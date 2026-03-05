@@ -1,0 +1,33 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="8" y="8" width="1008" height="1008" rx="180" fill="#E9A9B7"/>
+
+  <!-- wheels -->
+  <circle cx="450" cy="730" r="62" fill="#F6F4F5"/>
+  <circle cx="740" cy="700" r="58" fill="#F6F4F5"/>
+
+  <!-- scooter body -->
+  <path d="M210 640C250 560 380 520 560 520H760C830 520 880 560 895 620L342 700C287 707 242 685 210 640Z" fill="#F6F4F5"/>
+  <path d="M175 575C250 505 410 470 570 468" stroke="#F6F4F5" stroke-width="46" stroke-linecap="round"/>
+  <path d="M157 630C260 720 470 760 760 728" stroke="#F6F4F5" stroke-width="44" stroke-linecap="round"/>
+  <path d="M176 700C290 780 520 804 784 770" stroke="#F6F4F5" stroke-width="34" stroke-linecap="round"/>
+  <path d="M330 615L860 548" stroke="#F6F4F5" stroke-width="34" stroke-linecap="round"/>
+
+  <!-- butterfly body -->
+  <rect x="500" y="305" width="42" height="158" rx="21" fill="#F6F4F5"/>
+  <path d="M520 315C505 275 480 257 468 245" stroke="#F6F4F5" stroke-width="18" stroke-linecap="round"/>
+  <path d="M525 317C540 276 565 258 577 247" stroke="#F6F4F5" stroke-width="18" stroke-linecap="round"/>
+
+  <!-- left wing -->
+  <path d="M514 400C470 340 395 278 315 250C247 227 220 266 246 333C264 380 285 424 302 455C342 462 417 446 514 400Z" fill="#F6F4F5"/>
+  <path d="M508 420C420 440 350 472 302 520C256 567 264 612 344 632C399 605 455 560 508 420Z" fill="#F6F4F5"/>
+
+  <!-- right wing -->
+  <path d="M528 400C573 343 648 286 726 259C798 234 823 270 799 336C782 382 760 427 742 457C701 463 625 447 528 400Z" fill="#F6F4F5"/>
+  <path d="M535 420C622 441 690 472 737 516C783 560 776 606 699 626C644 600 587 557 535 420Z" fill="#F6F4F5"/>
+
+  <!-- wing holes -->
+  <ellipse cx="314" cy="292" rx="22" ry="11" transform="rotate(25 314 292)" fill="#E9A9B7"/>
+  <ellipse cx="332" cy="342" rx="20" ry="10" transform="rotate(22 332 342)" fill="#E9A9B7"/>
+  <ellipse cx="774" cy="299" rx="22" ry="11" transform="rotate(-20 774 299)" fill="#E9A9B7"/>
+  <ellipse cx="760" cy="347" rx="20" ry="10" transform="rotate(-15 760 347)" fill="#E9A9B7"/>
+</svg>
