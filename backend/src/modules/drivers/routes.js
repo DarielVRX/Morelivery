@@ -42,22 +42,43 @@ router.post('/listener', authenticate, authorize(['driver']), async (req, res, n
 
 router.get('/offers', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
-    const result = await query(
-      `SELECT o.id, o.status, o.total_cents, o.delivery_address, o.customer_address,
-              o.restaurant_name, o.customer_first_name
-       FROM (
-         SELECT ord.*, r.name AS restaurant_name,
-                split_part(u.full_name, '_', 1) AS customer_first_name,
-                u.address AS customer_address
-         FROM orders ord
-         JOIN restaurants r ON r.id = ord.restaurant_id
-         JOIN users u ON u.id = ord.customer_id
-       ) o
-       JOIN order_driver_offers od ON od.order_id = o.id
-       WHERE od.driver_id = $1 AND od.status = 'pending'
-       ORDER BY o.created_at DESC`,
-      [req.user.userId]
-    );
+    let result;
+    try {
+      result = await query(
+        `SELECT o.id, o.status, o.total_cents, o.delivery_address, o.customer_address,
+                o.restaurant_name, o.customer_first_name
+         FROM (
+           SELECT ord.*, r.name AS restaurant_name,
+                  split_part(u.full_name, '_', 1) AS customer_first_name,
+                  u.address AS customer_address
+           FROM orders ord
+           JOIN restaurants r ON r.id = ord.restaurant_id
+           JOIN users u ON u.id = ord.customer_id
+         ) o
+         JOIN order_driver_offers od ON od.order_id = o.id
+         WHERE od.driver_id = $1 AND od.status = 'pending'
+         ORDER BY o.created_at DESC`,
+        [req.user.userId]
+      );
+    } catch (error) {
+      if (error?.code !== '42703') throw error;
+      result = await query(
+        `SELECT o.id, o.status, o.total_cents, o.delivery_address, o.customer_address,
+                o.restaurant_name, o.customer_first_name
+         FROM (
+           SELECT ord.*, r.name AS restaurant_name,
+                  split_part(u.full_name, '_', 1) AS customer_first_name,
+                  ord.delivery_address AS customer_address
+           FROM orders ord
+           JOIN restaurants r ON r.id = ord.restaurant_id
+           JOIN users u ON u.id = ord.customer_id
+         ) o
+         JOIN order_driver_offers od ON od.order_id = o.id
+         WHERE od.driver_id = $1 AND od.status = 'pending'
+         ORDER BY o.created_at DESC`,
+        [req.user.userId]
+      );
+    }
     return res.json({ offers: result.rows });
   } catch (error) {
     return next(error);

@@ -14,6 +14,52 @@ function isMissingColumnError(error) {
   return error?.code === '42703';
 }
 
+function isMissingRelationError(error) {
+  return error?.code === '42P01';
+}
+
+function parseSuggestionItems(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.items)) return [];
+    return parsed.items;
+  } catch {
+    return [];
+  }
+}
+
+async function getOrderItems(orderIds = []) {
+  if (orderIds.length === 0) return new Map();
+  let result;
+  try {
+    result = await query(
+      `SELECT oi.order_id, oi.menu_item_id, oi.quantity, oi.unit_price_cents,
+              COALESCE(mi.name, 'Producto') AS name
+       FROM order_items oi
+       LEFT JOIN menu_items mi ON mi.id = oi.menu_item_id
+       WHERE oi.order_id = ANY($1::uuid[])
+       ORDER BY oi.order_id, oi.id`,
+      [orderIds]
+    );
+  } catch (error) {
+    if (isMissingRelationError(error)) return new Map();
+    throw error;
+  }
+
+  const map = new Map();
+  for (const row of result.rows) {
+    if (!map.has(row.order_id)) map.set(row.order_id, []);
+    map.get(row.order_id).push({
+      menuItemId: row.menu_item_id,
+      name: row.name,
+      quantity: row.quantity,
+      unitPriceCents: row.unit_price_cents
+    });
+  }
+  return map;
+}
+
 router.post('/', authenticate, authorize(['customer']), validate(createOrderSchema), async (req, res, next) => {
   const { restaurantId, items } = req.validatedBody;
 
@@ -48,7 +94,11 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       );
     }
 
-    await offerNextDrivers(order.id);
+    try {
+      await offerNextDrivers(order.id);
+    } catch (error) {
+      if (!isMissingRelationError(error) && !isMissingColumnError(error)) throw error;
+    }
 
     const updatedOrder = await query('SELECT * FROM orders WHERE id = $1', [order.id]);
     orderEvents.emitOrderUpdate(order.id, updatedOrder.rows[0].status);
@@ -107,11 +157,32 @@ router.patch('/:id/cancel', authenticate, authorize(['customer']), async (req, r
 
 router.patch('/:id/suggest', authenticate, authorize(['restaurant']), validate(suggestionSchema), async (req, res, next) => {
   try {
+    const menuIds = req.validatedBody.items.map((item) => item.menuItemId);
+    const menuResult = await query(
+      `SELECT mi.id, mi.name, mi.price_cents
+       FROM menu_items mi
+       JOIN restaurants r ON r.id = mi.restaurant_id
+       WHERE mi.id = ANY($1::uuid[]) AND r.owner_user_id = $2`,
+      [menuIds, req.user.userId]
+    );
+
+    if (menuResult.rowCount !== menuIds.length) return next(new AppError(400, 'Invalid suggestion menu items'));
+
+    const menuMap = new Map(menuResult.rows.map((row) => [row.id, row]));
+    const suggestion = {
+      items: req.validatedBody.items.map((item) => ({
+        menuItemId: item.menuItemId,
+        name: menuMap.get(item.menuItemId)?.name || 'Producto',
+        quantity: item.quantity,
+        unitPriceCents: menuMap.get(item.menuItemId)?.price_cents || 0
+      }))
+    };
+
     const result = await query(
       `UPDATE orders SET suggestion_text = $1, suggestion_status = 'pending_customer', updated_at = NOW()
        WHERE id = $2 AND restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id = $3)
        RETURNING *`,
-      [req.validatedBody.suggestionText, req.params.id, req.user.userId]
+      [JSON.stringify(suggestion), req.params.id, req.user.userId]
     );
     if (result.rowCount === 0) return next(new AppError(404, 'Order not found'));
     return res.json({ order: result.rows[0] });
@@ -169,7 +240,17 @@ router.get('/my', authenticate, async (req, res, next) => {
         [req.user.userId]
       );
     }
-    return res.json({ orders: result.rows });
+
+    const orderIds = result.rows.map((row) => row.id);
+    const itemsByOrder = await getOrderItems(orderIds);
+
+    const orders = result.rows.map((row) => ({
+      ...row,
+      items: itemsByOrder.get(row.id) || [],
+      suggestion_items: parseSuggestionItems(row.suggestion_text)
+    }));
+
+    return res.json({ orders });
   } catch (error) {
     return next(error);
   }

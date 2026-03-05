@@ -1,6 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+
+function buildInitialSuggestion(items = []) {
+  const map = {};
+  items.forEach((item) => {
+    map[item.menuItemId] = item.quantity;
+  });
+  return map;
+}
 
 export default function RestaurantDashboard() {
   const { auth } = useAuth();
@@ -10,6 +18,8 @@ export default function RestaurantDashboard() {
   const [orders, setOrders] = useState([]);
   const [products, setProducts] = useState([]);
   const [message, setMessage] = useState('');
+  const [suggestionDrafts, setSuggestionDrafts] = useState({});
+  const [openSuggestionFor, setOpenSuggestionFor] = useState('');
 
   async function loadData() {
     if (!auth.token) return;
@@ -24,6 +34,15 @@ export default function RestaurantDashboard() {
   useEffect(() => {
     loadData().catch((error) => setMessage(error.message));
   }, [auth.token]);
+
+  useEffect(() => {
+    const nextDrafts = {};
+    for (const order of orders) {
+      nextDrafts[order.id] = suggestionDrafts[order.id] || buildInitialSuggestion(order.items);
+    }
+    setSuggestionDrafts(nextDrafts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders.length]);
 
   async function addProduct() {
     try {
@@ -60,12 +79,35 @@ export default function RestaurantDashboard() {
     loadData();
   }
 
-  async function suggestAlternative(orderId) {
-    const suggestionText = prompt('Sugerencia para cliente');
-    if (!suggestionText) return;
-    await apiFetch(`/orders/${orderId}/suggest`, { method: 'PATCH', body: JSON.stringify({ suggestionText }) }, auth.token);
+  function adjustSuggestion(orderId, menuItemId, delta) {
+    setSuggestionDrafts((prev) => {
+      const current = prev[orderId] || {};
+      const nextQty = Math.max(0, (current[menuItemId] || 0) + delta);
+      return { ...prev, [orderId]: { ...current, [menuItemId]: nextQty } };
+    });
+  }
+
+  async function sendSuggestion(order) {
+    const draft = suggestionDrafts[order.id] || {};
+    const items = Object.entries(draft)
+      .filter(([, quantity]) => quantity > 0)
+      .map(([menuItemId, quantity]) => ({ menuItemId, quantity }));
+
+    if (items.length === 0) {
+      setMessage('La sugerencia debe tener al menos 1 producto');
+      return;
+    }
+
+    await apiFetch(`/orders/${order.id}/suggest`, { method: 'PATCH', body: JSON.stringify({ items }) }, auth.token);
+    setMessage('Sugerencia enviada');
+    setOpenSuggestionFor('');
     loadData();
   }
+
+  const restaurantOrders = useMemo(
+    () => orders.filter((order) => ['created', 'assigned', 'accepted', 'preparing', 'ready'].includes(order.status)),
+    [orders]
+  );
 
   return (
     <section className="role-panel">
@@ -93,14 +135,38 @@ export default function RestaurantDashboard() {
 
       <h3>Vista previa pedidos</h3>
       <ul>
-        {orders.map((order) => (
+        {restaurantOrders.map((order) => (
           <li key={order.id}>
             {order.id} · {order.status} · cliente: {order.customer_first_name} · driver: {order.driver_first_name || 'pendiente'}
             {order.restaurant_note ? <p>{order.restaurant_note}</p> : null}
-            <button onClick={() => changeStatus(order.id, 'accepted')}>aceptado</button>
-            <button onClick={() => changeStatus(order.id, 'preparing')}>preparación</button>
-            <button onClick={() => changeStatus(order.id, 'ready')}>listo</button>
-            <button onClick={() => suggestAlternative(order.id)}>Sugerir alternativa</button>
+            <div className="row">
+              <button onClick={() => changeStatus(order.id, 'preparing')}>preparación</button>
+              <button onClick={() => changeStatus(order.id, 'ready')}>listo</button>
+              <button onClick={() => setOpenSuggestionFor(openSuggestionFor === order.id ? '' : order.id)}>Sugerir alternativa</button>
+            </div>
+
+            {openSuggestionFor === order.id ? (
+              <div className="auth-card compact">
+                <p>Pedido solicitado (no editable)</p>
+                <ul>
+                  {(order.items || []).map((item) => (
+                    <li key={item.menuItemId}>{item.name} · qty solicitada: {item.quantity}</li>
+                  ))}
+                </ul>
+                <p>Armar sugerencia (+/-)</p>
+                <ul>
+                  {(order.items || []).map((item) => (
+                    <li key={`s-${item.menuItemId}`}>
+                      {item.name}
+                      <button onClick={() => adjustSuggestion(order.id, item.menuItemId, -1)}>-</button>
+                      <span style={{ margin: '0 .5rem' }}>{(suggestionDrafts[order.id] || {})[item.menuItemId] ?? item.quantity}</span>
+                      <button onClick={() => adjustSuggestion(order.id, item.menuItemId, 1)}>+</button>
+                    </li>
+                  ))}
+                </ul>
+                <button onClick={() => sendSuggestion(order)}>Enviar sugerencia</button>
+              </div>
+            ) : null}
           </li>
         ))}
       </ul>

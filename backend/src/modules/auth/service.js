@@ -50,13 +50,13 @@ export async function registerUser(payload) {
     try {
       await query('INSERT INTO restaurants(owner_user_id, name, category, address) VALUES($1, $2, $3, $4)', [
         user.id,
-        `${username} kitchen`,
+        username,
         'General',
         payload.address || null
       ]);
     } catch (error) {
       if (error?.code === '42703') {
-        await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1, $2, $3)', [user.id, `${username} kitchen`, 'General']);
+        await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1, $2, $3)', [user.id, username, 'General']);
       } else {
         throw error;
       }
