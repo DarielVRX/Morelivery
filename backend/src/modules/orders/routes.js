@@ -10,6 +10,10 @@ import { offerNextDrivers } from './assignment.js';
 
 const router = Router();
 
+function isMissingColumnError(error) {
+  return error?.code === '42703';
+}
+
 router.post('/', authenticate, authorize(['customer']), validate(createOrderSchema), async (req, res, next) => {
   const { restaurantId, items } = req.validatedBody;
 
@@ -21,8 +25,13 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       totalCents += menuResult.rows[0].price_cents * item.quantity;
     }
 
-    const customer = await query('SELECT address FROM users WHERE id = $1', [req.user.userId]);
-    const deliveryAddress = customer.rows[0]?.address || 'address-pending';
+    let deliveryAddress = 'address-pending';
+    try {
+      const customer = await query('SELECT address FROM users WHERE id = $1', [req.user.userId]);
+      deliveryAddress = customer.rows[0]?.address || 'address-pending';
+    } catch (error) {
+      if (!isMissingColumnError(error)) throw error;
+    }
 
     const orderResult = await query(
       'INSERT INTO orders(customer_id, restaurant_id, status, total_cents, delivery_address) VALUES($1, $2, $3, $4, $5) RETURNING *',
@@ -129,19 +138,37 @@ router.patch('/:id/suggestion-response', authenticate, authorize(['customer']), 
 
 router.get('/my', authenticate, async (req, res, next) => {
   try {
-    const result = await query(
-      `SELECT o.*, r.name AS restaurant_name,
-              split_part(c.full_name, '_', 1) AS customer_first_name,
-              split_part(d.full_name, '_', 1) AS driver_first_name,
-              c.address AS customer_address
-       FROM orders o
-       JOIN restaurants r ON r.id = o.restaurant_id
-       JOIN users c ON c.id = o.customer_id
-       LEFT JOIN users d ON d.id = o.driver_id
-       WHERE o.customer_id = $1 OR o.driver_id = $1 OR o.restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id = $1)
-       ORDER BY o.created_at DESC`,
-      [req.user.userId]
-    );
+    let result;
+    try {
+      result = await query(
+        `SELECT o.*, r.name AS restaurant_name,
+                split_part(c.full_name, '_', 1) AS customer_first_name,
+                split_part(d.full_name, '_', 1) AS driver_first_name,
+                c.address AS customer_address
+         FROM orders o
+         JOIN restaurants r ON r.id = o.restaurant_id
+         JOIN users c ON c.id = o.customer_id
+         LEFT JOIN users d ON d.id = o.driver_id
+         WHERE o.customer_id = $1 OR o.driver_id = $1 OR o.restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id = $1)
+         ORDER BY o.created_at DESC`,
+        [req.user.userId]
+      );
+    } catch (error) {
+      if (!isMissingColumnError(error)) throw error;
+      result = await query(
+        `SELECT o.*, r.name AS restaurant_name,
+                split_part(c.full_name, '_', 1) AS customer_first_name,
+                split_part(d.full_name, '_', 1) AS driver_first_name,
+                o.delivery_address AS customer_address
+         FROM orders o
+         JOIN restaurants r ON r.id = o.restaurant_id
+         JOIN users c ON c.id = o.customer_id
+         LEFT JOIN users d ON d.id = o.driver_id
+         WHERE o.customer_id = $1 OR o.driver_id = $1 OR o.restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id = $1)
+         ORDER BY o.created_at DESC`,
+        [req.user.userId]
+      );
+    }
     return res.json({ orders: result.rows });
   } catch (error) {
     return next(error);
