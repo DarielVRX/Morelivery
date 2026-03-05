@@ -17,7 +17,14 @@ export const updateOrderStatusSchema = z.object({
 });
 
 export const suggestionSchema = z.object({
-  suggestionText: z.string().min(3).max(300)
+  items: z
+    .array(
+      z.object({
+        menuItemId: z.string().uuid(),
+        quantity: z.number().int().min(1).max(20)
+      })
+    )
+    .min(1)
 });
 
 export const suggestionResponseSchema = z.object({

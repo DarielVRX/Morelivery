@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 
 export default function DriverDashboard() {
-  const { auth } = useAuth();
+  const { auth, patchUser } = useAuth();
   const [orders, setOrders] = useState([]);
   const [offers, setOffers] = useState([]);
-  const [online, setOnline] = useState(navigator.onLine);
+  const [networkOnline, setNetworkOnline] = useState(navigator.onLine);
+  const [availability, setAvailabilityState] = useState(Boolean(auth.user?.driver?.is_available));
 
   async function loadData() {
     if (!auth.token) return;
@@ -22,8 +23,12 @@ export default function DriverDashboard() {
   }, [auth.token]);
 
   useEffect(() => {
-    function onOnline() { setOnline(true); }
-    function onOffline() { setOnline(false); }
+    setAvailabilityState(Boolean(auth.user?.driver?.is_available));
+  }, [auth.user?.driver?.is_available]);
+
+  useEffect(() => {
+    function onOnline() { setNetworkOnline(true); }
+    function onOffline() { setNetworkOnline(false); }
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
     return () => {
@@ -33,7 +38,9 @@ export default function DriverDashboard() {
   }, []);
 
   async function setAvailability(isAvailable) {
-    await apiFetch('/drivers/availability', { method: 'PATCH', body: JSON.stringify({ isAvailable }) }, auth.token);
+    const data = await apiFetch('/drivers/availability', { method: 'PATCH', body: JSON.stringify({ isAvailable }) }, auth.token);
+    setAvailabilityState(Boolean(data.profile?.is_available));
+    patchUser({ driver: { ...(auth.user?.driver || {}), is_available: Boolean(data.profile?.is_available) } });
     loadData();
   }
 
@@ -57,10 +64,16 @@ export default function DriverDashboard() {
     loadData();
   }
 
+  const previousOrders = useMemo(
+    () => orders.filter((order) => ['delivered', 'cancelled'].includes(order.status)),
+    [orders]
+  );
+
   return (
     <section className="role-panel">
       <h2>Repartidor</h2>
-      <p>Estado de conexión: {online ? 'Conectado' : 'Desconectado'}</p>
+      <p>Estado de red: {networkOnline ? 'Conectado' : 'Desconectado'}</p>
+      <p>Disponibilidad: {availability ? 'Disponible' : 'No disponible'}</p>
       <button disabled={!auth.token || auth.user?.role !== 'driver'} onClick={() => setAvailability(true)}>Disponible</button>
       <button disabled={!auth.token || auth.user?.role !== 'driver'} onClick={() => setAvailability(false)}>No disponible</button>
 
@@ -77,7 +90,7 @@ export default function DriverDashboard() {
 
       <h3>Pedidos asignados</h3>
       <ul>
-        {orders.map((order) => (
+        {orders.filter((order) => !['delivered', 'cancelled'].includes(order.status)).map((order) => (
           <li key={order.id}>
             {order.id} · {order.status} · cliente: {order.customer_first_name}
             {order.driver_note ? <p>{order.driver_note}</p> : null}
@@ -85,6 +98,13 @@ export default function DriverDashboard() {
             <button onClick={() => changeStatus(order.id, 'delivered')}>Entregado</button>
             <button onClick={() => releaseOrder(order.id)}>Liberar</button>
           </li>
+        ))}
+      </ul>
+
+      <h3>Historial reciente</h3>
+      <ul>
+        {previousOrders.map((order) => (
+          <li key={`prev-${order.id}`}>{order.id} · {order.status} · cliente: {order.customer_first_name}</li>
         ))}
       </ul>
     </section>

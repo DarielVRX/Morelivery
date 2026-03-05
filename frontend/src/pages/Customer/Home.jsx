@@ -1,6 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+
+function toDraft(items = []) {
+  const draft = {};
+  items.forEach((item) => {
+    draft[item.menuItemId] = item.quantity;
+  });
+  return draft;
+}
 
 export default function CustomerHome() {
   const { auth } = useAuth();
@@ -10,6 +18,8 @@ export default function CustomerHome() {
   const [selectedItems, setSelectedItems] = useState({});
   const [myOrders, setMyOrders] = useState([]);
   const [message, setMessage] = useState('');
+  const [openSuggestionFor, setOpenSuggestionFor] = useState('');
+  const [suggestionDrafts, setSuggestionDrafts] = useState({});
 
   async function loadRestaurants() {
     const data = await apiFetch('/restaurants');
@@ -61,13 +71,36 @@ export default function CustomerHome() {
 
   async function cancelOrder(orderId) {
     await apiFetch(`/orders/${orderId}/cancel`, { method: 'PATCH' }, auth.token);
+    setOpenSuggestionFor('');
     loadMyOrders();
   }
 
-  async function suggestionResponse(orderId, accepted) {
+  function openSuggestion(order) {
+    setOpenSuggestionFor(order.id);
+    setSuggestionDrafts((prev) => ({
+      ...prev,
+      [order.id]: prev[order.id] || toDraft(order.suggestion_items || [])
+    }));
+  }
+
+  function adjustSuggestion(orderId, menuItemId, delta) {
+    setSuggestionDrafts((prev) => {
+      const current = prev[orderId] || {};
+      const next = Math.max(0, (current[menuItemId] || 0) + delta);
+      return { ...prev, [orderId]: { ...current, [menuItemId]: next } };
+    });
+  }
+
+  async function respondSuggestion(orderId, accepted) {
     await apiFetch(`/orders/${orderId}/suggestion-response`, { method: 'PATCH', body: JSON.stringify({ accepted }) }, auth.token);
+    setOpenSuggestionFor('');
     loadMyOrders();
   }
+
+  const pendingSuggestions = useMemo(
+    () => myOrders.filter((order) => order.suggestion_status === 'pending_customer' && (order.suggestion_items || []).length > 0),
+    [myOrders]
+  );
 
   return (
     <section className="role-panel">
@@ -92,18 +125,41 @@ export default function CustomerHome() {
       </ul>
       <button disabled={!auth.token || auth.user?.role !== 'customer'} onClick={createOrder}>Crear pedido</button>
 
+      <h3>Sugerencias de restaurante</h3>
+      <ul>
+        {pendingSuggestions.map((order) => (
+          <li key={`sug-${order.id}`}>
+            Pedido {order.id}
+            <button onClick={() => openSuggestion(order)}>Ver sugerencia</button>
+            {openSuggestionFor === order.id ? (
+              <div className="auth-card compact">
+                <p>Preview de sugerencia (+/- solo visual)</p>
+                <ul>
+                  {(order.suggestion_items || []).map((item) => (
+                    <li key={`${order.id}-${item.menuItemId}`}>
+                      {item.name}
+                      <button onClick={() => adjustSuggestion(order.id, item.menuItemId, -1)}>-</button>
+                      <span style={{ margin: '0 .5rem' }}>{(suggestionDrafts[order.id] || {})[item.menuItemId] ?? item.quantity}</span>
+                      <button onClick={() => adjustSuggestion(order.id, item.menuItemId, 1)}>+</button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="row">
+                  <button onClick={() => respondSuggestion(order.id, true)}>Aceptar sugerencia</button>
+                  <button onClick={() => respondSuggestion(order.id, false)}>Rechazar sugerencia</button>
+                  <button onClick={() => cancelOrder(order.id)}>Cancelar pedido</button>
+                </div>
+              </div>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+
       <h3>Mis pedidos</h3>
       <ul>
         {myOrders.map((order) => (
           <li key={order.id}>
             {order.id} · {order.status} · ${(order.total_cents / 100).toFixed(2)} · restaurante: {order.restaurant_name} · driver: {order.driver_first_name || 'pending'}
-            {order.suggestion_status === 'pending_customer' ? (
-              <>
-                <p>Sugerencia del restaurante: {order.suggestion_text}</p>
-                <button onClick={() => suggestionResponse(order.id, true)}>Aceptar cambio</button>
-                <button onClick={() => suggestionResponse(order.id, false)}>Rechazar cambio</button>
-              </>
-            ) : null}
             {['created', 'pending_driver', 'assigned', 'accepted', 'preparing'].includes(order.status) ? (
               <button onClick={() => cancelOrder(order.id)}>Cancelar</button>
             ) : null}

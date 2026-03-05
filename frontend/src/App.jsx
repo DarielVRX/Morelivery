@@ -16,7 +16,7 @@ function ProtectedRole({ role, children }) {
 }
 
 function AuthScreen({ mode = 'login' }) {
-  const { login } = useAuth();
+  const { auth, login } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -43,6 +43,8 @@ function AuthScreen({ mode = 'login' }) {
   }
 
   const isLogin = mode === 'login';
+
+  if (auth.user) return <Navigate to={`/${auth.user.role}`} replace />;
 
   return (
     <section className="auth-card">
@@ -79,10 +81,11 @@ function AuthScreen({ mode = 'login' }) {
 }
 
 function AppRoutes() {
+  const { auth } = useAuth();
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="/" element={<Navigate to={auth.user ? `/${auth.user.role}` : '/login'} replace />} />
         <Route path="/login" element={<AuthScreen mode="login" />} />
         <Route path="/register" element={<AuthScreen mode="register" />} />
         <Route path="/customer" element={<ProtectedRole role="customer"><CustomerHome /></ProtectedRole>} />

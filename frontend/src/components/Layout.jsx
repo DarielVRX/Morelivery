@@ -4,13 +4,20 @@ import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../api/client';
 
 export default function Layout({ children }) {
-  const { auth, logout, login } = useAuth();
+  const { auth, logout, login, patchUser } = useAuth();
   const [address, setAddress] = useState('');
+
+  const shouldAskAddress = Boolean(
+    auth.user &&
+      ['customer', 'restaurant'].includes(auth.user.role) &&
+      (!auth.user.address || auth.user.address === 'address-pending')
+  );
 
   async function saveAddress() {
     if (!auth.token || !address.trim()) return;
     const data = await apiFetch('/auth/profile', { method: 'PATCH', body: JSON.stringify({ address }) }, auth.token);
-    login({ token: auth.token, user: { ...auth.user, address: data.profile.address, needsAddress: false } });
+    patchUser({ address: data.profile.address, needsAddress: false });
+    setAddress('');
   }
 
   async function deleteAccount() {
@@ -36,9 +43,9 @@ export default function Layout({ children }) {
         </div>
       </header>
 
-      {auth.user?.needsAddress ? (
+      {shouldAskAddress ? (
         <section className="auth-card">
-          <h3>Completa dirección para continuar (pruebas)</h3>
+          <h3>Completa dirección para continuar</h3>
           <div className="row">
             <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Dirección" />
             <button onClick={saveAddress}>Guardar dirección</button>
