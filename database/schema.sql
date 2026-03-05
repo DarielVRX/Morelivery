@@ -10,6 +10,7 @@ CREATE TABLE users (
   password_hash TEXT NOT NULL,
   role user_role NOT NULL,
   status account_status NOT NULL DEFAULT 'active',
+  address TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -18,6 +19,7 @@ CREATE TABLE restaurants (
   owner_user_id UUID NOT NULL REFERENCES users(id),
   name VARCHAR(140) NOT NULL,
   category VARCHAR(80) NOT NULL,
+  address TEXT,
   is_open BOOLEAN NOT NULL DEFAULT true,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -50,6 +52,10 @@ CREATE TABLE orders (
   status VARCHAR(30) NOT NULL,
   total_cents INT NOT NULL,
   delivery_address TEXT NOT NULL,
+  suggestion_text TEXT,
+  suggestion_status VARCHAR(20) NOT NULL DEFAULT 'none',
+  driver_note TEXT,
+  restaurant_note TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -62,6 +68,18 @@ CREATE TABLE order_items (
   unit_price_cents INT NOT NULL
 );
 
+CREATE TABLE order_driver_offers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  driver_id UUID NOT NULL REFERENCES users(id),
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(order_id, driver_id)
+);
+
 CREATE INDEX idx_orders_customer ON orders(customer_id);
 CREATE INDEX idx_orders_driver ON orders(driver_id);
 CREATE INDEX idx_orders_restaurant ON orders(restaurant_id);
+CREATE INDEX idx_order_driver_offers_order ON order_driver_offers(order_id);
+CREATE INDEX idx_order_driver_offers_driver ON order_driver_offers(driver_id);

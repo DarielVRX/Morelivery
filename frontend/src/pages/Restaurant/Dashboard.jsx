@@ -27,14 +27,10 @@ export default function RestaurantDashboard() {
 
   async function addProduct() {
     try {
-      await apiFetch(
-        '/restaurants/menu-items',
-        {
-          method: 'POST',
-          body: JSON.stringify({ name: description.slice(0, 20), description, priceCents: Number(price) })
-        },
-        auth.token
-      );
+      await apiFetch('/restaurants/menu-items', {
+        method: 'POST',
+        body: JSON.stringify({ name: description.slice(0, 20), description, priceCents: Number(price) })
+      }, auth.token);
       setMessage('Producto agregado');
       loadData();
     } catch (error) {
@@ -64,6 +60,13 @@ export default function RestaurantDashboard() {
     loadData();
   }
 
+  async function suggestAlternative(orderId) {
+    const suggestionText = prompt('Sugerencia para cliente');
+    if (!suggestionText) return;
+    await apiFetch(`/orders/${orderId}/suggest`, { method: 'PATCH', body: JSON.stringify({ suggestionText }) }, auth.token);
+    loadData();
+  }
+
   return (
     <section className="role-panel">
       <h2>Restaurante</h2>
@@ -83,26 +86,21 @@ export default function RestaurantDashboard() {
             <button onClick={() => {
               const nextPrice = Number(prompt('Nuevo precio en cents', String(product.price_cents)));
               if (!Number.isNaN(nextPrice) && nextPrice > 0) updateProduct(product.id, product, 'priceCents', nextPrice);
-            }}>
-              Editar precio
-            </button>
-            <button onClick={() => {
-              const nextDesc = prompt('Nueva descripción', product.description || '');
-              if (nextDesc !== null) updateProduct(product.id, product, 'description', nextDesc);
-            }}>
-              Editar descripción
-            </button>
+            }}>Editar precio</button>
           </li>
         ))}
       </ul>
 
-      <h3>Pedidos</h3>
+      <h3>Vista previa pedidos</h3>
       <ul>
         {orders.map((order) => (
-          <li key={order.id}>{order.id} - {order.status}
+          <li key={order.id}>
+            {order.id} · {order.status} · cliente: {order.customer_first_name} · driver: {order.driver_first_name || 'pendiente'}
+            {order.restaurant_note ? <p>{order.restaurant_note}</p> : null}
             <button onClick={() => changeStatus(order.id, 'accepted')}>aceptado</button>
-            <button onClick={() => changeStatus(order.id, 'preparing')}>preparando</button>
+            <button onClick={() => changeStatus(order.id, 'preparing')}>preparación</button>
             <button onClick={() => changeStatus(order.id, 'ready')}>listo</button>
+            <button onClick={() => suggestAlternative(order.id)}>Sugerir alternativa</button>
           </li>
         ))}
       </ul>

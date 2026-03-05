@@ -234,3 +234,30 @@ create unique index if not exists driver_profiles_driver_number_unique on driver
 ## 19) UX de autenticación
 - Inicio de sesión y Registro son páginas separadas (`/login` y `/register`) con mensajes y CTA diferenciados.
 - El header no muestra menú de roles global; solo el rol del usuario autenticado bajo el título Morelivery.
+
+
+### Driver matching
+- La asignación usa ofertas progresivas: 1 por 1 en los primeros 5 drivers, luego lotes de 5, luego 10 y de 10 en 10.
+- Se evita duplicado por `UNIQUE(order_id, driver_id)` en `order_driver_offers`.
+
+
+## 20) Cambios de esquema recomendados para despliegues antiguos
+Si tu DB viene de commits anteriores, agrega:
+
+```sql
+alter table users add column if not exists address text;
+alter table restaurants add column if not exists address text;
+alter table orders add column if not exists suggestion_text text;
+alter table orders add column if not exists suggestion_status varchar(20) default 'none';
+alter table orders add column if not exists driver_note text;
+alter table orders add column if not exists restaurant_note text;
+create table if not exists order_driver_offers (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references orders(id) on delete cascade,
+  driver_id uuid not null references users(id),
+  status varchar(20) not null default 'pending',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(order_id, driver_id)
+);
+```

@@ -54,6 +54,16 @@ export default function CustomerHome() {
     }
   }
 
+  async function cancelOrder(orderId) {
+    await apiFetch(`/orders/${orderId}/cancel`, { method: 'PATCH' }, auth.token);
+    loadMyOrders();
+  }
+
+  async function suggestionResponse(orderId, accepted) {
+    await apiFetch(`/orders/${orderId}/suggestion-response`, { method: 'PATCH', body: JSON.stringify({ accepted }) }, auth.token);
+    loadMyOrders();
+  }
+
   return (
     <section className="role-panel">
       <h2>Cliente</h2>
@@ -80,7 +90,19 @@ export default function CustomerHome() {
       <h3>Mis pedidos</h3>
       <ul>
         {myOrders.map((order) => (
-          <li key={order.id}>{order.id} - {order.status} - ${(order.total_cents / 100).toFixed(2)} - driver: {order.driver_id || 'pending'}</li>
+          <li key={order.id}>
+            {order.id} · {order.status} · ${(order.total_cents / 100).toFixed(2)} · restaurante: {order.restaurant_name} · driver: {order.driver_first_name || 'pending'}
+            {order.suggestion_status === 'pending_customer' ? (
+              <>
+                <p>Sugerencia del restaurante: {order.suggestion_text}</p>
+                <button onClick={() => suggestionResponse(order.id, true)}>Aceptar cambio</button>
+                <button onClick={() => suggestionResponse(order.id, false)}>Rechazar cambio</button>
+              </>
+            ) : null}
+            {['created', 'pending_driver', 'assigned', 'accepted', 'preparing'].includes(order.status) ? (
+              <button onClick={() => cancelOrder(order.id)}>Cancelar</button>
+            ) : null}
+          </li>
         ))}
       </ul>
       {message ? <p>{message}</p> : null}

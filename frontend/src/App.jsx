@@ -21,12 +21,16 @@ function AuthScreen({ mode = 'login' }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('customer');
+  const [address, setAddress] = useState('');
   const [message, setMessage] = useState('');
 
   async function submit() {
     try {
       if (mode === 'register') {
-        await apiFetch('/auth/register', { method: 'POST', body: JSON.stringify({ username, password, role }) });
+        await apiFetch('/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({ username, password, role, address: ['customer', 'restaurant'].includes(role) ? address : undefined })
+        });
         setMessage('Registro exitoso. Ya puedes iniciar sesión.');
         return;
       }
@@ -42,11 +46,11 @@ function AuthScreen({ mode = 'login' }) {
 
   return (
     <section className="auth-card">
-      <h2>{isLogin ? 'Inicio de sesión' : 'Crear cuenta de prueba'}</h2>
+      <h2>{isLogin ? 'Inicio de sesión' : 'Registro de usuario'}</h2>
       <p>
         {isLogin
-          ? 'Accede con tu username y contraseña para entrar a tu entorno de trabajo.'
-          : 'Registro rápido de usuarios ficticios para pruebas por rol.'}
+          ? 'Ingresa para acceder a tu panel por rol.'
+          : 'Crea usuarios de prueba indicando tipo de usuario y dirección para cliente/restaurante.'}
       </p>
       <div className="row">
         <input placeholder="username" value={username} onChange={(e) => setUsername(e.target.value)} />
@@ -60,6 +64,11 @@ function AuthScreen({ mode = 'login' }) {
           </select>
         ) : null}
       </div>
+      {!isLogin && ['customer', 'restaurant'].includes(role) ? (
+        <div className="row">
+          <input placeholder="Dirección" value={address} onChange={(e) => setAddress(e.target.value)} />
+        </div>
+      ) : null}
       <div className="row">
         <button onClick={submit}>{isLogin ? 'Entrar' : 'Registrar'}</button>
         {isLogin ? <Link className="login-link" to="/register">Ir a registro</Link> : <Link className="login-link" to="/login">Ir a login</Link>}
