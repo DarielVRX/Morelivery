@@ -10,6 +10,22 @@ function buildInitialSuggestion(items = []) {
   return map;
 }
 
+function formatMoney(cents) {
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
+const STATUS_LABELS = {
+  created: 'Recibido',
+  assigned: 'Asignado a driver',
+  accepted: 'Aceptado',
+  preparing: 'En preparación',
+  ready: 'Listo para retiro',
+  on_the_way: 'En camino',
+  delivered: 'Entregado',
+  cancelled: 'Cancelado',
+  pending_driver: 'Esperando driver',
+};
+
 export default function RestaurantDashboard() {
   const { auth } = useAuth();
   const [restaurant, setRestaurant] = useState(null);
@@ -20,6 +36,7 @@ export default function RestaurantDashboard() {
   const [message, setMessage] = useState('');
   const [suggestionDrafts, setSuggestionDrafts] = useState({});
   const [openSuggestionFor, setOpenSuggestionFor] = useState('');
+  const [loadingStatus, setLoadingStatus] = useState({});
 
   async function loadData() {
     if (!auth.token) return;
@@ -75,8 +92,20 @@ export default function RestaurantDashboard() {
   }
 
   async function changeStatus(orderId, status) {
-    await apiFetch(`/orders/${orderId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }, auth.token);
-    loadData();
+    setLoadingStatus((prev) => ({ ...prev, [orderId]: status }));
+    setMessage('');
+    try {
+      await apiFetch(`/orders/${orderId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status })
+      }, auth.token);
+      await loadData();
+      setMessage(`Estado actualizado: ${STATUS_LABELS[status] || status}`);
+    } catch (error) {
+      setMessage(`Error: ${error.message}`);
+    } finally {
+      setLoadingStatus((prev) => ({ ...prev, [orderId]: null }));
+    }
   }
 
   function adjustSuggestion(orderId, menuItemId, delta) {
@@ -105,72 +134,130 @@ export default function RestaurantDashboard() {
   }
 
   const restaurantOrders = useMemo(
-    () => orders.filter((order) => ['created', 'assigned', 'accepted', 'preparing', 'ready'].includes(order.status)),
+    () => orders.filter((order) => ['created', 'assigned', 'accepted', 'preparing', 'ready', 'pending_driver'].includes(order.status)),
     [orders]
   );
 
   return (
     <section className="role-panel">
       <h2>Restaurante</h2>
-      <p>Mi restaurante: {restaurant?.name || 'N/A'}</p>
-      <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="descripción" />
-      <input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="precio en cents" />
-      <button disabled={!auth.token || auth.user?.role !== 'restaurant'} onClick={addProduct}>Agregar producto</button>
+      <p>Mi restaurante: <strong>{restaurant?.name || 'N/A'}</strong></p>
 
+      {/* Agregar producto */}
+      <div style={{ marginBottom: '1rem' }}>
+        <h3>Agregar producto</h3>
+        <div className="row">
+          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descripción" />
+          <input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Precio en cents (ej: 1500 = $15.00)" />
+          <button disabled={!auth.token || auth.user?.role !== 'restaurant'} onClick={addProduct}>
+            Agregar producto
+          </button>
+        </div>
+      </div>
+
+      {/* Mis productos */}
       <h3>Mis productos</h3>
-      <ul>
-        {products.map((product) => (
-          <li key={product.id}>
-            <strong>{product.name}</strong> · {product.description} · ${(product.price_cents / 100).toFixed(2)} · {product.is_available ? 'activo' : 'inactivo'}
-            <button onClick={() => updateProduct(product.id, product, 'isAvailable', !product.is_available)}>
-              {product.is_available ? 'Desactivar' : 'Activar'}
-            </button>
-            <button onClick={() => {
-              const nextPrice = Number(prompt('Nuevo precio en cents', String(product.price_cents)));
-              if (!Number.isNaN(nextPrice) && nextPrice > 0) updateProduct(product.id, product, 'priceCents', nextPrice);
-            }}>Editar precio</button>
-          </li>
-        ))}
-      </ul>
+      {products.length === 0 ? <p>Sin productos aún.</p> : (
+        <ul>
+          {products.map((product) => (
+            <li key={product.id}>
+              <strong>{product.name}</strong> · {product.description} · {formatMoney(product.price_cents)} · {product.is_available ? '✅ activo' : '❌ inactivo'}
+              <button onClick={() => updateProduct(product.id, product, 'isAvailable', !product.is_available)}>
+                {product.is_available ? 'Desactivar' : 'Activar'}
+              </button>
+              <button onClick={() => {
+                const nextPrice = Number(prompt('Nuevo precio en cents (ej: 1500 = $15.00)', String(product.price_cents)));
+                if (!Number.isNaN(nextPrice) && nextPrice > 0) updateProduct(product.id, product, 'priceCents', nextPrice);
+              }}>Editar precio</button>
+            </li>
+          ))}
+        </ul>
+      )}
 
-      <h3>Vista previa pedidos</h3>
-      <ul>
-        {restaurantOrders.map((order) => (
-          <li key={order.id}>
-            {order.id} · {order.status} · cliente: {order.customer_first_name} · driver: {order.driver_first_name || 'pendiente'}
-            {order.restaurant_note ? <p>{order.restaurant_note}</p> : null}
-            <div className="row">
-              <button onClick={() => changeStatus(order.id, 'preparing')}>preparación</button>
-              <button onClick={() => changeStatus(order.id, 'ready')}>listo</button>
-              <button onClick={() => setOpenSuggestionFor(openSuggestionFor === order.id ? '' : order.id)}>Sugerir alternativa</button>
-            </div>
+      {/* Pedidos activos */}
+      <h3>Pedidos activos ({restaurantOrders.length})</h3>
+      {restaurantOrders.length === 0 ? <p>No hay pedidos activos.</p> : (
+        <ul>
+          {restaurantOrders.map((order) => {
+            const isLoading = loadingStatus[order.id];
+            return (
+              <li key={order.id} style={{ marginBottom: '1.5rem', borderBottom: '1px solid #eee', paddingBottom: '1rem' }}>
+                {/* Cabecera del pedido */}
+                <div><strong>Pedido:</strong> {order.id}</div>
+                <div><strong>Estado:</strong> {STATUS_LABELS[order.status] || order.status}</div>
+                <div><strong>Total:</strong> {formatMoney(order.total_cents)}</div>
+                <div><strong>Cliente:</strong> {order.customer_first_name || '—'}</div>
+                <div><strong>Driver:</strong> {order.driver_first_name || 'Pendiente de asignación'}</div>
+                {order.restaurant_note ? <div><strong>Nota:</strong> {order.restaurant_note}</div> : null}
 
-            {openSuggestionFor === order.id ? (
-              <div className="auth-card compact">
-                <p>Pedido solicitado (no editable)</p>
-                <ul>
-                  {(order.items || []).map((item) => (
-                    <li key={item.menuItemId}>{item.name} · qty solicitada: {item.quantity}</li>
-                  ))}
-                </ul>
-                <p>Armar sugerencia (+/-)</p>
-                <ul>
-                  {(order.items || []).map((item) => (
-                    <li key={`s-${item.menuItemId}`}>
-                      {item.name}
-                      <button onClick={() => adjustSuggestion(order.id, item.menuItemId, -1)}>-</button>
-                      <span style={{ margin: '0 .5rem' }}>{(suggestionDrafts[order.id] || {})[item.menuItemId] ?? item.quantity}</span>
-                      <button onClick={() => adjustSuggestion(order.id, item.menuItemId, 1)}>+</button>
-                    </li>
-                  ))}
-                </ul>
-                <button onClick={() => sendSuggestion(order)}>Enviar sugerencia</button>
-              </div>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-      {message ? <p>{message}</p> : null}
+                {/* Detalle de productos */}
+                {(order.items || []).length > 0 && (
+                  <div style={{ margin: '0.5rem 0', paddingLeft: '1rem' }}>
+                    <strong>Productos:</strong>
+                    <ul>
+                      {order.items.map((item) => (
+                        <li key={item.menuItemId}>
+                          {item.name} × {item.quantity} — {formatMoney(item.unitPriceCents * item.quantity)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Botones de estado */}
+                <div className="row" style={{ marginTop: '0.5rem' }}>
+                  <button
+                    disabled={!!isLoading || order.status === 'preparing'}
+                    onClick={() => changeStatus(order.id, 'preparing')}
+                  >
+                    {isLoading === 'preparing' ? '...' : '🍳 Preparando'}
+                  </button>
+                  <button
+                    disabled={!!isLoading || order.status === 'ready'}
+                    onClick={() => changeStatus(order.id, 'ready')}
+                  >
+                    {isLoading === 'ready' ? '...' : '✅ Listo'}
+                  </button>
+                  <button
+                    onClick={() => setOpenSuggestionFor(openSuggestionFor === order.id ? '' : order.id)}
+                  >
+                    💬 Sugerir alternativa
+                  </button>
+                </div>
+
+                {/* Panel de sugerencia */}
+                {openSuggestionFor === order.id ? (
+                  <div className="auth-card compact">
+                    <p><strong>Pedido solicitado (no editable)</strong></p>
+                    <ul>
+                      {(order.items || []).map((item) => (
+                        <li key={item.menuItemId}>{item.name} · qty solicitada: {item.quantity}</li>
+                      ))}
+                    </ul>
+                    <p><strong>Armar sugerencia (+/-)</strong></p>
+                    <ul>
+                      {(order.items || []).map((item) => (
+                        <li key={`s-${item.menuItemId}`}>
+                          {item.name}
+                          <button onClick={() => adjustSuggestion(order.id, item.menuItemId, -1)}>-</button>
+                          <span style={{ margin: '0 .5rem' }}>
+                            {(suggestionDrafts[order.id] || {})[item.menuItemId] ?? item.quantity}
+                          </span>
+                          <button onClick={() => adjustSuggestion(order.id, item.menuItemId, 1)}>+</button>
+                        </li>
+                      ))}
+                    </ul>
+                    <button onClick={() => sendSuggestion(order)}>Enviar sugerencia</button>
+                    <button onClick={() => setOpenSuggestionFor('')} style={{ marginLeft: '0.5rem' }}>Cancelar</button>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {message ? <p style={{ color: message.startsWith('Error') ? 'red' : 'green' }}>{message}</p> : null}
     </section>
   );
 }
