@@ -9,7 +9,6 @@ export default function Layout({ children }) {
           <Link to="/">Cliente</Link>
           <Link to="/restaurant">Restaurante</Link>
           <Link to="/driver">Repartidor</Link>
-          <Link to="/admin">Admin</Link>
         </nav>
       </header>
       <main>{children}</main>

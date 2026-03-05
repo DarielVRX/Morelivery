@@ -1,49 +1,89 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function CustomerHome() {
+  const { auth } = useAuth();
   const [restaurants, setRestaurants] = useState([]);
-  const [error, setError] = useState('');
+  const [restaurantId, setRestaurantId] = useState('');
+  const [menu, setMenu] = useState([]);
+  const [selectedItems, setSelectedItems] = useState({});
+  const [myOrders, setMyOrders] = useState([]);
+  const [message, setMessage] = useState('');
+
+  async function loadRestaurants() {
+    const data = await apiFetch('/restaurants');
+    setRestaurants(data.restaurants);
+    if (data.restaurants[0]?.id) setRestaurantId(data.restaurants[0].id);
+  }
+
+  async function loadMenu(id) {
+    if (!id) return;
+    const data = await apiFetch(`/restaurants/${id}/menu`);
+    setMenu(data.menu);
+  }
+
+  async function loadMyOrders() {
+    if (!auth.token) return;
+    const data = await apiFetch('/orders/my', {}, auth.token);
+    setMyOrders(data.orders);
+  }
 
   useEffect(() => {
-    apiFetch('/restaurants')
-      .then((data) => setRestaurants(data.restaurants))
-      .catch(() => setError('No se pudo cargar restaurantes. Verifica API y CORS.'));
+    loadRestaurants().catch(() => setMessage('Error cargando restaurantes'));
   }, []);
+
+  useEffect(() => {
+    loadMenu(restaurantId).catch(() => setMenu([]));
+  }, [restaurantId]);
+
+  useEffect(() => {
+    loadMyOrders().catch(() => setMyOrders([]));
+  }, [auth.token]);
+
+  async function createOrder() {
+    try {
+      const items = Object.entries(selectedItems)
+        .filter(([, qty]) => Number(qty) > 0)
+        .map(([menuItemId, quantity]) => ({ menuItemId, quantity: Number(quantity) }));
+      const data = await apiFetch('/orders', { method: 'POST', body: JSON.stringify({ restaurantId, items }) }, auth.token);
+      setMessage(`Pedido creado: ${data.order.id} estado ${data.order.status}`);
+      loadMyOrders();
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
 
   return (
     <section>
-      <h2>Página principal (cliente)</h2>
-      <p>
-        Debe mostrar restaurantes abiertos, tiempos estimados y CTA de pedido. En esta beta ya lista restaurantes y
-        comunica el flujo operativo end-to-end.
-      </p>
-
-      <div className="grid-cards">
-        <article className="card">
-          <h3>1) Descubrir</h3>
-          <p>El cliente explora restaurantes disponibles y su menú.</p>
-        </article>
-        <article className="card">
-          <h3>2) Pedir</h3>
-          <p>Crea un pedido seguro y recibe estados en tiempo real.</p>
-        </article>
-        <article className="card">
-          <h3>3) Recibir</h3>
-          <p>Ve estado aproximado del repartidor hasta entrega.</p>
-        </article>
-      </div>
-
-      {error ? <p className="error">{error}</p> : null}
-
-      <h3>Restaurantes disponibles</h3>
+      <h2>Cliente</h2>
+      <select value={restaurantId} onChange={(e) => setRestaurantId(e.target.value)}>
+        {restaurants.map((r) => (
+          <option key={r.id} value={r.id}>{r.name}</option>
+        ))}
+      </select>
       <ul>
-        {restaurants.map((restaurant) => (
-          <li key={restaurant.id}>
-            <strong>{restaurant.name}</strong> · {restaurant.category} · {restaurant.is_open ? 'Abierto' : 'Cerrado'}
+        {menu.map((item) => (
+          <li key={item.id}>
+            {item.description} - ${(item.price_cents / 100).toFixed(2)}
+            <input
+              type="number"
+              min="0"
+              placeholder="qty"
+              onChange={(e) => setSelectedItems((prev) => ({ ...prev, [item.id]: e.target.value }))}
+            />
           </li>
         ))}
       </ul>
+      <button disabled={!auth.token || auth.user?.role !== 'customer'} onClick={createOrder}>Crear pedido</button>
+
+      <h3>Mis pedidos</h3>
+      <ul>
+        {myOrders.map((order) => (
+          <li key={order.id}>{order.id} - {order.status} - ${(order.total_cents / 100).toFixed(2)} - driver: {order.driver_id || 'pending'}</li>
+        ))}
+      </ul>
+      {message ? <p>{message}</p> : null}
     </section>
   );
 }
