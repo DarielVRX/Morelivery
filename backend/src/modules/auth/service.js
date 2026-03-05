@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { query } from '../../config/db.js';
 import { env } from '../../config/env.js';
 import { AppError } from '../../utils/errors.js';
+import { logEvent } from '../../utils/logger.js';
 
 function normalizeUsername(username) {
   return username.trim().toLowerCase();
@@ -51,13 +52,22 @@ export async function loginUser(payload) {
   const pseudoEmail = pseudoEmailFromUsername(username);
 
   const result = await query('SELECT id, full_name, email, password_hash, role, status FROM users WHERE email = $1', [pseudoEmail]);
-  if (result.rowCount === 0) throw new AppError(401, 'Invalid credentials');
+  if (result.rowCount === 0) {
+    logEvent('auth.login_error', { username, reason: 'user_not_found' });
+    throw new AppError(401, 'Invalid credentials');
+  }
 
   const user = result.rows[0];
-  if (user.status !== 'active') throw new AppError(403, 'Account suspended');
+  if (user.status !== 'active') {
+    logEvent('auth.login_error', { username, reason: 'suspended' });
+    throw new AppError(403, 'Account suspended');
+  }
 
   const matches = await bcrypt.compare(payload.password, user.password_hash);
-  if (!matches) throw new AppError(401, 'Invalid credentials');
+  if (!matches) {
+    logEvent('auth.login_error', { username, reason: 'bad_password' });
+    throw new AppError(401, 'Invalid credentials');
+  }
 
   const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, {
     expiresIn: env.jwtExpiresIn
@@ -69,8 +79,18 @@ export async function loginUser(payload) {
     profile.restaurant = restaurantResult.rows[0] || null;
   }
   if (user.role === 'driver') {
-    const driverResult = await query('SELECT driver_number, is_available FROM driver_profiles WHERE user_id = $1', [user.id]);
-    profile.driver = driverResult.rows[0] || null;
+    try {
+      const driverResult = await query('SELECT driver_number, is_available FROM driver_profiles WHERE user_id = $1', [user.id]);
+      profile.driver = driverResult.rows[0] || { driver_number: null, is_available: true };
+    } catch (error) {
+      if (error?.code === '42703') {
+        // Backward compatibility with DB created before driver_number existed
+        const fallback = await query('SELECT is_available FROM driver_profiles WHERE user_id = $1', [user.id]);
+        profile.driver = { driver_number: null, is_available: fallback.rows[0]?.is_available ?? true };
+      } else {
+        throw error;
+      }
+    }
   }
 
   return {

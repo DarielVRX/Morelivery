@@ -26,7 +26,7 @@ export default function DriverDashboard() {
   }
 
   return (
-    <section>
+    <section className="role-panel">
       <h2>Repartidor</h2>
       <button disabled={!auth.token || auth.user?.role !== 'driver'} onClick={() => setAvailability(true)}>Disponible</button>
       <button disabled={!auth.token || auth.user?.role !== 'driver'} onClick={() => setAvailability(false)}>No disponible</button>
