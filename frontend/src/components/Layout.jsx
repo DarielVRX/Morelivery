@@ -32,7 +32,7 @@ export default function Layout({ children }) {
         </div>
         <div className="session-box">
           <span>{auth.user ? auth.user.username : 'Sin sesión'}</span>
-          {auth.user ? <button onClick={logout}>Cerrar sesión</button> : <Link className="login-link" to="/login">Iniciar sesión</Link>}
+          {auth.user ? <button onClick={logout}>Logout</button> : <Link className="login-link" to="/login">Login</Link>}
         </div>
       </header>
 
