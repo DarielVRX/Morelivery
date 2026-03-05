@@ -9,6 +9,15 @@ export function errorHandler(err, _req, res, _next) {
     return res.status(err.statusCode).json({ error: err.message });
   }
 
+  // PostgreSQL errors include SQLSTATE in err.code
+  if (err?.code) {
+    return res.status(500).json({
+      error: 'Database error',
+      code: err.code,
+      message: err.message
+    });
+  }
+
   console.error(err);
   return res.status(500).json({ error: 'Internal server error' });
 }
