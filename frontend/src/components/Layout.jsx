@@ -1,10 +1,11 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../api/client';
 
 export default function Layout({ children }) {
   const { auth, logout, patchUser } = useAuth();
+  const navigate = useNavigate();
   const [address, setAddress] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -37,18 +38,21 @@ export default function Layout({ children }) {
     logout();
   }
 
-  // Nombre a mostrar: display_name tiene prioridad, luego username
-  const displayName = auth.user?.display_name || auth.user?.username || 'Sin sesión';
+  const displayName = auth.user?.display_name || auth.user?.username || '';
+  const homeRoute = auth.user ? `/${auth.user.role}` : '/';
 
   return (
     <div className="container">
       <header className="app-header">
         <div className="brand-block">
-          <img className="brand-logo" src="/logo.svg" alt="Morelivery logo" />
-          <div>
-            <h1>Morelivery</h1>
-            {auth.user ? <p className="subtitle role-pill">{auth.user.role}</p> : null}
-          </div>
+          {/* Logo y título son el botón de home */}
+          <Link to={homeRoute} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', textDecoration: 'none', color: 'inherit' }}>
+            <img className="brand-logo" src="/logo.svg" alt="Morelivery logo" />
+            <div>
+              <h1 style={{ margin: 0 }}>Morelivery</h1>
+              {auth.user ? <p className="subtitle role-pill" style={{ margin: 0 }}>{auth.user.role}</p> : null}
+            </div>
+          </Link>
         </div>
         <div className="session-box">
           {auth.user ? (
@@ -63,11 +67,10 @@ export default function Layout({ children }) {
         </div>
       </header>
 
-      {/* Solicitar dirección si falta — bloquea el contenido */}
       {shouldAskAddress ? (
         <section className="auth-card">
           <h3>Ingresa tu dirección para continuar</h3>
-          <p>Solo se pedirá una vez y podrás modificarla desde tu perfil.</p>
+          <p>Solo se pedirá una vez. Podrás modificarla desde tu perfil.</p>
           <div className="row">
             <input
               value={address}
