@@ -12,12 +12,18 @@ import driverRoutes from './modules/drivers/routes.js';
 import adminRoutes from './modules/admin/routes.js';
 import { errorHandler, notFoundHandler } from './middlewares/errorHandler.js';
 
+function corsOrigin(origin, callback) {
+  if (!origin) return callback(null, true);
+  if (env.allowedOrigins.includes(origin)) return callback(null, true);
+  return callback(new Error('Origin not allowed by CORS'));
+}
+
 export function createApp() {
   const app = express();
 
   app.use(
     cors({
-      origin: env.frontendUrl,
+      origin: corsOrigin,
       credentials: true
     })
   );
@@ -26,7 +32,28 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
 
-  app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+  app.get('/', (_req, res) => {
+    res.json({
+      service: 'morelivery-api',
+      status: 'online',
+      docs: {
+        health: '/health',
+        auth: '/api/auth',
+        restaurants: '/api/restaurants',
+        orders: '/api/orders'
+      }
+    });
+  });
+
+  app.get('/health', (_req, res) => {
+    res.json({
+      status: 'ok',
+      service: 'morelivery-api',
+      env: env.nodeEnv,
+      allowedOrigins: env.allowedOrigins
+    });
+  });
+
   app.use('/api/auth', authRoutes);
   app.use('/api/restaurants', restaurantRoutes);
   app.use('/api/orders', orderRoutes);

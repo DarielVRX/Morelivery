@@ -142,7 +142,7 @@ No se recomienda un único servicio root para frontend+backend en beta; mejor se
 1. Crear Web Service desde repo.
 2. Root directory: `backend`.
 3. Start command: `npm start`.
-4. Variables: `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`, `NODE_ENV=production`.
+4. Variables: `DATABASE_URL`, `JWT_SECRET`, `ALLOWED_ORIGINS`, `NODE_ENV=production`.
 
 ### PostgreSQL (Supabase o Render Postgres)
 1. Crear instancia.
@@ -155,3 +155,26 @@ No se recomienda un único servicio root para frontend+backend en beta; mejor se
 - Observabilidad (OpenTelemetry + dashboards).
 - Particionamiento de tabla `orders` por fecha.
 - Migrar autenticación a proveedor externo (Auth0/Supabase Auth) si crece el equipo.
+
+
+## 12) Estado esperado con tus URLs actuales
+Si tu backend está en `https://morelivery.onrender.com/` y frontend en `https://morelivery-frontend.vercel.app/`, debería verse así:
+
+- `https://morelivery.onrender.com/` → JSON con `service: morelivery-api`, `status: online` y rutas principales.
+- `https://morelivery.onrender.com/health` → JSON con `status: ok` y `allowedOrigins` incluyendo tu dominio de Vercel.
+- `https://morelivery-frontend.vercel.app/` → web React cargando restaurantes desde `VITE_API_URL=https://morelivery.onrender.com/api`.
+
+Variables recomendadas en Render:
+
+```bash
+NODE_ENV=production
+ALLOWED_ORIGINS=https://morelivery-frontend.vercel.app,https://morelivery.onrender.com
+JWT_SECRET=<secreto-largo>
+DATABASE_URL=<postgres-url>
+```
+
+Variable recomendada en Vercel:
+
+```bash
+VITE_API_URL=https://morelivery.onrender.com/api
+```
