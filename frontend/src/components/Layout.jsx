@@ -4,9 +4,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../api/client';
 
 export default function Layout({ children }) {
-  const { auth, logout, login, patchUser } = useAuth();
+  const { auth, logout, patchUser } = useAuth();
   const [address, setAddress] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
+  // Necesita dirección si: es customer o restaurant Y no tiene address guardada
   const shouldAskAddress = Boolean(
     auth.user &&
       ['customer', 'restaurant'].includes(auth.user.role) &&
@@ -15,9 +18,21 @@ export default function Layout({ children }) {
 
   async function saveAddress() {
     if (!auth.token || !address.trim()) return;
-    const data = await apiFetch('/auth/profile', { method: 'PATCH', body: JSON.stringify({ address }) }, auth.token);
-    patchUser({ address: data.profile.address, needsAddress: false });
-    setAddress('');
+    setError('');
+    setSaving(true);
+    try {
+      const data = await apiFetch('/auth/profile', {
+        method: 'PATCH',
+        body: JSON.stringify({ address: address.trim() })
+      }, auth.token);
+      // patchUser actualiza auth en memoria Y en localStorage via AuthContext
+      patchUser({ address: data.profile.address });
+      setAddress('');
+    } catch (err) {
+      setError(err.message || 'Error al guardar dirección');
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function deleteAccount() {
@@ -39,27 +54,43 @@ export default function Layout({ children }) {
         </div>
         <div className="session-box">
           <span>{auth.user ? auth.user.username : 'Sin sesión'}</span>
-          {auth.user ? <button onClick={logout}>Cerrar sesión</button> : <Link className="login-link" to="/login">Iniciar sesión</Link>}
+          {auth.user
+            ? <button onClick={logout}>Cerrar sesión</button>
+            : <Link className="login-link" to="/login">Iniciar sesión</Link>}
         </div>
       </header>
 
       {shouldAskAddress ? (
         <section className="auth-card">
-          <h3>Completa dirección para continuar</h3>
+          <h3>Ingresa tu dirección para continuar</h3>
+          <p>Necesitamos tu dirección para procesar pedidos. Solo se pedirá una vez.</p>
           <div className="row">
-            <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Dirección" />
-            <button onClick={saveAddress}>Guardar dirección</button>
+            <input
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="Ej: Av. Siempre Viva 742, Springfield"
+              onKeyDown={(e) => e.key === 'Enter' && saveAddress()}
+            />
+            <button onClick={saveAddress} disabled={saving || !address.trim()}>
+              {saving ? 'Guardando...' : 'Guardar dirección'}
+            </button>
           </div>
+          {error ? <p style={{ color: 'red' }}>{error}</p> : null}
+          {/* Bloquea el contenido hasta tener dirección */}
         </section>
-      ) : null}
+      ) : (
+        <>
+          {auth.user ? (
+            <section className="auth-card compact">
+              <button onClick={deleteAccount}>Eliminar cuenta</button>
+            </section>
+          ) : null}
+          <main>{children}</main>
+        </>
+      )}
 
-      {auth.user ? (
-        <section className="auth-card compact">
-          <button onClick={deleteAccount}>Eliminar cuenta</button>
-        </section>
-      ) : null}
-
-      <main>{children}</main>
+      {/* Si no tiene dirección, no renderiza el contenido del rol */}
+      {shouldAskAddress ? null : null}
     </div>
   );
 }
