@@ -6,9 +6,11 @@ export default function DriverDashboard() {
   const { auth } = useAuth();
   const [orders, setOrders] = useState([]);
   const [offers, setOffers] = useState([]);
+  const [online, setOnline] = useState(navigator.onLine);
 
   async function loadData() {
     if (!auth.token) return;
+    await apiFetch('/drivers/listener', { method: 'POST' }, auth.token);
     const data = await apiFetch('/orders/my', {}, auth.token);
     setOrders(data.orders);
     const offerData = await apiFetch('/drivers/offers', {}, auth.token);
@@ -19,8 +21,20 @@ export default function DriverDashboard() {
     loadData().catch(() => {});
   }, [auth.token]);
 
+  useEffect(() => {
+    function onOnline() { setOnline(true); }
+    function onOffline() { setOnline(false); }
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
   async function setAvailability(isAvailable) {
     await apiFetch('/drivers/availability', { method: 'PATCH', body: JSON.stringify({ isAvailable }) }, auth.token);
+    loadData();
   }
 
   async function changeStatus(orderId, status) {
@@ -46,6 +60,7 @@ export default function DriverDashboard() {
   return (
     <section className="role-panel">
       <h2>Repartidor</h2>
+      <p>Estado de conexión: {online ? 'Conectado' : 'Desconectado'}</p>
       <button disabled={!auth.token || auth.user?.role !== 'driver'} onClick={() => setAvailability(true)}>Disponible</button>
       <button disabled={!auth.token || auth.user?.role !== 'driver'} onClick={() => setAvailability(false)}>No disponible</button>
 
@@ -66,7 +81,7 @@ export default function DriverDashboard() {
           <li key={order.id}>
             {order.id} · {order.status} · cliente: {order.customer_first_name}
             {order.driver_note ? <p>{order.driver_note}</p> : null}
-            <button onClick={() => changeStatus(order.id, 'on_the_way')}>On the way</button>
+            <button onClick={() => changeStatus(order.id, 'on_the_way')}>En camino</button>
             <button onClick={() => changeStatus(order.id, 'delivered')}>Entregado</button>
             <button onClick={() => releaseOrder(order.id)}>Liberar</button>
           </li>

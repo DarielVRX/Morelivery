@@ -261,3 +261,13 @@ create table if not exists order_driver_offers (
   unique(order_id, driver_id)
 );
 ```
+
+
+## 21) Fix para 404 al refrescar en Vercel
+Se agregó `frontend/vercel.json` con rewrite global a `index.html` para rutas SPA (`/login`, `/restaurant`, etc.).
+
+
+## 22) Capacidad y listener de asignación para drivers
+- Cada driver puede tener hasta **4 pedidos activos** simultáneos.
+- Se agregó `POST /api/drivers/listener` para ofertar pedidos pendientes cuando el driver se conecta o libera capacidad.
+- Esto evita polling agresivo y reduce carga en arquitectura gratuita.

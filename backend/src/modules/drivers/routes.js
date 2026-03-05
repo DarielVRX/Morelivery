@@ -4,7 +4,7 @@ import { query } from '../../config/db.js';
 import { validate } from '../../middlewares/validate.js';
 import { availabilitySchema } from './schemas.js';
 import { AppError } from '../../utils/errors.js';
-import { offerNextDrivers } from '../orders/assignment.js';
+import { driverHasCapacity, offerNextDrivers, offerOrdersToDriver } from '../orders/assignment.js';
 
 const router = Router();
 
@@ -14,10 +14,22 @@ router.patch('/availability', authenticate, authorize(['driver']), validate(avai
       req.validatedBody.isAvailable,
       req.user.userId
     ]);
-    if (result.rowCount === 0) {
-      return next(new AppError(404, 'Driver profile not found'));
+    if (result.rowCount === 0) return next(new AppError(404, 'Perfil de repartidor no encontrado'));
+
+    if (req.validatedBody.isAvailable) {
+      await offerOrdersToDriver(req.user.userId);
     }
+
     return res.json({ profile: result.rows[0] });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/listener', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const offered = await offerOrdersToDriver(req.user.userId);
+    return res.json({ offered });
   } catch (error) {
     return next(error);
   }
@@ -49,19 +61,22 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
 
 router.post('/offers/:id/accept', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
+    const hasCapacity = await driverHasCapacity(req.user.userId);
+    if (!hasCapacity) return next(new AppError(409, 'Máximo 4 pedidos activos alcanzado'));
+
     const offer = await query('SELECT * FROM order_driver_offers WHERE order_id = $1 AND driver_id = $2 AND status = $3', [
       req.params.id,
       req.user.userId,
       'pending'
     ]);
-    if (offer.rowCount === 0) return next(new AppError(404, 'Offer not found'));
+    if (offer.rowCount === 0) return next(new AppError(404, 'Oferta no encontrada'));
 
     const updateOrder = await query(
       'UPDATE orders SET driver_id = $1, status = $2, updated_at = NOW() WHERE id = $3 AND driver_id IS NULL RETURNING *',
       [req.user.userId, 'assigned', req.params.id]
     );
 
-    if (updateOrder.rowCount === 0) return next(new AppError(409, 'Order already taken'));
+    if (updateOrder.rowCount === 0) return next(new AppError(409, 'Pedido ya asignado'));
 
     await query('UPDATE order_driver_offers SET status = $1, updated_at = NOW() WHERE order_id = $2 AND driver_id = $3', [
       'accepted',
@@ -108,10 +123,11 @@ router.post('/orders/:id/release', authenticate, authorize(['driver']), async (r
       req.params.id,
       req.user.userId
     ]);
-    if (order.rowCount === 0) return next(new AppError(404, 'Assigned order not found'));
+    if (order.rowCount === 0) return next(new AppError(404, 'Pedido asignado no encontrado'));
 
     await query('UPDATE order_driver_offers SET status = $1, updated_at = NOW() WHERE order_id = $2 AND driver_id = $3', ['released', req.params.id, req.user.userId]);
     await offerNextDrivers(req.params.id);
+    await offerOrdersToDriver(req.user.userId);
     return res.json({ order: order.rows[0] });
   } catch (error) {
     return next(error);
