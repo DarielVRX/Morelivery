@@ -8,69 +8,58 @@ import { logEvent } from '../../utils/logger.js';
 function normalizeUsername(username) {
   return username.trim().toLowerCase();
 }
-
 function pseudoEmailFromUsername(username) {
   return `${normalizeUsername(username)}@local.test`;
-}
-
-function firstNameFromUsername(username) {
-  return username.split(/[_\-.\s]/)[0] || username;
 }
 
 export async function registerUser(payload) {
   const username = normalizeUsername(payload.username);
   const pseudoEmail = pseudoEmailFromUsername(username);
+  // display_name respeta capitalización del usuario; si no la dio, usamos username
+  const displayName = (payload.displayName || payload.username || username).trim();
 
   const existing = await query('SELECT id FROM users WHERE email = $1', [pseudoEmail]);
   if (existing.rowCount > 0) throw new AppError(409, 'Username already registered');
 
   const passwordHash = await bcrypt.hash(payload.password, 12);
-  const userAddress = payload.role === 'customer' ? payload.address || null : null;
+  const userAddress = ['customer'].includes(payload.role) ? (payload.address || null) : null;
 
   let result;
   try {
     result = await query(
       'INSERT INTO users(full_name, email, password_hash, role, address) VALUES($1, $2, $3, $4, $5) RETURNING id, full_name, email, role, address',
-      [username, pseudoEmail, passwordHash, payload.role, userAddress]
+      [displayName, pseudoEmail, passwordHash, payload.role, userAddress]
     );
   } catch (error) {
     if (error?.code === '42703') {
       result = await query(
         'INSERT INTO users(full_name, email, password_hash, role) VALUES($1, $2, $3, $4) RETURNING id, full_name, email, role',
-        [username, pseudoEmail, passwordHash, payload.role]
+        [displayName, pseudoEmail, passwordHash, payload.role]
       );
-    } else {
-      throw error;
-    }
+    } else throw error;
   }
 
   const user = result.rows[0];
 
   if (user.role === 'restaurant') {
+    const restName = displayName;
     try {
-      await query('INSERT INTO restaurants(owner_user_id, name, category, address) VALUES($1, $2, $3, $4)', [
-        user.id,
-        username,
-        'General',
-        payload.address || null
-      ]);
+      await query('INSERT INTO restaurants(owner_user_id, name, category, address) VALUES($1, $2, $3, $4)',
+        [user.id, restName, 'General', payload.address || null]);
     } catch (error) {
       if (error?.code === '42703') {
-        await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1, $2, $3)', [user.id, username, 'General']);
-      } else {
-        throw error;
-      }
+        await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1, $2, $3)',
+          [user.id, restName, 'General']);
+      } else throw error;
     }
   }
 
   if (user.role === 'driver') {
-    await query('INSERT INTO driver_profiles(user_id, vehicle_type, is_verified, is_available) VALUES($1, $2, true, true)', [
-      user.id,
-      'bike'
-    ]);
+    await query('INSERT INTO driver_profiles(user_id, vehicle_type, is_verified, is_available) VALUES($1, $2, true, true)',
+      [user.id, 'bike']);
   }
 
-  return { id: user.id, username, role: user.role };
+  return { id: user.id, username, role: user.role, display_name: displayName };
 }
 
 export async function loginUser(payload) {
@@ -79,13 +68,17 @@ export async function loginUser(payload) {
 
   let result;
   try {
-    result = await query('SELECT id, full_name, email, password_hash, role, status, address FROM users WHERE email = $1', [pseudoEmail]);
+    result = await query(
+      'SELECT id, full_name, email, password_hash, role, status, address FROM users WHERE email = $1',
+      [pseudoEmail]
+    );
   } catch (error) {
     if (error?.code === '42703') {
-      result = await query('SELECT id, full_name, email, password_hash, role, status FROM users WHERE email = $1', [pseudoEmail]);
-    } else {
-      throw error;
-    }
+      result = await query(
+        'SELECT id, full_name, email, password_hash, role, status FROM users WHERE email = $1',
+        [pseudoEmail]
+      );
+    } else throw error;
   }
 
   if (result.rowCount === 0) {
@@ -94,10 +87,7 @@ export async function loginUser(payload) {
   }
 
   const user = result.rows[0];
-  if (user.status !== 'active') {
-    logEvent('auth.login_error', { username, reason: 'suspended' });
-    throw new AppError(403, 'Cuenta suspendida');
-  }
+  if (user.status !== 'active') throw new AppError(403, 'Cuenta suspendida');
 
   const matches = await bcrypt.compare(payload.password, user.password_hash);
   if (!matches) {
@@ -105,36 +95,32 @@ export async function loginUser(payload) {
     throw new AppError(401, 'Credenciales inválidas');
   }
 
-  const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, {
-    expiresIn: env.jwtExpiresIn
-  });
+  const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 
-  let profile = { address: user.address || null, firstName: firstNameFromUsername(username), needsAddress: false };
+  // full_name guarda el display_name real; si coincide con username@local.test patrón antiguo, usamos username
+  const displayName = user.full_name && user.full_name !== username ? user.full_name : username;
+
+  let profile = { address: user.address || null, display_name: displayName, username, needsAddress: false };
+
   if (user.role === 'restaurant') {
     try {
-      const restaurantResult = await query('SELECT id, name, address FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
-      profile.restaurant = restaurantResult.rows[0] || null;
-      profile.address = restaurantResult.rows[0]?.address || null;
+      const r = await query('SELECT id, name, address FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
+      profile.restaurant = r.rows[0] || null;
+      profile.address = r.rows[0]?.address || null;
     } catch (error) {
-      if (error?.code === '42703') {
-        const restaurantResult = await query('SELECT id, name FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
-        profile.restaurant = restaurantResult.rows[0] || null;
-      } else {
-        throw error;
-      }
+      if (error?.code !== '42703') throw error;
     }
   }
+
   if (user.role === 'driver') {
     try {
-      const driverResult = await query('SELECT driver_number, is_available FROM driver_profiles WHERE user_id = $1', [user.id]);
-      profile.driver = driverResult.rows[0] || { driver_number: null, is_available: true };
+      const d = await query('SELECT driver_number, is_available FROM driver_profiles WHERE user_id = $1', [user.id]);
+      profile.driver = d.rows[0] || { driver_number: null, is_available: true };
     } catch (error) {
       if (error?.code === '42703') {
-        const fallback = await query('SELECT is_available FROM driver_profiles WHERE user_id = $1', [user.id]);
-        profile.driver = { driver_number: null, is_available: fallback.rows[0]?.is_available ?? true };
-      } else {
-        throw error;
-      }
+        const f = await query('SELECT is_available FROM driver_profiles WHERE user_id = $1', [user.id]);
+        profile.driver = { driver_number: null, is_available: f.rows[0]?.is_available ?? true };
+      } else throw error;
     }
   }
 
@@ -142,27 +128,46 @@ export async function loginUser(payload) {
     profile.needsAddress = true;
   }
 
-  return {
-    token,
-    user: { id: user.id, username, role: user.role, ...profile }
-  };
+  return { token, user: { id: user.id, username, role: user.role, ...profile } };
 }
 
-export async function updateProfileAddress(userId, role, address) {
-  if (role === 'restaurant') {
+export async function updateProfileAddress(userId, role, address, displayName) {
+  const result = {};
+
+  if (displayName && displayName.trim()) {
     try {
-      await query('UPDATE restaurants SET address = $1 WHERE owner_user_id = $2', [address, userId]);
-    } catch (error) {
-      if (error?.code !== '42703') throw error;
+      await query('UPDATE users SET full_name = $1 WHERE id = $2', [displayName.trim(), userId]);
+      result.displayName = displayName.trim();
+    } catch (_) {}
+  }
+
+  if (address && address.trim()) {
+    if (role === 'restaurant') {
+      try {
+        await query('UPDATE restaurants SET address = $1 WHERE owner_user_id = $2', [address.trim(), userId]);
+      } catch (error) { if (error?.code !== '42703') throw error; }
+    } else {
+      try {
+        await query('UPDATE users SET address = $1 WHERE id = $2', [address.trim(), userId]);
+      } catch (error) { if (error?.code !== '42703') throw error; }
     }
-    return { address };
+    result.address = address.trim();
   }
-  try {
-    await query('UPDATE users SET address = $1 WHERE id = $2', [address, userId]);
-  } catch (error) {
-    if (error?.code !== '42703') throw error;
+
+  return result;
+}
+
+export async function changePassword(userId, currentPassword, newPassword) {
+  const result = await query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+  if (result.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
+
+  if (currentPassword) {
+    const matches = await bcrypt.compare(currentPassword, result.rows[0].password_hash);
+    if (!matches) throw new AppError(401, 'Contraseña actual incorrecta');
   }
-  return { address };
+
+  const newHash = await bcrypt.hash(newPassword, 12);
+  await query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, userId]);
 }
 
 export async function deleteAccount(userId) {
