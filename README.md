@@ -21,9 +21,10 @@ Beta funcional enfocada en seguridad, modularidad y escalabilidad para marketpla
 - JWT firmado con expiración.
 - Password hashing con bcrypt (cost 12).
 - RBAC estricto por rol en endpoints sensibles.
-- Validación de input con Zod en auth.
+- Validación de input con Zod en auth/orders/drivers/restaurants/admin.
+- Sanitización básica de texto de formularios en backend.
 - Helmet + CORS controlado + rate limiting.
-- Logs de eventos críticos (`auth.login`, `order.created`, `order.status_changed`).
+- Logs de eventos críticos (`auth.login`, `order.created`, `order.status_changed`, `admin.user_suspended`).
 - Variables sensibles en `.env` (no expuestas en frontend).
 - Preparado para HTTPS (forzado por plataforma de despliegue: Vercel/Render/Supabase).
 
@@ -77,7 +78,16 @@ Entidades principales:
 - `GET /api/admin/users`
 - `PATCH /api/admin/users/:id/suspend`
 
-## 6) Flujo completo de pedido (ejemplo)
+## 6) ¿Cómo debe verse y funcionar la página principal?
+La home de cliente debe:
+1. Mostrar restaurantes disponibles/abiertos.
+2. Mostrar propuesta de valor en 3 pasos: descubrir, pedir, recibir.
+3. Tener un CTA claro a explorar menús y crear pedido.
+4. Refrescar estados del pedido en tiempo real (evento `order:update`).
+
+En esta beta, la home ya incluye listado de restaurantes + cards de flujo funcional.
+
+## 7) Flujo completo de pedido (ejemplo)
 1. Cliente autenticado consulta restaurantes y menú.
 2. Cliente crea pedido (`status=created`).
 3. Restaurante cambia estado a `accepted` y luego `preparing`, `ready`.
@@ -85,7 +95,14 @@ Entidades principales:
 5. Repartidor actualiza a `on_the_way` y `delivered`.
 6. Cliente visualiza cambios en tiempo real por evento `order:update`.
 
-## 7) Ejecución local
+## 8) Ejecución local
+
+### Desde la raíz (monorepo)
+```bash
+npm run install:all
+npm run dev:backend
+npm run dev:frontend
+```
 
 ### Backend
 ```bash
@@ -103,7 +120,16 @@ cp .env.example .env
 npm run dev
 ```
 
-## 8) Despliegue gratis
+## 9) ¿Es desplegable desde raíz?
+**Sí**, con dos opciones:
+1. **Render Blueprint (`render.yaml`) desde raíz**: crea API + sitio estático usando `rootDir` por servicio.
+2. **Despliegue separado desde raíz del repo**:
+   - Vercel: seleccionar `frontend` como Root Directory.
+   - Render: seleccionar `backend` como Root Directory.
+
+No se recomienda un único servicio root para frontend+backend en beta; mejor separar para escalar y aislar fallos.
+
+## 10) Despliegue gratis
 
 ### Frontend (Vercel)
 1. Importar repo en Vercel.
@@ -123,7 +149,7 @@ npm run dev
 2. Ejecutar `database/schema.sql`.
 3. Configurar `DATABASE_URL` en backend.
 
-## 9) Escalabilidad futura recomendada
+## 11) Escalabilidad futura recomendada
 - Colas (BullMQ/RabbitMQ) para asignación automática de repartidores.
 - Redis obligatorio para estado activo/geolocalización.
 - Observabilidad (OpenTelemetry + dashboards).
