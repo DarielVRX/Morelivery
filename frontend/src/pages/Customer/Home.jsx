@@ -55,7 +55,7 @@ export default function CustomerHome() {
   }
 
   return (
-    <section>
+    <section className="role-panel">
       <h2>Cliente</h2>
       <select value={restaurantId} onChange={(e) => setRestaurantId(e.target.value)}>
         {restaurants.map((r) => (

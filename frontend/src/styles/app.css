@@ -1,11 +1,32 @@
-body { font-family: Inter, Arial, sans-serif; margin: 0; background: #fafafa; color: #111827; }
-.container { max-width: 980px; margin: 0 auto; padding: 1rem; }
-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem; }
-nav { display: flex; gap: 1rem; flex-wrap: wrap; }
-nav a { color: #ef4444; text-decoration: none; font-weight: 600; }
-main { background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,.08); display: grid; gap: 1rem; }
-.card { border: 1px solid #e5e7eb; border-radius: 8px; padding: .75rem; background: #fcfcfc; }
+:root {
+  --primary: #E3AAAA;
+  --primary-dark: #c88e8e;
+  --bg-soft: #fff7f7;
+  --text: #3d2b2b;
+}
+
+* { box-sizing: border-box; }
+body { font-family: Inter, Arial, sans-serif; margin: 0; background: linear-gradient(180deg, #fff 0%, var(--bg-soft) 100%); color: var(--text); }
+.container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+
+.app-header { display: flex; justify-content: space-between; gap: 1rem; align-items: center; background: white; border: 1px solid #f1dada; border-radius: 14px; padding: 1rem; box-shadow: 0 4px 14px rgba(227,170,170,.2); }
+.brand-block { display: flex; align-items: center; gap: .75rem; }
+.brand-logo { width: 56px; height: 56px; border-radius: 10px; box-shadow: 0 2px 8px rgba(227,170,170,.4); }
+h1 { margin: 0; color: var(--primary-dark); }
+.subtitle { margin: .2rem 0 0; font-size: .9rem; opacity: .9; }
+.role-pill { display: inline-block; background: var(--primary); padding: .2rem .5rem; border-radius: 999px; }
+
+.session-box { display: flex; gap: .5rem; align-items: center; font-size: .9rem; }
+.login-link { color: var(--text); text-decoration: none; font-weight: 600; background: var(--primary); padding: .45rem .7rem; border-radius: 10px; }
+
+main { margin-top: 1rem; background: #fff; border-radius: 14px; padding: 1rem; box-shadow: 0 8px 20px rgba(227,170,170,.18); display: grid; gap: 1rem; border: 1px solid #f3e2e2; }
+.auth-card, .role-panel { border: 1px solid #edd8d8; border-radius: 12px; padding: 1rem; background: #fffdfd; }
+.auth-card h2, .role-panel h2 { margin-top: 0; color: var(--primary-dark); }
+
 .row { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .5rem; }
-input, select, button { padding: .4rem .5rem; }
+input, select { border: 1px solid #e2c7c7; border-radius: 8px; padding: .55rem .65rem; background: #fff; }
+button { border: 0; border-radius: 8px; padding: .52rem .8rem; background: var(--primary); color: #3a2a2a; font-weight: 600; cursor: pointer; }
+button:hover { filter: brightness(.97); }
+button:disabled { opacity: .6; cursor: not-allowed; }
 ul { padding-left: 1rem; }
-li { margin-bottom: .35rem; }
+li { margin-bottom: .45rem; }

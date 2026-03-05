@@ -65,7 +65,10 @@ Entidades principales:
 - `GET /api/orders/my`
 
 ### Restaurante
+- `GET /api/restaurants/my`
+- `GET /api/restaurants/my/menu`
 - `POST /api/restaurants/menu-items`
+- `PATCH /api/restaurants/menu-items/:id`
 - `PATCH /api/orders/:id/status`
 
 ### Repartidor
@@ -213,3 +216,21 @@ create unique index if not exists driver_profiles_driver_number_unique on driver
 - `GET /api/_routes` lista rutas críticas montadas para validar wiring de routers.
 - Si `health` funciona pero endpoints fallan, usa `GET /health/db`; si falla, el problema es de conexión/credenciales/schema en DB.
 - Cuando ocurra error SQL, el backend ahora devuelve `code` (SQLSTATE) para diagnóstico rápido.
+
+
+## 18) Si falla login de driver con "Database error"
+Puede ocurrir si tu DB fue creada antes de agregar `driver_number` en `driver_profiles`.
+Ejecuta en producción:
+
+```sql
+alter table driver_profiles add column if not exists driver_number bigserial;
+create unique index if not exists driver_profiles_driver_number_unique on driver_profiles(driver_number);
+```
+
+> ¿Debes volver a ejecutar `schema.sql` completo?
+> No necesariamente. Para este caso alcanza con el `ALTER TABLE` + índice de arriba.
+
+
+## 19) UX de autenticación
+- Inicio de sesión y Registro son páginas separadas (`/login` y `/register`) con mensajes y CTA diferenciados.
+- El header no muestra menú de roles global; solo el rol del usuario autenticado bajo el título Morelivery.

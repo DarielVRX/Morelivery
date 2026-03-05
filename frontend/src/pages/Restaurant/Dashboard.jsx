@@ -8,6 +8,7 @@ export default function RestaurantDashboard() {
   const [description, setDescription] = useState('Producto demo');
   const [price, setPrice] = useState('1000');
   const [orders, setOrders] = useState([]);
+  const [products, setProducts] = useState([]);
   const [message, setMessage] = useState('');
 
   async function loadData() {
@@ -16,19 +17,43 @@ export default function RestaurantDashboard() {
     setRestaurant(myRestaurant.restaurant);
     const myOrders = await apiFetch('/orders/my', {}, auth.token);
     setOrders(myOrders.orders);
+    const myProducts = await apiFetch('/restaurants/my/menu', {}, auth.token);
+    setProducts(myProducts.menu);
   }
 
   useEffect(() => {
-    loadData().catch(() => {});
+    loadData().catch((error) => setMessage(error.message));
   }, [auth.token]);
 
   async function addProduct() {
     try {
-      await apiFetch('/restaurants/menu-items', {
-        method: 'POST',
-        body: JSON.stringify({ name: description.slice(0, 20), description, priceCents: Number(price) })
-      }, auth.token);
+      await apiFetch(
+        '/restaurants/menu-items',
+        {
+          method: 'POST',
+          body: JSON.stringify({ name: description.slice(0, 20), description, priceCents: Number(price) })
+        },
+        auth.token
+      );
       setMessage('Producto agregado');
+      loadData();
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function updateProduct(productId, current, field, value) {
+    try {
+      const payload = {
+        name: current.name,
+        description: current.description,
+        priceCents: current.price_cents,
+        isAvailable: current.is_available,
+        [field]: value
+      };
+      await apiFetch(`/restaurants/menu-items/${productId}`, { method: 'PATCH', body: JSON.stringify(payload) }, auth.token);
+      setMessage('Producto actualizado');
+      loadData();
     } catch (error) {
       setMessage(error.message);
     }
@@ -40,12 +65,37 @@ export default function RestaurantDashboard() {
   }
 
   return (
-    <section>
+    <section className="role-panel">
       <h2>Restaurante</h2>
       <p>Mi restaurante: {restaurant?.name || 'N/A'}</p>
       <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="descripción" />
       <input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="precio en cents" />
       <button disabled={!auth.token || auth.user?.role !== 'restaurant'} onClick={addProduct}>Agregar producto</button>
+
+      <h3>Mis productos</h3>
+      <ul>
+        {products.map((product) => (
+          <li key={product.id}>
+            <strong>{product.name}</strong> · {product.description} · ${(product.price_cents / 100).toFixed(2)} · {product.is_available ? 'activo' : 'inactivo'}
+            <button onClick={() => updateProduct(product.id, product, 'isAvailable', !product.is_available)}>
+              {product.is_available ? 'Desactivar' : 'Activar'}
+            </button>
+            <button onClick={() => {
+              const nextPrice = Number(prompt('Nuevo precio en cents', String(product.price_cents)));
+              if (!Number.isNaN(nextPrice) && nextPrice > 0) updateProduct(product.id, product, 'priceCents', nextPrice);
+            }}>
+              Editar precio
+            </button>
+            <button onClick={() => {
+              const nextDesc = prompt('Nueva descripción', product.description || '');
+              if (nextDesc !== null) updateProduct(product.id, product, 'description', nextDesc);
+            }}>
+              Editar descripción
+            </button>
+          </li>
+        ))}
+      </ul>
+
       <h3>Pedidos</h3>
       <ul>
         {orders.map((order) => (
