@@ -15,3 +15,11 @@ export const createOrderSchema = z.object({
 export const updateOrderStatusSchema = z.object({
   status: z.enum(['accepted', 'preparing', 'ready', 'assigned', 'on_the_way', 'delivered', 'cancelled'])
 });
+
+export const suggestionSchema = z.object({
+  suggestionText: z.string().min(3).max(300)
+});
+
+export const suggestionResponseSchema = z.object({
+  accepted: z.boolean()
+});

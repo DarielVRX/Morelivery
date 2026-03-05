@@ -13,6 +13,10 @@ function pseudoEmailFromUsername(username) {
   return `${normalizeUsername(username)}@local.test`;
 }
 
+function firstNameFromUsername(username) {
+  return username.split(/[_\-.\s]/)[0] || username;
+}
+
 export async function registerUser(payload) {
   const username = normalizeUsername(payload.username);
   const pseudoEmail = pseudoEmailFromUsername(username);
@@ -21,19 +25,21 @@ export async function registerUser(payload) {
   if (existing.rowCount > 0) throw new AppError(409, 'Username already registered');
 
   const passwordHash = await bcrypt.hash(payload.password, 12);
+  const userAddress = payload.role === 'customer' ? payload.address || null : null;
 
   const result = await query(
-    'INSERT INTO users(full_name, email, password_hash, role) VALUES($1, $2, $3, $4) RETURNING id, full_name, email, role',
-    [username, pseudoEmail, passwordHash, payload.role]
+    'INSERT INTO users(full_name, email, password_hash, role, address) VALUES($1, $2, $3, $4, $5) RETURNING id, full_name, email, role, address',
+    [username, pseudoEmail, passwordHash, payload.role, userAddress]
   );
 
   const user = result.rows[0];
 
   if (user.role === 'restaurant') {
-    await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1, $2, $3)', [
+    await query('INSERT INTO restaurants(owner_user_id, name, category, address) VALUES($1, $2, $3, $4)', [
       user.id,
       `${username} kitchen`,
-      'General'
+      'General',
+      payload.address || null
     ]);
   }
 
@@ -51,7 +57,7 @@ export async function loginUser(payload) {
   const username = normalizeUsername(payload.username);
   const pseudoEmail = pseudoEmailFromUsername(username);
 
-  const result = await query('SELECT id, full_name, email, password_hash, role, status FROM users WHERE email = $1', [pseudoEmail]);
+  const result = await query('SELECT id, full_name, email, password_hash, role, status, address FROM users WHERE email = $1', [pseudoEmail]);
   if (result.rowCount === 0) {
     logEvent('auth.login_error', { username, reason: 'user_not_found' });
     throw new AppError(401, 'Invalid credentials');
@@ -73,10 +79,11 @@ export async function loginUser(payload) {
     expiresIn: env.jwtExpiresIn
   });
 
-  let profile = {};
+  let profile = { address: user.address || null, firstName: firstNameFromUsername(username), needsAddress: false };
   if (user.role === 'restaurant') {
-    const restaurantResult = await query('SELECT id, name FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
+    const restaurantResult = await query('SELECT id, name, address FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
     profile.restaurant = restaurantResult.rows[0] || null;
+    profile.address = restaurantResult.rows[0]?.address || null;
   }
   if (user.role === 'driver') {
     try {
@@ -84,7 +91,6 @@ export async function loginUser(payload) {
       profile.driver = driverResult.rows[0] || { driver_number: null, is_available: true };
     } catch (error) {
       if (error?.code === '42703') {
-        // Backward compatibility with DB created before driver_number existed
         const fallback = await query('SELECT is_available FROM driver_profiles WHERE user_id = $1', [user.id]);
         profile.driver = { driver_number: null, is_available: fallback.rows[0]?.is_available ?? true };
       } else {
@@ -93,8 +99,26 @@ export async function loginUser(payload) {
     }
   }
 
+  if (['customer', 'restaurant'].includes(user.role) && !profile.address) {
+    profile.needsAddress = true;
+  }
+
   return {
     token,
     user: { id: user.id, username, role: user.role, ...profile }
   };
+}
+
+export async function updateProfileAddress(userId, role, address) {
+  if (role === 'restaurant') {
+    await query('UPDATE restaurants SET address = $1 WHERE owner_user_id = $2', [address, userId]);
+    return { address };
+  }
+  await query('UPDATE users SET address = $1 WHERE id = $2', [address, userId]);
+  return { address };
+}
+
+export async function deleteAccount(userId) {
+  await query('DELETE FROM users WHERE id = $1', [userId]);
+  return { ok: true };
 }

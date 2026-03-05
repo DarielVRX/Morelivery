@@ -4,33 +4,11 @@ import { authenticate, authorize } from '../../middlewares/auth.js';
 import { orderEvents } from '../../events/orderEvents.js';
 import { logEvent } from '../../utils/logger.js';
 import { validate } from '../../middlewares/validate.js';
-import { createOrderSchema, updateOrderStatusSchema } from './schemas.js';
+import { createOrderSchema, suggestionResponseSchema, suggestionSchema, updateOrderStatusSchema } from './schemas.js';
 import { AppError } from '../../utils/errors.js';
+import { offerNextDrivers } from './assignment.js';
 
 const router = Router();
-
-async function assignNextDriver(orderId) {
-  const driverResult = await query(
-    `SELECT dp.user_id
-     FROM driver_profiles dp
-     WHERE dp.is_available = true
-       AND NOT EXISTS (
-         SELECT 1 FROM orders o
-         WHERE o.driver_id = dp.user_id
-           AND o.status IN ('assigned', 'on_the_way')
-       )
-     ORDER BY dp.driver_number ASC
-     LIMIT 1`
-  );
-
-  if (driverResult.rowCount === 0) {
-    return null;
-  }
-
-  const driverId = driverResult.rows[0].user_id;
-  await query('UPDATE orders SET driver_id = $1, status = $2, updated_at = NOW() WHERE id = $3', [driverId, 'assigned', orderId]);
-  return driverId;
-}
 
 router.post('/', authenticate, authorize(['customer']), validate(createOrderSchema), async (req, res, next) => {
   const { restaurantId, items } = req.validatedBody;
@@ -43,9 +21,12 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       totalCents += menuResult.rows[0].price_cents * item.quantity;
     }
 
+    const customer = await query('SELECT address FROM users WHERE id = $1', [req.user.userId]);
+    const deliveryAddress = customer.rows[0]?.address || 'address-pending';
+
     const orderResult = await query(
       'INSERT INTO orders(customer_id, restaurant_id, status, total_cents, delivery_address) VALUES($1, $2, $3, $4, $5) RETURNING *',
-      [req.user.userId, restaurantId, 'created', totalCents, 'beta-test-address']
+      [req.user.userId, restaurantId, 'created', totalCents, deliveryAddress]
     );
 
     const order = orderResult.rows[0];
@@ -58,11 +39,11 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       );
     }
 
-    const driverId = await assignNextDriver(order.id);
-    const updatedOrder = await query('SELECT * FROM orders WHERE id = $1', [order.id]);
+    await offerNextDrivers(order.id);
 
+    const updatedOrder = await query('SELECT * FROM orders WHERE id = $1', [order.id]);
     orderEvents.emitOrderUpdate(order.id, updatedOrder.rows[0].status);
-    logEvent('order.created', { orderId: order.id, customerId: req.user.userId, driverId });
+    logEvent('order.created', { orderId: order.id, customerId: req.user.userId });
     return res.status(201).json({ order: updatedOrder.rows[0] });
   } catch (error) {
     return next(error);
@@ -71,10 +52,27 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
 
 router.patch('/:id/status', authenticate, authorize(['restaurant', 'driver', 'admin']), validate(updateOrderStatusSchema), async (req, res, next) => {
   try {
-    const result = await query('UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *', [req.validatedBody.status, req.params.id]);
-    if (result.rowCount === 0) {
-      return next(new AppError(404, 'Order not found'));
+    const current = await query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
+    if (current.rowCount === 0) return next(new AppError(404, 'Order not found'));
+
+    const nextStatus = req.validatedBody.status;
+    let driverNote = current.rows[0].driver_note;
+    let restaurantNote = current.rows[0].restaurant_note;
+
+    if (req.user.role === 'driver' && nextStatus === 'on_the_way' && current.rows[0].status !== 'ready') {
+      return next(new AppError(409, 'Restaurant must mark order as ready first'));
     }
+
+    if (req.user.role === 'restaurant' && nextStatus === 'preparing') driverNote = 'Restaurante: pedido en preparación';
+    if (req.user.role === 'restaurant' && nextStatus === 'ready') driverNote = 'Restaurante: pedido listo para retiro';
+    if (req.user.role === 'driver' && nextStatus === 'on_the_way') restaurantNote = 'Driver: pedido en camino';
+    if (req.user.role === 'driver' && nextStatus === 'delivered') restaurantNote = 'Driver: pedido entregado';
+
+    const result = await query(
+      'UPDATE orders SET status = $1, driver_note = $2, restaurant_note = $3, updated_at = NOW() WHERE id = $4 RETURNING *',
+      [nextStatus, driverNote, restaurantNote, req.params.id]
+    );
+
     const order = result.rows[0];
     orderEvents.emitOrderUpdate(order.id, order.status);
     logEvent('order.status_changed', { orderId: order.id, status: order.status, actor: req.user.userId });
@@ -84,10 +82,64 @@ router.patch('/:id/status', authenticate, authorize(['restaurant', 'driver', 'ad
   }
 });
 
+router.patch('/:id/cancel', authenticate, authorize(['customer']), async (req, res, next) => {
+  try {
+    const result = await query('UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2 AND customer_id = $3 RETURNING *', [
+      'cancelled',
+      req.params.id,
+      req.user.userId
+    ]);
+    if (result.rowCount === 0) return next(new AppError(404, 'Order not found'));
+    return res.json({ order: result.rows[0] });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.patch('/:id/suggest', authenticate, authorize(['restaurant']), validate(suggestionSchema), async (req, res, next) => {
+  try {
+    const result = await query(
+      `UPDATE orders SET suggestion_text = $1, suggestion_status = 'pending_customer', updated_at = NOW()
+       WHERE id = $2 AND restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id = $3)
+       RETURNING *`,
+      [req.validatedBody.suggestionText, req.params.id, req.user.userId]
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Order not found'));
+    return res.json({ order: result.rows[0] });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.patch('/:id/suggestion-response', authenticate, authorize(['customer']), validate(suggestionResponseSchema), async (req, res, next) => {
+  try {
+    const status = req.validatedBody.accepted ? 'accepted' : 'rejected';
+    const result = await query(
+      `UPDATE orders SET suggestion_status = $1, updated_at = NOW()
+       WHERE id = $2 AND customer_id = $3
+       RETURNING *`,
+      [status, req.params.id, req.user.userId]
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Order not found'));
+    return res.json({ order: result.rows[0] });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.get('/my', authenticate, async (req, res, next) => {
   try {
     const result = await query(
-      'SELECT * FROM orders WHERE customer_id = $1 OR driver_id = $1 OR restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id = $1) ORDER BY created_at DESC',
+      `SELECT o.*, r.name AS restaurant_name,
+              split_part(c.full_name, '_', 1) AS customer_first_name,
+              split_part(d.full_name, '_', 1) AS driver_first_name,
+              c.address AS customer_address
+       FROM orders o
+       JOIN restaurants r ON r.id = o.restaurant_id
+       JOIN users c ON c.id = o.customer_id
+       LEFT JOIN users d ON d.id = o.driver_id
+       WHERE o.customer_id = $1 OR o.driver_id = $1 OR o.restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id = $1)
+       ORDER BY o.created_at DESC`,
       [req.user.userId]
     );
     return res.json({ orders: result.rows });
