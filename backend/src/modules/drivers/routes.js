@@ -42,13 +42,16 @@ router.post('/listener', authenticate, authorize(['driver']), async (req, res, n
 
 router.get('/offers', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
-    let result;
+    // Obtener ofertas pendientes con direcciones de restaurante y cliente
+    let offersResult;
     try {
-      result = await query(
+      offersResult = await query(
         `SELECT o.id, o.status, o.total_cents, o.delivery_address, o.customer_address,
-                o.restaurant_name, o.customer_first_name
+                o.restaurant_name, o.customer_first_name,
+                o.restaurant_address
          FROM (
            SELECT ord.*, r.name AS restaurant_name,
+                  r.address AS restaurant_address,
                   split_part(u.full_name, '_', 1) AS customer_first_name,
                   u.address AS customer_address
            FROM orders ord
@@ -62,13 +65,15 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
       );
     } catch (error) {
       if (error?.code !== '42703') throw error;
-      result = await query(
-        `SELECT o.id, o.status, o.total_cents, o.delivery_address, o.customer_address,
-                o.restaurant_name, o.customer_first_name
+      // Fallback si falta columna address en restaurants o users
+      offersResult = await query(
+        `SELECT o.id, o.status, o.total_cents, o.delivery_address,
+                o.restaurant_name, o.customer_first_name,
+                o.delivery_address AS customer_address,
+                NULL AS restaurant_address
          FROM (
            SELECT ord.*, r.name AS restaurant_name,
-                  split_part(u.full_name, '_', 1) AS customer_first_name,
-                  ord.delivery_address AS customer_address
+                  split_part(u.full_name, '_', 1) AS customer_first_name
            FROM orders ord
            JOIN restaurants r ON r.id = ord.restaurant_id
            JOIN users u ON u.id = ord.customer_id
@@ -79,7 +84,39 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
         [req.user.userId]
       );
     }
-    return res.json({ offers: result.rows });
+
+    // Obtener items de cada oferta
+    const offerIds = offersResult.rows.map((r) => r.id);
+    let itemsByOffer = new Map();
+    if (offerIds.length > 0) {
+      try {
+        const itemsResult = await query(
+          `SELECT oi.order_id, oi.menu_item_id, oi.quantity, oi.unit_price_cents,
+                  COALESCE(mi.name, 'Producto') AS name
+           FROM order_items oi
+           LEFT JOIN menu_items mi ON mi.id = oi.menu_item_id
+           WHERE oi.order_id = ANY($1::uuid[])
+           ORDER BY oi.order_id, oi.id`,
+          [offerIds]
+        );
+        for (const row of itemsResult.rows) {
+          if (!itemsByOffer.has(row.order_id)) itemsByOffer.set(row.order_id, []);
+          itemsByOffer.get(row.order_id).push({
+            menuItemId: row.menu_item_id,
+            name: row.name,
+            quantity: row.quantity,
+            unitPriceCents: row.unit_price_cents
+          });
+        }
+      } catch (_) { /* si order_items no existe aún, continúa sin items */ }
+    }
+
+    const offers = offersResult.rows.map((row) => ({
+      ...row,
+      items: itemsByOffer.get(row.id) || []
+    }));
+
+    return res.json({ offers });
   } catch (error) {
     return next(error);
   }
