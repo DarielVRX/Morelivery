@@ -53,13 +53,13 @@ function AuthScreen({ mode = 'login' }) {
           : 'Crea usuarios de prueba indicando tipo de usuario y dirección para cliente/restaurante.'}
       </p>
       <div className="row">
-        <input placeholder="username" value={username} onChange={(e) => setUsername(e.target.value)} />
-        <input type="password" placeholder="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <input placeholder="usuario" value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input type="password" placeholder="contraseña" value={password} onChange={(e) => setPassword(e.target.value)} />
         {!isLogin ? (
           <select value={role} onChange={(e) => setRole(e.target.value)}>
-            <option value="customer">customer</option>
-            <option value="restaurant">restaurant</option>
-            <option value="driver">driver</option>
+            <option value="customer">cliente</option>
+            <option value="restaurant">restaurante</option>
+            <option value="driver">repartidor</option>
             <option value="admin">admin</option>
           </select>
         ) : null}
@@ -71,7 +71,7 @@ function AuthScreen({ mode = 'login' }) {
       ) : null}
       <div className="row">
         <button onClick={submit}>{isLogin ? 'Entrar' : 'Registrar'}</button>
-        {isLogin ? <Link className="login-link" to="/register">Ir a registro</Link> : <Link className="login-link" to="/login">Ir a login</Link>}
+        {isLogin ? <Link className="login-link" to="/register">Ir a registro</Link> : <Link className="login-link" to="/login">Ir a inicio de sesión</Link>}
       </div>
       {message ? <p>{message}</p> : null}
     </section>
