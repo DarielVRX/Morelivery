@@ -136,7 +136,7 @@ No se recomienda un único servicio root para frontend+backend en beta; mejor se
 2. Root directory: `frontend`.
 3. Build command: `npm run build`.
 4. Output directory: `dist`.
-5. Variable: `VITE_API_URL=https://<tu-backend>/api`.
+5. Variable: `VITE_API_URL=https://<tu-backend>` (el frontend agrega `/api` automáticamente).
 
 ### Backend (Render)
 1. Crear Web Service desde repo.
@@ -162,7 +162,7 @@ Si tu backend está en `https://morelivery.onrender.com/` y frontend en `https:/
 
 - `https://morelivery.onrender.com/` → JSON con `service: morelivery-api`, `status: online` y rutas principales.
 - `https://morelivery.onrender.com/health` → JSON con `status: ok` y `allowedOrigins` incluyendo tu dominio de Vercel.
-- `https://morelivery-frontend.vercel.app/` → web React cargando restaurantes desde `VITE_API_URL=https://morelivery.onrender.com/api`.
+- `https://morelivery-frontend.vercel.app/` → web React cargando restaurantes desde `VITE_API_URL=https://morelivery.onrender.com`.
 
 Variables recomendadas en Render:
 
@@ -176,7 +176,7 @@ DATABASE_URL=<postgres-url>
 Variable recomendada en Vercel:
 
 ```bash
-VITE_API_URL=https://morelivery.onrender.com/api
+VITE_API_URL=https://morelivery.onrender.com
 ```
 
 
@@ -200,3 +200,9 @@ create unique index if not exists driver_profiles_driver_number_unique on driver
 ## 15) Auth de pruebas sin email real
 - El registro/login beta usa `username` + `password` (sin verificación de email).
 - Internamente backend genera un pseudo-email técnico (`<username>@local.test`) solo para compatibilidad del esquema actual.
+
+
+## 16) Troubleshooting rápido (404/500 y Failed to fetch)
+- Si `health` responde pero `/api/restaurants` falla, revisa que `database/schema.sql` esté ejecutado en la misma DB.
+- El backend ahora acepta rutas con y sin prefijo `/api` para evitar 404 por configuración de frontend.
+- `VITE_API_URL` puede apuntar a la raíz del backend (`https://...onrender.com`) o con `/api`; el cliente lo normaliza.
