@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TYPE user_role AS ENUM ('customer', 'restaurant', 'driver', 'admin');
 CREATE TYPE account_status AS ENUM ('active', 'suspended');
 
@@ -32,6 +34,7 @@ CREATE TABLE menu_items (
 
 CREATE TABLE driver_profiles (
   user_id UUID PRIMARY KEY REFERENCES users(id),
+  driver_number BIGSERIAL UNIQUE,
   vehicle_type VARCHAR(50),
   is_verified BOOLEAN NOT NULL DEFAULT false,
   is_available BOOLEAN NOT NULL DEFAULT false,

@@ -178,3 +178,25 @@ Variable recomendada en Vercel:
 ```bash
 VITE_API_URL=https://morelivery.onrender.com/api
 ```
+
+
+## 13) Flujo de pruebas rápido (beta)
+1. Registra 1 `restaurant`, 1 `customer`, 1+ `driver` desde el frontend (solo username/password/role).
+2. Login como restaurante y agrega productos (descripción + precio).
+3. Login como cliente, selecciona restaurante, arma cantidades y crea pedido.
+4. El backend asigna automáticamente el pedido al repartidor disponible con menor `driver_number`.
+5. Login como repartidor y avanza estado (`on_the_way`, `delivered`).
+
+## 14) SQL mínimo para DB existente
+Si ya tenías tablas creadas, ejecuta:
+
+```sql
+create extension if not exists pgcrypto;
+alter table driver_profiles add column if not exists driver_number bigserial;
+create unique index if not exists driver_profiles_driver_number_unique on driver_profiles(driver_number);
+```
+
+
+## 15) Auth de pruebas sin email real
+- El registro/login beta usa `username` + `password` (sin verificación de email).
+- Internamente backend genera un pseudo-email técnico (`<username>@local.test`) solo para compatibilidad del esquema actual.
