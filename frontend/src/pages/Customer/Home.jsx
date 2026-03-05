@@ -20,7 +20,9 @@ export default function CustomerHome() {
   async function loadMenu(id) {
     if (!id) return;
     const data = await apiFetch(`/restaurants/${id}/menu`);
-    setMenu(data.menu);
+    const availableMenu = (data.menu || []).filter((item) => item.is_available !== false);
+    setMenu(availableMenu);
+    setSelectedItems({});
   }
 
   async function loadMyOrders() {
@@ -43,9 +45,12 @@ export default function CustomerHome() {
 
   async function createOrder() {
     try {
+      if (!restaurantId) throw new Error('Selecciona un restaurante');
+      const currentMenuIds = new Set(menu.map((item) => item.id));
       const items = Object.entries(selectedItems)
-        .filter(([, qty]) => Number(qty) > 0)
+        .filter(([menuItemId, qty]) => currentMenuIds.has(menuItemId) && Number(qty) > 0)
         .map(([menuItemId, quantity]) => ({ menuItemId, quantity: Number(quantity) }));
+      if (items.length === 0) throw new Error('Selecciona al menos un producto válido');
       const data = await apiFetch('/orders', { method: 'POST', body: JSON.stringify({ restaurantId, items }) }, auth.token);
       setMessage(`Pedido creado: ${data.order.id} estado ${data.order.status}`);
       loadMyOrders();
@@ -75,7 +80,7 @@ export default function CustomerHome() {
       <ul>
         {menu.map((item) => (
           <li key={item.id}>
-            {item.description} - ${(item.price_cents / 100).toFixed(2)}
+            {item.name} - {(item.description || 'Sin descripción')} - ${(item.price_cents / 100).toFixed(2)}
             <input
               type="number"
               min="0"
