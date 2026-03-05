@@ -28,5 +28,10 @@ export const suggestionSchema = z.object({
 });
 
 export const suggestionResponseSchema = z.object({
-  accepted: z.boolean()
+  accepted: z.boolean(),
+  // Items editados por el cliente (opcionales — si no vienen se usan los de la sugerencia original)
+  items: z.array(z.object({
+    menuItemId: z.string().uuid(),
+    quantity: z.number().int().min(1).max(20)
+  })).optional()
 });
