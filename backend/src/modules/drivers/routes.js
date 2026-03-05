@@ -4,7 +4,12 @@ import { query } from '../../config/db.js';
 import { validate } from '../../middlewares/validate.js';
 import { availabilitySchema } from './schemas.js';
 import { AppError } from '../../utils/errors.js';
-import { driverHasCapacity, offerNextDrivers, offerOrdersToDriver } from '../orders/assignment.js';
+import {
+  MAX_ACTIVE_ORDERS_PER_DRIVER,
+  driverHasCapacity,
+  offerNextDrivers,
+  offerOrdersToDriver
+} from '../orders/assignment.js';
 
 const router = Router();
 
@@ -62,7 +67,9 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
 router.post('/offers/:id/accept', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const hasCapacity = await driverHasCapacity(req.user.userId);
-    if (!hasCapacity) return next(new AppError(409, 'Máximo 4 pedidos activos alcanzado'));
+    if (!hasCapacity) {
+      return next(new AppError(409, `Máximo ${MAX_ACTIVE_ORDERS_PER_DRIVER} pedidos activos alcanzado`));
+    }
 
     const offer = await query('SELECT * FROM order_driver_offers WHERE order_id = $1 AND driver_id = $2 AND status = $3', [
       req.params.id,

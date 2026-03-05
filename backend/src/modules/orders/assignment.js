@@ -1,5 +1,7 @@
 import { query } from '../../config/db.js';
 
+export const MAX_ACTIVE_ORDERS_PER_DRIVER = 4;
+
 function batchSize(offeredCount) {
   if (offeredCount < 5) return 1;
   if (offeredCount < 10) return 5;
@@ -16,7 +18,7 @@ export async function driverHasCapacity(driverId) {
      WHERE driver_id = $1 AND status = ANY($2::text[])`,
     [driverId, ACTIVE_DRIVER_STATUSES]
   );
-  return result.rows[0].count < 4;
+  return result.rows[0].count < MAX_ACTIVE_ORDERS_PER_DRIVER;
 }
 
 export async function offerNextDrivers(orderId) {
@@ -33,10 +35,10 @@ export async function offerNextDrivers(orderId) {
          SELECT COUNT(*)::int FROM orders o
          WHERE o.driver_id = dp.user_id
            AND o.status = ANY($3::text[])
-       ) < 4
+       ) < $4
      ORDER BY dp.driver_number ASC
      LIMIT $2`,
-    [orderId, limit, ACTIVE_DRIVER_STATUSES]
+    [orderId, limit, ACTIVE_DRIVER_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
   );
 
   for (const row of candidates.rows) {

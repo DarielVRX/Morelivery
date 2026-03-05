@@ -70,7 +70,7 @@ function AuthScreen({ mode = 'login' }) {
         </div>
       ) : null}
       <div className="row">
-        <button onClick={submit}>{isLogin ? 'Entrar' : 'Registrar'}</button>
+        <button onClick={submit}>{isLogin ? 'Iniciar sesión' : 'Registrarse'}</button>
         {isLogin ? <Link className="login-link" to="/register">Ir a registro</Link> : <Link className="login-link" to="/login">Ir a inicio de sesión</Link>}
       </div>
       {message ? <p>{message}</p> : null}
