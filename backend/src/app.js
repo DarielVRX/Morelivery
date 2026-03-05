@@ -11,6 +11,7 @@ import orderRoutes from './modules/orders/routes.js';
 import driverRoutes from './modules/drivers/routes.js';
 import adminRoutes from './modules/admin/routes.js';
 import { errorHandler, notFoundHandler } from './middlewares/errorHandler.js';
+import { checkDbConnection } from './config/db.js';
 
 function corsOrigin(origin, callback) {
   if (!origin) return callback(null, true);
@@ -40,6 +41,7 @@ export function createApp() {
       status: 'online',
       docs: {
         health: '/health',
+        healthDb: '/health/db',
         auth: '/api/auth',
         restaurants: '/api/restaurants',
         orders: '/api/orders'
@@ -56,13 +58,36 @@ export function createApp() {
     });
   });
 
+  app.get('/health/db', async (_req, res, next) => {
+    try {
+      const db = await checkDbConnection();
+      return res.json({ status: 'ok', database: 'connected', now: db.now });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.get('/api/_routes', (_req, res) => {
+    res.json({
+      routes: [
+        '/api/auth/register',
+        '/api/auth/login',
+        '/api/restaurants',
+        '/api/restaurants/:id/menu',
+        '/api/orders',
+        '/api/orders/my',
+        '/api/drivers/availability',
+        '/api/admin/orders'
+      ]
+    });
+  });
+
   app.use('/api/auth', authRoutes);
   app.use('/api/restaurants', restaurantRoutes);
   app.use('/api/orders', orderRoutes);
   app.use('/api/drivers', driverRoutes);
   app.use('/api/admin', adminRoutes);
 
-  // Backward-compatible aliases in case frontend VITE_API_URL missed /api
   app.use('/auth', authRoutes);
   app.use('/restaurants', restaurantRoutes);
   app.use('/orders', orderRoutes);

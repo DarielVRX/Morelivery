@@ -162,6 +162,7 @@ Si tu backend está en `https://morelivery.onrender.com/` y frontend en `https:/
 
 - `https://morelivery.onrender.com/` → JSON con `service: morelivery-api`, `status: online` y rutas principales.
 - `https://morelivery.onrender.com/health` → JSON con `status: ok` y `allowedOrigins` incluyendo tu dominio de Vercel.
+- `https://morelivery.onrender.com/health/db` → valida conexión real a PostgreSQL (si falla, hay problema de DB).
 - `https://morelivery-frontend.vercel.app/` → web React cargando restaurantes desde `VITE_API_URL=https://morelivery.onrender.com`.
 
 Variables recomendadas en Render:
@@ -206,3 +207,9 @@ create unique index if not exists driver_profiles_driver_number_unique on driver
 - Si `health` responde pero `/api/restaurants` falla, revisa que `database/schema.sql` esté ejecutado en la misma DB.
 - El backend ahora acepta rutas con y sin prefijo `/api` para evitar 404 por configuración de frontend.
 - `VITE_API_URL` puede apuntar a la raíz del backend (`https://...onrender.com`) o con `/api`; el cliente lo normaliza.
+
+
+## 17) Verificación de routers y DB en producción
+- `GET /api/_routes` lista rutas críticas montadas para validar wiring de routers.
+- Si `health` funciona pero endpoints fallan, usa `GET /health/db`; si falla, el problema es de conexión/credenciales/schema en DB.
+- Cuando ocurra error SQL, el backend ahora devuelve `code` (SQLSTATE) para diagnóstico rápido.
