@@ -13,6 +13,9 @@ router.get('/', async (_req, res, next) => {
     const result = await query('SELECT id, name, category, is_open FROM restaurants WHERE is_active = true ORDER BY name');
     return res.json({ restaurants: result.rows });
   } catch (error) {
+    if (error?.code === '42P01') {
+      return res.json({ restaurants: [], warning: 'restaurants table not initialized yet' });
+    }
     return next(error);
   }
 });
@@ -34,6 +37,9 @@ router.get('/:id/menu', async (req, res, next) => {
     );
     return res.json({ menu: result.rows });
   } catch (error) {
+    if (error?.code === '42P01') {
+      return res.json({ menu: [], warning: 'menu_items table not initialized yet' });
+    }
     return next(error);
   }
 });

@@ -14,8 +14,10 @@ import { errorHandler, notFoundHandler } from './middlewares/errorHandler.js';
 
 function corsOrigin(origin, callback) {
   if (!origin) return callback(null, true);
+  if (env.allowedOrigins.length === 0 || env.allowedOrigins.includes('*')) return callback(null, true);
   if (env.allowedOrigins.includes(origin)) return callback(null, true);
-  return callback(new Error('Origin not allowed by CORS'));
+  console.warn(`[cors] Origin not in allowlist, allowing for beta: ${origin}`);
+  return callback(null, true);
 }
 
 export function createApp() {
@@ -59,6 +61,13 @@ export function createApp() {
   app.use('/api/orders', orderRoutes);
   app.use('/api/drivers', driverRoutes);
   app.use('/api/admin', adminRoutes);
+
+  // Backward-compatible aliases in case frontend VITE_API_URL missed /api
+  app.use('/auth', authRoutes);
+  app.use('/restaurants', restaurantRoutes);
+  app.use('/orders', orderRoutes);
+  app.use('/drivers', driverRoutes);
+  app.use('/admin', adminRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
