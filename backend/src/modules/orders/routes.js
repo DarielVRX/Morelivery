@@ -64,19 +64,24 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
   const { restaurantId, items } = req.validatedBody;
 
   try {
-    let totalCents = 0;
-    for (const item of items) {
-      const menuResult = await query('SELECT price_cents FROM menu_items WHERE id = $1 AND restaurant_id = $2', [item.menuItemId, restaurantId]);
-      if (menuResult.rowCount === 0) return next(new AppError(400, 'Invalid menu item'));
-      totalCents += menuResult.rows[0].price_cents * item.quantity;
-    }
-
+    // Verificar que el cliente tiene dirección guardada
     let deliveryAddress = 'address-pending';
     try {
       const customer = await query('SELECT address FROM users WHERE id = $1', [req.user.userId]);
       deliveryAddress = customer.rows[0]?.address || 'address-pending';
     } catch (error) {
       if (!isMissingColumnError(error)) throw error;
+    }
+
+    if (!deliveryAddress || deliveryAddress === 'address-pending') {
+      return next(new AppError(400, 'Debes guardar tu dirección antes de hacer un pedido'));
+    }
+
+    let totalCents = 0;
+    for (const item of items) {
+      const menuResult = await query('SELECT price_cents FROM menu_items WHERE id = $1 AND restaurant_id = $2', [item.menuItemId, restaurantId]);
+      if (menuResult.rowCount === 0) return next(new AppError(400, 'Invalid menu item'));
+      totalCents += menuResult.rows[0].price_cents * item.quantity;
     }
 
     const orderResult = await query(
@@ -119,7 +124,7 @@ router.patch('/:id/status', authenticate, authorize(['restaurant', 'driver', 'ad
     let restaurantNote = current.rows[0].restaurant_note;
 
     if (req.user.role === 'driver' && nextStatus === 'on_the_way' && current.rows[0].status !== 'ready') {
-      return next(new AppError(409, 'Restaurant must mark order as ready first'));
+      return next(new AppError(409, 'El restaurante debe marcar el pedido como listo primero'));
     }
 
     if (req.user.role === 'restaurant' && nextStatus === 'preparing') driverNote = 'Restaurante: pedido en preparación';
@@ -211,8 +216,10 @@ router.get('/my', authenticate, async (req, res, next) => {
   try {
     let result;
     try {
+      // Incluye restaurant_address para que el driver vea dónde retirar
       result = await query(
         `SELECT o.*, r.name AS restaurant_name,
+                r.address AS restaurant_address,
                 split_part(c.full_name, '_', 1) AS customer_first_name,
                 split_part(d.full_name, '_', 1) AS driver_first_name,
                 c.address AS customer_address
@@ -226,8 +233,10 @@ router.get('/my', authenticate, async (req, res, next) => {
       );
     } catch (error) {
       if (!isMissingColumnError(error)) throw error;
+      // Fallback sin columnas address
       result = await query(
         `SELECT o.*, r.name AS restaurant_name,
+                NULL AS restaurant_address,
                 split_part(c.full_name, '_', 1) AS customer_first_name,
                 split_part(d.full_name, '_', 1) AS driver_first_name,
                 o.delivery_address AS customer_address
