@@ -3,6 +3,7 @@ import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import CustomerHome from './pages/Customer/Home';
+import RestaurantPage from './pages/Customer/RestaurantPage';
 import RestaurantDashboard from './pages/Restaurant/Dashboard';
 import DriverDashboard from './pages/Driver/Dashboard';
 import AdminDashboard from './pages/Admin/Dashboard';
@@ -63,7 +64,7 @@ function AuthScreen({ mode = 'login' }) {
     <section className="auth-card">
       <h2>{isLogin ? 'Inicio de sesión' : 'Registro de usuario'}</h2>
       <div className="row">
-        <input placeholder="Usuario (para login)" value={username} onChange={e => setUsername(e.target.value)} />
+        <input placeholder="Usuario" value={username} onChange={e => setUsername(e.target.value)} />
         <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} />
         {!isLogin && (
           <select value={role} onChange={e => setRole(e.target.value)}>
@@ -91,8 +92,8 @@ function AuthScreen({ mode = 'login' }) {
       <div className="row">
         <button onClick={submit}>{isLogin ? 'Iniciar sesión' : 'Registrarse'}</button>
         {isLogin
-          ? <Link className="login-link" to="/register">Ir a registro</Link>
-          : <Link className="login-link" to="/login">Ir a inicio de sesión</Link>}
+          ? <Link className="login-link" to="/register">Crear cuenta</Link>
+          : <Link className="login-link" to="/login">Ya tengo cuenta</Link>}
       </div>
       {message ? <p>{message}</p> : null}
     </section>
@@ -108,6 +109,8 @@ function AppRoutes() {
         <Route path="/login" element={<AuthScreen mode="login" />} />
         <Route path="/register" element={<AuthScreen mode="register" />} />
         <Route path="/profile" element={<ProtectedAuth><ProfilePage /></ProtectedAuth>} />
+        {/* Página individual de restaurante — accesible para todos */}
+        <Route path="/restaurant/:id" element={<RestaurantPage />} />
         <Route path="/customer" element={<ProtectedRole role="customer"><CustomerHome /></ProtectedRole>} />
         <Route path="/restaurant" element={<ProtectedRole role="restaurant"><RestaurantDashboard /></ProtectedRole>} />
         <Route path="/driver" element={<ProtectedRole role="driver"><DriverDashboard /></ProtectedRole>} />
