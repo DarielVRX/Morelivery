@@ -12,17 +12,22 @@ function pseudoEmailFromUsername(username) {
   return `${normalizeUsername(username)}@local.test`;
 }
 
+// Limpia sufijos genéricos que se agregaban automáticamente
+function cleanRestaurantName(name) {
+  return name.replace(/\s+kitchen$/i, '').replace(/\s+restaurant$/i, '').trim();
+}
+
 export async function registerUser(payload) {
   const username = normalizeUsername(payload.username);
   const pseudoEmail = pseudoEmailFromUsername(username);
-  // display_name respeta capitalización del usuario; si no la dio, usamos username
+  // display_name respeta capitalización; si no se dio, usamos username
   const displayName = (payload.displayName || payload.username || username).trim();
 
   const existing = await query('SELECT id FROM users WHERE email = $1', [pseudoEmail]);
   if (existing.rowCount > 0) throw new AppError(409, 'Username already registered');
 
   const passwordHash = await bcrypt.hash(payload.password, 12);
-  const userAddress = ['customer'].includes(payload.role) ? (payload.address || null) : null;
+  const userAddress = payload.role === 'customer' ? (payload.address || null) : null;
 
   let result;
   try {
@@ -42,21 +47,29 @@ export async function registerUser(payload) {
   const user = result.rows[0];
 
   if (user.role === 'restaurant') {
-    const restName = displayName;
+    // Nombre del restaurante = displayName limpio, sin sufijos
+    const restName = cleanRestaurantName(displayName);
+    const restAddress = payload.address || null;
     try {
-      await query('INSERT INTO restaurants(owner_user_id, name, category, address) VALUES($1, $2, $3, $4)',
-        [user.id, restName, 'General', payload.address || null]);
+      await query(
+        'INSERT INTO restaurants(owner_user_id, name, category, address) VALUES($1, $2, $3, $4)',
+        [user.id, restName, 'General', restAddress]
+      );
     } catch (error) {
       if (error?.code === '42703') {
-        await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1, $2, $3)',
-          [user.id, restName, 'General']);
+        await query(
+          'INSERT INTO restaurants(owner_user_id, name, category) VALUES($1, $2, $3)',
+          [user.id, restName, 'General']
+        );
       } else throw error;
     }
   }
 
   if (user.role === 'driver') {
-    await query('INSERT INTO driver_profiles(user_id, vehicle_type, is_verified, is_available) VALUES($1, $2, true, true)',
-      [user.id, 'bike']);
+    await query(
+      'INSERT INTO driver_profiles(user_id, vehicle_type, is_verified, is_available) VALUES($1, $2, true, true)',
+      [user.id, 'bike']
+    );
   }
 
   return { id: user.id, username, role: user.role, display_name: displayName };
@@ -95,11 +108,11 @@ export async function loginUser(payload) {
     throw new AppError(401, 'Credenciales inválidas');
   }
 
-  const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
+  const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, {
+    expiresIn: env.jwtExpiresIn
+  });
 
-  // full_name guarda el display_name real; si coincide con username@local.test patrón antiguo, usamos username
   const displayName = user.full_name && user.full_name !== username ? user.full_name : username;
-
   let profile = { address: user.address || null, display_name: displayName, username, needsAddress: false };
 
   if (user.role === 'restaurant') {
@@ -135,10 +148,19 @@ export async function updateProfileAddress(userId, role, address, displayName) {
   const result = {};
 
   if (displayName && displayName.trim()) {
+    const cleanName = displayName.trim();
     try {
-      await query('UPDATE users SET full_name = $1 WHERE id = $2', [displayName.trim(), userId]);
-      result.displayName = displayName.trim();
+      await query('UPDATE users SET full_name = $1 WHERE id = $2', [cleanName, userId]);
+      result.displayName = cleanName;
     } catch (_) {}
+
+    // Si es restaurante, sincronizar el nombre del restaurante con el display_name
+    if (role === 'restaurant') {
+      try {
+        const restName = cleanRestaurantName(cleanName);
+        await query('UPDATE restaurants SET name = $1 WHERE owner_user_id = $2', [restName, userId]);
+      } catch (_) {}
+    }
   }
 
   if (address && address.trim()) {
