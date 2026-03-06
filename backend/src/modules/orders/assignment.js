@@ -4,10 +4,7 @@ export const MAX_ACTIVE_ORDERS_PER_DRIVER = 4;
 export const OFFER_TIMEOUT_SECONDS = 60;
 
 /**
- * Define el tamaño del lote según cuántas ofertas ya se hicieron.
- * 1 a 1 hasta que se haya ofertado a 5 conductores.
- * De 5 en 5 hasta que se haya ofertado a 20.
- * De 10 en 10 en adelante.
+ * Mantiene la progresión: 1x1 hasta 5 intentos, luego lotes de 5.
  */
 function getBatchSize(totalOfferedSoFar) {
   if (totalOfferedSoFar < 5) return 1;
@@ -31,14 +28,42 @@ export async function driverIsEligible(driverId) {
 }
 
 /**
- * Proceso de oferta proactiva (1x1, luego 5, luego 10)
+ * Expira ofertas y RE-OFERTA automáticamente si el pedido quedó sin candidatos pendientes.
+ */
+export async function expireTimedOutOffers() {
+  const expired = await query(
+    `UPDATE order_driver_offers
+     SET status = 'expired', updated_at = NOW()
+     WHERE status = 'pending'
+       AND created_at < NOW() - ($1 || ' seconds')::interval
+     RETURNING order_id`,
+    [OFFER_TIMEOUT_SECONDS]
+  );
+
+  if (expired.rowCount === 0) return;
+
+  // Si hubo expiraciones, intentamos ofrecer a los siguientes conductores para esos pedidos
+  const uniqueOrderIds = [...new Set(expired.rows.map(r => r.order_id))];
+  for (const orderId of uniqueOrderIds) {
+    // Solo re-ofertamos si el pedido sigue buscando driver
+    const orderCheck = await query(
+      `SELECT id FROM orders WHERE id = $1 AND driver_id IS NULL AND status NOT IN ('delivered','cancelled')`,
+      [orderId]
+    );
+    if (orderCheck.rowCount > 0) {
+      await offerNextDrivers(orderId);
+    }
+  }
+}
+
+/**
+ * Lógica principal de asignación proactiva.
  */
 export async function offerNextDrivers(orderId) {
-  // 1. Limpiar expirados primero
+  // 1. Limpieza de seguridad
   await expireTimedOutOffers();
 
-  // 2. Contar cuántos conductores han recibido ya una oferta (sin importar el estado)
-  // Esto mantiene la progresión de 1x1 -> 5x5
+  // 2. Cálculo de lote basado en historial total de intentos
   const countRes = await query(
     `SELECT COUNT(DISTINCT driver_id)::int as count FROM order_driver_offers WHERE order_id = $1`,
     [orderId]
@@ -46,9 +71,7 @@ export async function offerNextDrivers(orderId) {
   const totalOfferedSoFar = countRes.rows[0].count;
   const limit = getBatchSize(totalOfferedSoFar);
 
-  // 3. Buscar candidatos:
-  // - Deben estar disponibles (is_available = true)
-  // - No deben tener una oferta PENDIENTE actualmente para este pedido
+  // 3. Buscar candidatos disponibles que no tengan una oferta pendiente actual
   const candidates = await query(
     `SELECT dp.user_id
      FROM driver_profiles dp
@@ -72,12 +95,12 @@ export async function offerNextDrivers(orderId) {
        VALUES($1, $2, 'pending')
        ON CONFLICT(order_id, driver_id) 
        DO UPDATE SET status = 'pending', updated_at = NOW(), created_at = NOW()
-       WHERE order_driver_offers.status IN ('expired', 'rejected')`,
+       WHERE order_driver_offers.status IN ('expired', 'rejected', 'released', 'accepted')`,
       [orderId, row.user_id]
     );
   }
 
-  // Si no hay nadie disponible, marcar pedido como pendiente de driver
+  // Si el pedido es nuevo (totalOfferedSoFar === 0) y no hay nadie, marcar estado
   if (candidates.rowCount === 0 && totalOfferedSoFar === 0) {
     await query(
       `UPDATE orders SET status = 'pending_driver', updated_at = NOW() 
@@ -85,20 +108,18 @@ export async function offerNextDrivers(orderId) {
       [orderId]
     );
   }
-
   return candidates.rowCount;
 }
 
 /**
- * Polling del driver: Solo oferta si el driver es elegible y no tiene la oferta ya
+ * Lógica para cuando el Driver entra a la App o hace pull-to-refresh.
  */
 export async function offerOrdersToDriver(driverId) {
   const isEligible = await driverIsEligible(driverId);
   if (!isEligible) return 0;
 
-  // IMPORTANTE: Solo mostrar pedidos que NO tengan una oferta pendiente para otros conductores
-  // si estamos en la fase 1x1. Para simplificar, el driver "jala" lo que le corresponda.
-  
+  await expireTimedOutOffers();
+
   const pendingOrders = await query(
     `SELECT o.id
      FROM orders o
@@ -115,33 +136,25 @@ export async function offerOrdersToDriver(driverId) {
 
   let offered = 0;
   for (const row of pendingOrders.rows) {
-    // Validamos si a este driver le toca ver este pedido según la lógica de batch
+    // Antes de insertar, verificamos si por driver_number le toca entrar en el lote actual
     const countRes = await query(
       `SELECT COUNT(DISTINCT driver_id)::int as count FROM order_driver_offers WHERE order_id = $1`,
       [row.id]
     );
     const totalOfferedSoFar = countRes.rows[0].count;
-    
-    // Si ya se ofertó a otros, pero este driver entra en el siguiente "batch", se le permite
-    await query(
+
+    // Aquí permitimos que el driver "vea" el pedido si cumple con los estados de re-ciclo
+    const result = await query(
       `INSERT INTO order_driver_offers(order_id, driver_id, status)
        VALUES($1, $2, 'pending')
        ON CONFLICT(order_id, driver_id) 
        DO UPDATE SET status = 'pending', updated_at = NOW(), created_at = NOW()
-       WHERE order_driver_offers.status IN ('expired', 'rejected')`,
+       WHERE order_driver_offers.status IN ('expired', 'rejected', 'released', 'accepted')
+       RETURNING id`,
       [row.id, driverId]
     );
-    offered++;
+    
+    if (result.rowCount > 0) offered++;
   }
   return offered;
-}
-
-export async function expireTimedOutOffers() {
-  await query(
-    `UPDATE order_driver_offers
-     SET status = 'expired', updated_at = NOW()
-     WHERE status = 'pending'
-       AND created_at < NOW() - ($1 || ' seconds')::interval`,
-    [OFFER_TIMEOUT_SECONDS]
-  );
 }
