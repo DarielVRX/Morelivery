@@ -105,6 +105,26 @@ export async function offerNextDrivers(orderId) {
     [orderId, limit, ACTIVE_DRIVER_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
   );
 
+  // --- LÓGICA DE REINICIO ---
+  // Si no hay candidatos nuevos Y no hay nadie pendiente, REINICIAMOS el ciclo
+  if (candidates.rowCount === 0 && currentPending.rowCount === 0) {
+    console.log(`[REINICIO] Sin conductores nuevos para pedido ${orderId}. Reiniciando ciclo...`);
+    
+    // Borramos el historial de ofertas para este pedido para que el NOT EXISTS no los bloquee
+    await query(
+      `DELETE FROM order_driver_offers WHERE order_id = $1 AND status IN ('expired', 'rejected')`,
+      [orderId]
+    );
+
+    // Intentamos buscar de nuevo (ahora la tabla está limpia)
+    candidates = await query(
+      `SELECT dp.user_id FROM driver_profiles dp
+       WHERE dp.is_available = true
+       ORDER BY dp.driver_number ASC LIMIT $1`,
+      [limit]
+    );
+  }
+
   // 4. Insertar las nuevas ofertas
   for (const row of candidates.rows) {
     await query(
