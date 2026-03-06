@@ -294,8 +294,8 @@ export default function DriverDashboard() {
                 <div><strong>Dir. entrega:</strong> {order.customer_address||order.delivery_address||'—'}</div>
                 {(order.items||[]).length>0&&<ul style={{margin:'0.3rem 0 0 1rem',fontSize:'0.9rem'}}>{order.items.map(i=><li key={i.menuItemId}>{i.name} × {i.quantity} — {formatMoney(i.unitPriceCents*i.quantity)}</li>)}</ul>}
 
-                {/* Mapa — solo si tenemos posición GPS */}
-                {driverPos && (
+                {/* Mapa — muestra si hay GPS; si no, muestra las direcciones en texto */}
+                {driverPos ? (
                   <div style={{marginTop:'0.75rem'}}>
                     <OrderMap
                       driverPos={driverPos}
@@ -304,6 +304,10 @@ export default function DriverDashboard() {
                       showPickup={showPickup}
                       height="220px"
                     />
+                  </div>
+                ) : (
+                  <div style={{marginTop:'0.5rem',padding:'0.5rem 0.75rem',background:'#f9fafb',borderRadius:6,fontSize:'0.83rem',color:'#6b7280'}}>
+                    📍 GPS no disponible en este dispositivo — actívalo para ver el mapa
                   </div>
                 )}
 

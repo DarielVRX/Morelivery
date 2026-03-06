@@ -1,5 +1,5 @@
 // frontend/src/components/OrderMap.jsx
-// Mapa de seguimiento con OpenStreetMap (Leaflet) + tiempo estimado (OSRM p\u00fablico)
+// Mapa de seguimiento con OpenStreetMap (Leaflet) + tiempo estimado (OSRM público)
 // Sin API key, sin costo.
 // Instalar: npm install leaflet react-leaflet
 
@@ -17,19 +17,19 @@ L.Icon.Default.mergeOptions({
 });
 
 const driverIcon = new L.DivIcon({
-  html: '<div style="font-size:1.5rem;line-height:1">\ud83d\udef5</div>',
+  html: '<div style="font-size:1.5rem;line-height:1">🛵</div>',
   className: '',
   iconSize: [28, 28],
   iconAnchor: [14, 14],
 });
 const destIcon = new L.DivIcon({
-  html: '<div style="font-size:1.5rem;line-height:1">\ud83d\udccd</div>',
+  html: '<div style="font-size:1.5rem;line-height:1">📍</div>',
   className: '',
   iconSize: [28, 28],
   iconAnchor: [14, 28],
 });
 const restIcon = new L.DivIcon({
-  html: '<div style="font-size:1.5rem;line-height:1">\ud83c\udf7d</div>',
+  html: '<div style="font-size:1.5rem;line-height:1">🍽</div>',
   className: '',
   iconSize: [28, 28],
   iconAnchor: [14, 28],
@@ -46,7 +46,7 @@ function FitBounds({ points }) {
 }
 
 /**
- * Obtiene ruta real desde OSRM (instancia p\u00fablica gratuita de OpenStreetMap)
+ * Obtiene ruta real desde OSRM (instancia pública gratuita de OpenStreetMap)
  * Devuelve { route: [[lat,lng],...], durationSeconds: number, distanceMeters: number }
  */
 async function fetchRoute(from, to) {
@@ -67,7 +67,7 @@ async function fetchRoute(from, to) {
 }
 
 function formatETA(seconds) {
-  if (!seconds) return '\u2014';
+  if (!seconds) return '—';
   const mins = Math.ceil(seconds / 60);
   if (mins < 60) return `~${mins} min`;
   return `~${Math.floor(mins / 60)}h ${mins % 60}min`;
@@ -77,7 +77,7 @@ function formatETA(seconds) {
  * Props:
  *  driverPos  = { lat, lng } | null
  *  pickupPos  = { lat, lng } | null  (restaurante)
- *  deliveryPos = { lat, lng } | null (direcci\u00f3n del cliente)
+ *  deliveryPos = { lat, lng } | null (dirección del cliente)
  *  showPickup = boolean (mostrar punto de recogida)
  *  height     = string (default '280px')
  */
@@ -91,7 +91,7 @@ export default function OrderMap({ driverPos, pickupPos, deliveryPos, showPickup
     return driverPos || pickupPos || deliveryPos || { lat: 20.67, lng: -103.35 }; // Guadalajara fallback
   }, []);
 
-  // Calcular rutas cuando cambia la posici\u00f3n del driver
+  // Calcular rutas cuando cambia la posición del driver
   useEffect(() => {
     const id = ++routeFetchRef.current;
     async function calc() {
@@ -119,9 +119,9 @@ export default function OrderMap({ driverPos, pickupPos, deliveryPos, showPickup
     <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid #e5e7eb' }}>
       {eta != null && (
         <div style={{ padding: '0.4rem 0.75rem', background: '#f0fdf4', fontSize: '0.875rem', borderBottom: '1px solid #e5e7eb', display: 'flex', gap: '1rem' }}>
-          <span>\ud83d\udd50 ETA: <strong>{formatETA(eta)}</strong></span>
+          <span>🕐 ETA: <strong>{formatETA(eta)}</strong></span>
           {(showPickup ? routeToPickup : routeToDelivery)?.distanceMeters != null && (
-            <span>\ud83d\udccf {((showPickup ? routeToPickup : routeToDelivery).distanceMeters / 1000).toFixed(1)} km</span>
+            <span>📏 {((showPickup ? routeToPickup : routeToDelivery).distanceMeters / 1000).toFixed(1)} km</span>
           )}
         </div>
       )}
@@ -133,31 +133,31 @@ export default function OrderMap({ driverPos, pickupPos, deliveryPos, showPickup
       >
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='\u00a9 <a href="https://openstreetmap.org">OpenStreetMap</a>'
+          attribution='© <a href="https://openstreetmap.org">OpenStreetMap</a>'
         />
         <FitBounds points={allPoints} />
 
         {driverPos && (
           <Marker position={[driverPos.lat, driverPos.lng]} icon={driverIcon}>
-            <Popup>\ud83d\udef5 Driver</Popup>
+            <Popup>🛵 Driver</Popup>
           </Marker>
         )}
         {showPickup && pickupPos && (
           <Marker position={[pickupPos.lat, pickupPos.lng]} icon={restIcon}>
-            <Popup>\ud83c\udf7d Restaurante</Popup>
+            <Popup>🍽 Restaurante</Popup>
           </Marker>
         )}
         {deliveryPos && (
           <Marker position={[deliveryPos.lat, deliveryPos.lng]} icon={destIcon}>
-            <Popup>\ud83d\udccd Entrega</Popup>
+            <Popup>📍 Entrega</Popup>
           </Marker>
         )}
 
-        {/* Ruta driver \u2192 restaurante (azul) */}
+        {/* Ruta driver → restaurante (azul) */}
         {showPickup && routeToPickup?.route && (
           <Polyline positions={routeToPickup.route} color="#2563eb" weight={3} opacity={0.7} />
         )}
-        {/* Ruta driver \u2192 entrega (verde) */}
+        {/* Ruta driver → entrega (verde) */}
         {!showPickup && routeToDelivery?.route && (
           <Polyline positions={routeToDelivery.route} color="#16a34a" weight={3} opacity={0.7} />
         )}
