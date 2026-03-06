@@ -1,179 +1,157 @@
-import { useCallback, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { apiFetch } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 
-const ROLE_LABELS = {
-  customer: 'Cliente', restaurant: 'Restaurante', driver: 'Conductor', admin: 'Administrador'
-};
-
-function useFlash(duration = 4000) {
-  const [msgs, setMsgs]   = useState({});
-  const timers = useRef({});
-  const flash  = useCallback((text, isError = false, id = '__g__') => {
-    setMsgs(p => ({ ...p, [id]: { text, isError } }));
-    clearTimeout(timers.current[id]);
-    timers.current[id] = setTimeout(() =>
-      setMsgs(p => { const n = { ...p }; delete n[id]; return n; }), duration
-    );
-  }, [duration]);
-  return [msgs, flash];
+function Collapsible({ title, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="card" style={{ marginBottom:'0.75rem', padding:0, overflow:'hidden' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center',
+          padding:'0.85rem 1rem', background:'none', border:'none', cursor:'pointer',
+          fontWeight:700, fontSize:'0.9rem', color:'var(--gray-800)',
+          borderBottom: open ? '1px solid var(--gray-200)' : 'none',
+        }}
+      >
+        <span>{title}</span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition:'transform 0.2s' }}>
+          <path d="M6 9l6 6 6-6"/>
+        </svg>
+      </button>
+      {open && <div style={{ padding:'1rem' }}>{children}</div>}
+    </div>
+  );
 }
 
-function Flash({ msg }) {
-  if (!msg) return null;
-  return <p className={`flash ${msg.isError ? 'flash-error' : 'flash-ok'}`}>{msg.text}</p>;
+function Flash({ text, isError }) {
+  if (!text) return null;
+  return (
+    <p className={`flash ${isError ? 'flash-error' : 'flash-ok'}`} style={{ marginTop:'0.5rem' }}>
+      {text}
+    </p>
+  );
 }
 
 export default function ProfilePage() {
   const { auth, patchUser, logout } = useAuth();
-  const navigate  = useNavigate();
   const user = auth.user;
 
-  const [displayName, setDisplayName]       = useState(user?.display_name || user?.username || '');
-  const [address, setAddress]               = useState(
-    user?.address && user.address !== 'address-pending' ? user.address : ''
-  );
+  // Datos personales
+  const [displayName, setDisplayName] = useState(user?.display_name || user?.username || '');
+  const [address, setAddress]         = useState(user?.address && user.address !== 'address-pending' ? user.address : '');
+  const [profileMsg, setProfileMsg]   = useState('');
+  const [profileErr, setProfileErr]   = useState(false);
+
+  // Contraseña
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword]         = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [deleteMsg, setDeleteMsg]             = useState('');
-  const [flash, flashMsg] = useFlash();
+  const [pwdMsg, setPwdMsg]   = useState('');
+  const [pwdErr, setPwdErr]   = useState(false);
+
+  // Eliminar cuenta
+  const [deleteMsg, setDeleteMsg] = useState('');
+  const [deleteErr, setDeleteErr] = useState(false);
 
   async function saveProfile() {
-    if (!displayName.trim()) return flashMsg('El nombre no puede estar vacío', true, 'name');
+    if (!displayName.trim()) { setProfileMsg('El nombre no puede estar vacío'); setProfileErr(true); return; }
     try {
-      // Enviamos siempre, aunque no cambie — el backend hace COLLATE case-sensitive
       const body = { displayName: displayName.trim() };
-      if (['customer','restaurant'].includes(user.role)) {
-        body.address = address.trim() || undefined;
-      }
-      const data = await apiFetch('/auth/profile', {
-        method: 'PATCH',
-        body: JSON.stringify(body)
-      }, auth.token);
+      // Todos los roles pueden tener dirección
+      if (address.trim()) body.address = address.trim();
+      const data = await apiFetch('/auth/profile', { method:'PATCH', body: JSON.stringify(body) }, auth.token);
       patchUser({
-        display_name: data.profile.displayName ?? displayName.trim(),
-        address:      data.profile.address     ?? address.trim(),
+        display_name: data.profile.displayName || displayName.trim(),
+        address: data.profile.address ?? address.trim(),
       });
-      flashMsg('Perfil actualizado correctamente', false, 'name');
-    } catch (e) { flashMsg(e.message, true, 'name'); }
+      setProfileMsg('Perfil actualizado'); setProfileErr(false);
+    } catch (e) { setProfileMsg(e.message); setProfileErr(true); }
   }
 
   async function changePassword() {
-    if (!newPassword)                       return flashMsg('Ingresa la nueva contraseña', true, 'pwd');
-    if (newPassword !== confirmPassword)    return flashMsg('Las contraseñas no coinciden', true, 'pwd');
-    if (newPassword.length < 6)             return flashMsg('Mínimo 6 caracteres', true, 'pwd');
+    if (!newPassword) { setPwdMsg('Ingresa la nueva contraseña'); setPwdErr(true); return; }
+    if (newPassword !== confirmPassword) { setPwdMsg('Las contraseñas no coinciden'); setPwdErr(true); return; }
+    if (newPassword.length < 6) { setPwdMsg('Mínimo 6 caracteres'); setPwdErr(true); return; }
     try {
-      await apiFetch('/auth/password', {
-        method: 'PATCH',
-        body: JSON.stringify({ currentPassword, newPassword })
-      }, auth.token);
-      flashMsg('Contraseña actualizada', false, 'pwd');
+      await apiFetch('/auth/password', { method:'PATCH', body: JSON.stringify({ currentPassword, newPassword }) }, auth.token);
+      setPwdMsg('Contraseña actualizada'); setPwdErr(false);
       setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
-    } catch (e) { flashMsg(e.message, true, 'pwd'); }
+    } catch (e) { setPwdMsg(e.message); setPwdErr(true); }
   }
 
   async function deleteAccount() {
-    if (!window.confirm('¿Seguro que deseas eliminar tu cuenta? Esta acción no se puede deshacer.')) return;
-    setDeleteMsg('');
+    if (!window.confirm('¿Eliminar tu cuenta permanentemente? Esta acción no se puede deshacer.')) return;
     try {
-      await apiFetch('/auth/account', { method: 'DELETE' }, auth.token);
+      await apiFetch('/auth/delete-account', { method:'DELETE' }, auth.token);
       logout();
-      navigate('/login');
-    } catch (e) { setDeleteMsg(e.message); }
+    } catch (e) { setDeleteMsg(e.message); setDeleteErr(true); }
   }
 
   return (
     <div>
-      <h2 style={{ fontSize:'1.15rem', fontWeight:800, marginBottom:'1.25rem' }}>Mi perfil</h2>
+      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem' }}>Mi perfil</h2>
 
       {/* Info de cuenta */}
-      <div className="card" style={{ marginBottom:'0.75rem' }}>
-        <div style={{ display:'flex', gap:'1rem', flexWrap:'wrap' }}>
-          <div>
-            <div className="section-title">Usuario</div>
-            <div style={{ fontWeight:600 }}>{user?.username}</div>
-          </div>
-          <div>
-            <div className="section-title">Tipo de cuenta</div>
-            <span className="role-pill">{ROLE_LABELS[user?.role] || user?.role}</span>
+      <div className="card" style={{ marginBottom:'0.75rem', display:'flex', gap:'0.75rem', alignItems:'center' }}>
+        <div style={{ width:44, height:44, borderRadius:'50%', background:'var(--brand-light)', border:'2px solid var(--brand)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+          <span style={{ fontWeight:800, fontSize:'1.1rem', color:'var(--brand)' }}>
+            {(displayName[0] || '?').toUpperCase()}
+          </span>
+        </div>
+        <div>
+          <div style={{ fontWeight:700 }}>{displayName}</div>
+          <div style={{ fontSize:'0.8rem', color:'var(--gray-600)' }}>
+            @{user?.username} · {ROLE_LABELS[user?.role] || user?.role}
           </div>
         </div>
       </div>
 
       {/* Datos personales */}
-      <div className="card">
-        <h3 style={{ fontSize:'0.9rem', fontWeight:700, marginBottom:'0.75rem' }}>Datos personales</h3>
-
-        <div style={{ display:'flex', flexDirection:'column', gap:'0.65rem', marginBottom:'0.75rem' }}>
+      <Collapsible title="Datos personales" defaultOpen>
+        <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
           <label>
             Nombre para mostrar
-            <input
-              value={displayName}
-              onChange={e => setDisplayName(e.target.value)}
-              placeholder="Ej: Juan García"
-            />
+            <input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Ej: Juan García" />
           </label>
-
-          {['customer','restaurant'].includes(user?.role) && (
-            <label>
-              Dirección
-              <input
-                value={address}
-                onChange={e => setAddress(e.target.value)}
-                placeholder="Ej: Av. Revolución 1234, Col. Centro"
-              />
-            </label>
-          )}
+          <label>
+            Dirección
+            <input value={address} onChange={e => setAddress(e.target.value)}
+              placeholder="Ej: Av. Revolución 1234, Col. Centro" />
+          </label>
         </div>
-
-        <button className="btn-primary" onClick={saveProfile}>Guardar cambios</button>
-        <Flash msg={flash['name']} />
-      </div>
+        <button className="btn-primary btn-sm" onClick={saveProfile}>Guardar cambios</button>
+        <Flash text={profileMsg} isError={profileErr} />
+      </Collapsible>
 
       {/* Cambiar contraseña */}
-      <div className="card">
-        <h3 style={{ fontSize:'0.9rem', fontWeight:700, marginBottom:'0.75rem' }}>Cambiar contraseña</h3>
-
-        <div style={{ display:'flex', flexDirection:'column', gap:'0.65rem', marginBottom:'0.75rem' }}>
-          <label>Contraseña actual
-            <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder="Contraseña actual" />
-          </label>
-          <label>Nueva contraseña
-            <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
-          </label>
-          <label>Confirmar contraseña
-            <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Repite la nueva contraseña" />
-          </label>
+      <Collapsible title="Cambiar contraseña">
+        <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
+          <label>Contraseña actual<input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} /></label>
+          <label>Nueva contraseña<input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} /></label>
+          <label>Confirmar contraseña<input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} /></label>
         </div>
+        <button className="btn-primary btn-sm" onClick={changePassword}>Cambiar contraseña</button>
+        <Flash text={pwdMsg} isError={pwdErr} />
+      </Collapsible>
 
-        <button onClick={changePassword}>Cambiar contraseña</button>
-        <Flash msg={flash['pwd']} />
-      </div>
-
-      {/* Sesión */}
-      <div className="card">
-        <h3 style={{ fontSize:'0.9rem', fontWeight:700, marginBottom:'0.75rem' }}>Sesión</h3>
-        <button
-          onClick={() => { logout(); navigate('/login'); }}
-          style={{ marginBottom:'0.5rem' }}
-        >
-          Cerrar sesión
-        </button>
+      {/* Cerrar sesión */}
+      <div className="card" style={{ marginBottom:'0.75rem' }}>
+        <button className="btn-sm" onClick={logout}>Cerrar sesión</button>
       </div>
 
       {/* Eliminar cuenta */}
-      <div className="card">
-        <h3 style={{ fontSize:'0.9rem', fontWeight:700, marginBottom:'0.4rem', color:'var(--danger)' }}>
-          Zona de peligro
-        </h3>
-        <p style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginBottom:'0.65rem' }}>
-          Al eliminar tu cuenta se borrarán todos tus datos. Esta acción no se puede deshacer.
+      <Collapsible title="Zona de peligro">
+        <p style={{ fontSize:'0.85rem', color:'var(--gray-600)', marginBottom:'0.75rem' }}>
+          Eliminar tu cuenta es permanente. No podrás recuperarla.
         </p>
-        {deleteMsg && <p className="flash flash-error">{deleteMsg}</p>}
-        <button className="btn-danger" onClick={deleteAccount}>Eliminar cuenta</button>
-      </div>
+        <button className="btn-danger btn-sm" onClick={deleteAccount}>Eliminar cuenta</button>
+        <Flash text={deleteMsg} isError={deleteErr} />
+      </Collapsible>
     </div>
   );
 }
+
+const ROLE_LABELS = { customer:'Cliente', restaurant:'Restaurante', driver:'Conductor', admin:'Administrador' };

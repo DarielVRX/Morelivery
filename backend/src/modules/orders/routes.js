@@ -142,15 +142,29 @@ router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admi
     }
 
     // ── Máquina de estados: transiciones válidas por rol ─────────────────────
+    // Tabla de transiciones por rol — '*' significa desde cualquier estado no terminal
+    const ACTIVE = ['created','pending_driver','assigned','accepted','preparing','ready','on_the_way'];
     const VALID = {
-      restaurant: { preparing: ['assigned','accepted'], ready: ['preparing'] },
-      driver:     { accepted: ['assigned'], on_the_way: ['ready'], delivered: ['on_the_way'] },
-      admin:      { assigned: '*', accepted: '*', preparing: '*', ready: '*', on_the_way: '*', delivered: '*', cancelled: '*' },
+      restaurant: {
+        preparing: ACTIVE, // puede marcar "en preparación" desde cualquier estado activo
+        ready:     ACTIVE, // puede marcar "listo" directamente, sin depender de "en preparación"
+      },
+      driver: {
+        accepted:  ['assigned','pending_driver'],
+        on_the_way:['ready'],
+        delivered: ['on_the_way'],
+      },
+      admin: { assigned:'*', accepted:'*', preparing:'*', ready:'*', on_the_way:'*', delivered:'*', cancelled:'*' },
+    };
+    const STATUS_ES = {
+      created:'Recibido', pending_driver:'Buscando conductor', assigned:'Asignado',
+      accepted:'Aceptado', preparing:'En preparación', ready:'Listo',
+      on_the_way:'En camino', delivered:'Entregado', cancelled:'Cancelado',
     };
     const allowed = VALID[req.user.role]?.[nextStatus];
-    if (!allowed) return next(new AppError(403, `El rol ${req.user.role} no puede establecer el estado '${nextStatus}'`));
+    if (!allowed) return next(new AppError(403, `El rol '${req.user.role}' no puede establecer el estado '${STATUS_ES[nextStatus] || nextStatus}'`));
     if (allowed !== '*' && !allowed.includes(order.status))
-      return next(new AppError(409, `No se puede pasar de '${order.status}' a '${nextStatus}'`));
+      return next(new AppError(409, `No se puede cambiar de '${STATUS_ES[order.status] || order.status}' a '${STATUS_ES[nextStatus] || nextStatus}'`));
 
     let driverNote     = order.driver_note;
     let restaurantNote = order.restaurant_note;
@@ -178,12 +192,22 @@ router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admi
 /* ── PATCH /:id/cancel ── */
 router.patch('/:id/cancel', authenticate, authorize(['customer']), async (req, res, next) => {
   try {
-    const result = await query(
-      `UPDATE orders SET status='cancelled', cancelled_at=NOW(), updated_at=NOW()
-       WHERE id=$1 AND customer_id=$2 RETURNING *`,
+    const { note } = req.body || {};
+    if (!note?.trim()) return next(new AppError(400, 'El motivo de cancelación es obligatorio'));
+    // Solo cancelable en estados antes de que el restaurante comience a preparar
+    const check = await query(
+      `SELECT id, status FROM orders WHERE id=$1 AND customer_id=$2`,
       [req.params.id, req.user.userId]
     );
-    if (result.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
+    if (check.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
+    const cancellable = ['created','pending_driver','assigned','accepted'];
+    if (!cancellable.includes(check.rows[0].status))
+      return next(new AppError(409, 'El pedido ya no puede cancelarse en este estado'));
+    const result = await query(
+      `UPDATE orders SET status='cancelled', restaurant_note=$3, cancelled_at=NOW(), updated_at=NOW()
+       WHERE id=$1 AND customer_id=$2 RETURNING *`,
+      [req.params.id, req.user.userId, `[CANCELADO POR CLIENTE] ${note.trim()}`]
+    );
     await notifyOrderParties(req.params.id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
     return res.json({ order: result.rows[0] });
   } catch (error) { return next(error); }
@@ -330,5 +354,120 @@ router.get('/my', authenticate, async (req, res, next) => {
     return res.json({ orders });
   } catch (error) { return next(error); }
 });
+
+/* ── GET /:id/messages ── chat del pedido ── */
+router.get('/:id/messages', authenticate, async (req, res, next) => {
+  try {
+    // Verificar que el usuario es parte del pedido
+    const check = await query(
+      `SELECT o.customer_id, o.driver_id, r.owner_user_id AS restaurant_owner_id
+       FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
+      [req.params.id]
+    );
+    if (check.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
+    const { customer_id, driver_id, restaurant_owner_id } = check.rows[0];
+    const uid = req.user.userId;
+    if (uid !== customer_id && uid !== driver_id && uid !== restaurant_owner_id)
+      return next(new AppError(403, 'No tienes acceso a este pedido'));
+
+    try {
+      const msgs = await query(
+        `SELECT m.id, m.sender_id, m.text, m.created_at,
+                split_part(u.full_name,'_',1) AS sender_name, u.role AS sender_role
+         FROM order_messages m JOIN users u ON u.id=m.sender_id
+         WHERE m.order_id=$1 ORDER BY m.created_at ASC`,
+        [req.params.id]
+      );
+      return res.json({ messages: msgs.rows });
+    } catch (e) {
+      if (isMissingRelationError(e)) return res.json({ messages: [] });
+      throw e;
+    }
+  } catch (error) { return next(error); }
+});
+
+/* ── POST /:id/messages ── enviar mensaje ── */
+router.post('/:id/messages', authenticate, async (req, res, next) => {
+  try {
+    const { text } = req.body || {};
+    if (!text?.trim()) return next(new AppError(400, 'El mensaje no puede estar vacío'));
+    if (text.trim().length > 500) return next(new AppError(400, 'El mensaje es demasiado largo (máx. 500 caracteres)'));
+
+    const check = await query(
+      `SELECT o.customer_id, o.driver_id, r.owner_user_id AS restaurant_owner_id
+       FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
+      [req.params.id]
+    );
+    if (check.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
+    const { customer_id, driver_id, restaurant_owner_id } = check.rows[0];
+    const uid = req.user.userId;
+    if (uid !== customer_id && uid !== driver_id && uid !== restaurant_owner_id)
+      return next(new AppError(403, 'No tienes acceso a este pedido'));
+
+    try {
+      const msg = await query(
+        `INSERT INTO order_messages(order_id, sender_id, text) VALUES($1,$2,$3) RETURNING *`,
+        [req.params.id, uid, text.trim()]
+      );
+      // Notificar en tiempo real a los otros participantes
+      const recipients = [customer_id, driver_id, restaurant_owner_id].filter(id => id && id !== uid);
+      const senderName = req.user.username || req.user.userId;
+      for (const recipId of recipients) {
+        sseHub.sendToUser(recipId, 'chat_message', {
+          orderId: req.params.id,
+          messageId: msg.rows[0].id,
+          senderId: uid,
+          senderName,
+          senderRole: req.user.role,
+          text: text.trim(),
+          createdAt: msg.rows[0].created_at,
+        });
+      }
+      return res.json({ message: msg.rows[0] });
+    } catch (e) {
+      if (isMissingRelationError(e)) return next(new AppError(503, 'El chat no está disponible todavía. Ejecuta la migración v8.'));
+      throw e;
+    }
+  } catch (error) { return next(error); }
+});
+
+/* ── POST /:id/report ── reporte post-entrega (cualquier rol) ── */
+router.post('/:id/report', authenticate, async (req, res, next) => {
+  try {
+    const { text, reason } = req.body || {};
+    if (!text?.trim()) return next(new AppError(400, 'El reporte no puede estar vacío'));
+
+    const check = await query(
+      `SELECT o.status, o.customer_id, o.driver_id, r.owner_user_id AS restaurant_owner_id
+       FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
+      [req.params.id]
+    );
+    if (check.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
+    const { status, customer_id, driver_id, restaurant_owner_id } = check.rows[0];
+    const uid = req.user.userId;
+    if (uid !== customer_id && uid !== driver_id && uid !== restaurant_owner_id)
+      return next(new AppError(403, 'No tienes acceso a este pedido'));
+    if (!['delivered','cancelled'].includes(status))
+      return next(new AppError(409, 'Solo se puede reportar un pedido completado o cancelado'));
+
+    try {
+      await query(
+        `INSERT INTO order_reports(order_id, reporter_id, reporter_role, reason, text)
+         VALUES($1,$2,$3,$4,$5)`,
+        [req.params.id, uid, req.user.role, reason?.trim() || 'general', text.trim()]
+      );
+    } catch (e) {
+      if (isMissingRelationError(e)) {
+        // Fallback: guardar como queja
+        await query(`INSERT INTO order_complaints(order_id, customer_id, text, created_at)
+          VALUES($1,$2,$3,NOW()) ON CONFLICT DO NOTHING`,
+          [req.params.id, uid, `[REPORTE ${req.user.role}] ${text.trim()}`]);
+      } else throw e;
+    }
+    logEvent('order.report', { orderId: req.params.id, reporterId: uid, role: req.user.role });
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+
 
 export default router;

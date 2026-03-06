@@ -13,19 +13,19 @@ const router = Router();
  * Compatible con Render (no requiere WebSockets).
  * Formato: text/event-stream est\u00e1ndar.
  */
-router.get('/', authenticate, (req, res) => {
+router.get('/', (req, res, next) => {
+  // EventSource en browser no puede enviar headers — aceptar token por query param
+  if (req.query.token && !req.headers.authorization) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
+  return authenticate(req, res, next);
+}, (req, res) => {
   // Headers SSE
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // Nginx/Render: no bufferizar
   res.flushHeaders();
-
-  // Validación de seguridad
-  if (!req.user) {
-    console.error("Autenticación fallida: req.user no definido");
-    return res.end(); // Cerrar conexión si no hay usuario
-  }
 
   const userId = req.user.userId;
   const role = req.user.role;
