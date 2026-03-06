@@ -2,13 +2,22 @@ import { useState } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
-import CustomerHome from './pages/Customer/Home';
-import RestaurantPage from './pages/Customer/RestaurantPage';
-import RestaurantDashboard from './pages/Restaurant/Dashboard';
-import DriverDashboard from './pages/Driver/Dashboard';
+
+import CustomerHome    from './pages/Customer/Home';
+import CustomerOrders  from './pages/Customer/Orders';
+import RestaurantPage  from './pages/Customer/RestaurantPage';
+
+import RestaurantMenu     from './pages/Restaurant/Menu';
+import RestaurantOrders   from './pages/Restaurant/Orders';
+import RestaurantSchedule from './pages/Restaurant/Schedule';
+
+import DriverHome     from './pages/Driver/Home';
+import DriverOrders   from './pages/Driver/Orders';
+import DriverEarnings from './pages/Driver/Earnings';
+
 import AdminDashboard from './pages/Admin/Dashboard';
-import ProfilePage from './pages/Profile';
-import { apiFetch } from './api/client';
+import ProfilePage    from './pages/Profile';
+import { apiFetch }   from './api/client';
 
 function ProtectedRole({ role, children }) {
   const { auth } = useAuth();
@@ -26,28 +35,34 @@ function ProtectedAny({ children }) {
 function AuthScreen({ mode = 'login' }) {
   const { auth, login } = useAuth();
   const navigate = useNavigate();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [role, setRole] = useState('customer');
-  const [address, setAddress] = useState('');
+  const [username, setUsername]       = useState('');
+  const [password, setPassword]       = useState('');
+  const [role, setRole]               = useState('customer');
+  const [address, setAddress]         = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [message, setMessage] = useState('');
+  const [message, setMessage]         = useState('');
+
+  const isLogin = mode === 'login';
+  if (auth.user) return <Navigate to={`/${auth.user.role}`} replace />;
 
   async function submit() {
     try {
-      if (mode === 'register') {
+      if (!isLogin) {
         await apiFetch('/auth/register', {
           method: 'POST',
           body: JSON.stringify({
             username, password, role,
             displayName: displayName || undefined,
-            address: ['customer', 'restaurant'].includes(role) ? address : undefined
+            address: ['customer','restaurant'].includes(role) ? address : undefined
           })
         });
         setMessage('Registro exitoso. Ya puedes iniciar sesión.');
         return;
       }
-      const data = await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+      const data = await apiFetch('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username, password })
+      });
       login({ token: data.token, user: data.user });
       navigate(`/${data.user.role}`);
     } catch (error) {
@@ -55,45 +70,47 @@ function AuthScreen({ mode = 'login' }) {
     }
   }
 
-  const isLogin = mode === 'login';
-  if (auth.user) return <Navigate to={`/${auth.user.role}`} replace />;
-
   return (
     <section className="auth-card">
-      <h2>{isLogin ? 'Inicio de sesión' : 'Registro de usuario'}</h2>
-      <p>
-        {isLogin
-          ? 'Ingresa para acceder a tu panel por rol.'
-          : 'Crea tu cuenta indicando tipo de usuario y dirección.'}
-      </p>
+      <h2>{isLogin ? 'Iniciar sesión' : 'Crear cuenta'}</h2>
+      <p>{isLogin ? 'Ingresa con tu usuario y contraseña.' : 'Completa los datos para registrarte.'}</p>
+
       <div className="row">
-        <input placeholder="usuario" value={username} onChange={e => setUsername(e.target.value)} />
-        <input type="password" placeholder="contraseña" value={password} onChange={e => setPassword(e.target.value)} />
+        <label>Usuario<input placeholder="Tu nombre de usuario" value={username} onChange={e => setUsername(e.target.value)} /></label>
+        <label>Contraseña<input type="password" placeholder="Tu contraseña" value={password} onChange={e => setPassword(e.target.value)} /></label>
         {!isLogin && (
-          <select value={role} onChange={e => setRole(e.target.value)}>
-            <option value="customer">cliente</option>
-            <option value="restaurant">restaurante</option>
-            <option value="driver">repartidor</option>
-          </select>
+          <label>Tipo de cuenta
+            <select value={role} onChange={e => setRole(e.target.value)}>
+              <option value="customer">Cliente</option>
+              <option value="restaurant">Restaurante</option>
+              <option value="driver">Conductor</option>
+            </select>
+          </label>
         )}
       </div>
+
       {!isLogin && role === 'restaurant' && (
         <div className="row">
-          <input placeholder="Nombre del restaurante" value={displayName} onChange={e => setDisplayName(e.target.value)} />
+          <label>Nombre del restaurante<input placeholder="Ej: Tacos El Güero" value={displayName} onChange={e => setDisplayName(e.target.value)} /></label>
         </div>
       )}
-      {!isLogin && ['customer', 'restaurant'].includes(role) && (
+      {!isLogin && ['customer','restaurant'].includes(role) && (
         <div className="row">
-          <input placeholder="Dirección" value={address} onChange={e => setAddress(e.target.value)} />
+          <label>Dirección<input placeholder="Ej: Av. Revolución 1234, Col. Centro" value={address} onChange={e => setAddress(e.target.value)} /></label>
         </div>
       )}
+
       <div className="row">
-        <button onClick={submit}>{isLogin ? 'Iniciar sesión' : 'Registrarse'}</button>
+        <button className="btn-primary" onClick={submit}>
+          {isLogin ? 'Iniciar sesión' : 'Registrarse'}
+        </button>
         {isLogin
-          ? <Link className="login-link" to="/register">Ir a registro</Link>
-          : <Link className="login-link" to="/login">Ir a inicio de sesión</Link>}
+          ? <Link to="/register" style={{ fontSize:'0.875rem', textAlign:'center' }}>¿No tienes cuenta? Regístrate</Link>
+          : <Link to="/login"    style={{ fontSize:'0.875rem', textAlign:'center' }}>¿Ya tienes cuenta? Inicia sesión</Link>
+        }
       </div>
-      {message && <p>{message}</p>}
+
+      {message && <p className={`flash ${message.startsWith('Registro') ? 'flash-ok' : 'flash-error'}`}>{message}</p>}
     </section>
   );
 }
@@ -103,23 +120,33 @@ function AppRoutes() {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<Navigate to={auth.user ? `/${auth.user.role}` : '/login'} replace />} />
-        <Route path="/login"    element={<AuthScreen mode="login" />} />
+        <Route path="/"        element={<Navigate to={auth.user ? `/${auth.user.role}` : '/login'} replace />} />
+        <Route path="/login"   element={<AuthScreen mode="login" />} />
         <Route path="/register" element={<AuthScreen mode="register" />} />
 
-        {/* Perfil — accesible para cualquier rol autenticado */}
+        {/* Perfil — cualquier rol */}
         <Route path="/profile" element={<ProtectedAny><ProfilePage /></ProtectedAny>} />
 
-        {/* Página individual de restaurante — accesible sin login (para ver menú) */}
+        {/* Restaurante público */}
         <Route path="/restaurant/:id" element={<RestaurantPage />} />
 
-        {/* Paneles por rol */}
-        <Route path="/customer"   element={<ProtectedRole role="customer"><CustomerHome /></ProtectedRole>} />
-        <Route path="/restaurant" element={<ProtectedRole role="restaurant"><RestaurantDashboard /></ProtectedRole>} />
-        <Route path="/driver"     element={<ProtectedRole role="driver"><DriverDashboard /></ProtectedRole>} />
-        <Route path="/admin"      element={<ProtectedRole role="admin"><AdminDashboard /></ProtectedRole>} />
+        {/* Cliente */}
+        <Route path="/customer"         element={<ProtectedRole role="customer"><CustomerHome /></ProtectedRole>} />
+        <Route path="/customer/pedidos" element={<ProtectedRole role="customer"><CustomerOrders /></ProtectedRole>} />
 
-        {/* Catch-all */}
+        {/* Restaurante */}
+        <Route path="/restaurant"         element={<ProtectedRole role="restaurant"><RestaurantMenu /></ProtectedRole>} />
+        <Route path="/restaurant/pedidos" element={<ProtectedRole role="restaurant"><RestaurantOrders /></ProtectedRole>} />
+        <Route path="/restaurant/horario" element={<ProtectedRole role="restaurant"><RestaurantSchedule /></ProtectedRole>} />
+
+        {/* Conductor */}
+        <Route path="/driver"           element={<ProtectedRole role="driver"><DriverHome /></ProtectedRole>} />
+        <Route path="/driver/pedidos"   element={<ProtectedRole role="driver"><DriverOrders /></ProtectedRole>} />
+        <Route path="/driver/ganancias" element={<ProtectedRole role="driver"><DriverEarnings /></ProtectedRole>} />
+
+        {/* Admin */}
+        <Route path="/admin" element={<ProtectedRole role="admin"><AdminDashboard /></ProtectedRole>} />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

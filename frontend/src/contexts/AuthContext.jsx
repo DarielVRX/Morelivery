@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AUTH_EXPIRED_EVENT } from '../api/client';
 
 const AuthContext = createContext(null);
 const STORAGE_KEY = 'morelivery_auth_v1';
@@ -37,6 +38,13 @@ export function AuthProvider({ children }) {
 
   const login = useCallback((payload) => setAuth(payload), []);
   const logout = useCallback(() => setAuth({ token: '', user: null }), []);
+
+  // Escuchar evento global de token expirado — hacer logout automático
+  useEffect(() => {
+    function handleExpired() { logout(); }
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpired);
+  }, [logout]);
   const patchUser = useCallback((patch) =>
     setAuth(prev => ({ ...prev, user: { ...(prev.user || {}), ...patch } }))
   , []);

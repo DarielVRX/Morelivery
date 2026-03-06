@@ -29,9 +29,15 @@ async function computeIsOpen(restaurantId) {
     const { is_open, manual_open_override } = r.rows[0];
     if (manual_open_override !== null && manual_open_override !== undefined) return Boolean(manual_open_override);
 
-    const now  = new Date();
-    const dow  = now.getDay();
-    const hhmm = now.toTimeString().slice(0, 5); // "HH:MM"
+    // Usar timezone de México — el servidor puede correr en UTC
+    const tz  = 'America/Mexico_City';
+    const now = new Date();
+    // getDay() equivalente en Mexico_City: restar el offset al momento UTC
+    const nowMx   = new Date(now.toLocaleString('en-US', { timeZone: tz }));
+    const dow     = nowMx.getDay();   // 0=Dom … 6=Sab
+    const hh      = String(nowMx.getHours()).padStart(2, '0');
+    const mm      = String(nowMx.getMinutes()).padStart(2, '0');
+    const hhmm    = `${hh}:${mm}`;
 
     try {
       const s = await query(
@@ -78,9 +84,9 @@ router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next
 router.get('/my/menu', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
-    if (!restaurantId) return next(new AppError(404, 'Restaurant not found'));
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
     const result = await query(
-      'SELECT id, name, description, price_cents, is_available FROM menu_items WHERE restaurant_id=$1 ORDER BY name',
+      'SELECT id, name, description, price_cents, is_available, image_url FROM menu_items WHERE restaurant_id=$1 ORDER BY name',
       [restaurantId]
     );
     return res.json({ menu: result.rows });
@@ -91,7 +97,7 @@ router.get('/my/menu', authenticate, authorize(['restaurant']), async (req, res,
 router.get('/my/schedule', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
-    if (!restaurantId) return next(new AppError(404, 'Restaurant not found'));
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
 
     let rows = [];
     try {
@@ -116,7 +122,7 @@ router.get('/my/schedule', authenticate, authorize(['restaurant']), async (req, 
 router.put('/my/schedule', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
-    if (!restaurantId) return next(new AppError(404, 'Restaurant not found'));
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
 
     const { schedule } = req.body;
     if (!Array.isArray(schedule) || schedule.length !== 7) return next(new AppError(400, 'Se requieren los 7 días'));
@@ -146,7 +152,7 @@ router.put('/my/schedule', authenticate, authorize(['restaurant']), async (req, 
 router.patch('/my/toggle', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
-    if (!restaurantId) return next(new AppError(404, 'Restaurant not found'));
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
 
     // override: true | false | null (null = volver al horario automático)
     const { override } = req.body;
@@ -164,7 +170,7 @@ router.patch('/my/toggle', authenticate, authorize(['restaurant']), async (req, 
 router.get('/:id/menu', async (req, res, next) => {
   try {
     const result = await query(
-      'SELECT id, name, description, price_cents, is_available FROM menu_items WHERE restaurant_id=$1 ORDER BY name',
+      'SELECT id, name, description, price_cents, is_available, image_url FROM menu_items WHERE restaurant_id=$1 ORDER BY name',
       [req.params.id]
     );
     return res.json({ menu: result.rows });
@@ -178,8 +184,12 @@ router.get('/:id/menu', async (req, res, next) => {
 router.post('/menu-items', authenticate, authorize(['restaurant']), validate(createMenuItemSchema), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
-    if (!restaurantId) return next(new AppError(404, 'Restaurant not found'));
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
     const { name, description, priceCents } = req.validatedBody;
+    // priceCents viene convertido desde pesos × 100 en el frontend — validar rango
+    if (!Number.isInteger(priceCents) || priceCents < 100 || priceCents > 10_000_00) {
+      return next(new AppError(400, 'El precio debe estar entre $1.00 y $10,000.00'));
+    }
     const result = await query(
       'INSERT INTO menu_items(restaurant_id, name, description, price_cents, is_available) VALUES($1,$2,$3,$4,true) RETURNING *',
       [restaurantId, name, description, priceCents]
@@ -192,14 +202,16 @@ router.post('/menu-items', authenticate, authorize(['restaurant']), validate(cre
 router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), validate(updateMenuItemSchema), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
-    if (!restaurantId) return next(new AppError(404, 'Restaurant not found'));
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
     const item = await query('SELECT * FROM menu_items WHERE id=$1 AND restaurant_id=$2', [req.params.id, restaurantId]);
-    if (item.rowCount === 0) return next(new AppError(404, 'Menu item not found'));
-    const c = item.rows[0];
+    if (item.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
+    const cur = item.rows[0];
     const p = req.validatedBody;
+    // imageUrl llega en req.body directamente (no validado por schema, es opcional)
+    const imageUrl = req.body.imageUrl !== undefined ? req.body.imageUrl : cur.image_url;
     const result = await query(
-      'UPDATE menu_items SET name=$1, description=$2, price_cents=$3, is_available=$4 WHERE id=$5 RETURNING *',
-      [p.name ?? c.name, p.description ?? c.description ?? '', p.priceCents ?? c.price_cents, p.isAvailable ?? c.is_available, req.params.id]
+      'UPDATE menu_items SET name=$1, description=$2, price_cents=$3, is_available=$4, image_url=$5 WHERE id=$6 RETURNING *',
+      [p.name ?? cur.name, p.description ?? cur.description ?? '', p.priceCents ?? cur.price_cents, p.isAvailable ?? cur.is_available, imageUrl, req.params.id]
     );
     return res.json({ menuItem: result.rows[0] });
   } catch (error) { return next(error); }
