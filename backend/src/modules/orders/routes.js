@@ -177,57 +177,105 @@ router.patch('/:id/suggestion-response', authenticate, authorize(['customer']), 
     const { accepted, items: clientItems } = req.validatedBody;
     const status = accepted ? 'accepted' : 'rejected';
 
-    const orderResult = await query('SELECT * FROM orders WHERE id = $1 AND customer_id = $2', [req.params.id, req.user.userId]);
+    // Cargar pedido completo
+    const orderResult = await query(
+      'SELECT * FROM orders WHERE id = $1 AND customer_id = $2',
+      [req.params.id, req.user.userId]
+    );
     if (orderResult.rowCount === 0) return next(new AppError(404, 'Order not found'));
     const order = orderResult.rows[0];
 
+    // Marcar estado de sugerencia
     await query(
       `UPDATE orders SET suggestion_status = $1, updated_at = NOW() WHERE id = $2`,
       [status, req.params.id]
     );
 
     if (accepted) {
-      // Prioridad: items editados por el cliente → items originales de la sugerencia
-      let itemsToApply = null;
+      let rawItems = null;
 
       if (clientItems && clientItems.length > 0) {
-        // Validar precios desde DB (nunca confiar en precios del cliente)
-        const menuIds = clientItems.map(i => i.menuItemId);
-        const menuResult = await query(
-          `SELECT id, price_cents FROM menu_items WHERE id = ANY($1::uuid[])`,
-          [menuIds]
-        );
-        const priceMap = new Map(menuResult.rows.map(r => [r.id, r.price_cents]));
-        itemsToApply = clientItems
-          .filter(i => priceMap.has(i.menuItemId))
-          .map(i => ({ menuItemId: i.menuItemId, quantity: i.quantity, unitPriceCents: priceMap.get(i.menuItemId) }));
+        // Items editados por el cliente
+        rawItems = clientItems;
       } else {
-        // Usar items de la sugerencia original (ya tienen precio validado por el restaurante)
-        itemsToApply = parseSuggestionItems(order.suggestion_text);
+        // Items originales de la sugerencia
+        try {
+          const parsed = order.suggestion_text ? JSON.parse(order.suggestion_text) : null;
+          if (Array.isArray(parsed?.items) && parsed.items.length > 0) {
+            // Estos ya tienen unitPriceCents del restaurante, los usamos directo
+            rawItems = parsed.items.map(i => ({
+              menuItemId: i.menuItemId,
+              quantity: i.quantity,
+              unitPriceCents: i.unitPriceCents
+            }));
+          }
+        } catch (_) {}
       }
 
-      if (itemsToApply && itemsToApply.length > 0) {
-        try {
-          await query('DELETE FROM order_items WHERE order_id = $1', [req.params.id]);
-          let newTotal = 0;
-          for (const item of itemsToApply) {
-            await query(
-              'INSERT INTO order_items(order_id, menu_item_id, quantity, unit_price_cents) VALUES($1, $2, $3, $4)',
-              [req.params.id, item.menuItemId, item.quantity, item.unitPriceCents]
-            );
-            newTotal += item.unitPriceCents * item.quantity;
-          }
-          await query('UPDATE orders SET total_cents = $1, updated_at = NOW() WHERE id = $2', [newTotal, req.params.id]);
-          logEvent('order.suggestion_accepted', { orderId: req.params.id, newTotal, editedByCustomer: !!(clientItems?.length) });
-        } catch (e) {
-          if (!isMissingRelationError(e) && !isMissingColumnError(e)) throw e;
+      if (!rawItems || rawItems.length === 0) {
+        return next(new AppError(400, 'No hay items válidos para aplicar'));
+      }
+
+      try {
+        let finalItems;
+
+        if (clientItems && clientItems.length > 0) {
+          // Cliente envió sus propios items — validar precios en DB (no confiar en el cliente)
+          const menuIds = rawItems.map(i => i.menuItemId);
+          const menuResult = await query(
+            `SELECT id, price_cents FROM menu_items WHERE id = ANY($1::uuid[])`,
+            [menuIds]
+          );
+          const priceMap = new Map(menuResult.rows.map(r => [r.id, r.price_cents]));
+
+          finalItems = rawItems
+            .filter(i => priceMap.has(i.menuItemId) && Number(i.quantity) > 0)
+            .map(i => ({
+              menuItemId: i.menuItemId,
+              quantity: Number(i.quantity),
+              unitPriceCents: priceMap.get(i.menuItemId) // precio real de DB, no el del cliente
+            }));
+        } else {
+          // Items de la sugerencia: ya tienen precio validado por el restaurante
+          finalItems = rawItems.filter(i => Number(i.quantity) > 0);
         }
+
+        if (finalItems.length === 0) {
+          return next(new AppError(400, 'No hay items con cantidad válida'));
+        }
+
+        // Reemplazar order_items
+        await query('DELETE FROM order_items WHERE order_id = $1', [req.params.id]);
+
+        let newTotal = 0;
+        for (const item of finalItems) {
+          await query(
+            'INSERT INTO order_items(order_id, menu_item_id, quantity, unit_price_cents) VALUES($1, $2, $3, $4)',
+            [req.params.id, item.menuItemId, item.quantity, item.unitPriceCents]
+          );
+          newTotal += item.unitPriceCents * item.quantity;
+        }
+
+        await query(
+          'UPDATE orders SET total_cents = $1, updated_at = NOW() WHERE id = $2',
+          [newTotal, req.params.id]
+        );
+
+        logEvent('order.suggestion_accepted', {
+          orderId: req.params.id,
+          newTotal,
+          editedByCustomer: !!(clientItems && clientItems.length > 0)
+        });
+
+      } catch (e) {
+        if (!isMissingRelationError(e) && !isMissingColumnError(e)) throw e;
       }
     }
 
-    // Devolver el pedido con todos los datos ya actualizados (no el snapshot anterior)
+    // Devolver pedido actualizado con totales correctos
     const updated = await query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
     return res.json({ order: updated.rows[0] });
+
   } catch (error) { return next(error); }
 });
 
