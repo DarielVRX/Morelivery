@@ -171,17 +171,37 @@ export default function DriverDashboard() {
     return()=>{window.removeEventListener('online',onOnline);window.removeEventListener('offline',onOffline);};
   },[]);
 
-  async function setAvailability(isAvailable) {
-    setLoadingAvail(true);
-    try {
-      const data=await apiFetch('/drivers/availability',{method:'PATCH',body:JSON.stringify({isAvailable})},auth.token);
-      const v=Boolean(data.profile?.is_available);
-      setAvailabilityState(v);
-      patchUser({driver:{...(auth.user?.driver||{}),is_available:v}});
-      flashMsg(v?'Ahora estás disponible':'Ahora estás no disponible');
+async function setAvailability(isAvailable) {
+  setLoadingAvail(true);
+  try {
+    const data = await apiFetch('/drivers/availability', {
+      method: 'PATCH',
+      body: JSON.stringify({ isAvailable })
+    }, auth.token);
+
+    const v = Boolean(data.profile?.is_available);
+    setAvailabilityState(v);
+    
+    // Actualizamos el contexto global
+    patchUser({ driver: { ...(auth.user?.driver || {}), is_available: v } });
+    flashMsg(v ? 'Ahora estás disponible' : 'Ahora estás no disponible');
+
+    // IMPORTANTE: Si nos ponemos NO disponibles, NO llamamos al listener
+    if (v) {
       await loadData();
-    } catch(e){ flashMsg(e.message,true); } finally { setLoadingAvail(false); }
+    } else {
+      // Si nos desconectamos, solo limpiamos las ofertas locales
+      setOffers([]); 
+      // Opcional: cargar historial sin disparar el listener
+      const d = await apiFetch('/orders/my', {}, auth.token);
+      setOrders(d.orders);
+    }
+  } catch (e) { 
+    flashMsg(e.message, true); 
+  } finally { 
+    setLoadingAvail(false); 
   }
+}
 
   async function changeStatus(orderId, status) {
     setLoadingStatus(p=>({...p,[orderId]:status}));
