@@ -1,29 +1,25 @@
-function normalizeApiUrl(raw) {
-  const base = (raw || '').trim();
-  if (!base) return 'http://localhost:4000/api';
-  return base.endsWith('/api') ? base : `${base.replace(/\/$/, '')}/api`;
-}
+// frontend/src/api/client.js
 
-const API_URL = normalizeApiUrl(import.meta.env.VITE_API_URL);
+export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
-export async function apiFetch(path, options = {}, token) {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {})
-    }
-  });
+export async function apiFetch(path, options = {}, token = null) {
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const raw = await response.text();
-  let data;
-  try {
-    data = raw ? JSON.parse(raw) : {};
-  } catch {
-    data = { error: raw || 'Non-JSON response from API' };
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+
+  if (!res.ok) {
+    let message = `Error ${res.status}`;
+    try {
+      const body = await res.json();
+      message = body.error || body.message || message;
+    } catch (_) {}
+    throw new Error(message);
   }
 
-  if (!response.ok) throw new Error(data.error || 'Request failed');
-  return data;
+  // SSE y respuestas vac\u00edas no son JSON
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) return res;
+
+  return res.json();
 }

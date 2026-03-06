@@ -3,23 +3,16 @@ import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import CustomerHome from './pages/Customer/Home';
-import RestaurantPage from './pages/Customer/RestaurantPage';
 import RestaurantDashboard from './pages/Restaurant/Dashboard';
 import DriverDashboard from './pages/Driver/Dashboard';
 import AdminDashboard from './pages/Admin/Dashboard';
-import ProfilePage from './pages/Profile';
 import { apiFetch } from './api/client';
+import RestaurantPage from './pages/Customer/RestaurantPage';
 
 function ProtectedRole({ role, children }) {
   const { auth } = useAuth();
   if (!auth.user) return <Navigate to="/login" replace />;
   if (auth.user.role !== role) return <Navigate to={`/${auth.user.role}`} replace />;
-  return children;
-}
-
-function ProtectedAuth({ children }) {
-  const { auth } = useAuth();
-  if (!auth.user) return <Navigate to="/login" replace />;
   return children;
 }
 
@@ -39,10 +32,8 @@ function AuthScreen({ mode = 'login' }) {
         await apiFetch('/auth/register', {
           method: 'POST',
           body: JSON.stringify({
-            username,
-            password,
-            role,
-            displayName: displayName.trim() || username,
+            username, password, role,
+            displayName: displayName || undefined,
             address: ['customer', 'restaurant'].includes(role) ? address : undefined
           })
         });
@@ -63,39 +54,40 @@ function AuthScreen({ mode = 'login' }) {
   return (
     <section className="auth-card">
       <h2>{isLogin ? 'Inicio de sesión' : 'Registro de usuario'}</h2>
+      <p>
+        {isLogin
+          ? 'Ingresa para acceder a tu panel por rol.'
+          : 'Crea tu cuenta indicando tipo de usuario y dirección.'}
+      </p>
       <div className="row">
-        <input placeholder="Usuario" value={username} onChange={e => setUsername(e.target.value)} />
-        <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} />
+        <input placeholder="usuario" value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input type="password" placeholder="contraseña" value={password} onChange={(e) => setPassword(e.target.value)} />
         {!isLogin && (
-          <select value={role} onChange={e => setRole(e.target.value)}>
-            <option value="customer">Cliente</option>
-            <option value="restaurant">Restaurante</option>
-            <option value="driver">Repartidor</option>
-            <option value="admin">Admin</option>
+          <select value={role} onChange={(e) => setRole(e.target.value)}>
+            <option value="customer">cliente</option>
+            <option value="restaurant">restaurante</option>
+            <option value="driver">repartidor</option>
+            {/* admin eliminado del registro público */}
           </select>
         )}
       </div>
-      {!isLogin && (
+      {!isLogin && role === 'restaurant' && (
         <div className="row">
-          <input
-            placeholder="Nombre para mostrar (Ej: Juan García)"
-            value={displayName}
-            onChange={e => setDisplayName(e.target.value)}
-          />
+          <input placeholder="Nombre del restaurante" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         </div>
       )}
       {!isLogin && ['customer', 'restaurant'].includes(role) && (
         <div className="row">
-          <input placeholder="Dirección" value={address} onChange={e => setAddress(e.target.value)} />
+          <input placeholder="Dirección" value={address} onChange={(e) => setAddress(e.target.value)} />
         </div>
       )}
       <div className="row">
         <button onClick={submit}>{isLogin ? 'Iniciar sesión' : 'Registrarse'}</button>
         {isLogin
-          ? <Link className="login-link" to="/register">Crear cuenta</Link>
-          : <Link className="login-link" to="/login">Ya tengo cuenta</Link>}
+          ? <Link className="login-link" to="/register">Ir a registro</Link>
+          : <Link className="login-link" to="/login">Ir a inicio de sesión</Link>}
       </div>
-      {message ? <p>{message}</p> : null}
+      {message && <p>{message}</p>}
     </section>
   );
 }
@@ -108,12 +100,10 @@ function AppRoutes() {
         <Route path="/" element={<Navigate to={auth.user ? `/${auth.user.role}` : '/login'} replace />} />
         <Route path="/login" element={<AuthScreen mode="login" />} />
         <Route path="/register" element={<AuthScreen mode="register" />} />
-        <Route path="/profile" element={<ProtectedAuth><ProfilePage /></ProtectedAuth>} />
-        {/* Página individual de restaurante — accesible para todos */}
-        <Route path="/restaurant/:id" element={<RestaurantPage />} />
         <Route path="/customer" element={<ProtectedRole role="customer"><CustomerHome /></ProtectedRole>} />
         <Route path="/restaurant" element={<ProtectedRole role="restaurant"><RestaurantDashboard /></ProtectedRole>} />
         <Route path="/driver" element={<ProtectedRole role="driver"><DriverDashboard /></ProtectedRole>} />
+        <Route path="/restaurant/:id" element={<RestaurantPage />} />
         <Route path="/admin" element={<ProtectedRole role="admin"><AdminDashboard /></ProtectedRole>} />
       </Routes>
     </Layout>

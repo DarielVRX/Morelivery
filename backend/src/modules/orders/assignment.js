@@ -63,9 +63,6 @@ export async function expireTimedOutOffers() {
  * LÓGICA DE ASIGNACIÓN SECUENCIAL
  */
 export async function offerNextDrivers(orderId) {
-  // Limpieza inicial
-  await expireTimedOutOffers();
-
   // 1. ¿Cuántos intentos fallidos van (Rechazados, Expirados, Liberados)?
   // Esto define el "puntero" de la secuencia para no repetir conductores.
   const history = await query(
@@ -87,7 +84,7 @@ export async function offerNextDrivers(orderId) {
 
   // 3. Buscar candidatos que NO tengan historial previo en este pedido
   // Esto evita que vuelva a Driver 1 si Driver 1 ya rechazó o expiró.
-  const candidates = await query(
+  let candidates = await query(
     `SELECT dp.user_id
      FROM driver_profiles dp
      WHERE dp.is_available = true
@@ -157,7 +154,13 @@ export async function offerOrdersToDriver(driverId) {
     `SELECT o.id FROM orders o
      WHERE o.driver_id IS NULL
        AND o.status IN ('created', 'pending_driver', 'preparing', 'ready')
-     ORDER BY o.created_at ASC LIMIT 3`
+       AND NOT EXISTS (
+         SELECT 1 FROM order_driver_offers od
+         WHERE od.order_id = o.id AND od.driver_id = $1
+         AND od.status IN ('rejected', 'expired')
+       )
+     ORDER BY o.created_at ASC LIMIT 3`,
+    [driverId]
   );
 
   let offered = 0;

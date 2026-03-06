@@ -1,3 +1,4 @@
+// backend/modules/orders/routes.js
 import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
@@ -6,22 +7,44 @@ import { logEvent } from '../../utils/logger.js';
 import { validate } from '../../middlewares/validate.js';
 import { createOrderSchema, suggestionResponseSchema, suggestionSchema, updateOrderStatusSchema } from './schemas.js';
 import { AppError } from '../../utils/errors.js';
-import { offerNextDrivers } from './assignment.js';
+import { offerNextDrivers, expireTimedOutOffers } from './assignment.js';
+import { sseHub } from '../events/hub.js';
 
 const router = Router();
 
 function isMissingColumnError(e) { return e?.code === '42703'; }
 function isMissingRelationError(e) { return e?.code === '42P01'; }
 
-function parseSuggestionItems(raw) {
-  if (!raw) return [];
+/** Emite SSE a todas las partes de un pedido */
+async function notifyOrderParties(orderId, event, data) {
   try {
-    const p = JSON.parse(raw);
-    if (!Array.isArray(p?.items)) return [];
-    return p.items;
-  } catch { return []; }
+    const r = await query(
+      `SELECT o.customer_id, o.driver_id, rest.owner_user_id AS restaurant_owner_id
+       FROM orders o JOIN restaurants rest ON rest.id = o.restaurant_id WHERE o.id = $1`,
+      [orderId]
+    );
+    if (r.rowCount === 0) return;
+    const { customer_id, driver_id, restaurant_owner_id } = r.rows[0];
+    sseHub.sendToUser(customer_id, event, data);
+    sseHub.sendToUser(restaurant_owner_id, event, data);
+    if (driver_id) sseHub.sendToUser(driver_id, event, data);
+  } catch (_) {}
 }
 
+/** Columna de timestamp que corresponde a cada transición */
+const STATUS_TS = {
+  accepted:  'accepted_at',
+  preparing: 'preparing_at',
+  ready:     'ready_at',
+  on_the_way:'picked_up_at',
+  delivered: 'delivered_at',
+  cancelled: 'cancelled_at',
+};
+
+function parseSuggestionItems(raw) {
+  if (!raw) return [];
+  try { const p = JSON.parse(raw); return Array.isArray(p?.items) ? p.items : []; } catch { return []; }
+}
 function parseSuggestionNote(raw) {
   if (!raw) return null;
   try { return JSON.parse(raw)?.note || null; } catch { return null; }
@@ -33,17 +56,12 @@ async function getOrderItems(orderIds = []) {
   try {
     result = await query(
       `SELECT oi.order_id, oi.menu_item_id, oi.quantity, oi.unit_price_cents,
-              COALESCE(mi.name, 'Producto') AS name
-       FROM order_items oi
-       LEFT JOIN menu_items mi ON mi.id = oi.menu_item_id
-       WHERE oi.order_id = ANY($1::uuid[])
-       ORDER BY oi.order_id, oi.id`,
+              COALESCE(mi.name,'Producto') AS name
+       FROM order_items oi LEFT JOIN menu_items mi ON mi.id = oi.menu_item_id
+       WHERE oi.order_id = ANY($1::uuid[]) ORDER BY oi.order_id, oi.id`,
       [orderIds]
     );
-  } catch (error) {
-    if (isMissingRelationError(error)) return new Map();
-    throw error;
-  }
+  } catch (e) { if (isMissingRelationError(e)) return new Map(); throw e; }
   const map = new Map();
   for (const row of result.rows) {
     if (!map.has(row.order_id)) map.set(row.order_id, []);
@@ -52,36 +70,33 @@ async function getOrderItems(orderIds = []) {
   return map;
 }
 
-/* ── POST / — crear pedido ── */
+/* ── POST / ── */
 router.post('/', authenticate, authorize(['customer']), validate(createOrderSchema), async (req, res, next) => {
   const { restaurantId, items } = req.validatedBody;
   try {
     let deliveryAddress = 'address-pending';
     try {
-      const c = await query('SELECT address FROM users WHERE id = $1', [req.user.userId]);
+      const c = await query('SELECT address FROM users WHERE id=$1', [req.user.userId]);
       deliveryAddress = c.rows[0]?.address || 'address-pending';
     } catch (e) { if (!isMissingColumnError(e)) throw e; }
-
-    if (!deliveryAddress || deliveryAddress === 'address-pending') {
-      return next(new AppError(400, 'Debes guardar tu dirección antes de hacer un pedido'));
-    }
+    if (!deliveryAddress || deliveryAddress === 'address-pending') return next(new AppError(400, 'Debes guardar tu dirección antes de hacer un pedido'));
 
     let totalCents = 0;
     for (const item of items) {
-      const m = await query('SELECT price_cents FROM menu_items WHERE id = $1 AND restaurant_id = $2', [item.menuItemId, restaurantId]);
+      const m = await query('SELECT price_cents FROM menu_items WHERE id=$1 AND restaurant_id=$2', [item.menuItemId, restaurantId]);
       if (m.rowCount === 0) return next(new AppError(400, 'Invalid menu item'));
       totalCents += m.rows[0].price_cents * item.quantity;
     }
 
     const orderResult = await query(
-      'INSERT INTO orders(customer_id, restaurant_id, status, total_cents, delivery_address) VALUES($1, $2, $3, $4, $5) RETURNING *',
+      'INSERT INTO orders(customer_id, restaurant_id, status, total_cents, delivery_address) VALUES($1,$2,$3,$4,$5) RETURNING *',
       [req.user.userId, restaurantId, 'created', totalCents, deliveryAddress]
     );
     const order = orderResult.rows[0];
 
     for (const item of items) {
-      const m = await query('SELECT price_cents FROM menu_items WHERE id = $1', [item.menuItemId]);
-      await query('INSERT INTO order_items(order_id, menu_item_id, quantity, unit_price_cents) VALUES($1, $2, $3, $4)',
+      const m = await query('SELECT price_cents FROM menu_items WHERE id=$1', [item.menuItemId]);
+      await query('INSERT INTO order_items(order_id, menu_item_id, quantity, unit_price_cents) VALUES($1,$2,$3,$4)',
         [order.id, item.menuItemId, item.quantity, m.rows[0].price_cents]);
     }
 
@@ -89,37 +104,48 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       if (!isMissingRelationError(e) && !isMissingColumnError(e)) throw e;
     }
 
-    const updated = await query('SELECT * FROM orders WHERE id = $1', [order.id]);
+    const updated = await query('SELECT * FROM orders WHERE id=$1', [order.id]);
     orderEvents.emitOrderUpdate(order.id, updated.rows[0].status);
+
+    try {
+      const restInfo = await query('SELECT owner_user_id FROM restaurants WHERE id=$1', [restaurantId]);
+      if (restInfo.rowCount > 0) sseHub.sendToUser(restInfo.rows[0].owner_user_id, 'order_update', { orderId: order.id, status: 'created', action: 'new_order' });
+    } catch (_) {}
+
     logEvent('order.created', { orderId: order.id, customerId: req.user.userId });
     return res.status(201).json({ order: updated.rows[0] });
   } catch (error) { return next(error); }
 });
 
 /* ── PATCH /:id/status ── */
-router.patch('/:id/status', authenticate, authorize(['restaurant', 'driver', 'admin']), validate(updateOrderStatusSchema), async (req, res, next) => {
+router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admin']), validate(updateOrderStatusSchema), async (req, res, next) => {
   try {
-    const current = await query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
+    const current = await query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
     if (current.rowCount === 0) return next(new AppError(404, 'Order not found'));
 
     const nextStatus = req.validatedBody.status;
-    let driverNote = current.rows[0].driver_note;
+    let driverNote     = current.rows[0].driver_note;
     let restaurantNote = current.rows[0].restaurant_note;
 
     if (req.user.role === 'driver' && nextStatus === 'on_the_way' && current.rows[0].status !== 'ready') {
       return next(new AppError(409, 'El restaurante debe marcar el pedido como listo primero'));
     }
-    if (req.user.role === 'restaurant' && nextStatus === 'preparing') driverNote = 'Restaurante: pedido en preparación';
-    if (req.user.role === 'restaurant' && nextStatus === 'ready') driverNote = 'Restaurante: pedido listo para retiro';
-    if (req.user.role === 'driver' && nextStatus === 'on_the_way') restaurantNote = 'Driver: pedido en camino';
-    if (req.user.role === 'driver' && nextStatus === 'delivered') restaurantNote = 'Driver: pedido entregado';
+    if (req.user.role === 'restaurant' && nextStatus === 'preparing') driverNote     = 'Restaurante: pedido en preparación';
+    if (req.user.role === 'restaurant' && nextStatus === 'ready')     driverNote     = 'Restaurante: pedido listo para retiro';
+    if (req.user.role === 'driver'     && nextStatus === 'on_the_way') restaurantNote = 'Driver: pedido en camino';
+    if (req.user.role === 'driver'     && nextStatus === 'delivered')  restaurantNote = 'Driver: pedido entregado';
+
+    // Timestamp de la etapa
+    const tsCol = STATUS_TS[nextStatus];
+    const tsClause = tsCol ? `, ${tsCol} = NOW()` : '';
 
     const result = await query(
-      'UPDATE orders SET status = $1, driver_note = $2, restaurant_note = $3, updated_at = NOW() WHERE id = $4 RETURNING *',
+      `UPDATE orders SET status=$1, driver_note=$2, restaurant_note=$3, updated_at=NOW()${tsClause} WHERE id=$4 RETURNING *`,
       [nextStatus, driverNote, restaurantNote, req.params.id]
     );
     const order = result.rows[0];
     orderEvents.emitOrderUpdate(order.id, order.status);
+    await notifyOrderParties(order.id, 'order_update', { orderId: order.id, status: order.status });
     logEvent('order.status_changed', { orderId: order.id, status: order.status, actor: req.user.userId });
     return res.json({ order });
   } catch (error) { return next(error); }
@@ -129,10 +155,12 @@ router.patch('/:id/status', authenticate, authorize(['restaurant', 'driver', 'ad
 router.patch('/:id/cancel', authenticate, authorize(['customer']), async (req, res, next) => {
   try {
     const result = await query(
-      'UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2 AND customer_id = $3 RETURNING *',
-      ['cancelled', req.params.id, req.user.userId]
+      `UPDATE orders SET status='cancelled', cancelled_at=NOW(), updated_at=NOW()
+       WHERE id=$1 AND customer_id=$2 RETURNING *`,
+      [req.params.id, req.user.userId]
     );
     if (result.rowCount === 0) return next(new AppError(404, 'Order not found'));
+    await notifyOrderParties(req.params.id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
     return res.json({ order: result.rows[0] });
   } catch (error) { return next(error); }
 });
@@ -161,151 +189,75 @@ router.patch('/:id/suggest', authenticate, authorize(['restaurant']), validate(s
     };
 
     const result = await query(
-      `UPDATE orders SET suggestion_text = $1, suggestion_status = 'pending_customer', updated_at = NOW()
-       WHERE id = $2 AND restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id = $3)
-       RETURNING *`,
+      `UPDATE orders SET suggestion_text=$1, suggestion_status='pending_customer', updated_at=NOW()
+       WHERE id=$2 AND restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id=$3) RETURNING *`,
       [JSON.stringify(suggestion), req.params.id, req.user.userId]
     );
     if (result.rowCount === 0) return next(new AppError(404, 'Order not found'));
+    sseHub.sendToUser(result.rows[0].customer_id, 'order_update', { orderId: req.params.id, action: 'suggestion_received' });
     return res.json({ order: result.rows[0] });
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /:id/suggestion-response — acepta y ACTUALIZA el pedido original ── */
-/* ── PATCH /:id/suggestion-response — Acepta y ACTUALIZA el pedido original ── */
+/* ── PATCH /:id/suggestion-response ── */
 router.patch('/:id/suggestion-response', authenticate, authorize(['customer']), validate(suggestionResponseSchema), async (req, res, next) => {
   try {
     const { accepted, items: clientItems } = req.validatedBody;
     const status = accepted ? 'accepted' : 'rejected';
 
-    // 1. Cargar el pedido para verificar propiedad y obtener la sugerencia guardada
-    const orderResult = await query(
-      'SELECT * FROM orders WHERE id = $1 AND customer_id = $2',
-      [req.params.id, req.user.userId]
-    );
-    
+    const orderResult = await query('SELECT * FROM orders WHERE id=$1 AND customer_id=$2', [req.params.id, req.user.userId]);
     if (orderResult.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
     const order = orderResult.rows[0];
 
-    // --- INICIO DE TRANSACCIÓN ---
     try {
       await query('BEGIN');
-
-      // 2. Actualizar el estado de la sugerencia
-      await query(
-        `UPDATE orders SET suggestion_status = $1, updated_at = NOW() WHERE id = $2`,
-        [status, req.params.id]
-      );
+      await query(`UPDATE orders SET suggestion_status=$1, updated_at=NOW() WHERE id=$2`, [status, req.params.id]);
 
       if (accepted) {
         let finalItems = [];
-
         if (clientItems && clientItems.length > 0) {
-          // ESCENARIO A: El cliente editó los items (Validamos precios vigentes en DB)
-          const menuIds = clientItems.map(i => i.menuItemId);
-          const menuResult = await query(
-            `SELECT id, price_cents FROM menu_items WHERE id = ANY($1::uuid[])`,
-            [menuIds]
-          );
+          const menuResult = await query(`SELECT id, price_cents FROM menu_items WHERE id = ANY($1::uuid[])`, [clientItems.map(i => i.menuItemId)]);
           const priceMap = new Map(menuResult.rows.map(r => [r.id, r.price_cents]));
-
-          finalItems = clientItems
-            .filter(i => priceMap.has(i.menuItemId))
-            .map(i => ({
-              menuItemId: i.menuItemId,
-              quantity: Number(i.quantity),
-              unitPriceCents: priceMap.get(i.menuItemId)
-            }));
+          finalItems = clientItems.filter(i => priceMap.has(i.menuItemId)).map(i => ({ menuItemId: i.menuItemId, quantity: Number(i.quantity), unitPriceCents: priceMap.get(i.menuItemId) }));
         } else {
-          // ESCENARIO B: Aceptó la sugerencia original guardada en el JSON
-          const parsed = typeof order.suggestion_text === 'string' 
-            ? JSON.parse(order.suggestion_text) 
-            : order.suggestion_text;
-
-          if (parsed?.items) {
-            finalItems = parsed.items.map(i => ({
-              menuItemId: i.menuItemId,
-              quantity: Number(i.quantity),
-              unitPriceCents: Number(i.unitPriceCents)
-            }));
-          }
+          const parsed = typeof order.suggestion_text === 'string' ? JSON.parse(order.suggestion_text) : order.suggestion_text;
+          if (parsed?.items) finalItems = parsed.items.map(i => ({ menuItemId: i.menuItemId, quantity: Number(i.quantity), unitPriceCents: Number(i.unitPriceCents) }));
         }
+        if (finalItems.length === 0) throw new AppError(400, 'No se encontraron productos válidos');
 
-        if (finalItems.length === 0) {
-          throw new AppError(400, 'No se encontraron productos válidos para procesar');
-        }
-
-        // 3. Reemplazo físico de los items (Atomicidad)
-        await query('DELETE FROM order_items WHERE order_id = $1', [req.params.id]);
-
+        await query('DELETE FROM order_items WHERE order_id=$1', [req.params.id]);
         let newTotal = 0;
         for (const item of finalItems) {
-          await query(
-            'INSERT INTO order_items(order_id, menu_item_id, quantity, unit_price_cents) VALUES($1, $2, $3, $4)',
-            [req.params.id, item.menuItemId, item.quantity, item.unitPriceCents]
-          );
-          newTotal += (item.unitPriceCents * item.quantity);
+          await query('INSERT INTO order_items(order_id, menu_item_id, quantity, unit_price_cents) VALUES($1,$2,$3,$4)',
+            [req.params.id, item.menuItemId, item.quantity, item.unitPriceCents]);
+          newTotal += item.unitPriceCents * item.quantity;
         }
-
-        // 4. Actualizar cabecera y LIMPIAR el suggestion_text para que deje de ser "sugerencia"
-        // y pase a ser el contenido oficial del pedido.
-        await query(
-          `UPDATE orders SET 
-             total_cents = $1, 
-             suggestion_text = NULL, 
-             updated_at = NOW() 
-           WHERE id = $2`,
-          [newTotal, req.params.id]
-        );
+        await query(`UPDATE orders SET total_cents=$1, suggestion_text=NULL, updated_at=NOW() WHERE id=$2`, [newTotal, req.params.id]);
       }
-
       await query('COMMIT');
+    } catch (txError) { await query('ROLLBACK'); throw txError; }
 
-      // 5. Registro y Respuesta
-      logEvent('order.suggestion_processed', { 
-        orderId: req.params.id, 
-        accepted, 
-        customerId: req.user.userId 
-      });
+    logEvent('order.suggestion_processed', { orderId: req.params.id, accepted, customerId: req.user.userId });
+    await notifyOrderParties(req.params.id, 'order_update', { orderId: req.params.id, action: accepted ? 'suggestion_accepted' : 'suggestion_rejected' });
 
-      // Importante: Devolver el pedido fresco
-      const updatedOrder = await query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
-      return res.json({ order: updatedOrder.rows[0] });
-
-    } catch (txError) {
-      await query('ROLLBACK');
-      throw txError;
-    }
-  } catch (error) {
-    return next(error);
-  }
+    const updatedOrder = await query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
+    return res.json({ order: updatedOrder.rows[0] });
+  } catch (error) { return next(error); }
 });
 
 /* ── POST /:id/complaint ── */
 router.post('/:id/complaint', authenticate, authorize(['customer']), async (req, res, next) => {
   try {
     const { text } = req.body || {};
-    if (!text || !text.trim()) return next(new AppError(400, 'El texto de la queja es requerido'));
-
-    const orderCheck = await query('SELECT id, status FROM orders WHERE id = $1 AND customer_id = $2', [req.params.id, req.user.userId]);
+    if (!text?.trim()) return next(new AppError(400, 'El texto de la queja es requerido'));
+    const orderCheck = await query('SELECT id FROM orders WHERE id=$1 AND customer_id=$2', [req.params.id, req.user.userId]);
     if (orderCheck.rowCount === 0) return next(new AppError(404, 'Order not found'));
-
-    // Guardar queja — si tienes tabla de complaints úsala, sino en una columna de orders
     try {
-      await query(
-        `INSERT INTO order_complaints(order_id, customer_id, text, created_at) VALUES($1, $2, $3, NOW())`,
-        [req.params.id, req.user.userId, text.trim()]
-      );
+      await query(`INSERT INTO order_complaints(order_id, customer_id, text, created_at) VALUES($1,$2,$3,NOW())`, [req.params.id, req.user.userId, text.trim()]);
     } catch (e) {
-      // Si la tabla no existe, guardar en orders como campo de texto
-      if (isMissingRelationError(e)) {
-        try {
-          await query('UPDATE orders SET restaurant_note = $1, updated_at = NOW() WHERE id = $2',
-            [`[QUEJA] ${text.trim()}`, req.params.id]);
-        } catch (_) {}
-      } else throw e;
+      if (isMissingRelationError(e)) await query('UPDATE orders SET restaurant_note=$1, updated_at=NOW() WHERE id=$2', [`[QUEJA] ${text.trim()}`, req.params.id]);
+      else throw e;
     }
-
     logEvent('order.complaint', { orderId: req.params.id, customerId: req.user.userId });
     return res.json({ ok: true });
   } catch (error) { return next(error); }
@@ -317,49 +269,40 @@ router.get('/my', authenticate, async (req, res, next) => {
     let result;
     try {
       result = await query(
-        `SELECT o.*, r.name AS restaurant_name,
-                r.address AS restaurant_address,
-                split_part(c.full_name, '_', 1) AS customer_first_name,
-                c.full_name AS customer_display_name,
-                split_part(d.full_name, '_', 1) AS driver_first_name,
-                c.address AS customer_address
+        `SELECT o.*, r.name AS restaurant_name, r.address AS restaurant_address,
+                split_part(c.full_name,'_',1) AS customer_first_name, c.full_name AS customer_display_name,
+                split_part(d.full_name,'_',1) AS driver_first_name, c.address AS customer_address
          FROM orders o
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id
          LEFT JOIN users d ON d.id = o.driver_id
-         WHERE o.customer_id = $1 OR o.driver_id = $1 OR o.restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id = $1)
+         WHERE o.customer_id=$1 OR o.driver_id=$1 OR o.restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id=$1)
          ORDER BY o.created_at DESC`,
         [req.user.userId]
       );
     } catch (error) {
       if (!isMissingColumnError(error)) throw error;
       result = await query(
-        `SELECT o.*, r.name AS restaurant_name,
-                NULL AS restaurant_address,
-                split_part(c.full_name, '_', 1) AS customer_first_name,
-                c.full_name AS customer_display_name,
-                split_part(d.full_name, '_', 1) AS driver_first_name,
-                o.delivery_address AS customer_address
+        `SELECT o.*, r.name AS restaurant_name, NULL AS restaurant_address,
+                split_part(c.full_name,'_',1) AS customer_first_name, c.full_name AS customer_display_name,
+                split_part(d.full_name,'_',1) AS driver_first_name, o.delivery_address AS customer_address
          FROM orders o
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id
          LEFT JOIN users d ON d.id = o.driver_id
-         WHERE o.customer_id = $1 OR o.driver_id = $1 OR o.restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id = $1)
+         WHERE o.customer_id=$1 OR o.driver_id=$1 OR o.restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id=$1)
          ORDER BY o.created_at DESC`,
         [req.user.userId]
       );
     }
-
     const orderIds = result.rows.map(r => r.id);
     const itemsByOrder = await getOrderItems(orderIds);
-
     const orders = result.rows.map(row => ({
       ...row,
       items: itemsByOrder.get(row.id) || [],
       suggestion_items: parseSuggestionItems(row.suggestion_text),
       suggestion_note: parseSuggestionNote(row.suggestion_text),
     }));
-
     return res.json({ orders });
   } catch (error) { return next(error); }
 });

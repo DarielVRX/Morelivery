@@ -1,414 +1,295 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
+import ScheduleEditor from '../../components/ScheduleEditor';
 
-/* ── helpers ── */
-function formatMoney(cents) {
-  return `$${((cents ?? 0) / 100).toFixed(2)}`;
+function buildInitialSuggestion(items = []) {
+  const map = {};
+  items.forEach(item => { map[item.menuItemId] = item.quantity; });
+  return map;
 }
-function formatDate(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' });
-}
-function startOfWeek(date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - d.getDay());
-  return d;
-}
-function isSameDay(a, b) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}
+
+function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
 const STATUS_LABELS = {
-  created: 'Recibido', assigned: 'Asignado', accepted: 'Aceptado',
-  preparing: 'En preparación', ready: 'Listo para retiro',
-  on_the_way: 'En camino', delivered: 'Entregado',
-  cancelled: 'Cancelado', pending_driver: 'Esperando driver',
+  created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
+  preparing:'En preparación', ready:'Listo para retiro',
+  on_the_way:'En camino', delivered:'Entregado',
+  cancelled:'Cancelado', pending_driver:'Esperando driver',
 };
-const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
-/* ── flash hook ── */
-function useFlash(duration = 5000) {
-  const [msgs, setMsgs] = useState({});
-  const timers = useRef({});
-  const flash = useCallback((text, isError = false, id = '__g__') => {
-    setMsgs(p => ({ ...p, [id]: { text, isError } }));
-    clearTimeout(timers.current[id]);
-    timers.current[id] = setTimeout(() =>
-      setMsgs(p => { const n = { ...p }; delete n[id]; return n; }), duration);
-  }, [duration]);
-  return [msgs, flash];
-}
-
-function FlashMsg({ msg }) {
-  if (!msg) return null;
-  return <p style={{ color: msg.isError ? '#c00' : '#080', margin: '0.25rem 0', fontSize: '0.875rem' }}>{msg.text}</p>;
-}
-
-/* ── SuggestionPanel ── */
-function SuggestionPanel({ order, products, onSend, onCancel }) {
-  const [draft, setDraft] = useState(() => {
-    const d = {};
-    (order.items || []).forEach(i => { d[i.menuItemId] = { name: i.name, quantity: i.quantity, unitPriceCents: i.unitPriceCents }; });
-    return d;
-  });
-  const [search, setSearch] = useState('');
-  const [note, setNote] = useState('');
-
-  const filteredProducts = useMemo(() => {
-    const q = search.toLowerCase();
-    return products.filter(p => p.is_available && p.name.toLowerCase().includes(q) && !draft[p.id]);
-  }, [search, products, draft]);
-
-  function adjust(menuItemId, name, unitPriceCents, delta) {
-    setDraft(prev => {
-      const qty = Math.max(0, (prev[menuItemId]?.quantity ?? 0) + delta);
-      if (qty === 0) { const { [menuItemId]: _, ...rest } = prev; return rest; }
-      return { ...prev, [menuItemId]: { name, quantity: qty, unitPriceCents } };
-    });
-  }
-
-  const draftItems = Object.entries(draft).map(([menuItemId, v]) => ({ menuItemId, ...v }));
-  const total = draftItems.reduce((s, i) => s + i.unitPriceCents * i.quantity, 0);
-
-  return (
-    <div className="auth-card compact" style={{ marginTop: '0.75rem' }}>
-      <strong>Pedido original</strong>
-      <ul style={{ margin: '0.25rem 0 0.5rem 1rem', fontSize: '0.9rem' }}>
-        {(order.items || []).map(i => <li key={i.menuItemId}>{i.name} × {i.quantity} — {formatMoney(i.unitPriceCents * i.quantity)}</li>)}
-      </ul>
-
-      <strong>Sugerencia</strong>
-      {draftItems.length === 0 && <p style={{ color: '#888', fontSize: '0.85rem' }}>Sin productos aún</p>}
-      <ul style={{ margin: '0.25rem 0 0.5rem 0', listStyle: 'none', padding: 0 }}>
-        {draftItems.map(i => (
-          <li key={i.menuItemId} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem' }}>
-            <span style={{ flex: 1, fontSize: '0.9rem' }}>{i.name}</span>
-            <button onClick={() => adjust(i.menuItemId, i.name, i.unitPriceCents, -1)}>−</button>
-            <span>{i.quantity}</span>
-            <button onClick={() => adjust(i.menuItemId, i.name, i.unitPriceCents, +1)}>+</button>
-            <span style={{ color: '#555', fontSize: '0.82rem' }}>{formatMoney(i.unitPriceCents * i.quantity)}</span>
-          </li>
-        ))}
-      </ul>
-      <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.9rem' }}>Total sugerido: {formatMoney(total)}</div>
-
-      {/* Buscador */}
-      <div style={{ position: 'relative', marginBottom: '0.5rem' }}>
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Buscar producto del menú para agregar…"
-          style={{ width: '100%', boxSizing: 'border-box' }}
-        />
-        {search.length > 0 && filteredProducts.length > 0 && (
-          <ul style={{ position: 'absolute', zIndex: 10, background: '#fff', border: '1px solid #ddd', borderRadius: 4, width: '100%', margin: 0, padding: 0, listStyle: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-            {filteredProducts.slice(0, 6).map(p => (
-              <li key={p.id} onClick={() => { setDraft(prev => ({ ...prev, [p.id]: { name: p.name, quantity: 1, unitPriceCents: p.price_cents } })); setSearch(''); }}
-                style={{ padding: '0.4rem 0.75rem', cursor: 'pointer', fontSize: '0.9rem' }}
-                onMouseEnter={e => e.currentTarget.style.background = '#f0f4ff'}
-                onMouseLeave={e => e.currentTarget.style.background = ''}
-              >
-                {p.name} — {formatMoney(p.price_cents)}
-              </li>
-            ))}
-          </ul>
-        )}
-        {search.length > 0 && filteredProducts.length === 0 && <p style={{ fontSize: '0.82rem', color: '#888', margin: '0.25rem 0 0' }}>Sin resultados</p>}
-      </div>
-
-      {/* Nota */}
-      <textarea
-        value={note} onChange={e => setNote(e.target.value)}
-        placeholder="Nota para el cliente (opcional)…"
-        rows={2} style={{ width: '100%', boxSizing: 'border-box', marginBottom: '0.5rem' }}
-      />
-
-      <div className="row">
-        <button disabled={draftItems.length === 0} onClick={() => onSend(draftItems, note)}>Enviar sugerencia</button>
-        <button onClick={onCancel}>Cancelar</button>
-      </div>
-    </div>
-  );
-}
-
-/* ── HistoryCalendar ── */
-function HistoryCalendar({ orders }) {
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [selectedDay, setSelectedDay] = useState(null);
-  const [expanded, setExpanded] = useState({});
-
-  const weekStart = useMemo(() => {
-    const d = startOfWeek(new Date());
-    d.setDate(d.getDate() + weekOffset * 7);
-    return d;
-  }, [weekOffset]);
-
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); return d;
-  }), [weekStart]);
-
-  const ordersInWeek = useMemo(() => orders.filter(o => {
-    const d = new Date(o.created_at);
-    return d >= days[0] && d <= new Date(days[6].getTime() + 86399999);
-  }), [orders, days]);
-
-  const filteredOrders = useMemo(() =>
-    selectedDay ? ordersInWeek.filter(o => isSameDay(new Date(o.created_at), selectedDay)) : ordersInWeek,
-    [ordersInWeek, selectedDay]);
-
-  const countByDay = useMemo(() => {
-    const m = {};
-    ordersInWeek.forEach(o => { const k = new Date(o.created_at).toDateString(); m[k] = (m[k] || 0) + 1; });
-    return m;
-  }, [ordersInWeek]);
-
-  const weekLabel = `${days[0].toLocaleDateString('es', { day: 'numeric', month: 'short' })} – ${days[6].toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' })}`;
-
-  return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-        <button onClick={() => setWeekOffset(w => w - 1)}>◀</button>
-        <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{weekLabel}</span>
-        <button onClick={() => setWeekOffset(w => w + 1)} disabled={weekOffset >= 0}>▶</button>
-        {weekOffset !== 0 && <button onClick={() => { setWeekOffset(0); setSelectedDay(null); }}>Hoy</button>}
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: '0.2rem', marginBottom: '0.75rem' }}>
-        {days.map((d, i) => {
-          const count = countByDay[d.toDateString()] || 0;
-          const sel = selectedDay && isSameDay(d, selectedDay);
-          const today = isSameDay(d, new Date());
-          return (
-            <div key={i} onClick={() => setSelectedDay(sel ? null : d)}
-              style={{ padding: '0.3rem 0.1rem', textAlign: 'center', cursor: 'pointer', borderRadius: 6,
-                background: sel ? '#2563eb' : today ? '#eff6ff' : '#f5f5f5',
-                color: sel ? '#fff' : '#111',
-                border: today && !sel ? '1px solid #93c5fd' : '1px solid transparent', userSelect: 'none' }}>
-              <div style={{ fontSize: '0.65rem' }}>{DAY_NAMES[i]}</div>
-              <div style={{ fontWeight: 700 }}>{d.getDate()}</div>
-              {count > 0 && <div style={{ fontSize: '0.65rem', color: sel ? '#bfdbfe' : '#2563eb' }}>{count}</div>}
-            </div>
-          );
-        })}
-      </div>
-
-      {selectedDay && (
-        <p style={{ fontSize: '0.85rem', color: '#555', marginBottom: '0.5rem' }}>
-          {filteredOrders.length} pedido(s) el {selectedDay.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' })}
-          <button onClick={() => setSelectedDay(null)} style={{ marginLeft: '0.5rem', fontSize: '0.75rem' }}>✕ Limpiar</button>
-        </p>
-      )}
-
-      {filteredOrders.length === 0 ? <p style={{ color: '#888' }}>Sin pedidos en este período.</p> : (
-        <ul style={{ listStyle: 'none', padding: 0 }}>
-          {filteredOrders.map(order => (
-            <li key={order.id} style={{ borderBottom: '1px solid #eee' }}>
-              <div onClick={() => setExpanded(p => ({ ...p, [order.id]: !p[order.id] }))}
-                style={{ display: 'flex', justifyContent: 'space-between', cursor: 'pointer', padding: '0.4rem 0', alignItems: 'center' }}>
-                <span>
-                  <strong>{STATUS_LABELS[order.status] || order.status}</strong>
-                  {' · '}{formatMoney(order.total_cents)}
-                  <span style={{ color: '#888', fontSize: '0.82rem', marginLeft: '0.4rem' }}>{formatDate(order.created_at)}</span>
-                </span>
-                <span>{expanded[order.id] ? '▲' : '▼'}</span>
-              </div>
-              {expanded[order.id] && (
-                <div style={{ paddingLeft: '1rem', paddingBottom: '0.5rem', fontSize: '0.9rem' }}>
-                  <div><strong>Cliente:</strong> {order.customer_first_name}</div>
-                  <div><strong>Driver:</strong> {order.driver_first_name || '—'}</div>
-                  {(order.items || []).length > 0 && (
-                    <ul style={{ margin: '0.25rem 0 0 1rem' }}>
-                      {order.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity} — {formatMoney(i.unitPriceCents * i.quantity)}</li>)}
-                    </ul>
-                  )}
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-/* ══ RestaurantDashboard ══ */
 export default function RestaurantDashboard() {
   const { auth } = useAuth();
-  const [restaurant, setRestaurant] = useState(null);
-  const [productName, setProductName] = useState('');
+  const [tab, setTab]                 = useState('orders');
+  const [restaurant, setRestaurant]   = useState(null);
+  const [orders, setOrders]           = useState([]);
+  const [products, setProducts]       = useState([]);
   const [description, setDescription] = useState('');
-  const [price, setPrice] = useState('1000');
-  const [orders, setOrders] = useState([]);
-  const [products, setProducts] = useState([]);
+  const [price, setPrice]             = useState('1000');
+  const [message, setMessage]         = useState('');
+  const [suggestionDrafts, setSuggestionDrafts] = useState({});
   const [openSuggestionFor, setOpenSuggestionFor] = useState('');
-  const [loadingStatus, setLoadingStatus] = useState({});
-  const [flash, flashMsg] = useFlash();
+
+  const loadDataRef = useRef(null);
 
   async function loadData() {
     if (!auth.token) return;
-    const [r, o, p] = await Promise.all([
-      apiFetch('/restaurants/my', {}, auth.token),
-      apiFetch('/orders/my', {}, auth.token),
-      apiFetch('/restaurants/my/menu', {}, auth.token),
-    ]);
-    setRestaurant(r.restaurant);
-    setOrders(o.orders);
-    setProducts(p.menu);
+    try {
+      const [restData, ordersData, menuData] = await Promise.all([
+        apiFetch('/restaurants/my', {}, auth.token),
+        apiFetch('/orders/my', {}, auth.token),
+        apiFetch('/restaurants/my/menu', {}, auth.token),
+      ]);
+      setRestaurant(restData.restaurant);
+      setOrders(ordersData.orders);
+      setProducts(menuData.menu);
+    } catch (error) { setMessage(error.message); }
   }
 
-  useEffect(() => { loadData().catch(e => flashMsg(e.message, true)); }, [auth.token]);
+  // Ref estable para callbacks SSE
+  useEffect(() => { loadDataRef.current = loadData; });
+  useEffect(() => { loadData(); }, [auth.token]);
+
+  // SSE — actualizaciones en tiempo real sin refresh manual
+  useRealtimeOrders(auth.token, () => loadDataRef.current?.(), () => {});
+
+  useEffect(() => {
+    const nextDrafts = {};
+    for (const order of orders) {
+      nextDrafts[order.id] = suggestionDrafts[order.id] || buildInitialSuggestion(order.items);
+    }
+    setSuggestionDrafts(nextDrafts);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders.length]);
 
   async function addProduct() {
-    if (!productName.trim()) return flashMsg('Ingresa nombre del producto', true);
+    if (!description.trim()) return setMessage('Escribe una descripción');
     try {
       await apiFetch('/restaurants/menu-items', {
         method: 'POST',
-        body: JSON.stringify({ name: productName.slice(0, 40), description, priceCents: Number(price) })
+        body: JSON.stringify({ name: description.slice(0, 20), description, priceCents: Number(price) })
       }, auth.token);
-      flashMsg('✅ Producto agregado');
-      setProductName(''); setDescription(''); setPrice('1000');
+      setMessage('Producto agregado'); setDescription('');
       loadData();
-    } catch (e) { flashMsg(e.message, true); }
+    } catch (error) { setMessage(error.message); }
   }
 
-  async function updateProduct(id, cur, field, val) {
+  async function updateProduct(productId, current, field, value) {
     try {
-      await apiFetch(`/restaurants/menu-items/${id}`, {
+      await apiFetch(`/restaurants/menu-items/${productId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ name: cur.name, description: cur.description, priceCents: cur.price_cents, isAvailable: cur.is_available, [field]: val })
+        body: JSON.stringify({ name: current.name, description: current.description, priceCents: current.price_cents, isAvailable: current.is_available, [field]: value })
       }, auth.token);
       loadData();
-    } catch (e) { flashMsg(e.message, true); }
+    } catch (error) { setMessage(error.message); }
   }
 
   async function changeStatus(orderId, status) {
-    setLoadingStatus(p => ({ ...p, [orderId]: status }));
     try {
       await apiFetch(`/orders/${orderId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }, auth.token);
-      await loadData();
-      flashMsg(STATUS_LABELS[status] || status, false, orderId);
-    } catch (e) {
-      flashMsg(e.message, true, orderId);
-    } finally {
-      setLoadingStatus(p => ({ ...p, [orderId]: null }));
-    }
+      loadData();
+    } catch (error) { setMessage(error.message); }
   }
 
-  async function sendSuggestion(order, items, note) {
+  function adjustSuggestion(orderId, menuItemId, delta) {
+    setSuggestionDrafts(prev => {
+      const cur = prev[orderId] || {};
+      const qty = Math.max(0, (cur[menuItemId] || 0) + delta);
+      return { ...prev, [orderId]: { ...cur, [menuItemId]: qty } };
+    });
+  }
+
+  async function sendSuggestion(order) {
+    const draft = suggestionDrafts[order.id] || {};
+    const items = Object.entries(draft).filter(([, q]) => q > 0).map(([menuItemId, quantity]) => ({ menuItemId, quantity }));
+    if (items.length === 0) return setMessage('La sugerencia debe tener al menos 1 producto');
     try {
-      await apiFetch(`/orders/${order.id}/suggest`, {
-        method: 'PATCH',
-        body: JSON.stringify({ items, note: note || undefined })
-      }, auth.token);
-      flashMsg('Sugerencia enviada', false, order.id);
-      setOpenSuggestionFor('');
+      await apiFetch(`/orders/${order.id}/suggest`, { method: 'PATCH', body: JSON.stringify({ items }) }, auth.token);
+      setMessage('Sugerencia enviada'); setOpenSuggestionFor('');
       loadData();
-    } catch (e) { flashMsg(e.message, true, order.id); }
+    } catch (error) { setMessage(error.message); }
   }
 
   const activeOrders = useMemo(
-    () => orders.filter(o => ['created', 'assigned', 'accepted', 'preparing', 'ready', 'pending_driver'].includes(o.status)),
+    () => orders.filter(o => ['created','assigned','accepted','preparing','ready'].includes(o.status)),
     [orders]
   );
-  const historyOrders = useMemo(
-    () => orders.filter(o => ['delivered', 'cancelled'].includes(o.status)),
-    [orders]
-  );
+
+  const tabStyle = (t) => ({
+    padding: '0.45rem 1rem', cursor: 'pointer', border: 'none', borderRadius: 6, fontWeight: 600,
+    background: tab === t ? '#2563eb' : '#f3f4f6',
+    color: tab === t ? '#fff' : '#374151', fontSize: '0.875rem'
+  });
 
   return (
     <section className="role-panel">
-      <h2>Restaurante — {restaurant?.name || '…'}</h2>
-
-      {/* Agregar producto */}
-      <details style={{ marginBottom: '1rem' }}>
-        <summary style={{ cursor: 'pointer', fontWeight: 600 }}>➕ Agregar producto</summary>
-        <div style={{ paddingTop: '0.5rem' }}>
-          <div className="row" style={{ flexWrap: 'wrap' }}>
-            <input value={productName} onChange={e => setProductName(e.target.value)} placeholder="Nombre" />
-            <input value={description} onChange={e => setDescription(e.target.value)} placeholder="Descripción" />
-            <input value={price} onChange={e => setPrice(e.target.value)} placeholder="Precio en cents" style={{ width: '7rem' }} />
-            <button onClick={addProduct}>Agregar</button>
-          </div>
-          <FlashMsg msg={flash['__g__']} />
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'0.5rem', marginBottom:'0.75rem' }}>
+        <div>
+          <h2 style={{ margin:0 }}>{restaurant?.name || 'Restaurante'}</h2>
+          <span style={{ fontSize:'0.875rem', color: restaurant?.is_open ? '#16a34a' : '#dc2626', fontWeight:700 }}>
+            {restaurant?.is_open ? '● Abierto' : '● Cerrado'}
+          </span>
         </div>
-      </details>
+        <button onClick={loadData} style={{ fontSize:'0.82rem' }}>🔄</button>
+      </div>
 
-      {/* Mis productos */}
-      <details style={{ marginBottom: '1rem' }}>
-        <summary style={{ cursor: 'pointer', fontWeight: 600 }}>🍽 Mis productos ({products.length})</summary>
-        <ul style={{ paddingTop: '0.5rem', paddingLeft: '1rem' }}>
-          {products.map(p => (
-            <li key={p.id} style={{ marginBottom: '0.35rem' }}>
-              <strong>{p.name}</strong> · {p.description} · {formatMoney(p.price_cents)} · {p.is_available ? '✅' : '❌'}
-              <button onClick={() => updateProduct(p.id, p, 'isAvailable', !p.is_available)} style={{ marginLeft: '0.5rem' }}>
-                {p.is_available ? 'Desactivar' : 'Activar'}
-              </button>
-              <button onClick={() => {
-                const v = Number(prompt('Nuevo precio en cents', String(p.price_cents)));
-                if (!isNaN(v) && v > 0) updateProduct(p.id, p, 'priceCents', v);
-              }} style={{ marginLeft: '0.25rem' }}>Precio</button>
-            </li>
-          ))}
-        </ul>
-      </details>
+      <div style={{ display:'flex', gap:'0.4rem', marginBottom:'1.25rem', flexWrap:'wrap' }}>
+        <button style={tabStyle('orders')}  onClick={() => setTab('orders')}>📋 Pedidos ({activeOrders.length})</button>
+        <button style={tabStyle('menu')}    onClick={() => setTab('menu')}>🍽 Menú ({products.length})</button>
+        <button style={tabStyle('schedule')} onClick={() => setTab('schedule')}>🕐 Horario</button>
+      </div>
 
-      {/* Pedidos activos */}
-      <h3>Pedidos activos ({activeOrders.length})</h3>
-      {activeOrders.length === 0 ? <p>No hay pedidos activos.</p> : (
-        <ul style={{ listStyle: 'none', padding: 0 }}>
-          {activeOrders.map(order => {
-            const loading = loadingStatus[order.id];
-            const isReady = order.status === 'ready';
-            return (
-              <li key={order.id} style={{ marginBottom: '1.25rem', border: '1px solid #e5e7eb', borderRadius: 8, padding: '0.875rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                  <strong>{STATUS_LABELS[order.status] || order.status}</strong>
-                  <strong>{formatMoney(order.total_cents)}</strong>
-                </div>
-                <div style={{ fontSize: '0.85rem', color: '#555' }}>{formatDate(order.created_at)}</div>
-                <div><strong>Cliente:</strong> {order.customer_first_name || '—'}</div>
-                <div><strong>Driver:</strong> {order.driver_first_name || 'Pendiente'}</div>
-                {(order.items || []).length > 0 && (
-                  <ul style={{ margin: '0.4rem 0 0 1rem', fontSize: '0.9rem' }}>
-                    {order.items.map(i => (
-                      <li key={i.menuItemId}>{i.name} × {i.quantity} — {formatMoney(i.unitPriceCents * i.quantity)}</li>
-                    ))}
-                  </ul>
-                )}
+      {message && <p style={{ color:'#c00', marginBottom:'0.5rem' }}>{message}</p>}
 
-                <div className="row" style={{ marginTop: '0.6rem', flexWrap: 'wrap' }}>
-                  <button disabled={!!loading || isReady || order.status === 'preparing'} onClick={() => changeStatus(order.id, 'preparing')}>
-                    {loading === 'preparing' ? '…' : '🍳 Preparando'}
-                  </button>
-                  <button disabled={!!loading || isReady} onClick={() => changeStatus(order.id, 'ready')}>
-                    {loading === 'ready' ? '…' : '✅ Listo'}
-                  </button>
-                  <button disabled={isReady} onClick={() => setOpenSuggestionFor(openSuggestionFor === order.id ? '' : order.id)}>
-                    💬 Alternativa
-                  </button>
-                </div>
+      {/* ── PEDIDOS ── */}
+      {tab === 'orders' && (
+        activeOrders.length === 0
+          ? <p style={{ color:'#888' }}>Sin pedidos activos.</p>
+          : (
+            <ul style={{ listStyle:'none', padding:0 }}>
+              {activeOrders.map(order => (
+                <li key={order.id} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'0.875rem', marginBottom:'1rem' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', flexWrap:'wrap', gap:'0.25rem' }}>
+                    <strong style={{ fontSize:'0.875rem', color:'#374151' }}>{STATUS_LABELS[order.status] || order.status}</strong>
+                    <strong>{fmt(order.total_cents)}</strong>
+                  </div>
+                  <div style={{ fontSize:'0.85rem', color:'#6b7280' }}>
+                    Cliente: {order.customer_first_name || '—'} · Driver: {order.driver_first_name || 'pendiente'}
+                  </div>
+                  {order.items?.length > 0 && (
+                    <ul style={{ margin:'0.3rem 0 0 1rem', fontSize:'0.875rem' }}>
+                      {order.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
+                    </ul>
+                  )}
+                  {order.restaurant_note && <p style={{ fontSize:'0.82rem', color:'#6b7280', marginTop:'0.25rem' }}>{order.restaurant_note}</p>}
 
-                <FlashMsg msg={flash[order.id]} />
+                  <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginTop:'0.6rem' }}>
+                    <button onClick={() => changeStatus(order.id, 'preparing')}>🍳 En preparación</button>
+                    <button onClick={() => changeStatus(order.id, 'ready')}>✅ Listo</button>
+                    <button
+                      onClick={() => setOpenSuggestionFor(openSuggestionFor === order.id ? '' : order.id)}
+                      style={{ background: openSuggestionFor === order.id ? '#e0e7ff' : undefined }}
+                    >
+                      💬 {openSuggestionFor === order.id ? 'Cerrar' : 'Sugerir cambio'}
+                    </button>
+                  </div>
 
-                {openSuggestionFor === order.id && (
-                  <SuggestionPanel
-                    order={order}
-                    products={products}
-                    onSend={(items, note) => sendSuggestion(order, items, note)}
-                    onCancel={() => setOpenSuggestionFor('')}
-                  />
-                )}
-              </li>
-            );
-          })}
-        </ul>
+                  {/* Panel de sugerencia — diseño igual al del cliente */}
+                  {openSuggestionFor === order.id && (
+                    <div style={{
+                      marginTop:'0.75rem', background:'#f8fafc',
+                      border:'1px solid #e0e7ff', borderRadius:8, padding:'0.875rem'
+                    }}>
+                      <p style={{ fontWeight:700, fontSize:'0.875rem', margin:'0 0 0.5rem', color:'#1e40af' }}>
+                        Sugerir cambio al cliente
+                      </p>
+
+                      {/* Pedido original */}
+                      <p style={{ fontSize:'0.75rem', color:'#6b7280', margin:'0 0 0.35rem' }}>Pedido original:</p>
+                      <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:6, padding:'0.4rem 0.75rem', marginBottom:'0.75rem' }}>
+                        {(order.items || []).map(i => (
+                          <div key={i.menuItemId} style={{ display:'flex', justifyContent:'space-between', fontSize:'0.83rem', padding:'0.15rem 0' }}>
+                            <span>{i.name}</span><span style={{ color:'#9ca3af' }}>× {i.quantity}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Selector de productos */}
+                      <p style={{ fontSize:'0.75rem', color:'#6b7280', margin:'0 0 0.35rem' }}>Tu sugerencia:</p>
+                      <div style={{ display:'flex', flexDirection:'column', gap:'0.35rem', marginBottom:'0.75rem' }}>
+                        {products.map(product => {
+                          const qty = (suggestionDrafts[order.id] || {})[product.id] ?? 0;
+                          return (
+                            <div key={product.id} style={{
+                              display:'flex', alignItems:'center', gap:'0.5rem',
+                              background: qty > 0 ? '#eff6ff' : '#fff',
+                              border: qty > 0 ? '1px solid #bfdbfe' : '1px solid #e5e7eb',
+                              borderRadius:6, padding:'0.4rem 0.75rem',
+                              transition:'all 0.15s'
+                            }}>
+                              <span style={{ flex:1, fontSize:'0.875rem', fontWeight: qty > 0 ? 600 : 400 }}>{product.name}</span>
+                              <span style={{ fontSize:'0.75rem', color:'#6b7280' }}>{fmt(product.price_cents)}</span>
+                              <button
+                                onClick={() => adjustSuggestion(order.id, product.id, -1)}
+                                disabled={qty === 0}
+                                style={{ width:26, height:26, borderRadius:'50%', border:'1px solid #e5e7eb', background: qty === 0 ? '#f9fafb' : '#fff', fontWeight:700, cursor: qty === 0 ? 'default' : 'pointer', fontSize:'1rem', lineHeight:1, opacity: qty === 0 ? 0.4 : 1 }}>
+                                −
+                              </button>
+                              <span style={{ minWidth:20, textAlign:'center', fontWeight:700 }}>{qty}</span>
+                              <button
+                                onClick={() => adjustSuggestion(order.id, product.id, 1)}
+                                style={{ width:26, height:26, borderRadius:'50%', border:'none', background:'#2563eb', color:'#fff', fontWeight:700, cursor:'pointer', fontSize:'1rem', lineHeight:1 }}>
+                                +
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div style={{ display:'flex', gap:'0.5rem' }}>
+                        <button
+                          onClick={() => sendSuggestion(order)}
+                          style={{ background:'#2563eb', color:'#fff', border:'none', borderRadius:6, padding:'0.5rem 1.25rem', fontWeight:700, cursor:'pointer' }}>
+                          Enviar al cliente
+                        </button>
+                        <button
+                          onClick={() => setOpenSuggestionFor('')}
+                          style={{ background:'#f3f4f6', border:'none', borderRadius:6, padding:'0.5rem 1rem', cursor:'pointer' }}>
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )
       )}
 
-      {/* Historial */}
-      <h3>Historial</h3>
-      <HistoryCalendar orders={historyOrders} />
+      {/* ── MENÚ ── */}
+      {tab === 'menu' && (
+        <>
+          <div style={{ display:'flex', gap:'0.5rem', flexWrap:'wrap', marginBottom:'1rem' }}>
+            <input value={description} onChange={e => setDescription(e.target.value)} placeholder="Nombre del producto" style={{ flex:2, minWidth:140 }} />
+            <input value={price} onChange={e => setPrice(e.target.value)} placeholder="Precio en centavos" style={{ width:140 }} />
+            <button onClick={addProduct}>Agregar</button>
+          </div>
+          {products.length === 0
+            ? <p style={{ color:'#888' }}>Sin productos en el menú.</p>
+            : (
+              <ul style={{ listStyle:'none', padding:0 }}>
+                {products.map(product => (
+                  <li key={product.id} style={{ display:'flex', alignItems:'center', gap:'0.5rem', borderBottom:'1px solid #f3f4f6', padding:'0.5rem 0', flexWrap:'wrap', fontSize:'0.875rem' }}>
+                    <span style={{ flex:1, fontWeight:600 }}>{product.name}</span>
+                    <span style={{ color:'#6b7280' }}>{product.description}</span>
+                    <span style={{ fontWeight:700 }}>{fmt(product.price_cents)}</span>
+                    <span style={{ color: product.is_available ? '#16a34a' : '#dc2626', fontSize:'0.78rem' }}>
+                      {product.is_available ? '● Activo' : '● Inactivo'}
+                    </span>
+                    <button onClick={() => updateProduct(product.id, product, 'isAvailable', !product.is_available)}>
+                      {product.is_available ? 'Desactivar' : 'Activar'}
+                    </button>
+                    <button onClick={() => {
+                      const v = Number(prompt('Nuevo precio en centavos', String(product.price_cents)));
+                      if (!isNaN(v) && v > 0) updateProduct(product.id, product, 'priceCents', v);
+                    }}>Editar precio</button>
+                  </li>
+                ))}
+              </ul>
+            )
+          }
+        </>
+      )}
+
+      {/* ── HORARIO ── */}
+      {tab === 'schedule' && (
+        <ScheduleEditor
+          token={auth.token}
+          isOpen={restaurant?.is_open}
+          onIsOpenChange={(open) => setRestaurant(prev => prev ? { ...prev, is_open: open } : prev)}
+        />
+      )}
     </section>
   );
 }

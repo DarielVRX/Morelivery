@@ -1,58 +1,56 @@
+// backend/modules/auth/routes.js
 import { Router } from 'express';
-// CORRECCIÓN: Eliminamos 'validateBody' y usamos solo 'validate' 
-// que es lo que realmente exporta tu middleware.
-import { validate } from '../../middlewares/validate.js'; 
-import { authRateLimit } from '../../middlewares/rateLimit.js';
-import { loginSchema, profileSchema, registerSchema } from './schemas.js';
-import { changePassword, deleteAccount, loginUser, registerUser, updateProfileAddress } from './service.js';
-import { logEvent } from '../../utils/logger.js';
 import { authenticate } from '../../middlewares/auth.js';
-import { z } from 'zod';
+import { validate } from '../../middlewares/validate.js';
+import { registerSchema, loginSchema } from './schemas.js';
+import { registerUser, loginUser, updateProfileAddress, changePassword, deleteAccount } from './service.js';
+import { AppError } from '../../utils/errors.js';
 
 const router = Router();
 
-router.post('/register', authRateLimit, validate(registerSchema), async (req, res, next) => {
+/* ── POST /auth/register ── */
+router.post('/register', validate(registerSchema), async (req, res, next) => {
   try {
-    const user = await registerUser(req.validatedBody);
-    logEvent('auth.register', { userId: user.id, role: user.role });
-    res.status(201).json({ user });
-  } catch (error) { next(error); }
+    // Registro público de admin bloqueado — solo el dashboard de admin puede crear admins
+    if (req.body.role === 'admin') return next(new AppError(403, 'El registro de administradores no está disponible públicamente'));
+    const user = await registerUser(req.body);
+    return res.status(201).json({ user });
+  } catch (error) { return next(error); }
 });
 
-router.post('/login', authRateLimit, validate(loginSchema), async (req, res, next) => {
+/* ── POST /auth/login ── */
+router.post('/login', validate(loginSchema), async (req, res, next) => {
   try {
-    const data = await loginUser(req.validatedBody);
-    logEvent('auth.login', { userId: data.user.id });
-    res.json(data);
-  } catch (error) { next(error); }
+    const result = await loginUser(req.body);
+    return res.json(result);
+  } catch (error) { return next(error); }
 });
 
-// Sugerencia: Añadir validación al perfil también
-router.patch('/profile', authenticate, validate(profileSchema), async (req, res, next) => {
+/* ── PATCH /auth/profile ── */
+router.patch('/profile', authenticate, async (req, res, next) => {
   try {
-    const { address, displayName } = req.validatedBody; // Usar validatedBody para mayor seguridad
-    const result = await updateProfileAddress(req.user.userId, req.user.role, address, displayName);
-    res.json({ profile: result });
-  } catch (error) { next(error); }
+    const { address, displayName } = req.body || {};
+    const profile = await updateProfileAddress(req.user.userId, req.user.role, address, displayName);
+    return res.json({ profile });
+  } catch (error) { return next(error); }
 });
 
+/* ── PATCH /auth/password ── */
 router.patch('/password', authenticate, async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body || {};
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
-    }
+    if (!newPassword || newPassword.length < 6) return next(new AppError(400, 'La nueva contraseña debe tener al menos 6 caracteres'));
     await changePassword(req.user.userId, currentPassword, newPassword);
-    res.json({ ok: true });
-  } catch (error) { next(error); }
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
 });
 
+/* ── DELETE /auth/account — bloqueado si hay pedidos pendientes ── */
 router.delete('/account', authenticate, async (req, res, next) => {
   try {
-    const data = await deleteAccount(req.user.userId);
-    logEvent('auth.account_deleted', { userId: req.user.userId });
-    res.json(data);
-  } catch (error) { next(error); }
+    await deleteAccount(req.user.userId, req.user.role);
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
 });
 
 export default router;

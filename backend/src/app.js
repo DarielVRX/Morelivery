@@ -10,6 +10,7 @@ import restaurantRoutes from './modules/restaurants/routes.js';
 import orderRoutes from './modules/orders/routes.js';
 import driverRoutes from './modules/drivers/routes.js';
 import adminRoutes from './modules/admin/routes.js';
+import eventRoutes from './modules/events/routes.js';
 import { errorHandler, notFoundHandler } from './middlewares/errorHandler.js';
 import { checkDbConnection } from './config/db.js';
 
@@ -23,63 +24,26 @@ function corsOrigin(origin, callback) {
 
 export function createApp() {
   const app = express();
+
   app.set('trust proxy', 1);
-  app.use(
-    cors({
-      origin: corsOrigin,
-      credentials: true
-    })
-  );
+
+  app.use(cors({ origin: corsOrigin, credentials: true }));
   app.use(helmet());
-  app.use(apiRateLimit);
+  // SSE no debe ser afectado por rate limit \u2014 excluir la ruta antes de aplicarlo
+  app.use((req, res, next) => {
+    if (req.path === '/api/events' || req.path === '/events') return next();
+    return apiRateLimit(req, res, next);
+  });
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
 
-  app.get('/', (_req, res) => {
-    res.json({
-      service: 'morelivery-api',
-      status: 'online',
-      docs: {
-        health: '/health',
-        healthDb: '/health/db',
-        auth: '/api/auth',
-        restaurants: '/api/restaurants',
-        orders: '/api/orders'
-      }
-    });
-  });
-
-  app.get('/health', (_req, res) => {
-    res.json({
-      status: 'ok',
-      service: 'morelivery-api',
-      env: env.nodeEnv,
-      allowedOrigins: env.allowedOrigins
-    });
-  });
-
+  app.get('/', (_req, res) => res.json({ service: 'morelivery-api', status: 'online' }));
+  app.get('/health', (_req, res) => res.json({ status: 'ok', env: env.nodeEnv }));
   app.get('/health/db', async (_req, res, next) => {
     try {
       const db = await checkDbConnection();
       return res.json({ status: 'ok', database: 'connected', now: db.now });
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  app.get('/api/_routes', (_req, res) => {
-    res.json({
-      routes: [
-        '/api/auth/register',
-        '/api/auth/login',
-        '/api/restaurants',
-        '/api/restaurants/:id/menu',
-        '/api/orders',
-        '/api/orders/my',
-        '/api/drivers/availability',
-        '/api/admin/orders'
-      ]
-    });
+    } catch (error) { return next(error); }
   });
 
   app.use('/api/auth', authRoutes);
@@ -87,12 +51,15 @@ export function createApp() {
   app.use('/api/orders', orderRoutes);
   app.use('/api/drivers', driverRoutes);
   app.use('/api/admin', adminRoutes);
+  app.use('/api/events', eventRoutes);   // \u2190 SSE
 
+  // Aliases sin /api/ para compatibilidad con c\u00f3digo existente
   app.use('/auth', authRoutes);
   app.use('/restaurants', restaurantRoutes);
   app.use('/orders', orderRoutes);
   app.use('/drivers', driverRoutes);
   app.use('/admin', adminRoutes);
+  app.use('/events', eventRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
