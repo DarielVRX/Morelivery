@@ -1,13 +1,32 @@
 import dotenv from 'dotenv';
-
 dotenv.config();
 
+/**
+ * Construye allowedOrigins combinando:
+ * - ALLOWED_ORIGINS explícito
+ * - FRONTEND_URL
+ * - localhost para desarrollo
+ */
 function parseAllowedOrigins() {
-  const csv = process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:5173';
-  return csv
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  const origins = [];
+
+  // 1. Lista explícita de ALLOWED_ORIGINS (coma-separada)
+  if (process.env.ALLOWED_ORIGINS) {
+    origins.push(...process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean));
+  }
+
+  // 2. FRONTEND_URL (producción)
+  if (process.env.FRONTEND_URL) {
+    origins.push(process.env.FRONTEND_URL.trim());
+  }
+
+  // 3. Siempre incluir localhost para desarrollo
+  if ((process.env.NODE_ENV || 'development') === 'development') {
+    origins.push('http://localhost:5173', 'http://localhost:3000');
+  }
+
+  // Eliminar duplicados
+  return Array.from(new Set(origins));
 }
 
 export const env = {
