@@ -13,7 +13,7 @@ const router = Router();
  * Compatible con Render (no requiere WebSockets).
  * Formato: text/event-stream est\u00e1ndar.
  */
-router.get('/', authenticate, (req, res) => {
+router.get('/', (req, res) => {
   // Headers SSE
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
