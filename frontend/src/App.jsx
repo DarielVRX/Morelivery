@@ -3,16 +3,23 @@ import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import CustomerHome from './pages/Customer/Home';
+import RestaurantPage from './pages/Customer/RestaurantPage';
 import RestaurantDashboard from './pages/Restaurant/Dashboard';
 import DriverDashboard from './pages/Driver/Dashboard';
 import AdminDashboard from './pages/Admin/Dashboard';
+import ProfilePage from './pages/Profile';
 import { apiFetch } from './api/client';
-import RestaurantPage from './pages/Customer/RestaurantPage';
 
 function ProtectedRole({ role, children }) {
   const { auth } = useAuth();
   if (!auth.user) return <Navigate to="/login" replace />;
   if (auth.user.role !== role) return <Navigate to={`/${auth.user.role}`} replace />;
+  return children;
+}
+
+function ProtectedAny({ children }) {
+  const { auth } = useAuth();
+  if (!auth.user) return <Navigate to="/login" replace />;
   return children;
 }
 
@@ -60,25 +67,24 @@ function AuthScreen({ mode = 'login' }) {
           : 'Crea tu cuenta indicando tipo de usuario y dirección.'}
       </p>
       <div className="row">
-        <input placeholder="usuario" value={username} onChange={(e) => setUsername(e.target.value)} />
-        <input type="password" placeholder="contraseña" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <input placeholder="usuario" value={username} onChange={e => setUsername(e.target.value)} />
+        <input type="password" placeholder="contraseña" value={password} onChange={e => setPassword(e.target.value)} />
         {!isLogin && (
-          <select value={role} onChange={(e) => setRole(e.target.value)}>
+          <select value={role} onChange={e => setRole(e.target.value)}>
             <option value="customer">cliente</option>
             <option value="restaurant">restaurante</option>
             <option value="driver">repartidor</option>
-            {/* admin eliminado del registro público */}
           </select>
         )}
       </div>
       {!isLogin && role === 'restaurant' && (
         <div className="row">
-          <input placeholder="Nombre del restaurante" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+          <input placeholder="Nombre del restaurante" value={displayName} onChange={e => setDisplayName(e.target.value)} />
         </div>
       )}
       {!isLogin && ['customer', 'restaurant'].includes(role) && (
         <div className="row">
-          <input placeholder="Dirección" value={address} onChange={(e) => setAddress(e.target.value)} />
+          <input placeholder="Dirección" value={address} onChange={e => setAddress(e.target.value)} />
         </div>
       )}
       <div className="row">
@@ -98,13 +104,23 @@ function AppRoutes() {
     <Layout>
       <Routes>
         <Route path="/" element={<Navigate to={auth.user ? `/${auth.user.role}` : '/login'} replace />} />
-        <Route path="/login" element={<AuthScreen mode="login" />} />
+        <Route path="/login"    element={<AuthScreen mode="login" />} />
         <Route path="/register" element={<AuthScreen mode="register" />} />
-        <Route path="/customer" element={<ProtectedRole role="customer"><CustomerHome /></ProtectedRole>} />
-        <Route path="/restaurant" element={<ProtectedRole role="restaurant"><RestaurantDashboard /></ProtectedRole>} />
-        <Route path="/driver" element={<ProtectedRole role="driver"><DriverDashboard /></ProtectedRole>} />
+
+        {/* Perfil — accesible para cualquier rol autenticado */}
+        <Route path="/profile" element={<ProtectedAny><ProfilePage /></ProtectedAny>} />
+
+        {/* Página individual de restaurante — accesible sin login (para ver menú) */}
         <Route path="/restaurant/:id" element={<RestaurantPage />} />
-        <Route path="/admin" element={<ProtectedRole role="admin"><AdminDashboard /></ProtectedRole>} />
+
+        {/* Paneles por rol */}
+        <Route path="/customer"   element={<ProtectedRole role="customer"><CustomerHome /></ProtectedRole>} />
+        <Route path="/restaurant" element={<ProtectedRole role="restaurant"><RestaurantDashboard /></ProtectedRole>} />
+        <Route path="/driver"     element={<ProtectedRole role="driver"><DriverDashboard /></ProtectedRole>} />
+        <Route path="/admin"      element={<ProtectedRole role="admin"><AdminDashboard /></ProtectedRole>} />
+
+        {/* Catch-all */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>
   );
