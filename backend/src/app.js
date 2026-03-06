@@ -15,11 +15,8 @@ import { errorHandler, notFoundHandler } from './middlewares/errorHandler.js';
 import { checkDbConnection } from './config/db.js';
 
 function corsOrigin(origin, callback) {
-  if (!origin) return callback(null, true);
-  if (env.allowedOrigins.length === 0 || env.allowedOrigins.includes('*')) return callback(null, true);
-  if (env.allowedOrigins.includes(origin)) return callback(null, true);
-  console.warn(`[cors] Origin not in allowlist, allowing for beta: ${origin}`);
-  return callback(null, true);
+  // Si no hay origen (como un test local) o es tu app de Vercel, permitir siempre
+  callback(null, true); 
 }
 
 export function createApp() {
@@ -28,8 +25,11 @@ export function createApp() {
   app.set('trust proxy', 1);
 
   app.use(cors({ origin: corsOrigin, credentials: true }));
-  app.use(helmet());
-  // SSE no debe ser afectado por rate limit \u2014 excluir la ruta antes de aplicarlo
+// Busca esta línea y cámbiala por esta configuración:
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: false
+}));
   app.use((req, res, next) => {
     if (req.path === '/api/events' || req.path === '/events') return next();
     return apiRateLimit(req, res, next);
