@@ -129,8 +129,6 @@ router.post('/offers/:orderId/accept', authenticate, authorize(['driver']), asyn
     return next(error);
   }
 });
-  }
-});
 
 /* \u2500\u2500 POST /drivers/offers/:orderId/reject \u2500\u2500 */
 router.post('/offers/:orderId/reject', authenticate, authorize(['driver']), async (req, res, next) => {

@@ -37,14 +37,22 @@ function ProductImage({ src, size = 68 }) {
 
 export default function RestaurantMenu() {
   const { auth } = useAuth();
+
   const [products, setProducts] = useState([]);
-  const [name, setName]         = useState('');
-  const [description, setDesc]  = useState('');
-  const [price, setPrice]       = useState('');
-  const [msg, setMsg]           = useState('');
-  const [editingImg, setEditingImg] = useState(null); // productId | null
-  const [imgUrl, setImgUrl]         = useState('');
-  const [savingImg, setSavingImg]   = useState(false);
+
+  // formulario
+  const [name, setName] = useState('');
+  const [description, setDesc] = useState('');
+  const [price, setPrice] = useState('');
+  const [msg, setMsg] = useState('');
+
+  // edición
+  const [editingId, setEditingId] = useState(null);
+
+  // imagen
+  const [editingImg, setEditingImg] = useState(null);
+  const [imgUrl, setImgUrl] = useState('');
+  const [savingImg, setSavingImg] = useState(false);
 
   async function load() {
     try {
@@ -53,150 +61,97 @@ export default function RestaurantMenu() {
     } catch (_) {}
   }
 
-  useEffect(() => { load(); }, [auth.token]);
+  useEffect(() => {
+    load();
+  }, [auth.token]);
 
-  async function addProduct() {
-    if (!name.trim()) return setMsg('El nombre es requerido');
-    const cents = Math.round(parseFloat(price.replace(',', '.')) * 100);
-    if (isNaN(cents) || cents <= 0) return setMsg('Precio inválido');
-    try {
-      await apiFetch('/restaurants/menu-items', {
-        method: 'POST',
-        body: JSON.stringify({ name: name.trim(), description: description.trim(), priceCents: cents })
-      }, auth.token);
-      setName(''); setDesc(''); setPrice(''); setMsg('');
-      load();
-    } catch (e) { setMsg(e.message); }
-  }
-
-  export default function RestaurantMenu() {
-    const { auth } = useAuth();
-    const [products, setProducts] = useState([]);
-
-    // Estado del formulario
-    const [name, setName]         = useState('');
-    const [description, setDesc]  = useState('');
-    const [price, setPrice]       = useState('');
-    const [msg, setMsg]           = useState('');
-
-    // Estado para controlar edición
-    const [editingId, setEditingId]   = useState(null); // ID del producto siendo editado
-    const [editingImg, setEditingImg] = useState(null);
-    const [imgUrl, setImgUrl]         = useState('');
-    const [savingImg, setSavingImg]   = useState(false);
-
-    async function load() {
-      try {
-        const d = await apiFetch('/restaurants/my/menu', {}, auth.token);
-        setProducts(d.menu || []);
-      } catch (_) {}
-    }
-
-    useEffect(() => { load(); }, [auth.token]);
-
-    // Función unificada para Crear o Actualizar
-    async function handleSubmit() {
-      if (!name.trim()) return setMsg('El nombre es requerido');
-      const cents = Math.round(parseFloat(price.toString().replace(',', '.')) * 100);
-      if (isNaN(cents) || cents <= 0) return setMsg('Precio inválido');
-
-      try {
-        const payload = { name: name.trim(), description: description.trim(), priceCents: cents };
-
-        if (editingId) {
-          // Modo Edición
-          await apiFetch(`/restaurants/menu-items/${editingId}`, {
-            method: 'PATCH',
-            body: JSON.stringify(payload)
-          }, auth.token);
-        } else {
-          // Modo Creación
-          await apiFetch('/restaurants/menu-items', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-          }, auth.token);
-        }
-
-        cancelEdit();
-        load();
-      } catch (e) { setMsg(e.message); }
-    }
-
-    function startEdit(product) {
-      setEditingId(product.id);
-      setName(product.name);
-      setDesc(product.description || '');
-      setPrice((product.price_cents / 100).toFixed(2));
-      setMsg('');
-      window.scrollTo({ top: 0, behavior: 'smooth' }); // Subir al formulario
-    }
-
-    function cancelEdit() {
-      setEditingId(null);
-      setName('');
-      setDesc('');
-      setPrice('');
-      setMsg('');
-    }
-
-  async function toggleAvailable(product) {
-    try {
-      await apiFetch(`/restaurants/menu-items/${product.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ name: product.name, description: product.description, priceCents: product.price_cents, isAvailable: !product.is_available })
-      }, auth.token);
-      load();
-    } catch (e) { setMsg(e.message); }
-  }
-
-  async function saveImage(productId) {
-    setSavingImg(true);
-    try {
-      await apiFetch(`/restaurants/menu-items/${productId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ imageUrl: imgUrl.trim() || null })
-      }, auth.token);
-      setEditingImg(null); setImgUrl('');
-      load();
-    } catch (e) { setMsg(e.message); }
-    finally { setSavingImg(false); }
-  }
-
-  // 1. Cargar datos del producto en el formulario
-  const startEdit = (product) => {
-    setEditingId(product.id);
-    setName(product.name);
-    setDesc(product.description || '');
-    setPrice((product.price_cents / 100).toFixed(2));
-    window.scrollTo({ top: 0, behavior: 'smooth' }); // Feedback visual: sube al formulario
-  };
-
-  // 2. Limpiar el formulario y salir del modo edición
-  const resetForm = () => {
-    setEditingId(null);
-    setName('');
-    setDesc('');
-    setPrice('');
-    setMsg('');
-  };
-
-  // 3. Manejador unificado (Sustituye a addProduct)
+  // crear o editar producto
   async function handleSubmit() {
     if (!name.trim()) return setMsg('El nombre es requerido');
+
     const cents = Math.round(parseFloat(price.toString().replace(',', '.')) * 100);
     if (isNaN(cents) || cents <= 0) return setMsg('Precio inválido');
 
     try {
-      const body = { name: name.trim(), description: description.trim(), priceCents: cents };
-      const url = editingId ? `/restaurants/menu-items/${editingId}` : '/restaurants/menu-items';
-      const method = editingId ? 'PATCH' : 'POST';
+      const payload = {
+        name: name.trim(),
+        description: description.trim(),
+        priceCents: cents
+      };
 
-      await apiFetch(url, { method, body: JSON.stringify(body) }, auth.token);
+      if (editingId) {
+        await apiFetch(`/restaurants/menu-items/${editingId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload)
+        }, auth.token);
+      } else {
+        await apiFetch('/restaurants/menu-items', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        }, auth.token);
+      }
 
       resetForm();
       load();
     } catch (e) {
       setMsg(e.message);
+    }
+  }
+
+  function startEdit(product) {
+    setEditingId(product.id);
+    setName(product.name);
+    setDesc(product.description || '');
+    setPrice((product.price_cents / 100).toFixed(2));
+    setMsg('');
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function resetForm() {
+    setEditingId(null);
+    setName('');
+    setDesc('');
+    setPrice('');
+    setMsg('');
+  }
+
+  async function toggleAvailable(product) {
+    try {
+      await apiFetch(`/restaurants/menu-items/${product.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: product.name,
+          description: product.description,
+          priceCents: product.price_cents,
+          isAvailable: !product.is_available
+        })
+      }, auth.token);
+
+      load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  }
+
+  async function saveImage(productId) {
+    setSavingImg(true);
+
+    try {
+      await apiFetch(`/restaurants/menu-items/${productId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          imageUrl: imgUrl.trim() || null
+        })
+      }, auth.token);
+
+      setEditingImg(null);
+      setImgUrl('');
+      load();
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setSavingImg(false);
     }
   }
 
