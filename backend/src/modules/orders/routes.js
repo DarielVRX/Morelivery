@@ -172,106 +172,115 @@ router.patch('/:id/suggest', authenticate, authorize(['restaurant']), validate(s
 });
 
 /* ── PATCH /:id/suggestion-response — acepta y ACTUALIZA el pedido original ── */
+/* ── PATCH /:id/suggestion-response — Acepta y ACTUALIZA el pedido original ── */
 router.patch('/:id/suggestion-response', authenticate, authorize(['customer']), validate(suggestionResponseSchema), async (req, res, next) => {
   try {
     const { accepted, items: clientItems } = req.validatedBody;
     const status = accepted ? 'accepted' : 'rejected';
 
-    // Cargar pedido completo
+    // 1. Cargar el pedido para verificar propiedad y obtener la sugerencia guardada
     const orderResult = await query(
       'SELECT * FROM orders WHERE id = $1 AND customer_id = $2',
       [req.params.id, req.user.userId]
     );
-    if (orderResult.rowCount === 0) return next(new AppError(404, 'Order not found'));
+    
+    if (orderResult.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
     const order = orderResult.rows[0];
 
-    // Marcar estado de sugerencia
-    await query(
-      `UPDATE orders SET suggestion_status = $1, updated_at = NOW() WHERE id = $2`,
-      [status, req.params.id]
-    );
-
-   /* ── PATCH /:id/suggestion-response ── */
-// ... (código previo de carga de order)
-
-if (accepted) {
-  let finalItems = [];
-
-  if (clientItems && clientItems.length > 0) {
-    // Escenario A: El cliente editó los items
-    const menuIds = clientItems.map(i => i.menuItemId);
-    const menuResult = await query(
-      `SELECT id, price_cents FROM menu_items WHERE id = ANY($1::uuid[])`,
-      [menuIds]
-    );
-    const priceMap = new Map(menuResult.rows.map(r => [r.id, r.price_cents]));
-
-    finalItems = clientItems
-      .filter(i => priceMap.has(i.menuItemId))
-      .map(i => ({
-        menuItemId: i.menuItemId,
-        quantity: Number(i.quantity),
-        unitPriceCents: priceMap.get(i.menuItemId)
-      }));
-  } else {
-    // Escenario B: El cliente aceptó la sugerencia original
+    // --- INICIO DE TRANSACCIÓN ---
     try {
-      // Aseguramos que suggestion_text sea un objeto
-      const parsed = typeof order.suggestion_text === 'string' 
-        ? JSON.parse(order.suggestion_text) 
-        : order.suggestion_text;
+      await query('BEGIN');
 
-      if (parsed?.items) {
-        finalItems = parsed.items.map(i => ({
-          menuItemId: i.menuItemId,
-          quantity: Number(i.quantity),
-          unitPriceCents: Number(i.unitPriceCents)
-        }));
-      }
-    } catch (e) {
-      return next(new AppError(400, 'Error al procesar los items de la sugerencia'));
-    }
-  }
-
-  if (finalItems.length === 0) {
-    return next(new AppError(400, 'No se encontraron items válidos para actualizar'));
-  }
-
-  // --- INICIO DE TRANSACCIÓN MANUAL ---
-  try {
-    await query('BEGIN');
-
-    // 1. Limpiar items anteriores
-    await query('DELETE FROM order_items WHERE order_id = $1', [req.params.id]);
-
-    // 2. Insertar nuevos y calcular total
-    let newTotal = 0;
-    for (const item of finalItems) {
+      // 2. Actualizar el estado de la sugerencia
       await query(
-        'INSERT INTO order_items(order_id, menu_item_id, quantity, unit_price_cents) VALUES($1, $2, $3, $4)',
-        [req.params.id, item.menuItemId, item.quantity, item.unitPriceCents]
+        `UPDATE orders SET suggestion_status = $1, updated_at = NOW() WHERE id = $2`,
+        [status, req.params.id]
       );
-      newTotal += item.unitPriceCents * item.quantity;
+
+      if (accepted) {
+        let finalItems = [];
+
+        if (clientItems && clientItems.length > 0) {
+          // ESCENARIO A: El cliente editó los items (Validamos precios vigentes en DB)
+          const menuIds = clientItems.map(i => i.menuItemId);
+          const menuResult = await query(
+            `SELECT id, price_cents FROM menu_items WHERE id = ANY($1::uuid[])`,
+            [menuIds]
+          );
+          const priceMap = new Map(menuResult.rows.map(r => [r.id, r.price_cents]));
+
+          finalItems = clientItems
+            .filter(i => priceMap.has(i.menuItemId))
+            .map(i => ({
+              menuItemId: i.menuItemId,
+              quantity: Number(i.quantity),
+              unitPriceCents: priceMap.get(i.menuItemId)
+            }));
+        } else {
+          // ESCENARIO B: Aceptó la sugerencia original guardada en el JSON
+          const parsed = typeof order.suggestion_text === 'string' 
+            ? JSON.parse(order.suggestion_text) 
+            : order.suggestion_text;
+
+          if (parsed?.items) {
+            finalItems = parsed.items.map(i => ({
+              menuItemId: i.menuItemId,
+              quantity: Number(i.quantity),
+              unitPriceCents: Number(i.unitPriceCents)
+            }));
+          }
+        }
+
+        if (finalItems.length === 0) {
+          throw new AppError(400, 'No se encontraron productos válidos para procesar');
+        }
+
+        // 3. Reemplazo físico de los items (Atomicidad)
+        await query('DELETE FROM order_items WHERE order_id = $1', [req.params.id]);
+
+        let newTotal = 0;
+        for (const item of finalItems) {
+          await query(
+            'INSERT INTO order_items(order_id, menu_item_id, quantity, unit_price_cents) VALUES($1, $2, $3, $4)',
+            [req.params.id, item.menuItemId, item.quantity, item.unitPriceCents]
+          );
+          newTotal += (item.unitPriceCents * item.quantity);
+        }
+
+        // 4. Actualizar cabecera y LIMPIAR el suggestion_text para que deje de ser "sugerencia"
+        // y pase a ser el contenido oficial del pedido.
+        await query(
+          `UPDATE orders SET 
+             total_cents = $1, 
+             suggestion_text = NULL, 
+             updated_at = NOW() 
+           WHERE id = $2`,
+          [newTotal, req.params.id]
+        );
+      }
+
+      await query('COMMIT');
+
+      // 5. Registro y Respuesta
+      logEvent('order.suggestion_processed', { 
+        orderId: req.params.id, 
+        accepted, 
+        customerId: req.user.userId 
+      });
+
+      // Importante: Devolver el pedido fresco
+      const updatedOrder = await query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
+      return res.json({ order: updatedOrder.rows[0] });
+
+    } catch (txError) {
+      await query('ROLLBACK');
+      throw txError;
     }
-
-    // 3. Actualizar la cabecera del pedido
-    await query(
-      'UPDATE orders SET total_cents = $1, updated_at = NOW() WHERE id = $2',
-      [newTotal, req.params.id]
-    );
-
-    await query('COMMIT');
-    
-    logEvent('order.suggestion_accepted', { 
-      orderId: req.params.id, 
-      newTotal, 
-      editedByCustomer: !!(clientItems && clientItems.length > 0) 
-    });
   } catch (error) {
-    await query('ROLLBACK');
-    throw error; // El catch general lo manejará
+    return next(error);
   }
-}
+});
+
 /* ── POST /:id/complaint ── */
 router.post('/:id/complaint', authenticate, authorize(['customer']), async (req, res, next) => {
   try {
