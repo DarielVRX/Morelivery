@@ -1,12 +1,13 @@
 import { Router } from 'express';
-import { validate } from '../../middlewares/validate.js';
+// CORRECCIÓN: Eliminamos 'validateBody' y usamos solo 'validate' 
+// que es lo que realmente exporta tu middleware.
+import { validate } from '../../middlewares/validate.js'; 
 import { authRateLimit } from '../../middlewares/rateLimit.js';
 import { loginSchema, profileSchema, registerSchema } from './schemas.js';
 import { changePassword, deleteAccount, loginUser, registerUser, updateProfileAddress } from './service.js';
 import { logEvent } from '../../utils/logger.js';
 import { authenticate } from '../../middlewares/auth.js';
 import { z } from 'zod';
-import { validateBody } from '../../middlewares/validate.js';
 
 const router = Router();
 
@@ -26,9 +27,10 @@ router.post('/login', authRateLimit, validate(loginSchema), async (req, res, nex
   } catch (error) { next(error); }
 });
 
-router.patch('/profile', authenticate, async (req, res, next) => {
+// Sugerencia: Añadir validación al perfil también
+router.patch('/profile', authenticate, validate(profileSchema), async (req, res, next) => {
   try {
-    const { address, displayName } = req.body || {};
+    const { address, displayName } = req.validatedBody; // Usar validatedBody para mayor seguridad
     const result = await updateProfileAddress(req.user.userId, req.user.role, address, displayName);
     res.json({ profile: result });
   } catch (error) { next(error); }
