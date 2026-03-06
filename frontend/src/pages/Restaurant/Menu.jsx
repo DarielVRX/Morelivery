@@ -162,6 +162,44 @@ export default function RestaurantMenu() {
     finally { setSavingImg(false); }
   }
 
+  // 1. Cargar datos del producto en el formulario
+  const startEdit = (product) => {
+    setEditingId(product.id);
+    setName(product.name);
+    setDesc(product.description || '');
+    setPrice((product.price_cents / 100).toFixed(2));
+    window.scrollTo({ top: 0, behavior: 'smooth' }); // Feedback visual: sube al formulario
+  };
+
+  // 2. Limpiar el formulario y salir del modo edición
+  const resetForm = () => {
+    setEditingId(null);
+    setName('');
+    setDesc('');
+    setPrice('');
+    setMsg('');
+  };
+
+  // 3. Manejador unificado (Sustituye a addProduct)
+  async function handleSubmit() {
+    if (!name.trim()) return setMsg('El nombre es requerido');
+    const cents = Math.round(parseFloat(price.toString().replace(',', '.')) * 100);
+    if (isNaN(cents) || cents <= 0) return setMsg('Precio inválido');
+
+    try {
+      const body = { name: name.trim(), description: description.trim(), priceCents: cents };
+      const url = editingId ? `/restaurants/menu-items/${editingId}` : '/restaurants/menu-items';
+      const method = editingId ? 'PATCH' : 'POST';
+
+      await apiFetch(url, { method, body: JSON.stringify(body) }, auth.token);
+
+      resetForm();
+      load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  }
+
   return (
     <div style={{ backgroundColor: '#fff9f8', minHeight: '100vh', padding: '1rem' }}>
     <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem', color: '#8a5e5e' }}>Gestión de menú</h2>
