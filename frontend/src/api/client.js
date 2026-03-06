@@ -2,6 +2,9 @@
 
 export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
+// Evento global que AuthContext escucha para hacer logout automático cuando el JWT expira
+export const AUTH_EXPIRED_EVENT = 'morelivery:auth_expired';
+
 export async function apiFetch(path, options = {}, token = null) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -9,6 +12,10 @@ export async function apiFetch(path, options = {}, token = null) {
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
   if (!res.ok) {
+    // Token expirado o inválido — disparar evento global para que AuthContext haga logout
+    if (res.status === 401 && token) {
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    }
     let message = `Error ${res.status}`;
     try {
       const body = await res.json();
@@ -17,7 +24,7 @@ export async function apiFetch(path, options = {}, token = null) {
     throw new Error(message);
   }
 
-  // SSE y respuestas vac\u00edas no son JSON
+  // SSE y respuestas vacías no son JSON
   const ct = res.headers.get('content-type') || '';
   if (!ct.includes('application/json')) return res;
 

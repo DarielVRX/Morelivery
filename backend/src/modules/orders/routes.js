@@ -84,7 +84,7 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
     let totalCents = 0;
     for (const item of items) {
       const m = await query('SELECT price_cents FROM menu_items WHERE id=$1 AND restaurant_id=$2', [item.menuItemId, restaurantId]);
-      if (m.rowCount === 0) return next(new AppError(400, 'Invalid menu item'));
+      if (m.rowCount === 0) return next(new AppError(400, 'Producto del menú no encontrado'));
       totalCents += m.rows[0].price_cents * item.quantity;
     }
 
@@ -121,15 +121,39 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
 router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admin']), validate(updateOrderStatusSchema), async (req, res, next) => {
   try {
     const current = await query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
-    if (current.rowCount === 0) return next(new AppError(404, 'Order not found'));
+    if (current.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
 
+    const order = current.rows[0];
     const nextStatus = req.validatedBody.status;
-    let driverNote     = current.rows[0].driver_note;
-    let restaurantNote = current.rows[0].restaurant_note;
 
-    if (req.user.role === 'driver' && nextStatus === 'on_the_way' && current.rows[0].status !== 'ready') {
-      return next(new AppError(409, 'El restaurante debe marcar el pedido como listo primero'));
+    // ── Validación de ownership por rol ──────────────────────────────────────
+    if (req.user.role === 'driver') {
+      if (order.driver_id !== req.user.userId)
+        return next(new AppError(403, 'No tienes permiso para modificar este pedido'));
     }
+    if (req.user.role === 'restaurant') {
+      // Verificar que el restaurante pertenece al usuario
+      const restCheck = await query(
+        'SELECT 1 FROM restaurants WHERE id=$1 AND owner_user_id=$2',
+        [order.restaurant_id, req.user.userId]
+      );
+      if (restCheck.rowCount === 0)
+        return next(new AppError(403, 'No tienes permiso para modificar este pedido'));
+    }
+
+    // ── Máquina de estados: transiciones válidas por rol ─────────────────────
+    const VALID = {
+      restaurant: { preparing: ['assigned','accepted'], ready: ['preparing'] },
+      driver:     { accepted: ['assigned'], on_the_way: ['ready'], delivered: ['on_the_way'] },
+      admin:      { assigned: '*', accepted: '*', preparing: '*', ready: '*', on_the_way: '*', delivered: '*', cancelled: '*' },
+    };
+    const allowed = VALID[req.user.role]?.[nextStatus];
+    if (!allowed) return next(new AppError(403, `El rol ${req.user.role} no puede establecer el estado '${nextStatus}'`));
+    if (allowed !== '*' && !allowed.includes(order.status))
+      return next(new AppError(409, `No se puede pasar de '${order.status}' a '${nextStatus}'`));
+
+    let driverNote     = order.driver_note;
+    let restaurantNote = order.restaurant_note;
     if (req.user.role === 'restaurant' && nextStatus === 'preparing') driverNote     = 'Restaurante: pedido en preparación';
     if (req.user.role === 'restaurant' && nextStatus === 'ready')     driverNote     = 'Restaurante: pedido listo para retiro';
     if (req.user.role === 'driver'     && nextStatus === 'on_the_way') restaurantNote = 'Driver: pedido en camino';
@@ -143,11 +167,11 @@ router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admi
       `UPDATE orders SET status=$1, driver_note=$2, restaurant_note=$3, updated_at=NOW()${tsClause} WHERE id=$4 RETURNING *`,
       [nextStatus, driverNote, restaurantNote, req.params.id]
     );
-    const order = result.rows[0];
-    orderEvents.emitOrderUpdate(order.id, order.status);
-    await notifyOrderParties(order.id, 'order_update', { orderId: order.id, status: order.status });
-    logEvent('order.status_changed', { orderId: order.id, status: order.status, actor: req.user.userId });
-    return res.json({ order });
+    const updated = result.rows[0];
+    orderEvents.emitOrderUpdate(updated.id, updated.status);
+    await notifyOrderParties(updated.id, 'order_update', { orderId: updated.id, status: updated.status });
+    logEvent('order.status_changed', { orderId: updated.id, status: updated.status, actor: req.user.userId });
+    return res.json({ order: updated });
   } catch (error) { return next(error); }
 });
 
@@ -159,7 +183,7 @@ router.patch('/:id/cancel', authenticate, authorize(['customer']), async (req, r
        WHERE id=$1 AND customer_id=$2 RETURNING *`,
       [req.params.id, req.user.userId]
     );
-    if (result.rowCount === 0) return next(new AppError(404, 'Order not found'));
+    if (result.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
     await notifyOrderParties(req.params.id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
     return res.json({ order: result.rows[0] });
   } catch (error) { return next(error); }
@@ -175,7 +199,7 @@ router.patch('/:id/suggest', authenticate, authorize(['restaurant']), validate(s
        WHERE mi.id = ANY($1::uuid[]) AND r.owner_user_id = $2`,
       [menuIds, req.user.userId]
     );
-    if (menuResult.rowCount !== menuIds.length) return next(new AppError(400, 'Invalid suggestion menu items'));
+    if (menuResult.rowCount !== menuIds.length) return next(new AppError(400, 'Productos de la sugerencia no válidos'));
 
     const menuMap = new Map(menuResult.rows.map(r => [r.id, r]));
     const suggestion = {
@@ -193,7 +217,7 @@ router.patch('/:id/suggest', authenticate, authorize(['restaurant']), validate(s
        WHERE id=$2 AND restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id=$3) RETURNING *`,
       [JSON.stringify(suggestion), req.params.id, req.user.userId]
     );
-    if (result.rowCount === 0) return next(new AppError(404, 'Order not found'));
+    if (result.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
     sseHub.sendToUser(result.rows[0].customer_id, 'order_update', { orderId: req.params.id, action: 'suggestion_received' });
     return res.json({ order: result.rows[0] });
   } catch (error) { return next(error); }
@@ -251,7 +275,7 @@ router.post('/:id/complaint', authenticate, authorize(['customer']), async (req,
     const { text } = req.body || {};
     if (!text?.trim()) return next(new AppError(400, 'El texto de la queja es requerido'));
     const orderCheck = await query('SELECT id FROM orders WHERE id=$1 AND customer_id=$2', [req.params.id, req.user.userId]);
-    if (orderCheck.rowCount === 0) return next(new AppError(404, 'Order not found'));
+    if (orderCheck.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
     try {
       await query(`INSERT INTO order_complaints(order_id, customer_id, text, created_at) VALUES($1,$2,$3,NOW())`, [req.params.id, req.user.userId, text.trim()]);
     } catch (e) {

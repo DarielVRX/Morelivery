@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
-import { offerOrdersToDriver, expireTimedOutOffers } from '../orders/assignment.js';
+import { offerOrdersToDriver, expireTimedOutOffers, acceptOffer, rejectOffer, releaseOrder } from '../orders/assignment.js';
 import { sseHub } from '../events/hub.js';
 import { AppError } from '../../utils/errors.js';
 
@@ -30,7 +30,7 @@ router.patch('/availability', authenticate, authorize(['driver']), async (req, r
       'UPDATE driver_profiles SET is_available = $1 WHERE user_id = $2 RETURNING *',
       [Boolean(isAvailable), req.user.userId]
     );
-    if (result.rowCount === 0) return next(new AppError(404, 'Driver profile not found'));
+    if (result.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
 
     if (isAvailable) {
       // Al volver disponible, intentar asignar pedidos en espera
@@ -96,36 +96,30 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
   }
 });
 
-/* \u2500\u2500 POST /drivers/offers/:orderId/accept \u2500\u2500 */
+/* ── POST /drivers/offers/:orderId/accept ── */
 router.post('/offers/:orderId/accept', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
-    // Verificar que la oferta existe y sigue pendiente
+    // Verificar que la oferta existe y sigue pendiente antes de intentar el mutex
     const offer = await query(
-      `SELECT * FROM order_driver_offers WHERE order_id = $1 AND driver_id = $2 AND status = 'pending'`,
+      `SELECT 1 FROM order_driver_offers WHERE order_id = $1 AND driver_id = $2 AND status = 'pending'`,
       [req.params.orderId, req.user.userId]
     );
-    if (offer.rowCount === 0) return next(new AppError(404, 'Offer not found or already taken'));
+    if (offer.rowCount === 0) return next(new AppError(404, 'Oferta no encontrada o ya tomada por otro driver'));
 
-    // Asignar driver al pedido
-    await query(
-      `UPDATE orders SET driver_id = $1, status = 'assigned', updated_at = NOW() WHERE id = $2 AND driver_id IS NULL`,
-      [req.user.userId, req.params.orderId]
-    );
-
-    // Marcar oferta como aceptada, rechazar las dem\u00e1s para este pedido
-    await query(`UPDATE order_driver_offers SET status = 'accepted' WHERE order_id = $1 AND driver_id = $2`, [req.params.orderId, req.user.userId]);
-    await query(`UPDATE order_driver_offers SET status = 'rejected' WHERE order_id = $1 AND driver_id != $2`, [req.params.orderId, req.user.userId]);
+    // acceptOffer usa FOR UPDATE SKIP LOCKED — evita doble asignación si dos drivers aceptan simultáneamente
+    const assigned = await acceptOffer(req.params.orderId, req.user.userId);
+    if (!assigned) return next(new AppError(409, 'El pedido ya fue tomado por otro driver'));
 
     // Notificar por SSE al restaurante y al cliente
     const orderInfo = await query(
-      `SELECT o.*, r.owner_user_id AS restaurant_owner_id
+      `SELECT o.customer_id, r.owner_user_id AS restaurant_owner_id
        FROM orders o JOIN restaurants r ON r.id = o.restaurant_id
        WHERE o.id = $1`,
       [req.params.orderId]
     );
     if (orderInfo.rowCount > 0) {
       const ord = orderInfo.rows[0];
-      const payload = { orderId: ord.id, status: 'assigned', driverId: req.user.userId };
+      const payload = { orderId: req.params.orderId, status: 'assigned', driverId: req.user.userId };
       sseHub.sendToUser(ord.customer_id, 'order_update', payload);
       sseHub.sendToUser(ord.restaurant_owner_id, 'order_update', payload);
     }
@@ -135,17 +129,14 @@ router.post('/offers/:orderId/accept', authenticate, authorize(['driver']), asyn
     return next(error);
   }
 });
+  }
+});
 
 /* \u2500\u2500 POST /drivers/offers/:orderId/reject \u2500\u2500 */
 router.post('/offers/:orderId/reject', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
-    const { note } = req.body || {};
-    await query(
-      `UPDATE order_driver_offers SET status = 'rejected', updated_at = NOW() WHERE order_id = $1 AND driver_id = $2`,
-      [req.params.orderId, req.user.userId]
-    );
-    // Intentar ofrecer al siguiente
-    await expireTimedOutOffers();
+    // rejectOffer aplica cooldown de 5 min y busca al siguiente driver
+    await rejectOffer(req.params.orderId, req.user.userId);
     return res.json({ ok: true });
   } catch (error) {
     return next(error);
@@ -159,24 +150,18 @@ router.post('/orders/:orderId/release', authenticate, authorize(['driver']), asy
     const orderId = req.params.orderId;
     const driverId = req.user.userId;
 
-    const r = await query(
-      `UPDATE orders SET driver_id = NULL, status = 'pending_driver',
-       driver_note = $1, updated_at = NOW()
-       WHERE id = $2 AND driver_id = $3 RETURNING id`,
-      [note || null, orderId, driverId]
-    );
-    if (r.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado o no asignado a ti'));
+    // Guardar nota si la hay
+    if (note) {
+      try {
+        await query(
+          `UPDATE orders SET driver_note=$1, updated_at=NOW() WHERE id=$2 AND driver_id=$3`,
+          [note, orderId, driverId]
+        );
+      } catch (_) {}
+    }
 
-    // Marcar como released para no re-ofrecer al mismo driver
-    await query(
-      `UPDATE order_driver_offers SET status = 'released', updated_at = NOW()
-       WHERE order_id = $1 AND driver_id = $2`,
-      [orderId, driverId]
-    );
-
-    // Re-ofrecer a otros drivers
-    try { await expireTimedOutOffers(); } catch (_) {}
-
+    // releaseOrder aplica cooldown, libera el pedido y busca siguiente driver
+    await releaseOrder(orderId, driverId);
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });

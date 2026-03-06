@@ -17,7 +17,7 @@ export async function registerUser(payload) {
   const pseudoEmail = pseudoEmailFromUsername(username);
 
   const existing = await query('SELECT id FROM users WHERE email = $1', [pseudoEmail]);
-  if (existing.rowCount > 0) throw new AppError(409, 'Username already registered');
+  if (existing.rowCount > 0) throw new AppError(409, 'Ese nombre de usuario ya está registrado');
 
   const passwordHash = await bcrypt.hash(payload.password, 12);
   const userAddress = payload.role === 'customer' ? payload.address || null : null;
@@ -113,21 +113,31 @@ export async function loginUser(payload) {
 
 export async function updateProfileAddress(userId, role, address, displayName) {
   if (role === 'restaurant') {
-    const updates = [];
-    if (address !== undefined) {
-      try { await query('UPDATE restaurants SET address = $1 WHERE owner_user_id = $2', [address, userId]); } catch (e) { if (e?.code !== '42703') throw e; }
+    if (address !== undefined && address !== null) {
+      try { await query('UPDATE restaurants SET address = $1 WHERE owner_user_id = $2', [address, userId]); }
+      catch (e) { if (e?.code !== '42703') throw e; }
     }
-    if (displayName) {
+    if (displayName !== undefined && displayName !== null) {
+      // Guardar tal como viene (preservar mayúsculas)
       const cleanName = cleanRestaurantName(displayName);
       try {
         await query('UPDATE restaurants SET name = $1 WHERE owner_user_id = $2', [cleanName, userId]);
-        await query('UPDATE users SET full_name = $1 WHERE id = $2', [displayName.trim().toLowerCase(), userId]);
+        // full_name en users también con el valor original
+        await query('UPDATE users SET full_name = $1 WHERE id = $2', [displayName.trim(), userId]);
       } catch (e) { if (e?.code !== '42703') throw e; }
     }
     return { address, displayName };
   }
-  try { await query('UPDATE users SET address = $1 WHERE id = $2', [address, userId]); } catch (e) { if (e?.code !== '42703') throw e; }
-  return { address };
+  // customer / driver
+  if (displayName !== undefined && displayName !== null) {
+    try { await query('UPDATE users SET full_name = $1 WHERE id = $2', [displayName.trim(), userId]); }
+    catch (e) { if (e?.code !== '42703') throw e; }
+  }
+  if (address !== undefined && address !== null) {
+    try { await query('UPDATE users SET address = $1 WHERE id = $2', [address, userId]); }
+    catch (e) { if (e?.code !== '42703') throw e; }
+  }
+  return { address, displayName };
 }
 
 export async function changePassword(userId, currentPassword, newPassword) {

@@ -62,7 +62,7 @@ router.get('/orders', authenticate, authorize(['admin']), async (req, res, next)
 router.get('/metrics', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
     const days = Math.max(1, Math.min(90, parseInt(req.query.days) || 7));
-    const interval = `INTERVAL '${days} days'`;
+    // days está sanitizado con parseInt + clamp (1-90), seguro para interpolar como entero
 
     const [summary, timings, byRestaurant, byDriver, byCustomer, byHour] = await Promise.all([
 
@@ -73,7 +73,7 @@ router.get('/metrics', authenticate, authorize(['admin']), async (req, res, next
         COUNT(*) FILTER (WHERE status NOT IN ('delivered','cancelled'))::int AS active,
         ROUND(AVG(total_cents) FILTER (WHERE status='delivered'))::int       AS avg_ticket_cents,
         COALESCE(SUM(total_cents) FILTER (WHERE status='delivered'),0)::bigint AS revenue_cents
-        FROM orders WHERE created_at > NOW() - ${interval}`),
+        FROM orders WHERE created_at > NOW() - (${days}::int * INTERVAL '1 day')`),
 
       query(`SELECT
         ROUND(AVG(EXTRACT(EPOCH FROM (accepted_at   - created_at))  /60))::int AS avg_min_to_accept,
@@ -82,7 +82,7 @@ router.get('/metrics', authenticate, authorize(['admin']), async (req, res, next
         ROUND(AVG(EXTRACT(EPOCH FROM (picked_up_at  - ready_at))    /60))::int AS avg_min_to_pickup,
         ROUND(AVG(EXTRACT(EPOCH FROM (delivered_at  - picked_up_at))/60))::int AS avg_min_to_deliver,
         ROUND(AVG(EXTRACT(EPOCH FROM (delivered_at  - created_at))  /60))::int AS avg_total_min
-        FROM orders WHERE status='delivered' AND created_at > NOW() - ${interval}`),
+        FROM orders WHERE status='delivered' AND created_at > NOW() - (${days}::int * INTERVAL '1 day')`),
 
       query(`SELECT r.id, r.name,
         COUNT(o.id)::int                                               AS total_orders,
@@ -91,7 +91,7 @@ router.get('/metrics', authenticate, authorize(['admin']), async (req, res, next
         ROUND(AVG(o.total_cents) FILTER (WHERE o.status='delivered'))::int AS avg_ticket_cents,
         COALESCE(SUM(o.total_cents) FILTER (WHERE o.status='delivered'),0)::bigint AS revenue_cents,
         ROUND(AVG(EXTRACT(EPOCH FROM (o.delivered_at - o.created_at))/60) FILTER (WHERE o.status='delivered'))::int AS avg_total_min
-        FROM restaurants r LEFT JOIN orders o ON o.restaurant_id=r.id AND o.created_at > NOW() - ${interval}
+        FROM restaurants r LEFT JOIN orders o ON o.restaurant_id=r.id AND o.created_at > NOW() - (${days}::int * INTERVAL '1 day')
         GROUP BY r.id, r.name ORDER BY total_orders DESC`),
 
       query(`SELECT d.id, d.full_name AS name,
@@ -103,7 +103,7 @@ router.get('/metrics', authenticate, authorize(['admin']), async (req, res, next
         COUNT(odo.id) FILTER (WHERE odo.status='rejected')::int        AS total_rejections,
         COUNT(odo.id) FILTER (WHERE odo.status='expired')::int         AS total_expirations
         FROM users d JOIN driver_profiles dp ON dp.user_id=d.id
-        LEFT JOIN orders o ON o.driver_id=d.id AND o.created_at > NOW() - ${interval}
+        LEFT JOIN orders o ON o.driver_id=d.id AND o.created_at > NOW() - (${days}::int * INTERVAL '1 day')
         LEFT JOIN order_driver_offers odo ON odo.driver_id=d.id
         WHERE d.role='driver'
         GROUP BY d.id, d.full_name, dp.is_available, dp.vehicle_type
@@ -114,12 +114,12 @@ router.get('/metrics', authenticate, authorize(['admin']), async (req, res, next
         COUNT(o.id) FILTER (WHERE o.status='delivered')::int           AS delivered,
         COUNT(o.id) FILTER (WHERE o.status='cancelled')::int           AS cancelled,
         COALESCE(SUM(o.total_cents) FILTER (WHERE o.status='delivered'),0)::bigint AS total_spent_cents
-        FROM users c LEFT JOIN orders o ON o.customer_id=c.id AND o.created_at > NOW() - ${interval}
+        FROM users c LEFT JOIN orders o ON o.customer_id=c.id AND o.created_at > NOW() - (${days}::int * INTERVAL '1 day')
         WHERE c.role='customer'
         GROUP BY c.id, c.full_name ORDER BY total_orders DESC LIMIT 50`),
 
       query(`SELECT EXTRACT(HOUR FROM created_at)::int AS hour, COUNT(*)::int AS orders
-        FROM orders WHERE created_at > NOW() - ${interval}
+        FROM orders WHERE created_at > NOW() - (${days}::int * INTERVAL '1 day')
         GROUP BY hour ORDER BY hour`),
     ]);
 
@@ -153,7 +153,7 @@ router.get('/users', authenticate, authorize(['admin']), async (req, res, next) 
 router.patch('/users/:id/status', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
     const { status } = req.body;
-    if (!['active','suspended'].includes(status)) return next(new AppError(400, 'Status inválido'));
+    if (!['active','suspended'].includes(status)) return next(new AppError(400, 'Estado inválido, debe ser active o suspended'));
     await query('UPDATE users SET status=$1 WHERE id=$2', [status, req.params.id]);
     return res.json({ ok: true });
   } catch (error) { return next(error); }
@@ -171,7 +171,7 @@ router.post('/register', authenticate, authorize(['admin']), async (req, res, ne
 router.patch('/orders/:id/status', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
     const { status, note } = req.body || {};
-    if (!status) return next(new AppError(400, 'status requerido'));
+    if (!status) return next(new AppError(400, 'El campo status es requerido'));
     const tsCol = { accepted:'accepted_at', preparing:'preparing_at', ready:'ready_at', on_the_way:'picked_up_at', delivered:'delivered_at', cancelled:'cancelled_at' }[status];
     const tsClause = tsCol ? `, ${tsCol} = NOW()` : '';
     await query(
