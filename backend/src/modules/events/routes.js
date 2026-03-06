@@ -21,6 +21,12 @@ router.get('/', authenticate, (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no'); // Nginx/Render: no bufferizar
   res.flushHeaders();
 
+  // Validación de seguridad
+  if (!req.user) {
+    console.error("Autenticación fallida: req.user no definido");
+    return res.end(); // Cerrar conexión si no hay usuario
+  }
+
   const userId = req.user.userId;
   const role = req.user.role;
 
