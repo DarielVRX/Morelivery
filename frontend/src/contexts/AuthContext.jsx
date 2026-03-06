@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 const AuthContext = createContext(null);
 const STORAGE_KEY = 'morelivery_auth_v1';
@@ -17,24 +17,31 @@ function loadStoredAuth() {
 
 export function AuthProvider({ children }) {
   const [auth, setAuth] = useState(() => loadStoredAuth());
+  const persistTimer = useRef(null);
 
+  // Escritura a localStorage diferida \u2014 evita bloquear el hilo principal en cada keystroke
+  // (el AuthContext re-renderiza cuando cambia auth.user, y antes escrib\u00eda a localStorage en cada render)
   useEffect(() => {
-    if (auth?.token && auth?.user) {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
-    } else {
-      window.localStorage.removeItem(STORAGE_KEY);
-    }
+    clearTimeout(persistTimer.current);
+    persistTimer.current = setTimeout(() => {
+      try {
+        if (auth?.token && auth?.user) {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
+        } else {
+          window.localStorage.removeItem(STORAGE_KEY);
+        }
+      } catch (_) {}
+    }, 300);
+    return () => clearTimeout(persistTimer.current);
   }, [auth]);
 
-  const value = useMemo(
-    () => ({
-      auth,
-      login: (payload) => setAuth(payload),
-      logout: () => setAuth({ token: '', user: null }),
-      patchUser: (patch) => setAuth((prev) => ({ ...prev, user: { ...(prev.user || {}), ...patch } }))
-    }),
-    [auth]
-  );
+  const login = useCallback((payload) => setAuth(payload), []);
+  const logout = useCallback(() => setAuth({ token: '', user: null }), []);
+  const patchUser = useCallback((patch) =>
+    setAuth(prev => ({ ...prev, user: { ...(prev.user || {}), ...patch } }))
+  , []);
+
+  const value = useMemo(() => ({ auth, login, logout, patchUser }), [auth, login, logout, patchUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
