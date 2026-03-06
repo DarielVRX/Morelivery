@@ -69,6 +69,76 @@ export default function RestaurantMenu() {
     } catch (e) { setMsg(e.message); }
   }
 
+  export default function RestaurantMenu() {
+    const { auth } = useAuth();
+    const [products, setProducts] = useState([]);
+
+    // Estado del formulario
+    const [name, setName]         = useState('');
+    const [description, setDesc]  = useState('');
+    const [price, setPrice]       = useState('');
+    const [msg, setMsg]           = useState('');
+
+    // Estado para controlar edición
+    const [editingId, setEditingId]   = useState(null); // ID del producto siendo editado
+    const [editingImg, setEditingImg] = useState(null);
+    const [imgUrl, setImgUrl]         = useState('');
+    const [savingImg, setSavingImg]   = useState(false);
+
+    async function load() {
+      try {
+        const d = await apiFetch('/restaurants/my/menu', {}, auth.token);
+        setProducts(d.menu || []);
+      } catch (_) {}
+    }
+
+    useEffect(() => { load(); }, [auth.token]);
+
+    // Función unificada para Crear o Actualizar
+    async function handleSubmit() {
+      if (!name.trim()) return setMsg('El nombre es requerido');
+      const cents = Math.round(parseFloat(price.toString().replace(',', '.')) * 100);
+      if (isNaN(cents) || cents <= 0) return setMsg('Precio inválido');
+
+      try {
+        const payload = { name: name.trim(), description: description.trim(), priceCents: cents };
+
+        if (editingId) {
+          // Modo Edición
+          await apiFetch(`/restaurants/menu-items/${editingId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload)
+          }, auth.token);
+        } else {
+          // Modo Creación
+          await apiFetch('/restaurants/menu-items', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          }, auth.token);
+        }
+
+        cancelEdit();
+        load();
+      } catch (e) { setMsg(e.message); }
+    }
+
+    function startEdit(product) {
+      setEditingId(product.id);
+      setName(product.name);
+      setDesc(product.description || '');
+      setPrice((product.price_cents / 100).toFixed(2));
+      setMsg('');
+      window.scrollTo({ top: 0, behavior: 'smooth' }); // Subir al formulario
+    }
+
+    function cancelEdit() {
+      setEditingId(null);
+      setName('');
+      setDesc('');
+      setPrice('');
+      setMsg('');
+    }
+
   async function toggleAvailable(product) {
     try {
       await apiFetch(`/restaurants/menu-items/${product.id}`, {
@@ -93,73 +163,93 @@ export default function RestaurantMenu() {
   }
 
   return (
-    <div>
-      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem' }}>Gestión de menú</h2>
+    <div style={{ backgroundColor: '#fff9f8', minHeight: '100vh', padding: '1rem' }}>
+    <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem', color: '#8a5e5e' }}>Gestión de menú</h2>
 
-      {/* Agregar producto */}
-      <div className="card" style={{ marginBottom:'1.25rem' }}>
-        <h3 style={{ fontSize:'0.88rem', fontWeight:700, marginBottom:'0.75rem' }}>Agregar producto</h3>
-        <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
-          <label>Nombre del producto<input value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Taco de pastor" /></label>
-          <label>Descripción (opcional)<input value={description} onChange={e => setDesc(e.target.value)} placeholder="Ej: Con cebolla y cilantro" /></label>
-          <label>Precio (pesos)<input value={price} onChange={e => setPrice(e.target.value)} placeholder="Ej: 35.00" inputMode="decimal" /></label>
-        </div>
-        {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
-        <button className="btn-primary" onClick={addProduct}>Agregar</button>
-      </div>
+    {/* Formulario Dinámico (Agregar/Editar) */}
+    <div className="card" style={{ marginBottom:'1.25rem', border: editingId ? '2px solid #e3aaaa' : '1px solid var(--gray-200)' }}>
+    <h3 style={{ fontSize:'0.88rem', fontWeight:700, marginBottom:'0.75rem' }}>
+    {editingId ? 'Modo Edición' : 'Agregar producto'}
+    </h3>
+    <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
+    <label>Nombre del producto<input value={name} onChange={e => setName(e.target.value)} /></label>
+    <label>Descripción (opcional)<input value={description} onChange={e => setDesc(e.target.value)} /></label>
+    <label>Precio (pesos)<input value={price} onChange={e => setPrice(e.target.value)} inputMode="decimal" /></label>
+    </div>
+    {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
 
-      {/* Lista de productos */}
-      {products.length === 0
-        ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin productos en el menú.</p>
-        : (
-          <ul style={{ listStyle:'none', padding:0 }}>
-            {products.map(product => (
-              <li key={product.id} className="card" style={{ marginBottom:'0.5rem', padding:'0.75rem' }}>
-                <div style={{ display:'flex', gap:'0.75rem', alignItems:'flex-start' }}>
-                  <ProductImage src={product.image_url} size={68} />
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'0.5rem', flexWrap:'wrap' }}>
-                      <span style={{ fontWeight:700, fontSize:'0.95rem' }}>{product.name}</span>
-                      <span style={{ fontWeight:700, color:'var(--gray-800)', flexShrink:0 }}>{fmt(product.price_cents)}</span>
-                    </div>
-                    {product.description && (
-                      <p style={{ fontSize:'0.82rem', color:'var(--gray-600)', margin:'0.15rem 0 0' }}>{product.description}</p>
-                    )}
-                    <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
-                      <button className="btn-sm" onClick={() => toggleAvailable(product)}>
-                        {product.is_available ? 'Desactivar' : 'Activar'}
-                      </button>
-                      <button className="btn-sm" onClick={() => { setEditingImg(product.id); setImgUrl(product.image_url || ''); }}>
-                        {product.image_url ? 'Cambiar imagen' : 'Agregar imagen'}
-                      </button>
-                    </div>
-                    {/* Editor de imagen */}
-                    {editingImg === product.id && (
-                      <div style={{ marginTop:'0.5rem', display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
-                        <input
-                          value={imgUrl}
-                          onChange={e => setImgUrl(e.target.value)}
-                          placeholder="URL de imagen (https://...)"
-                          style={{ flex:1, minWidth:180 }}
-                        />
-                        <button className="btn-primary btn-sm" disabled={savingImg} onClick={() => saveImage(product.id)}>
-                          {savingImg ? 'Guardando…' : 'Guardar'}
-                        </button>
-                        <button className="btn-sm" onClick={() => { setEditingImg(null); setImgUrl(''); }}>Cancelar</button>
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <span style={{ fontSize:'0.72rem', fontWeight:700, color: product.is_available ? 'var(--success)' : 'var(--gray-400)' }}>
-                      {product.is_available ? 'Activo' : 'Inactivo'}
-                    </span>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )
-      }
+    <div style={{ display: 'flex', gap: '0.5rem' }}>
+    <button
+    className="btn-primary"
+    onClick={handleSubmit}
+    style={{ backgroundColor: '#e3aaaa', borderColor: '#e3aaaa' }}
+    >
+    {editingId ? 'Guardar Cambios' : 'Agregar'}
+    </button>
+    {editingId && <button className="btn-sm" onClick={resetForm}>Cancelar</button>}
+    </div>
+    </div>
+
+    {/* Lista de productos */}
+    {products.length === 0
+      ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin productos en el menú.</p>
+      : (
+        <ul style={{ listStyle:'none', padding:0 }}>
+        {products.map(product => (
+          <li key={product.id} className="card" style={{ marginBottom:'0.5rem', padding:'0.75rem' }}>
+          <div style={{ display:'flex', gap:'0.75rem', alignItems:'flex-start' }}>
+          <ProductImage src={product.image_url} size={68} />
+          <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'0.5rem', flexWrap:'wrap' }}>
+          <span style={{ fontWeight:700, fontSize:'0.95rem' }}>{product.name}</span>
+          <span style={{ fontWeight:700, color:'#8a5e5e', flexShrink:0 }}>{fmt(product.price_cents)}</span>
+          </div>
+          {product.description && (
+            <p style={{ fontSize:'0.82rem', color:'var(--gray-600)', margin:'0.15rem 0 0' }}>{product.description}</p>
+          )}
+          <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
+          {/* BOTÓN EDITAR AGREGADO */}
+          <button className="btn-sm" onClick={() => startEdit(product)}>Editar</button>
+
+          <button className="btn-sm" onClick={() => toggleAvailable(product)}>
+          {product.is_available ? 'Desactivar' : 'Activar'}
+          </button>
+          <button className="btn-sm" onClick={() => { setEditingImg(product.id); setImgUrl(product.image_url || ''); }}>
+          {product.image_url ? 'Cambiar imagen' : 'Agregar imagen'}
+          </button>
+          </div>
+
+          {/* Editor de imagen */}
+          {editingImg === product.id && (
+            <div style={{ marginTop:'0.5rem', display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
+            <input
+            value={imgUrl}
+            onChange={e => setImgUrl(e.target.value)}
+            placeholder="URL de imagen (https://...)"
+            style={{ flex:1, minWidth:180 }}
+            />
+            <button
+            className="btn-primary btn-sm"
+            disabled={savingImg}
+            onClick={() => saveImage(product.id)}
+            style={{ backgroundColor: '#e3aaaa', borderColor: '#e3aaaa' }}
+            >
+            {savingImg ? '...' : 'OK'}
+            </button>
+            <button className="btn-sm" onClick={() => { setEditingImg(null); setImgUrl(''); }}>X</button>
+            </div>
+          )}
+          </div>
+          <div>
+          <span style={{ fontSize:'0.72rem', fontWeight:700, color: product.is_available ? 'var(--success)' : 'var(--gray-400)' }}>
+          {product.is_available ? 'Activo' : 'Inactivo'}
+          </span>
+          </div>
+          </div>
+          </li>
+        ))}
+        </ul>
+      )
+    }
     </div>
   );
-}
