@@ -55,10 +55,11 @@ a:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  text-decoration: none;
+  text-decoration: none !important;
   color: inherit;
   flex-shrink: 0;
 }
+.brand-block:hover { text-decoration: none !important; }
 .brand-block h1 {
   font-size: 1.1rem;
   font-weight: 800;
@@ -109,21 +110,26 @@ a:hover { text-decoration: underline; }
   font-weight: 700;
 }
 
-/* Session box */
-.session-box {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-.session-box .user-name {
+/* Username → Perfil button */
+.user-name-btn {
   font-size: 0.83rem;
-  font-weight: 600;
-  color: var(--gray-800);
-  max-width: 120px;
+  font-weight: 700;
+  color: var(--brand);
+  background: var(--brand-light);
+  border: 1px solid var(--brand);
+  border-radius: 20px;
+  padding: 0.3rem 0.85rem;
+  cursor: pointer;
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.user-name-btn:hover, .user-name-btn.active {
+  background: var(--brand);
+  color: #fff;
 }
 
 /* ── Contenido principal ───────────────────────────────────────────────────── */

@@ -128,13 +128,15 @@ export async function updateProfileAddress(userId, role, address, displayName) {
     }
     return { address, displayName };
   }
-  // customer / driver
-  if (displayName !== undefined && displayName !== null) {
-    try { await query('UPDATE users SET full_name = $1 WHERE id = $2', [displayName.trim(), userId]); }
-    catch (e) { if (e?.code !== '42703') throw e; }
-  }
-  if (address !== undefined && address !== null) {
-    try { await query('UPDATE users SET address = $1 WHERE id = $2', [address, userId]); }
+  // customer / driver / cualquier rol
+  const updates = [];
+  const vals = [];
+  let i = 1;
+  if (displayName !== undefined && displayName !== null) { updates.push(`full_name=$${i++}`); vals.push(displayName.trim()); }
+  if (address !== undefined && address !== null)         { updates.push(`address=$${i++}`);    vals.push(address); }
+  if (updates.length > 0) {
+    vals.push(userId);
+    try { await query(`UPDATE users SET ${updates.join(',')} WHERE id=$${i}`, vals); }
     catch (e) { if (e?.code !== '42703') throw e; }
   }
   return { address, displayName };

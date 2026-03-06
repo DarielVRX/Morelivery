@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useNavigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 
@@ -64,7 +64,8 @@ function AuthScreen({ mode = 'login' }) {
         body: JSON.stringify({ username, password })
       });
       login({ token: data.token, user: data.user });
-      navigate(`/${data.user.role}`);
+      const dest = data.user.role === 'restaurant' ? '/restaurant/pedidos' : `/${data.user.role}`;
+      navigate(dest);
     } catch (error) {
       setMessage(error.message);
     }
@@ -76,8 +77,8 @@ function AuthScreen({ mode = 'login' }) {
       <p>{isLogin ? 'Ingresa con tu usuario y contraseña.' : 'Completa los datos para registrarte.'}</p>
 
       <div className="row">
-        <label>Usuario<input placeholder="Tu nombre de usuario" value={username} onChange={e => setUsername(e.target.value)} /></label>
-        <label>Contraseña<input type="password" placeholder="Tu contraseña" value={password} onChange={e => setPassword(e.target.value)} /></label>
+        <label>Usuario<input placeholder="Tu nombre de usuario" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" /></label>
+        <label>Contraseña<input type="password" placeholder="Tu contraseña" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" /></label>
         {!isLogin && (
           <label>Tipo de cuenta
             <select value={role} onChange={e => setRole(e.target.value)}>
@@ -117,6 +118,19 @@ function AuthScreen({ mode = 'login' }) {
 
 function AppRoutes() {
   const { auth } = useAuth();
+  const location = useLocation();
+  const isAuthPage = ['/login', '/register'].includes(location.pathname);
+
+  // Auth pages NO usan el Layout (evita re-renders del header durante el typing)
+  if (isAuthPage) {
+    return (
+      <Routes>
+        <Route path="/login"    element={<AuthScreen mode="login" />} />
+        <Route path="/register" element={<AuthScreen mode="register" />} />
+      </Routes>
+    );
+  }
+
   return (
     <Layout>
       <Routes>

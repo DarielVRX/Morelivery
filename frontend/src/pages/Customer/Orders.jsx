@@ -82,8 +82,10 @@ export default function CustomerOrders() {
   );
 
   async function cancelOrder(orderId) {
+    const note = window.prompt('Motivo de cancelación (obligatorio):');
+    if (!note?.trim()) return;
     try {
-      await apiFetch(`/orders/${orderId}/cancel`, { method:'PATCH' }, auth.token);
+      await apiFetch(`/orders/${orderId}/cancel`, { method:'PATCH', body: JSON.stringify({ note }) }, auth.token);
       loadData();
     } catch (e) { setMsg(e.message); }
   }

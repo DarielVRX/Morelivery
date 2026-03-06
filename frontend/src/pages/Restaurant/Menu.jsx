@@ -6,15 +6,11 @@ function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
 function ProductImagePlaceholder({ size = 68 }) {
   return (
-    <div style={{
-      width: size, height: size, borderRadius: 6, background: 'var(--gray-100)',
-      border: '1px solid var(--gray-200)', display: 'flex', alignItems: 'center',
-      justifyContent: 'center', flexShrink: 0
-    }}>
-      <svg width={size * 0.5} height={size * 0.5} viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="1.5">
+    <div style={{ width:size, height:size, borderRadius:6, background:'var(--gray-100)', border:'1px solid var(--gray-200)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+      <svg width={size*0.5} height={size*0.5} viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="1.5">
         <circle cx="12" cy="12" r="9"/>
-        <path d="M8 12h8M12 8v8"/>
         <path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
+        <circle cx="12" cy="10" r="2"/>
       </svg>
     </div>
   );
@@ -24,35 +20,40 @@ function ProductImage({ src, size = 68 }) {
   const [err, setErr] = useState(false);
   if (!src || err) return <ProductImagePlaceholder size={size} />;
   return (
-    <img
-      src={src}
-      alt=""
-      width={size}
-      height={size}
-      onError={() => setErr(true)}
-      style={{ width: size, height: size, borderRadius: 6, objectFit: 'cover', border: '1px solid var(--gray-200)', flexShrink: 0 }}
-    />
+    <img src={src} alt="" width={size} height={size} onError={() => setErr(true)}
+      style={{ width:size, height:size, borderRadius:6, objectFit:'cover', border:'1px solid var(--gray-200)', flexShrink:0 }} />
   );
+}
+
+// Convierte archivo local a data-URL base64
+function useLocalImage() {
+  const [preview, setPreview] = useState(null);
+  const [dataUrl, setDataUrl]  = useState(null);
+  function pick(file) {
+    if (!file) { setPreview(null); setDataUrl(null); return; }
+    const reader = new FileReader();
+    reader.onload = e => { setPreview(e.target.result); setDataUrl(e.target.result); };
+    reader.readAsDataURL(file);
+  }
+  function clear() { setPreview(null); setDataUrl(null); }
+  return { preview, dataUrl, pick, clear };
 }
 
 export default function RestaurantMenu() {
   const { auth } = useAuth();
-
   const [products, setProducts] = useState([]);
-
-  // formulario
-  const [name, setName] = useState('');
-  const [description, setDesc] = useState('');
-  const [price, setPrice] = useState('');
-  const [msg, setMsg] = useState('');
-
-  // edición
+  const [name, setName]         = useState('');
+  const [description, setDesc]  = useState('');
+  const [price, setPrice]       = useState('');
+  const [msg, setMsg]           = useState('');
   const [editingId, setEditingId] = useState(null);
-
-  // imagen
+  const [formOpen, setFormOpen]   = useState(false); // colapsado por defecto
+  // Imagen
   const [editingImg, setEditingImg] = useState(null);
-  const [imgUrl, setImgUrl] = useState('');
-  const [savingImg, setSavingImg] = useState(false);
+  const [imgUrl, setImgUrl]         = useState('');
+  const [savingImg, setSavingImg]   = useState(false);
+  const { preview, dataUrl, pick, clear } = useLocalImage();
+  const fileRef = useRef(null);
 
   async function load() {
     try {
@@ -61,41 +62,22 @@ export default function RestaurantMenu() {
     } catch (_) {}
   }
 
-  useEffect(() => {
-    load();
-  }, [auth.token]);
+  useEffect(() => { load(); }, [auth.token]);
 
-  // crear o editar producto
   async function handleSubmit() {
     if (!name.trim()) return setMsg('El nombre es requerido');
-
     const cents = Math.round(parseFloat(price.toString().replace(',', '.')) * 100);
     if (isNaN(cents) || cents <= 0) return setMsg('Precio inválido');
-
     try {
-      const payload = {
-        name: name.trim(),
-        description: description.trim(),
-        priceCents: cents
-      };
-
+      const payload = { name: name.trim(), description: description.trim(), priceCents: cents };
       if (editingId) {
-        await apiFetch(`/restaurants/menu-items/${editingId}`, {
-          method: 'PATCH',
-          body: JSON.stringify(payload)
-        }, auth.token);
+        await apiFetch(`/restaurants/menu-items/${editingId}`, { method:'PATCH', body: JSON.stringify(payload) }, auth.token);
       } else {
-        await apiFetch('/restaurants/menu-items', {
-          method: 'POST',
-          body: JSON.stringify(payload)
-        }, auth.token);
+        await apiFetch('/restaurants/menu-items', { method:'POST', body: JSON.stringify(payload) }, auth.token);
       }
-
       resetForm();
       load();
-    } catch (e) {
-      setMsg(e.message);
-    }
+    } catch (e) { setMsg(e.message); }
   }
 
   function startEdit(product) {
@@ -104,146 +86,153 @@ export default function RestaurantMenu() {
     setDesc(product.description || '');
     setPrice((product.price_cents / 100).toFixed(2));
     setMsg('');
-
+    setFormOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function resetForm() {
-    setEditingId(null);
-    setName('');
-    setDesc('');
-    setPrice('');
-    setMsg('');
+    setEditingId(null); setName(''); setDesc(''); setPrice(''); setMsg('');
+    setFormOpen(false);
   }
 
   async function toggleAvailable(product) {
     try {
       await apiFetch(`/restaurants/menu-items/${product.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          name: product.name,
-          description: product.description,
-          priceCents: product.price_cents,
-          isAvailable: !product.is_available
-        })
+        method:'PATCH',
+        body: JSON.stringify({ name: product.name, description: product.description, priceCents: product.price_cents, isAvailable: !product.is_available })
       }, auth.token);
-
       load();
-    } catch (e) {
-      setMsg(e.message);
-    }
+    } catch (e) { setMsg(e.message); }
   }
 
   async function saveImage(productId) {
     setSavingImg(true);
-
     try {
+      // Prioridad: imagen local (dataUrl) > URL manual
+      const imageToSave = dataUrl || imgUrl.trim() || null;
       await apiFetch(`/restaurants/menu-items/${productId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          imageUrl: imgUrl.trim() || null
-        })
+        method:'PATCH', body: JSON.stringify({ imageUrl: imageToSave })
       }, auth.token);
-
-      setEditingImg(null);
-      setImgUrl('');
+      setEditingImg(null); setImgUrl(''); clear();
       load();
-    } catch (e) {
-      setMsg(e.message);
-    } finally {
-      setSavingImg(false);
-    }
+    } catch (e) { setMsg(e.message); }
+    finally { setSavingImg(false); }
   }
 
   return (
-    <div style={{ backgroundColor: '#fff9f8', minHeight: '100vh', padding: '1rem' }}>
-    <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem', color: '#8a5e5e' }}>Gestión de menú</h2>
+    <div style={{ backgroundColor: '#fff9f8', minHeight:'100vh', padding:'1rem' }}>
+      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem', color:'#8a5e5e' }}>Gestión de menú</h2>
 
-    {/* Formulario Dinámico (Agregar/Editar) */}
-    <div className="card" style={{ marginBottom:'1.25rem', border: editingId ? '2px solid #e3aaaa' : '1px solid var(--gray-200)' }}>
-    <h3 style={{ fontSize:'0.88rem', fontWeight:700, marginBottom:'0.75rem' }}>
-    {editingId ? 'Modo Edición' : 'Agregar producto'}
-    </h3>
-    <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
-    <label>Nombre del producto<input value={name} onChange={e => setName(e.target.value)} /></label>
-    <label>Descripción (opcional)<input value={description} onChange={e => setDesc(e.target.value)} /></label>
-    <label>Precio (pesos)<input value={price} onChange={e => setPrice(e.target.value)} inputMode="decimal" /></label>
-    </div>
-    {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
+      {/* Lista de productos */}
+      {products.length === 0
+        ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin productos en el menú.</p>
+        : (
+          <ul style={{ listStyle:'none', padding:0, marginBottom:'1rem' }}>
+            {products.map(product => (
+              <li key={product.id} className="card" style={{ marginBottom:'0.5rem', padding:'0.75rem' }}>
+                <div style={{ display:'flex', gap:'0.75rem', alignItems:'flex-start' }}>
+                  <ProductImage src={product.image_url} size={68} />
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'0.5rem', flexWrap:'wrap' }}>
+                      <span style={{ fontWeight:700, fontSize:'0.95rem' }}>{product.name}</span>
+                      <span style={{ fontWeight:700, color:'#8a5e5e', flexShrink:0 }}>{fmt(product.price_cents)}</span>
+                    </div>
+                    {product.description && (
+                      <p style={{ fontSize:'0.82rem', color:'var(--gray-600)', margin:'0.15rem 0 0' }}>{product.description}</p>
+                    )}
+                    <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
+                      <button className="btn-sm" onClick={() => startEdit(product)}>Editar</button>
+                      <button className="btn-sm" onClick={() => toggleAvailable(product)}>
+                        {product.is_available ? 'Desactivar' : 'Activar'}
+                      </button>
+                      <button className="btn-sm" onClick={() => {
+                        setEditingImg(product.id);
+                        setImgUrl(product.image_url && !product.image_url.startsWith('data:') ? product.image_url : '');
+                        clear();
+                      }}>
+                        {product.image_url ? 'Cambiar imagen' : 'Agregar imagen'}
+                      </button>
+                    </div>
 
-    <div style={{ display: 'flex', gap: '0.5rem' }}>
-    <button
-    className="btn-primary"
-    onClick={handleSubmit}
-    style={{ backgroundColor: '#e3aaaa', borderColor: '#e3aaaa' }}
-    >
-    {editingId ? 'Guardar Cambios' : 'Agregar'}
-    </button>
-    {editingId && <button className="btn-sm" onClick={resetForm}>Cancelar</button>}
-    </div>
-    </div>
+                    {/* Editor de imagen */}
+                    {editingImg === product.id && (
+                      <div style={{ marginTop:'0.5rem', display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+                        {/* Opción 1: desde local */}
+                        <div style={{ display:'flex', alignItems:'center', gap:'0.4rem' }}>
+                          <button className="btn-sm" onClick={() => fileRef.current?.click()}>
+                            Seleccionar archivo
+                          </button>
+                          <input
+                            ref={fileRef} type="file" accept="image/*"
+                            style={{ display:'none' }}
+                            onChange={e => pick(e.target.files?.[0])}
+                          />
+                          {preview && (
+                            <img src={preview} alt="Preview"
+                              style={{ width:40, height:40, borderRadius:4, objectFit:'cover', border:'1px solid var(--gray-200)' }} />
+                          )}
+                        </div>
+                        {/* Opción 2: URL — solo si no hay imagen local */}
+                        {!preview && (
+                          <input
+                            value={imgUrl} onChange={e => setImgUrl(e.target.value)}
+                            placeholder="O pega una URL (https://...)"
+                            style={{ fontSize:'0.82rem' }}
+                          />
+                        )}
+                        <div style={{ display:'flex', gap:'0.4rem' }}>
+                          <button className="btn-primary btn-sm" disabled={savingImg || (!preview && !imgUrl.trim())}
+                            onClick={() => saveImage(product.id)}
+                            style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}>
+                            {savingImg ? '...' : 'Guardar'}
+                          </button>
+                          <button className="btn-sm" onClick={() => { setEditingImg(null); setImgUrl(''); clear(); }}>
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <span style={{ fontSize:'0.72rem', fontWeight:700, color: product.is_available ? 'var(--success)':'var(--gray-400)', flexShrink:0 }}>
+                    {product.is_available ? 'Activo':'Inactivo'}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )
+      }
 
-    {/* Lista de productos */}
-    {products.length === 0
-      ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin productos en el menú.</p>
-      : (
-        <ul style={{ listStyle:'none', padding:0 }}>
-        {products.map(product => (
-          <li key={product.id} className="card" style={{ marginBottom:'0.5rem', padding:'0.75rem' }}>
-          <div style={{ display:'flex', gap:'0.75rem', alignItems:'flex-start' }}>
-          <ProductImage src={product.image_url} size={68} />
-          <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'0.5rem', flexWrap:'wrap' }}>
-          <span style={{ fontWeight:700, fontSize:'0.95rem' }}>{product.name}</span>
-          <span style={{ fontWeight:700, color:'#8a5e5e', flexShrink:0 }}>{fmt(product.price_cents)}</span>
-          </div>
-          {product.description && (
-            <p style={{ fontSize:'0.82rem', color:'var(--gray-600)', margin:'0.15rem 0 0' }}>{product.description}</p>
-          )}
-          <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
-          {/* BOTÓN EDITAR AGREGADO */}
-          <button className="btn-sm" onClick={() => startEdit(product)}>Editar</button>
-
-          <button className="btn-sm" onClick={() => toggleAvailable(product)}>
-          {product.is_available ? 'Desactivar' : 'Activar'}
-          </button>
-          <button className="btn-sm" onClick={() => { setEditingImg(product.id); setImgUrl(product.image_url || ''); }}>
-          {product.image_url ? 'Cambiar imagen' : 'Agregar imagen'}
-          </button>
-          </div>
-
-          {/* Editor de imagen */}
-          {editingImg === product.id && (
-            <div style={{ marginTop:'0.5rem', display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
-            <input
-            value={imgUrl}
-            onChange={e => setImgUrl(e.target.value)}
-            placeholder="URL de imagen (https://...)"
-            style={{ flex:1, minWidth:180 }}
-            />
-            <button
-            className="btn-primary btn-sm"
-            disabled={savingImg}
-            onClick={() => saveImage(product.id)}
-            style={{ backgroundColor: '#e3aaaa', borderColor: '#e3aaaa' }}
-            >
-            {savingImg ? '...' : 'OK'}
-            </button>
-            <button className="btn-sm" onClick={() => { setEditingImg(null); setImgUrl(''); }}>X</button>
+      {/* Formulario colapsable al fondo */}
+      <div className="card" style={{ border: formOpen ? '2px solid #e3aaaa' : '1px solid var(--gray-200)', padding:0, overflow:'hidden' }}>
+        <button
+          onClick={() => { setFormOpen(o => !o); if (editingId) resetForm(); }}
+          style={{ width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.85rem 1rem', background:'none', border:'none', cursor:'pointer', fontWeight:700, fontSize:'0.88rem', borderBottom: formOpen ? '1px solid var(--gray-200)':'none' }}
+        >
+          <span>{editingId ? 'Modo Edición' : '+ Agregar producto'}</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            style={{ transform: formOpen ? 'rotate(180deg)':'rotate(0)', transition:'transform 0.2s' }}>
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </button>
+        {formOpen && (
+          <div style={{ padding:'1rem' }}>
+            <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
+              <label>Nombre del producto<input value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Taco de pastor" /></label>
+              <label>Descripción (opcional)<input value={description} onChange={e => setDesc(e.target.value)} placeholder="Ej: Con cebolla y cilantro" /></label>
+              <label>Precio (pesos)<input value={price} onChange={e => setPrice(e.target.value)} placeholder="Ej: 35.00" inputMode="decimal" /></label>
             </div>
-          )}
+            {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
+            <div style={{ display:'flex', gap:'0.5rem' }}>
+              <button className="btn-primary btn-sm" onClick={handleSubmit}
+                style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}>
+                {editingId ? 'Guardar cambios' : 'Agregar'}
+              </button>
+              {editingId && <button className="btn-sm" onClick={resetForm}>Cancelar</button>}
+            </div>
           </div>
-          <div>
-          <span style={{ fontSize:'0.72rem', fontWeight:700, color: product.is_available ? 'var(--success)' : 'var(--gray-400)' }}>
-          {product.is_available ? 'Activo' : 'Inactivo'}
-          </span>
-          </div>
-          </div>
-          </li>
-        ))}
-        </ul>
-      )
-    }
+        )}
+      </div>
     </div>
   );
 }

@@ -129,8 +129,14 @@ export default function RestaurantOrders() {
                       </ul>
                     )}
                     <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginTop:'0.4rem' }}>
-                      <button className="btn-sm" onClick={() => changeStatus(order.id, 'preparing')}>En preparación</button>
-                      <button className="btn-sm" onClick={() => changeStatus(order.id, 'ready')}>Listo</button>
+                      {/* Preparing y Ready independientes — no requieren secuencia */}
+                      {!['preparing','ready','on_the_way','delivered','cancelled'].includes(order.status) && (
+                        <button className="btn-sm" onClick={() => changeStatus(order.id, 'preparing')}>En preparación</button>
+                      )}
+                      {order.status !== 'ready' && !['on_the_way','delivered','cancelled'].includes(order.status) && (
+                        <button className="btn-sm" style={{ background:'var(--success)', color:'#fff', borderColor:'var(--success)' }}
+                          onClick={() => changeStatus(order.id, 'ready')}>Listo</button>
+                      )}
                       <button className="btn-sm" onClick={() => setSuggestionFor(s => s === order.id ? '' : order.id)}
                         style={{ background: suggestionFor === order.id ? 'var(--brand-light)' : undefined }}>
                         Sugerir cambio
