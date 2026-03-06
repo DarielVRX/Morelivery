@@ -12,18 +12,30 @@ function batchSize(offeredCount) {
 
 const ACTIVE_DRIVER_STATUSES = ['assigned', 'accepted', 'preparing', 'ready', 'on_the_way'];
 
-export async function driverHasCapacity(driverId) {
+/**
+ * Verifica si el repartidor está disponible y tiene espacio para más pedidos.
+ *
+ */
+export async function driverIsEligible(driverId) {
   const result = await query(
-    `SELECT COUNT(*)::int AS count FROM orders
-     WHERE driver_id = $1 AND status = ANY($2::text[])`,
+    `SELECT 
+        dp.is_available,
+        (SELECT COUNT(*)::int FROM orders WHERE driver_id = $1 AND status = ANY($2::text[])) as active_count
+     FROM driver_profiles dp
+     WHERE dp.user_id = $1`,
     [driverId, ACTIVE_DRIVER_STATUSES]
   );
-  return result.rows[0].count < MAX_ACTIVE_ORDERS_PER_DRIVER;
+
+  if (result.rowCount === 0) return false;
+  
+  const { is_available, active_count } = result.rows[0];
+  // Solo es elegible si está marcado como disponible Y no ha superado el límite
+  return is_available === true && active_count < MAX_ACTIVE_ORDERS_PER_DRIVER;
 }
 
 /**
- * Expira ofertas que llevan más de OFFER_TIMEOUT_SECONDS sin respuesta
- * e intenta ofrecer a los siguientes conductores disponibles.
+ * Expira ofertas vencidas.
+ *
  */
 export async function expireTimedOutOffers() {
   const expired = await query(
@@ -58,7 +70,8 @@ export async function expireTimedOutOffers() {
 }
 
 /**
- * Proceso principal para ofrecer un pedido a nuevos candidatos.
+ * Ofrece el pedido a nuevos candidatos disponibles.
+ *
  */
 export async function offerNextDrivers(orderId) {
   try { await expireTimedOutOffers(); } catch (_) {}
@@ -70,11 +83,10 @@ export async function offerNextDrivers(orderId) {
   const offeredCount = offered.rows[0].count;
   const limit = batchSize(offeredCount);
 
-  // Buscamos candidatos que no tengan una oferta 'pending' actualmente
   const candidates = await query(
     `SELECT dp.user_id
      FROM driver_profiles dp
-     WHERE dp.is_available = true
+     WHERE dp.is_available = true -- Solo conductores activos
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
          WHERE od.order_id = $1 AND od.driver_id = dp.user_id AND od.status = 'pending'
@@ -94,7 +106,7 @@ export async function offerNextDrivers(orderId) {
        VALUES($1, $2, 'pending')
        ON CONFLICT(order_id, driver_id) 
        DO UPDATE SET status = 'pending', updated_at = NOW(), created_at = NOW()
-       WHERE order_driver_offers.status IN ('expired', 'rejected')`,
+       WHERE order_driver_offers.status IN ('expired', 'rejected')`, // Permite re-ofertar
       [orderId, row.user_id]
     );
   }
@@ -105,23 +117,19 @@ export async function offerNextDrivers(orderId) {
        WHERE id = $1 AND driver_id IS NULL`,
       [orderId]
     );
-  } else {
-    // Si encontramos nuevos candidatos, aseguramos que el pedido no esté marcado como estancado
-    await query(
-        `UPDATE orders SET updated_at = NOW() WHERE id = $1 AND status = 'pending_driver'`,
-        [orderId]
-    );
   }
 
   return candidates.rowCount;
 }
 
 /**
- * Llamado cuando un repartidor consulta por pedidos (polling) o se pone disponible.
+ * Función principal para que el repartidor reciba pedidos.
+ *
  */
+// En assignment.js (Backend)
 export async function offerOrdersToDriver(driverId) {
-  const canTake = await driverHasCapacity(driverId);
-  if (!canTake) return 0;
+  const isEligible = await driverIsEligible(driverId);
+  if (!isEligible) return 0; // Aquí es donde el backend te bloquea si marcaste "No disponible"
 
   try { await expireTimedOutOffers(); } catch (_) {}
 
@@ -132,11 +140,11 @@ export async function offerOrdersToDriver(driverId) {
        AND o.status IN ('created', 'pending_driver', 'preparing', 'ready')
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id = o.id AND od.driver_id = $1 AND od.status = 'pending'
+         WHERE od.order_id = o.id 
+           AND od.driver_id = $1 
+           AND od.status = 'pending' -- Solo ignoramos si ya hay una oferta PENDIENTE
        )
-     ORDER BY 
-       CASE WHEN o.status = 'pending_driver' THEN 0 ELSE 1 END,
-       o.created_at ASC
+     ORDER BY o.created_at ASC
      LIMIT 3`,
     [driverId]
   );
@@ -147,28 +155,14 @@ export async function offerOrdersToDriver(driverId) {
       `INSERT INTO order_driver_offers(order_id, driver_id, status)
        VALUES($1, $2, 'pending')
        ON CONFLICT(order_id, driver_id) 
-       DO UPDATE SET status = 'pending', updated_at = NOW(), created_at = NOW()
-       WHERE order_driver_offers.status IN ('expired', 'rejected')`,
+       DO UPDATE SET 
+          status = 'pending', 
+          updated_at = NOW(), 
+          created_at = NOW()
+       WHERE order_driver_offers.status IN ('expired', 'rejected')`, // Esto permite el re-offer
       [row.id, driverId]
     );
     offered++;
   }
-
   return offered;
-}
-
-/**
- * Función de rescate proactiva para pedidos que llevan tiempo sin conductor.
- */
-export async function retryPendingDriverOrders() {
-    const pendingOrders = await query(
-      `SELECT id FROM orders 
-       WHERE status = 'pending_driver' 
-         AND driver_id IS NULL 
-         AND updated_at < NOW() - INTERVAL '1 minute'`
-    );
-  
-    for (const order of pendingOrders.rows) {
-      await offerNextDrivers(order.id);
-    }
 }
