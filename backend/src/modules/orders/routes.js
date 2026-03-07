@@ -109,7 +109,7 @@ router.get('/pending-assignment', authenticate, authorize(['driver']), async (re
 });
 
 router.post('/', authenticate, authorize(['customer']), validate(createOrderSchema), async (req, res, next) => {
-  const { restaurantId, items, paymentMethod, tipCents } = req.validatedBody;
+  const { restaurantId, items, payment_method, tip_cents } = req.validatedBody;
   try {
     let deliveryAddress = 'address-pending';
     try {
@@ -128,8 +128,8 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
     const serviceFee     = Math.round(totalCents * SERVICE_FEE_PCT);
     const deliveryFee    = Math.round(totalCents * DELIVERY_FEE_PCT);
     const restaurantFee  = Math.round(totalCents * RESTAURANT_FEE_PCT);
-    const paymentMethod  = req.body.paymentMethod || 'cash';
-    const tipCents = Number(req.validatedBody.tipCents) || 0;
+    const paymentMethod  = payment_method || 'cash';
+    const tipCents = Number(tip_cents) || 0;
 
     const orderResult = await query(
       `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address)
@@ -373,7 +373,7 @@ router.post('/:id/complaint', authenticate, authorize(['customer']), async (req,
 /* ── GET /my ── */
 // PATCH /:id/tip — cliente actualiza agradecimiento (solo puede subir en historial, libre en activos)
 router.patch('/:id/tip', authenticate, authorize(['customer']), async (req, res, next) => {
-  const tipCents = Number(req.body.tipCents);
+  const tipCents = Number(req.body.tip_cents);
   if (!Number.isFinite(tipCents) || tipCents < 0) return next(new AppError(400, 'Monto inválido'));
   try {
     const ord = await query('SELECT tip_cents, status, customer_id FROM orders WHERE id=$1', [req.params.id]);
@@ -384,7 +384,7 @@ router.patch('/:id/tip', authenticate, authorize(['customer']), async (req, res,
     const isPast = ['delivered', 'cancelled'].includes(o.status);
     if (isPast && tipCents < (o.tip_cents || 0)) return next(new AppError(400, 'En el historial el agradecimiento solo puede aumentar'));
     await query('UPDATE orders SET tip_cents=$1, updated_at=NOW() WHERE id=$2', [tip_cents, req.params.id]);
-    res.json({ tipCents });
+    res.json({ tip_cents: tipCents });
   } catch (e) { next(e); }
 });
 
