@@ -14,7 +14,7 @@ function FeeBreakdown({ order }) {
   const del_fee  = order.delivery_fee_cents   || 0;
   const tip      = order.tip_cents            || 0;
   const grandTotal = sub + svc + del_fee + tip;
-  if (!svc && !del_fee) return null;
+  if (!svc && !del_fee && !tip) return null;
   return (
     <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', borderTop:'1px solid var(--gray-100)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
       <div style={{ display:'flex', justifyContent:'space-between' }}>
