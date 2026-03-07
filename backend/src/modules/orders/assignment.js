@@ -4,6 +4,7 @@ import { query } from '../../config/db.js';
 export const MAX_ACTIVE_ORDERS_PER_DRIVER = 4;
 export const OFFER_TIMEOUT_SECONDS        = 60;
 export const COOLDOWN_SECONDS             = 300;
+const COOLDOWN_DIVISOR                    = 5;   // reducción real: wait_restante / 5
 
 const ACTIVE_STATUSES = ['assigned','accepted','preparing','ready','on_the_way'];
 const assignmentQueue = [];
@@ -45,13 +46,13 @@ function batchForRound(round) {
 export async function expireTimedOutOffers(onOffer) {
   const expired = await query(
     `UPDATE order_driver_offers
-    SET status = 'expired',
-    wait_until = NOW() + ($2::int * INTERVAL '1 second'),
-                              updated_at = NOW()
-                              WHERE status = 'pending'
-                              AND created_at < NOW() - ($1::int * INTERVAL '1 second')
-                              RETURNING order_id`,
-                              [OFFER_TIMEOUT_SECONDS, COOLDOWN_SECONDS]
+     SET status     = 'expired',
+         wait_until = NOW() + ($2::int * INTERVAL '1 second'),
+         updated_at = NOW()
+     WHERE status = 'pending'
+       AND created_at < NOW() - ($1::int * INTERVAL '1 second')
+     RETURNING order_id`,
+    [OFFER_TIMEOUT_SECONDS, COOLDOWN_SECONDS]
   );
   if (expired.rowCount === 0) return;
 
@@ -66,23 +67,72 @@ export async function expireTimedOutOffers(onOffer) {
   }
 }
 
-// ─── Núcleo: una oferta activa a la vez, saltar drivers ocupados ──────────────
-// _onOffer?: (driverId, orderId, data) => void  — callback para SSE, evita import circular
+// ─── Reducir wait_until del driver más cercano a vencer para este pedido ──────
+// Se aplica siempre que no hay candidatos: tanto en la primera vez (triggered=false)
+// como en las siguientes (triggered=true), pero el flag no vuelve a cambiar.
+// Devuelve true si encontró un driver al que reducirle el cooldown.
+async function applyOrderCooldownReduction(orderId) {
+  // Buscar el driver con menor tiempo restante de cooldown para este pedido
+  // (excluir los que ya vencieron — esos ya son candidatos normales)
+  const nearest = await query(
+    `SELECT od.driver_id,
+            EXTRACT(EPOCH FROM (od.wait_until - NOW()))::int AS secs_remaining
+     FROM order_driver_offers od
+     WHERE od.order_id = $1
+       AND od.status IN ('rejected', 'expired', 'released')
+       AND od.wait_until > NOW()
+     ORDER BY od.wait_until ASC
+     LIMIT 1`,
+    [orderId]
+  );
+
+  if (nearest.rowCount === 0) return false;
+
+  const { driver_id, secs_remaining } = nearest.rows[0];
+
+  // Reducción real: restar el 80% del tiempo restante (equivale a wait/5)
+  // Ej: 200s restantes → restar 160s → queda en 40s (= 200/5)
+  const reduction = Math.floor(secs_remaining * (1 - 1 / COOLDOWN_DIVISOR));
+
+  await query(
+    `UPDATE order_driver_offers
+     SET wait_until = wait_until - ($1 * INTERVAL '1 second'),
+         updated_at = NOW()
+     WHERE order_id = $2
+       AND driver_id = $3
+       AND status IN ('rejected', 'expired', 'released')
+       AND wait_until > NOW()`,
+    [reduction, orderId, driver_id]
+  );
+
+  console.log(
+    `[assignment] cooldown reduction: order=${orderId} driver=${driver_id} ` +
+    `reduced by ${reduction}s (was ${secs_remaining}s remaining)`
+  );
+
+  return true;
+}
+
+// ─── Núcleo: una oferta activa a la vez ──────────────────────────────────────
 export async function offerNextDrivers(orderId, _onOffer) {
-  // Si ya hay oferta pending activa para este pedido, no crear otra
-  await expireTimedOutOffers(_onOffer);
+  // Lock para evitar race condition entre pedidos concurrentes
+  const lockResult = await query(
+    `SELECT id, offer_cooldown_triggered FROM orders
+     WHERE id=$1 AND driver_id IS NULL
+       AND status NOT IN ('delivered','cancelled')
+     FOR UPDATE SKIP LOCKED`,
+    [orderId]
+  );
+  if (lockResult.rowCount === 0) return 0;
+
+  const cooldownTriggered = lockResult.rows[0].offer_cooldown_triggered;
+
+  // Si ya hay oferta pending activa, no crear otra
   const alreadyPending = await query(
     `SELECT 1 FROM order_driver_offers WHERE order_id=$1 AND status='pending'`,
     [orderId]
   );
   if (alreadyPending.rowCount > 0) return 0;
-
-  const open = await query(
-    `SELECT id FROM orders WHERE id=$1 AND driver_id IS NULL
-       AND status NOT IN ('delivered','cancelled')`,
-    [orderId]
-  );
-  if (open.rowCount === 0) return 0;
 
   const hist = await query(
     `SELECT COUNT(DISTINCT driver_id)::int AS n
@@ -93,19 +143,75 @@ export async function offerNextDrivers(orderId, _onOffer) {
   const processed = hist.rows[0].n;
   const round     = processed + 1;
   const batchSize = batchForRound(round);
-  // ─── Cola de asignación ───────────────────────────────────────────────────────
-  // Candidatos: disponibles, con cupo, SIN oferta activa (pending) en CUALQUIER pedido,
-  // sin cooldown en este pedido, sin haber rechazado/liberado este pedido
-  let candidates = await query(
+
+  let candidates = await queryCandidates(orderId, batchSize);
+
+  // ── Sin candidatos: activar reducción de cooldown por pedido ────────────────
+  if (candidates.rowCount === 0) {
+    const anyAvail = await query(
+      `SELECT 1 FROM driver_profiles WHERE is_available=true LIMIT 1`
+    );
+    if (anyAvail.rowCount === 0) {
+      // No hay ningún driver disponible en el sistema — esperar
+      await query(
+        `UPDATE orders SET status='pending_driver', updated_at=NOW()
+         WHERE id=$1 AND driver_id IS NULL`, [orderId]
+      );
+      return 0;
+    }
+
+    // Aplicar reducción al driver más cercano a vencer
+    const reduced = await applyOrderCooldownReduction(orderId);
+
+    if (!reduced) {
+      // No hay drivers con cooldown activo — todos libres pero ninguno cumple
+      // otros criterios (cupo lleno, etc.). Esperar.
+      await query(
+        `UPDATE orders SET status='pending_driver', updated_at=NOW()
+         WHERE id=$1 AND driver_id IS NULL`, [orderId]
+      );
+      return 0;
+    }
+
+    // Marcar el pedido la primera vez (no acumula)
+    if (!cooldownTriggered) {
+      await query(
+        `UPDATE orders SET offer_cooldown_triggered=true, updated_at=NOW()
+         WHERE id=$1`, [orderId]
+      );
+    }
+
+    // Reintentar candidatos tras la reducción
+    candidates = await queryCandidates(orderId, 1);
+
+    if (candidates.rowCount === 0) {
+      // La reducción no fue suficiente todavía — el driver reducido aún tiene algo
+      // de wait. El siguiente tick de expireTimedOutOffers lo activará.
+      await query(
+        `UPDATE orders SET status='pending_driver', updated_at=NOW()
+         WHERE id=$1 AND driver_id IS NULL`, [orderId]
+      );
+      return 0;
+    }
+  }
+
+  for (const row of candidates.rows) {
+    await upsertOffer(orderId, row.user_id, _onOffer);
+  }
+  return candidates.rowCount;
+}
+
+// ─── Query de candidatos (extraída para reutilizar) ───────────────────────────
+async function queryCandidates(orderId, batchSize) {
+  return query(
     `SELECT dp.user_id
      FROM driver_profiles dp
      WHERE dp.is_available = true
-       -- cupo de pedidos activos
        AND (
          SELECT COUNT(*)::int FROM orders o
          WHERE o.driver_id = dp.user_id AND o.status = ANY($3::text[])
        ) < $4
-       -- NO tiene oferta pending en ningún pedido (solo una oferta a la vez)
+       -- NO tiene oferta pending en ningún pedido
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
          WHERE od.driver_id = dp.user_id AND od.status = 'pending'
@@ -120,60 +226,13 @@ export async function offerNextDrivers(orderId, _onOffer) {
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
          WHERE od.order_id = $1 AND od.driver_id = dp.user_id
-           AND od.status IN ('rejected','released', 'expired')
+           AND od.status IN ('rejected','released','expired')
            AND od.wait_until IS NOT NULL AND od.wait_until > NOW()
        )
      ORDER BY dp.driver_number ASC
      LIMIT $2`,
     [orderId, batchSize, ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
   );
-
-  // ── Reinicio de ciclo ────────────────────────────────────────────────────────
-  if (candidates.rowCount === 0) {
-    const anyAvail = await query(
-      `SELECT 1 FROM driver_profiles WHERE is_available=true LIMIT 1`
-    );
-    if (anyAvail.rowCount === 0) {
-      await query(
-        `UPDATE orders SET status='pending_driver', updated_at=NOW()
-         WHERE id=$1 AND driver_id IS NULL`, [orderId]
-      );
-      return 0;
-    }
-    await query(
-      `UPDATE order_driver_offers
-      SET wait_until = LEAST(wait_until, NOW() + (60 * INTERVAL '1 second'))
-      WHERE order_id=$1
-      AND status IN ('rejected','expired','released')
-      AND wait_until > NOW()`,
-                [orderId]
-    );
-    await query(
-      `UPDATE orders SET status='pending_driver', updated_at=NOW()
-       WHERE id=$1 AND driver_id IS NULL`, [orderId]
-    );
-    candidates = await query(
-      `SELECT dp.user_id
-       FROM driver_profiles dp
-       WHERE dp.is_available=true
-         AND (
-           SELECT COUNT(*)::int FROM orders o
-           WHERE o.driver_id=dp.user_id AND o.status=ANY($1::text[])
-         ) < $2
-         AND NOT EXISTS (
-           SELECT 1 FROM order_driver_offers od
-           WHERE od.driver_id = dp.user_id AND od.status = 'pending'
-         )
-       ORDER BY dp.driver_number ASC
-       LIMIT 1`,
-      [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
-    );
-  }
-
-  for (const row of candidates.rows) {
-    await upsertOffer(orderId, row.user_id, _onOffer);
-  }
-  return candidates.rowCount;
 }
 
 // ─── Aceptar con mutex ────────────────────────────────────────────────────────
@@ -216,10 +275,8 @@ export async function rejectOffer(orderId, driverId, onOffer) {
 
   await query(
     `UPDATE order_driver_offers
-    SET status='expired', updated_at=NOW()
-    WHERE driver_id=$1
-    AND status='pending'
-    AND order_id <> $2`,
+     SET status='expired', updated_at=NOW()
+     WHERE driver_id=$1 AND status='pending' AND order_id <> $2`,
     [driverId, orderId]
   );
 
@@ -240,11 +297,10 @@ export async function releaseOrder(orderId, driverId, onOffer) {
     `UPDATE orders SET driver_id=NULL, status='pending_driver', updated_at=NOW()
      WHERE id=$1 AND driver_id=$2`, [orderId, driverId]
   );
-  // 🔑 liberar cualquier pending restante del driver
   await query(
     `UPDATE order_driver_offers
-    SET status='expired', updated_at=NOW()
-    WHERE driver_id=$1 AND status='pending'`,
+     SET status='expired', updated_at=NOW()
+     WHERE driver_id=$1 AND status='pending'`,
     [driverId]
   );
   enqueueAssignment(orderId, onOffer);
@@ -287,7 +343,6 @@ async function upsertOffer(orderId, driverId, onOffer) {
      DO UPDATE SET status='pending', updated_at=NOW(), wait_until=NULL`,
     [orderId, driverId]
   );
-  // Notificar via callback (evita import circular con sseHub)
   if (onOffer) {
     try {
       const info = await query(
