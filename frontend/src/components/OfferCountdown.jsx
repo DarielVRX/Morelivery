@@ -4,8 +4,9 @@ import { useOfferCountdown } from '../hooks/useOfferCountdown';
 
 const OFFER_TIMEOUT_SECONDS = 60;
 
-export default function OfferCountdown({ offerCreatedAt, onExpired }) {
-  const { secondsLeft, urgent, expired } = useOfferCountdown(offerCreatedAt);
+export default function OfferCountdown({ secondsLeft: serverSecondsLeft, onExpired }) {
+  // El hook ahora maneja un número simple, no una fecha
+  const { secondsLeft, urgent, expired } = useOfferCountdown(serverSecondsLeft);
 
   // Llamar onExpired una sola vez cuando expira
   useEffect(() => {

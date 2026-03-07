@@ -7,7 +7,8 @@ class OrderEvents {
 
   emitOrderUpdate(orderId, status) {
     if (!this.io) return;
-    this.io.emit('order:update', { orderId, status, updatedAt: new Date().toISOString() });
+    // En lugar de new Date(), podrías enviar un flag de actualización
+    this.io.emit('order:update', { orderId, status });
   }
 }
 
