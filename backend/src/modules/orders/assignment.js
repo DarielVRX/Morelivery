@@ -151,8 +151,8 @@ export async function offerNextDrivers(orderId, _onOffer) {
        WHERE dp.is_available=true
          AND (
            SELECT COUNT(*)::int FROM orders o
-           WHERE o.driver_id=dp.user_id AND o.status=ANY($2::text[])
-         ) < $3
+           WHERE o.driver_id=dp.user_id AND o.status=ANY($1::text[])
+         ) < $2
          AND NOT EXISTS (
            SELECT 1 FROM order_driver_offers od
            WHERE od.driver_id = dp.user_id AND od.status = 'pending'
