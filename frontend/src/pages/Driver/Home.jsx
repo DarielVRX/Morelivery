@@ -144,7 +144,7 @@ export default function DriverHome() {
   const handleNewOffer = useCallback((data) => {
     setPendingOffer(prev => {
       if (prev) return prev; // Ya hay una oferta, ignorar (no debería pasar con la nueva lógica)
-      return { id: data.orderId, ...data, offer_created_at: data.offerCreatedAt };
+      return { id: data.orderId, ...data, seconds_left: data.secondsLeft ?? 60 };
     });
     // Recargar también para tener datos completos
     setTimeout(() => loadDataRef.current?.(), 500);
@@ -263,7 +263,7 @@ export default function DriverHome() {
             </ul>
           )}
           <OfferCountdown
-            offerCreatedAt={pendingOffer.offer_created_at}
+            secondsLeft={pendingOffer.seconds_left ?? 60}
             onExpired={() => { setPendingOffer(null); loadData(); }}
           />
           <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.5rem' }}>

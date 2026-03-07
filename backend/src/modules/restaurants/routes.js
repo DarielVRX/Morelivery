@@ -71,7 +71,7 @@ router.get('/', async (_req, res, next) => {
 router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const result = await query(
-      'SELECT id, name, category, is_open, address, manual_open_override FROM restaurants WHERE owner_user_id=$1 LIMIT 1',
+      'SELECT id, name, category, is_open, address, manual_open_override, profile_photo FROM restaurants WHERE owner_user_id=$1 LIMIT 1',
       [req.user.userId]
     );
     if (result.rowCount === 0) return res.json({ restaurant: null });
@@ -181,6 +181,28 @@ router.get('/:id/menu', async (req, res, next) => {
 });
 
 /* ── POST /menu-items ── */
+
+/* ── PATCH /restaurants/my/profile-photo ── */
+router.patch('/my/profile-photo', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    // Acepta base64 (data:image/...) o URL o null para eliminar
+    const { photoUrl } = req.body || {};
+    const val = (photoUrl === null || photoUrl === '') ? null
+      : (typeof photoUrl === 'string' ? photoUrl : null);
+    try {
+      await query(
+        `UPDATE restaurants SET profile_photo=$1 WHERE owner_user_id=$2`,
+        [val, req.user.userId]
+      );
+    } catch (e) {
+      // Columna puede no existir si la migration no se corrió
+      if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_v11.sql primero'));
+      throw e;
+    }
+    return res.json({ ok: true, photoUrl: val });
+  } catch (error) { return next(error); }
+});
+
 router.post('/menu-items', authenticate, authorize(['restaurant']), validate(createMenuItemSchema), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
@@ -199,14 +221,15 @@ router.post('/menu-items', authenticate, authorize(['restaurant']), validate(cre
 });
 
 /* ── PATCH /menu-items/:id ── */
-router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), validate(updateMenuItemSchema), async (req, res, next) => {
+router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  // No usar updateMenuItemSchema porque bloquea peticiones que solo traen imageUrl
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
     const item = await query('SELECT * FROM menu_items WHERE id=$1 AND restaurant_id=$2', [req.params.id, restaurantId]);
     if (item.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
     const cur = item.rows[0];
-    const p = req.validatedBody;
+    const p = req.body || {};
     // imageUrl: acepta base64 (data:image/...) o null para eliminar imagen
     let imageUrl = cur.image_url;
     if (req.body.imageUrl !== undefined) {
@@ -219,7 +242,7 @@ router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), validat
     }
     const result = await query(
       'UPDATE menu_items SET name=$1, description=$2, price_cents=$3, is_available=$4, image_url=$5 WHERE id=$6 RETURNING *',
-      [p.name ?? cur.name, p.description ?? cur.description ?? '', p.priceCents ?? cur.price_cents, p.isAvailable ?? cur.is_available, imageUrl, req.params.id]
+      [p.name ?? cur.name, p.description ?? cur.description ?? '', (p.priceCents != null ? Math.round(Number(p.priceCents)) : null) ?? cur.price_cents, p.isAvailable ?? cur.is_available, imageUrl, req.params.id]
     );
     return res.json({ menuItem: result.rows[0] });
   } catch (error) { return next(error); }

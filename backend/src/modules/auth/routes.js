@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { authenticate } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
 import { registerSchema, loginSchema } from './schemas.js';
-import { registerUser, loginUser, updateProfileAddress, changePassword, deleteAccount } from './service.js';
+import { registerUser, loginUser, updateProfileAddress, changePassword, deleteAccount, updateLoginUsername } from './service.js';
 import { AppError } from '../../utils/errors.js';
 
 const router = Router();
@@ -35,20 +35,18 @@ router.patch('/profile', authenticate, async (req, res, next) => {
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /auth/login-username — cambia el username de acceso (email interno) ── */
+/* ── PATCH /auth/password ── */
+/* ── PATCH /auth/login-username ── */
 router.patch('/login-username', authenticate, async (req, res, next) => {
   try {
     const { currentPassword, newUsername } = req.body || {};
     if (!newUsername?.trim()) return next(new AppError(400, 'El nuevo usuario de acceso no puede estar vacío'));
     if (!currentPassword)     return next(new AppError(400, 'La contraseña actual es requerida'));
-    // Verificar contraseña actual
-    const { changePassword, updateLoginUsername } = await import('./service.js');
-    await updateLoginUsername(req.user.userId, req.user.role, currentPassword, newUsername.trim());
-    return res.json({ ok: true, username: newUsername.trim().toLowerCase() });
+    const result = await updateLoginUsername(req.user.userId, req.user.role, currentPassword, newUsername.trim());
+    return res.json({ ok: true, username: result.username });
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /auth/password ── */
 router.patch('/password', authenticate, async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body || {};

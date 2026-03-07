@@ -55,14 +55,14 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
         `SELECT o.id, o.total_cents, o.status, o.delivery_address AS customer_address,
                 r.name AS restaurant_name, r.address AS restaurant_address,
                 split_part(c.full_name,'_',1) AS customer_first_name,
-                od.created_at AS offer_created_at
+                GREATEST(0, EXTRACT(EPOCH FROM (od.created_at + ($2::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
          FROM order_driver_offers od
          JOIN orders o ON o.id = od.order_id
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id
          WHERE od.driver_id=$1 AND od.status='pending' AND o.driver_id IS NULL
          ORDER BY od.created_at ASC`,
-        [req.user.userId]
+        [req.user.userId, 60]
       );
     } catch (e) {
       if (!isMissingColumnError(e) && !isMissingRelationError(e)) throw e;
@@ -86,7 +86,7 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
         }
       } catch (_) {}
     }
-    const offers = result.rows.map(r => ({ ...r, items: itemsByOrder.get(r.id) || [] }));
+    const offers = result.rows.map(r => ({ ...r, seconds_left: Number(r.seconds_left ?? 60), items: itemsByOrder.get(r.id) || [] }));
     return res.json({ offers });
   } catch (error) { return next(error); }
 });

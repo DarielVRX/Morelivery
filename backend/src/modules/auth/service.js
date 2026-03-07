@@ -198,10 +198,13 @@ export async function updateLoginUsername(userId, role, currentPassword, newUser
   if (!matches) throw new AppError(401, 'Contraseña actual incorrecta');
 
   // Verificar disponibilidad del nuevo username en el mismo rol
-  const taken = await query('SELECT id FROM users WHERE email=$1 AND role=$2 AND id<>$3', [newEmail, role, userId]);
+  const taken = await query(
+    'SELECT id FROM users WHERE email=$1 AND role=$2 AND id<>$3',
+    [newEmail, role, userId]
+  );
   if (taken.rowCount > 0) throw new AppError(409, 'Ese usuario de acceso ya está en uso');
 
-  await query('UPDATE users SET email=$1, updated_at=NOW() WHERE id=$2', [newEmail, userId]);
+  await query('UPDATE users SET email=$1 WHERE id=$2', [newEmail, userId]);
   return { username: normalized };
 }
 
