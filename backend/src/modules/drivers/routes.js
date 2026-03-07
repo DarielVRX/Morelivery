@@ -7,14 +7,25 @@ import { sseHub } from '../events/hub.js';
 import { AppError } from '../../utils/errors.js';
 
 const router = Router();
+
+// Callback SSE para notificar ofertas — evita import circular en assignment.js
+function makeOfferCallback() {
+  return function onOffer(driverId, orderId, data) {
+    try {
+      sseHub.notifyNewOffer(driverId, orderId, data);
+    } catch (_) {}
+  };
+}
+const offerCb = makeOfferCallback();
+
 function isMissingColumnError(e)   { return e?.code === '42703'; }
 function isMissingRelationError(e) { return e?.code === '42P01'; }
 
 /* ── POST /drivers/listener ── driver anuncia presencia ─────────────────────── */
 router.post('/listener', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
-    await expireTimedOutOffers();
-    await offerOrdersToDriver(req.user.userId);
+    await expireTimedOutOffers(offerCb);
+    await offerOrdersToDriver(req.user.userId, offerCb);
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
@@ -30,7 +41,7 @@ router.patch('/availability', authenticate, authorize(['driver']), async (req, r
       [Boolean(isAvailable), req.user.userId]
     );
     if (result.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
-    if (isAvailable) await offerOrdersToDriver(req.user.userId);
+    if (isAvailable) await offerOrdersToDriver(req.user.userId, offerCb);
     return res.json({ profile: result.rows[0] });
   } catch (error) { return next(error); }
 });
@@ -111,7 +122,7 @@ router.post('/offers/:orderId/accept', authenticate, authorize(['driver']), asyn
 /* ── POST /drivers/offers/:orderId/reject ───────────────────────────────────── */
 router.post('/offers/:orderId/reject', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
-    await rejectOffer(req.params.orderId, req.user.userId);
+    await rejectOffer(req.params.orderId, req.user.userId, offerCb);
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
@@ -126,7 +137,7 @@ router.post('/orders/:orderId/release', authenticate, authorize(['driver']), asy
       try { await query(`UPDATE orders SET driver_note=$1, updated_at=NOW() WHERE id=$2 AND driver_id=$3`, [note, orderId, driverId]); }
       catch (_) {}
     }
-    await releaseOrder(orderId, driverId);
+    await releaseOrder(orderId, driverId, offerCb);
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });

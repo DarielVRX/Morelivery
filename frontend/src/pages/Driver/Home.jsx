@@ -14,44 +14,45 @@ const STATUS_LABELS = {
   cancelled:'Cancelado', pending_driver:'Buscando conductor',
 };
 
-// Mapa ligero — instancia única, destruida al desmontar
+// ── Cargar CSS de Leaflet una sola vez ───────────────────────────────────────
+function ensureLeafletCSS() {
+  if (document.getElementById('leaflet-css')) return;
+  const lnk = document.createElement('link');
+  lnk.id = 'leaflet-css'; lnk.rel = 'stylesheet';
+  lnk.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  document.head.appendChild(lnk);
+}
+
+// Mapa ligero — instancia única destruida al desmontar
 function DriverMap({ driverPos }) {
-  const ref    = useRef(null);
-  const mapRef = useRef(null);
+  const containerRef = useRef(null);
+  const mapRef       = useRef(null); // { map, marker }
 
+  // Inicializar una vez cuando hay posición
   useEffect(() => {
-    if (!ref.current || !driverPos) return;
+    if (!containerRef.current || !driverPos) return;
+    if (mapRef.current) return; // ya inicializado
 
-    import('leaflet').then(L => {
-      // Solo cargar CSS una vez
-      if (!document.getElementById('leaflet-css')) {
-        const link = document.createElement('link');
-        link.id   = 'leaflet-css';
-        link.rel  = 'stylesheet';
-        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        document.head.appendChild(link);
-      }
+    ensureLeafletCSS();
 
-      if (!L.Icon.Default.prototype._getIconUrl) {
+    // Dar un tick para que el CSS se aplique y el contenedor tenga tamaño
+    const t = setTimeout(() => {
+      import('leaflet').then(L => {
+        if (!containerRef.current || mapRef.current) return;
+
         delete L.Icon.Default.prototype._getIconUrl;
         L.Icon.Default.mergeOptions({
           iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
           iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
           shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
         });
-      }
 
-      if (!ref.current._leaflet_id) {
-        const map = L.map(ref.current, {
-          zoomControl: false,
-          attributionControl: false,
-          // Reducir memoria: menos tiles cacheados
-          maxZoom: 18,
+        const map = L.map(containerRef.current, {
+          zoomControl: false, attributionControl: false,
         }).setView([driverPos.lat, driverPos.lng], 15);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          keepBuffer: 1,  // menos tiles en buffer = menos memoria
-          updateWhenIdle: true,
+          keepBuffer: 1, updateWhenIdle: true,
         }).addTo(map);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
@@ -60,30 +61,34 @@ function DriverMap({ driverPos }) {
         }).addTo(map);
 
         mapRef.current = { map, marker };
-      } else if (mapRef.current) {
-        mapRef.current.marker?.setLatLng([driverPos.lat, driverPos.lng]);
-        mapRef.current.map?.panTo([driverPos.lat, driverPos.lng], { animate: true, duration: 0.5 });
-      }
-    }).catch(() => {});
 
+        // Forzar re-cálculo del tamaño por si el contenedor cambió durante la inicialización
+        setTimeout(() => map.invalidateSize(), 200);
+      }).catch(() => {});
+    }, 50);
+
+    return () => clearTimeout(t);
+  }, [Boolean(driverPos)]); // solo cuando pasa de null → posición
+
+  // Destruir al desmontar
+  useEffect(() => {
     return () => {
-      // Destruir mapa al desmontar para liberar memoria
-      if (mapRef.current?.map && ref.current?._leaflet_id) {
+      if (mapRef.current?.map) {
         mapRef.current.map.remove();
         mapRef.current = null;
       }
     };
-  }, []);  // Solo inicializar una vez
+  }, []);
 
-  // Actualizar posición sin re-crear el mapa
+  // Actualizar posición
   useEffect(() => {
     if (!mapRef.current || !driverPos) return;
-    mapRef.current.marker?.setLatLng([driverPos.lat, driverPos.lng]);
-    mapRef.current.map?.panTo([driverPos.lat, driverPos.lng], { animate: true, duration: 0.5 });
+    mapRef.current.marker.setLatLng([driverPos.lat, driverPos.lng]);
+    mapRef.current.map.panTo([driverPos.lat, driverPos.lng], { animate: true, duration: 0.5 });
   }, [driverPos?.lat, driverPos?.lng]);
 
   if (!driverPos) return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f3f4f6', borderRadius: 0 }}>
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f3f4f6' }}>
       <div style={{ textAlign: 'center', color: 'var(--gray-400)', fontSize: '0.85rem' }}>
         <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📍</div>
         Esperando señal GPS…
@@ -91,7 +96,7 @@ function DriverMap({ driverPos }) {
     </div>
   );
 
-  return <div ref={ref} style={{ height: '100%', width: '100%' }} />;
+  return <div ref={containerRef} style={{ height: '100%', width: '100%' }} />;
 }
 
 export default function DriverHome() {

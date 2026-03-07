@@ -27,6 +27,9 @@ export default function RestaurantOrders() {
   const [products, setProducts] = useState([]);
   const [tab, setTab]           = useState('active');
   const [msg, setMsg]           = useState('');
+  const [reportingId, setReportingId] = useState(null);
+  const [reportText, setReportText]   = useState('');
+  const [reportMsg, setReportMsg]     = useState('');
   const [suggestionFor, setSuggestionFor]   = useState('');
   const [suggDrafts, setSuggDrafts]         = useState({});
   const loadDataRef = useRef(null);
