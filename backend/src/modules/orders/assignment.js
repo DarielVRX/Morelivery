@@ -100,28 +100,34 @@ async function applyOrderCooldownReduction(orderId) {
   // EXTRAER CORRECTAMENTE: Aquí estaba el error de referencia
   const { driver_id, secs_remaining } = nearest.rows[0];
 
-  // 2. Aplicar la reducción directamente en la DB para evitar desfases de red/reloj
-  await query(
+  const newWaitSecs = secs_remaining / COOLDOWN_DIVISOR;
+
+  // Si el cooldown reducido es < 1s, poner wait_until en el pasado → elegible ya.
+  // Guard de idempotencia: solo actualiza si no fue reducido en el último segundo.
+  const result = await query(
     `UPDATE order_driver_offers
-     SET wait_until = CASE
-           WHEN (secs_remaining / $3::float) < 1
-           THEN NOW() - INTERVAL '2 seconds'
-           ELSE NOW() + ((secs_remaining / $3::float) * INTERVAL '1 second')
-         END,
+     SET wait_until  = CASE WHEN ($2::float < 1)
+                            THEN NOW() - INTERVAL '2 seconds'
+                            ELSE NOW() + ($2::float * INTERVAL '1 second')
+                       END,
          updated_at = NOW()
-     WHERE order_id = $1
+     WHERE order_id  = $3
        AND driver_id = $4
-       AND status IN ('rejected','expired','released')
+       AND status    IN ('rejected','expired','released')
        AND wait_until > NOW()
        AND updated_at < NOW() - INTERVAL '1 second'`,
-    [orderId, secs_remaining, COOLDOWN_DIVISOR, driver_id]
+    [orderId, newWaitSecs, orderId, driver_id]
   );
 
-  const newWaitSecs = secs_remaining / COOLDOWN_DIVISOR;
+  if (result.rowCount === 0) {
+    log(orderId, 'cooldown reduction skipped — already reduced recently', { driver_id });
+    return null;
+  }
 
   log(orderId, 'cooldown reduction applied', {
     driver_id,
-    new_wait_secs: Math.round(newWaitSecs * 10) / 10,
+    secs_remaining: Math.round(secs_remaining),
+    new_wait_secs:  Math.round(newWaitSecs * 10) / 10,
   });
 
   return { driver_id, newWaitSecs };
@@ -389,12 +395,8 @@ export async function offerOrdersToDriver(driverId, _onOffer) {
 
   let offered = 0;
   for (const row of open.rows) {
-    // Encolar en lugar de llamar directo — evita ejecuciones paralelas
     serializedOffer(row.id, _onOffer);
     offered++;
-    // Solo encolar el primero: el driver recibirá una oferta y luego
-    // el listener volverá a llamarse si sigue disponible.
-    break;
   }
   console.log(`[assignment] offerOrdersToDriver: driver=${driverId} done — enqueued ${offered} order(s)`);
   return offered;
