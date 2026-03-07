@@ -47,10 +47,11 @@ function serializedOffer(orderId, onOffer) {
 export async function expireTimedOutOffers(onOffer) {
   const expired = await query(
     `UPDATE order_driver_offers
-    SET status     = 'expired',
+    SET status = 'expired',
     wait_until = NOW() + ($2::int * INTERVAL '1 second'),
                               updated_at = NOW()
                               WHERE status = 'pending'
+                              -- Usamos updated_at para que sea sensible al último intento, no a la creación inicial
                               AND updated_at < NOW() - ($1::int * INTERVAL '1 second')
                               RETURNING order_id, driver_id`,
                               [OFFER_TIMEOUT_SECONDS, COOLDOWN_SECONDS]
@@ -404,13 +405,14 @@ async function upsertOffer(orderId, driverId, onOffer) {
       `SELECT o.total_cents, r.name AS restaurant_name, r.address AS restaurant_address,
       o.delivery_address AS customer_address,
       split_part(d.full_name,'_',1) AS driver_name,
-                             od.created_at AS offer_created_at
+                             -- CALCULO CRÍTICO: Segundos restantes reales según la DB
+                             GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + ($3::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
                              FROM orders o
                              JOIN restaurants r ON r.id=o.restaurant_id
                              LEFT JOIN users d ON d.id=$2
                              JOIN order_driver_offers od ON od.order_id=o.id AND od.driver_id=$2
                              WHERE o.id=$1`,
-                             [orderId, driverId]
+                             [orderId, driverId, OFFER_TIMEOUT_SECONDS]
     );
     if (info.rowCount > 0) {
       const row = info.rows[0];
@@ -422,7 +424,7 @@ async function upsertOffer(orderId, driverId, onOffer) {
         restaurantAddress: row.restaurant_address,
         customerAddress:   row.customer_address,
         totalCents:        row.total_cents,
-        offerCreatedAt:    row.offer_created_at,
+        secondsLeft: row.seconds_left,
       });
     } else {
       logWarn(orderId, `upsertOffer: info query returned 0 rows driver=${driverId}`);
