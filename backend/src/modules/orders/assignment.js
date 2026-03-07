@@ -405,7 +405,7 @@ async function upsertOffer(orderId, driverId, onOffer) {
       `SELECT o.total_cents, r.name AS restaurant_name, r.address AS restaurant_address,
       o.delivery_address AS customer_address,
       split_part(d.full_name,'_',1) AS driver_name,
-                             -- CALCULO CRÍTICO: Segundos restantes reales según la DB
+                             -- Calculamos los segundos restantes reales usando solo el reloj de la DB
                              GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + ($3::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
                              FROM orders o
                              JOIN restaurants r ON r.id=o.restaurant_id
@@ -414,6 +414,7 @@ async function upsertOffer(orderId, driverId, onOffer) {
                              WHERE o.id=$1`,
                              [orderId, driverId, OFFER_TIMEOUT_SECONDS]
     );
+
     if (info.rowCount > 0) {
       const row = info.rows[0];
       log(orderId, `upsertOffer: firing SSE onOffer driver=${driverId}`);
@@ -424,7 +425,8 @@ async function upsertOffer(orderId, driverId, onOffer) {
         restaurantAddress: row.restaurant_address,
         customerAddress:   row.customer_address,
         totalCents:        row.total_cents,
-        secondsLeft: row.seconds_left,
+        // CAMBIO: Enviamos segundos restantes en lugar de un timestamp absoluto
+        secondsLeft:       row.seconds_left,
       });
     } else {
       logWarn(orderId, `upsertOffer: info query returned 0 rows driver=${driverId}`);
