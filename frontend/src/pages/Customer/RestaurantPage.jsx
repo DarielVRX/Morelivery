@@ -236,10 +236,17 @@ export default function RestaurantPage() {
                   {v===0?'—':fmt(v)}
                 </button>
               ))}
-              <input type="number" min="0" placeholder="$ otro"
-                onChange={e => setTipCents(Math.max(0, Math.round(Number(e.target.value||0)*100)))}
-                style={{ width:62, fontSize:'0.75rem', padding:'0.2rem 0.4rem',
-                  border:'1px solid var(--gray-200)', borderRadius:6 }} />
+              <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="$ otro"
+              onChange={e => {
+                const val = e.target.value.replace(/\D/g, ''); // Solo permite números
+                setTipCents(Math.round(Number(val || 0) * 100));
+              }}
+              style={{ width: 62, fontSize: '0.75rem', padding: '0.2rem 0.4rem', border: '1px solid var(--gray-200)', borderRadius: 6 }}
+              />
             </div>
           </div>
           {/* Desglose */}
