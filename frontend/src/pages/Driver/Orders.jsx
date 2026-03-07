@@ -95,6 +95,7 @@ export default function DriverOrders() {
   const [actionLoading, setActionLoading] = useState(null);
   const [releaseNote, setReleaseNote]     = useState('');
   const [releasingId, setReleasingId]     = useState(null);
+  const [expanded, setExpanded]            = useState(null);
 
   async function acceptDirectly(orderId) {
     setActionLoading(orderId);
@@ -143,27 +144,42 @@ export default function DriverOrders() {
           </p>
           <ul style={{ listStyle:'none', padding:0 }}>
             {unoffered.map(o => {
-              const color = STATUS_COLOR[o.status] || '#9ca3af';
+              const color  = STATUS_COLOR[o.status] || '#9ca3af';
+              const grandTotal = (o.total_cents||0)+(o.service_fee_cents||0)+(o.delivery_fee_cents||0);
+              const isUExp = expanded === ('u_'+o.id);
               return (
-                <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.4rem', padding:'0.6rem 0.75rem' }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.2rem' }}>
-                    <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15`, fontSize:'0.72rem' }}>
-                      {STATUS_LABELS[o.status]}
-                    </span>
-                    <span style={{ fontWeight:700, fontSize:'0.875rem' }}>{fmt(o.total_cents)}</span>
+                <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.5rem', padding:0, overflow:'hidden' }}>
+                  <div onClick={() => setExpanded(isUExp ? null : 'u_'+o.id)}
+                    style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.65rem 0.75rem', cursor:'pointer', gap:'0.5rem' }}>
+                    <div>
+                      <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15`, fontSize:'0.72rem', marginRight:'0.4rem' }}>
+                        {STATUS_LABELS[o.status]}
+                      </span>
+                      <span style={{ fontWeight:600, fontSize:'0.875rem' }}>{o.restaurant_name}</span>
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
+                      <span style={{ fontWeight:700, fontSize:'0.875rem' }}>{fmt(grandTotal)}</span>
+                      <span style={{ color:'var(--gray-400)', fontSize:'0.8rem' }}>{isUExp?'▲':'▼'}</span>
+                    </div>
                   </div>
-                  <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.4rem' }}>
-                    {o.restaurant_name}
-                    {o.restaurant_address && <span> · {o.restaurant_address}</span>}
-                  </div>
-                  <button
-                    className="btn-sm btn-primary"
-                    disabled={actionLoading === o.id}
-                    onClick={() => acceptDirectly(o.id)}
-                    style={{ fontSize:'0.78rem' }}
-                  >
-                    {actionLoading === o.id ? 'Aceptando…' : 'Aceptar pedido'}
-                  </button>
+                  {isUExp && (
+                    <div style={{ padding:'0 0.75rem 0.65rem', borderTop:`1px solid ${color}22` }}>
+                      {o.restaurant_address && (
+                        <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.3rem' }}>
+                          {o.restaurant_address}
+                        </div>
+                      )}
+                      <FeeBreakdown order={o} />
+                      <button
+                        className="btn-sm btn-primary"
+                        disabled={actionLoading === o.id}
+                        onClick={() => acceptDirectly(o.id)}
+                        style={{ fontSize:'0.78rem', marginTop:'0.5rem' }}
+                      >
+                        {actionLoading === o.id ? 'Aceptando…' : 'Aceptar pedido'}
+                      </button>
+                    </div>
+                  )}
                 </li>
               );
             })}
@@ -184,18 +200,27 @@ export default function DriverOrders() {
               {active.map(o => {
                 const color = STATUS_COLOR[o.status] || '#9ca3af';
                 return (
-                  <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem' }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.25rem' }}>
-                      <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15` }}>
-                        {STATUS_LABELS[o.status]}
-                      </span>
-                      <span style={{ fontWeight:700 }}>{fmt(o.total_cents)}</span>
+                  <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden' }}>
+                    <div onClick={() => setExpanded(expanded===o.id ? null : o.id)}
+                      style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.75rem', cursor:'pointer', gap:'0.5rem' }}>
+                      <div>
+                        <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15`, marginRight:'0.5rem' }}>
+                          {STATUS_LABELS[o.status]}
+                        </span>
+                        <span style={{ fontWeight:600, fontSize:'0.875rem' }}>{o.restaurant_name}</span>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
+                        <span style={{ fontWeight:700 }}>{fmt((o.total_cents||0)+(o.delivery_fee_cents||0))}</span>
+                        <span style={{ color:'var(--gray-400)', fontSize:'0.8rem' }}>{expanded===o.id?'▲':'▼'}</span>
+                      </div>
                     </div>
-                    <div style={{ fontSize:'0.83rem', color:'var(--gray-600)' }}>
-                      {o.restaurant_name} · {fmtDate(o.created_at)}
+                    {expanded===o.id && (
+                    <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
+                    <div style={{ fontSize:'0.83rem', color:'var(--gray-600)', marginBottom:'0.2rem' }}>
+                      {fmtDate(o.created_at)}
                     </div>
                     {o.customer_address && (
-                      <div style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginTop:'0.2rem' }}>
+                      <div style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.2rem' }}>
                         Entregar en: <strong>{o.customer_address}</strong>
                       </div>
                     )}
@@ -227,6 +252,8 @@ export default function DriverOrders() {
                         )}
                       </div>
                     )}
+                    </div>
+                    )}
                   </li>
                 );
               })}
@@ -238,51 +265,54 @@ export default function DriverOrders() {
         past.length === 0
           ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
           : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Estado</th><th>Restaurante</th><th>Total</th><th>Fecha</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {past.slice(0, 50).map(o => (
-                    <tr key={o.id}>
-                      <td>
-                        <span className="badge" style={{ color:STATUS_COLOR[o.status], borderColor:`${STATUS_COLOR[o.status]}55`, background:`${STATUS_COLOR[o.status]}15`, fontSize:'0.7rem' }}>{STATUS_LABELS[o.status]}</span>
-                        {['delivered','cancelled'].includes(o.status) && (
-                          <div style={{ marginTop:'0.3rem' }}>
-                            {reportingId === o.id ? (
-                              <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem' }}>
-                                <textarea value={reportText} onChange={e=>setReportText(e.target.value)}
-                                  placeholder="Describe el problema…" rows={2}
-                                  style={{ fontSize:'0.78rem', width:'100%', boxSizing:'border-box' }} />
-                                <div style={{ display:'flex', gap:'0.3rem' }}>
-                                  <button className="btn-sm" style={{ fontSize:'0.75rem', background:'var(--danger)', color:'#fff', borderColor:'var(--danger)' }} onClick={() => sendReport(o.id)}>Enviar</button>
-                                  <button className="btn-sm" style={{ fontSize:'0.75rem' }} onClick={() => { setReportingId(null); setReportText(''); }}>Cancelar</button>
-                                </div>
-                              </div>
-                            ) : (
-                              <button className="btn-sm" style={{ fontSize:'0.72rem' }} onClick={() => setReportingId(o.id)}>Reportar</button>
-                            )}
-                          </div>
+            <ul style={{ listStyle:'none', padding:0 }}>
+              {past.slice(0, 50).map(o => {
+                const color    = STATUS_COLOR[o.status] || '#9ca3af';
+                const isHExp   = expanded === ('h_'+o.id);
+                const grandTotal = (o.total_cents||0)+(o.service_fee_cents||0)+(o.delivery_fee_cents||0)+(o.tip_cents||0);
+                return (
+                  <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden' }}>
+                    <div onClick={() => setExpanded(isHExp ? null : 'h_'+o.id)}
+                      style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.75rem', cursor:'pointer', gap:'0.5rem' }}>
+                      <div>
+                        <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15`, marginRight:'0.5rem', fontSize:'0.7rem' }}>
+                          {STATUS_LABELS[o.status]}
+                        </span>
+                        <span style={{ fontWeight:600, fontSize:'0.875rem' }}>{o.restaurant_name}</span>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
+                        <span style={{ fontWeight:700 }}>{fmt(grandTotal)}</span>
+                        <span style={{ color:'var(--gray-400)', fontSize:'0.8rem' }}>{isHExp?'▲':'▼'}</span>
+                      </div>
+                    </div>
+                    {isHExp && (
+                      <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
+                        <div style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginBottom:'0.3rem' }}>{fmtDate(o.created_at)}</div>
+                        {(o.items || []).length > 0 && (
+                          <ul style={{ fontSize:'0.82rem', margin:'0.2rem 0 0.35rem 1rem' }}>
+                            {o.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
+                          </ul>
                         )}
-                      </td>
-                      <td style={{ fontSize:'0.85rem' }}>{o.restaurant_name}</td>
-                      <td>
-            <div style={{ fontWeight:700 }}>{fmt((o.total_cents || 0) + (o.service_fee_cents || 0) + (o.delivery_fee_cents || 0))}</div>
-            {(o.service_fee_cents || 0) > 0 && (
-              <div style={{ fontSize:'0.72rem', color:'var(--gray-400)' }}>
-                Envío: {fmt(o.delivery_fee_cents || 0)}
-              </div>
-            )}
-          </td>
-                      <td style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>{fmtDate(o.created_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        <FeeBreakdown order={o} />
+                        {reportingId === o.id ? (
+                          <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginTop:'0.3rem' }}>
+                            <textarea value={reportText} onChange={e=>setReportText(e.target.value)}
+                              placeholder="Describe el problema…" rows={2}
+                              style={{ fontSize:'0.78rem', width:'100%', boxSizing:'border-box' }} />
+                            <div style={{ display:'flex', gap:'0.3rem' }}>
+                              <button className="btn-sm" style={{ fontSize:'0.75rem', background:'var(--danger)', color:'#fff', borderColor:'var(--danger)' }} onClick={() => sendReport(o.id)}>Enviar</button>
+                              <button className="btn-sm" style={{ fontSize:'0.75rem' }} onClick={() => { setReportingId(null); setReportText(''); }}>Cancelar</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button className="btn-sm" style={{ fontSize:'0.72rem', marginTop:'0.2rem' }} onClick={() => setReportingId(o.id)}>Reportar</button>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
           )
       )}
     </div>
