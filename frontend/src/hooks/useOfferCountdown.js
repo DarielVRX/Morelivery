@@ -1,29 +1,27 @@
-import { useEffect, useState } from 'react';
+export function useOfferCountdown(offerCreatedAt) {
+  // Convertimos a segundos restantes desde ahora
+  const initialSecondsLeft = Math.max(
+    0,
+    60 - Math.floor((Date.now() - new Date(offerCreatedAt).getTime()) / 1000)
+  );
 
-export function useOfferCountdown(initialSecondsLeft) {
-  const parsedInitial = parseInt(initialSecondsLeft);
-  const [secondsLeft, setSecondsLeft] = useState(isNaN(parsedInitial) ? 60 : parsedInitial);
+  const [secondsLeft, setSecondsLeft] = useState(initialSecondsLeft);
 
-  // Resincronizar si el backend envía un nuevo valor
   useEffect(() => {
-    setSecondsLeft(isNaN(parsedInitial) ? 60 : parsedInitial);
-  }, [initialSecondsLeft]);
+    const updated = Math.max(
+      0,
+      60 - Math.floor((Date.now() - new Date(offerCreatedAt).getTime()) / 1000)
+    );
+    setSecondsLeft(updated);
+  }, [offerCreatedAt]);
 
-  // Intervalo de cuenta regresiva
   useEffect(() => {
-    if (secondsLeft <= 0) return; // nada que hacer si ya expiró
+    if (secondsLeft <= 0) return;
     const interval = setInterval(() => {
-      setSecondsLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
+      setSecondsLeft(prev => Math.max(0, prev - 1));
     }, 1000);
-
     return () => clearInterval(interval);
-  }, []); // solo se monta una vez
+  }, [secondsLeft]);
 
   return {
     secondsLeft,
