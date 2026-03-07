@@ -70,6 +70,7 @@ export async function expireTimedOutOffers(onOffer) {
 // _onOffer?: (driverId, orderId, data) => void  — callback para SSE, evita import circular
 export async function offerNextDrivers(orderId, _onOffer) {
   // Si ya hay oferta pending activa para este pedido, no crear otra
+  await expireTimedOutOffers(_onOffer);
   const alreadyPending = await query(
     `SELECT 1 FROM order_driver_offers WHERE order_id=$1 AND status='pending'`,
     [orderId]
