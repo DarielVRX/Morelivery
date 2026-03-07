@@ -7,6 +7,35 @@ import OfferCountdown from '../../components/OfferCountdown';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
+// Desglose de tarifas para conductor
+function FeeBreakdown({ order }) {
+  const sub     = order.total_cents          || 0;
+  const svc     = order.service_fee_cents    || 0;
+  const del_fee = order.delivery_fee_cents   || 0;
+  const tip     = order.tip_cents            || 0;
+  const grandTotal = sub + svc + del_fee + tip;
+  if (!svc && !del_fee) return null;
+  return (
+    <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', borderTop:'1px solid var(--gray-100)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
+      <div style={{ display:'flex', justifyContent:'space-between' }}>
+        <span>A pagar a tienda</span><span>{fmt(sub)}</span>
+      </div>
+      <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)' }}>
+        <span>Tu tarifa de envío</span><span>{fmt(del_fee)}</span>
+      </div>
+      {tip > 0 && (
+        <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)' }}>
+          <span>Agradecimiento</span><span>+{fmt(tip)}</span>
+        </div>
+      )}
+      <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--gray-700)', marginTop:'0.2rem' }}>
+        <span>Total pagado por cliente</span><span>{fmt(grandTotal)}</span>
+      </div>
+    </div>
+  );
+}
+
+
 const STATUS_LABELS = {
   created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
   preparing:'En preparación', ready:'Listo para retiro',
@@ -108,6 +137,7 @@ export default function DriverHome() {
   const [loadingStatus, setLoadingStatus] = useState('');
   const [releaseNote,   setReleaseNote]   = useState('');
   const [showRelease,   setShowRelease]   = useState(false);
+  const [showOrderDetail, setShowOrderDetail] = useState(false);
   const [msg, setMsg] = useState('');
   const loadDataRef   = useRef(null);
 
@@ -291,13 +321,26 @@ export default function DriverHome() {
           <div style={{ fontSize:'0.72rem', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', color:'var(--success)', marginBottom:'0.25rem' }}>
             Pedido en curso
           </div>
-          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.25rem' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.25rem' }}>
             <span style={{ fontWeight:700, fontSize:'0.9rem' }}>{STATUS_LABELS[activeOrder.status]}</span>
-            <span style={{ fontWeight:700 }}>{fmt(activeOrder.total_cents)}</span>
+            <button onClick={() => setShowOrderDetail(s => !s)}
+              style={{ background:'none', border:'none', cursor:'pointer', fontSize:'0.78rem', color:'var(--brand)', fontWeight:600, padding:0 }}>
+              {showOrderDetail ? 'Ocultar' : 'Ver detalle'}
+            </button>
           </div>
-          <div style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginBottom:'0.4rem' }}>
+          <div style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginBottom:'0.3rem' }}>
             <strong>{activeOrder.restaurant_name}</strong> → {activeOrder.customer_address || activeOrder.delivery_address || '—'}
           </div>
+          {showOrderDetail && (
+            <div style={{ marginBottom:'0.4rem' }}>
+              {(activeOrder.items || []).length > 0 && (
+                <ul style={{ fontSize:'0.82rem', margin:'0 0 0.25rem 1rem', color:'var(--gray-700)' }}>
+                  {activeOrder.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
+                </ul>
+              )}
+              <FeeBreakdown order={activeOrder} />
+            </div>
+          )}
           <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
             <button className="btn-sm"
               style={{ background: activeOrder.status==='ready' ? 'var(--brand)':'', color: activeOrder.status==='ready' ? '#fff':'' }}
