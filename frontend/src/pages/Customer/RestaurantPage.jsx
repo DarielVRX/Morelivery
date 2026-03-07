@@ -58,10 +58,13 @@ export default function RestaurantPage() {
     load();
   }, [id]);
 
-  const total = Object.entries(selectedItems).reduce((sum, [menuItemId, qty]) => {
+  const subtotal     = Object.entries(selectedItems).reduce((sum, [menuItemId, qty]) => {
     const item = menu.find(i => i.id === menuItemId);
     return sum + (item ? item.price_cents * Number(qty) : 0);
   }, 0);
+  const serviceFee   = Math.round(subtotal * 0.05);
+  const deliveryFee  = Math.round(subtotal * 0.10);
+  const total        = subtotal + serviceFee + deliveryFee; // lo que paga el cliente
 
   function adjust(itemId, delta) {
     setSelectedItems(p => ({ ...p, [itemId]: Math.max(0, (Number(p[itemId]) || 0) + delta) }));
@@ -204,8 +207,19 @@ export default function RestaurantPage() {
               Guarda tu dirección en Perfil antes de pedir
             </p>
           )}
+          <div style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.3rem' }}>
+            <div style={{ display:'flex', justifyContent:'space-between' }}>
+              <span>Subtotal</span><span>{fmt(subtotal)}</span>
+            </div>
+            <div style={{ display:'flex', justifyContent:'space-between' }}>
+              <span>Tarifa de servicio (5%)</span><span>{fmt(serviceFee)}</span>
+            </div>
+            <div style={{ display:'flex', justifyContent:'space-between' }}>
+              <span>Tarifa de envío (10%)</span><span>{fmt(deliveryFee)}</span>
+            </div>
+          </div>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <span style={{ fontWeight:700 }}>Total: {fmt(total)}</span>
+            <span style={{ fontWeight:800 }}>Total: {fmt(total)}</span>
             <button
               className="btn-primary"
               disabled={!canOrder || ordering}

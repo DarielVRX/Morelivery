@@ -177,9 +177,7 @@ export default function RestaurantMenu() {
           <div style={{ fontWeight:700, fontSize:'0.9rem', color:'#8a5e5e' }}>
             {auth.user?.restaurant?.name || 'Mi tienda'}
           </div>
-          <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginTop:'0.15rem' }}>
-            {profilePhoto ? 'Foto de perfil cargada' : 'Sin foto de perfil'}
-          </div>
+
         </div>
       </div>
 

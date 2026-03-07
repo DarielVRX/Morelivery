@@ -5,6 +5,39 @@ import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
+// Desglose de tarifas — visible solo para Cliente y Conductor
+// total_cents = subtotal neto (lo que ve la Tienda)
+function FeeBreakdown({ order }) {
+  const sub      = order.total_cents          || 0;
+  const svc      = order.service_fee_cents    || 0;
+  const del_fee  = order.delivery_fee_cents   || 0;
+  const tip      = order.tip_cents            || 0;
+  const grandTotal = sub + svc + del_fee + tip;
+  if (!svc && !del_fee) return null;
+  return (
+    <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', borderTop:'1px solid var(--gray-100)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
+      <div style={{ display:'flex', justifyContent:'space-between' }}>
+        <span>Subtotal</span><span>{fmt(sub)}</span>
+      </div>
+      <div style={{ display:'flex', justifyContent:'space-between' }}>
+        <span>Tarifa de servicio (5%)</span><span>{fmt(svc)}</span>
+      </div>
+      <div style={{ display:'flex', justifyContent:'space-between' }}>
+        <span>Tarifa de envío (10%)</span><span>{fmt(del_fee)}</span>
+      </div>
+      {tip > 0 && (
+        <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)' }}>
+          <span>Agradecimiento</span><span>+{fmt(tip)}</span>
+        </div>
+      )}
+      <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--gray-700)', marginTop:'0.2rem' }}>
+        <span>Total cliente</span><span>{fmt(grandTotal)}</span>
+      </div>
+    </div>
+  );
+}
+
+
 const STATUS_LABELS = {
   created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
   preparing:'En preparación', ready:'Listo para retiro',
@@ -288,8 +321,9 @@ export default function CustomerOrders() {
                     </div>
                     {isExp && (
                       <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
+                        <FeeBreakdown order={order} />
                         {order.customer_address && (
-                          <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.3rem' }}>
+                          <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.3rem', marginTop:'0.35rem' }}>
                             Dirección: <strong>{order.customer_address}</strong>
                           </div>
                         )}
@@ -337,6 +371,7 @@ export default function CustomerOrders() {
                     <span style={{ fontWeight:700 }}>{fmt(o.total_cents)}</span>
                   </div>
                   <div style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginBottom:'0.4rem' }}>{o.restaurant_name}</div>
+                  <FeeBreakdown order={o} />
                   {reportingId===o.id ? (
                     <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginTop:'0.4rem' }}>
                       <textarea value={reportText} onChange={e=>setReportText(e.target.value)}

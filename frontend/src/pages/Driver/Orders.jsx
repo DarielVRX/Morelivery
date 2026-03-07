@@ -4,6 +4,35 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
+
+// Desglose de tarifas para conductor
+function FeeBreakdown({ order }) {
+  const sub     = order.total_cents          || 0;
+  const svc     = order.service_fee_cents    || 0;
+  const del_fee = order.delivery_fee_cents   || 0;
+  const tip     = order.tip_cents            || 0;
+  const grandTotal = sub + svc + del_fee + tip;
+  if (!svc && !del_fee) return null;
+  return (
+    <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', borderTop:'1px solid var(--gray-100)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
+      <div style={{ display:'flex', justifyContent:'space-between' }}>
+        <span>A pagar a tienda</span><span>{fmt(sub)}</span>
+      </div>
+      <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)' }}>
+        <span>Tu tarifa de envío</span><span>{fmt(del_fee)}</span>
+      </div>
+      {tip > 0 && (
+        <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)' }}>
+          <span>Agradecimiento</span><span>+{fmt(tip)}</span>
+        </div>
+      )}
+      <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--gray-700)', marginTop:'0.2rem' }}>
+        <span>Total pagado por cliente</span><span>{fmt(grandTotal)}</span>
+      </div>
+    </div>
+  );
+}
+
 function fmtDate(iso) { return iso ? new Date(iso).toLocaleString('es', { dateStyle:'short', timeStyle:'short' }) : '—'; }
 
 const STATUS_LABELS = {
@@ -175,6 +204,7 @@ export default function DriverOrders() {
                         {o.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
                       </ul>
                     )}
+                    <FeeBreakdown order={o} />
                     {/* Liberar pedido asignado */}
                     {['assigned','accepted'].includes(o.status) && (
                       <div style={{ marginTop:'0.4rem' }}>
@@ -239,7 +269,14 @@ export default function DriverOrders() {
                         )}
                       </td>
                       <td style={{ fontSize:'0.85rem' }}>{o.restaurant_name}</td>
-                      <td style={{ fontWeight:700 }}>{fmt(o.total_cents)}</td>
+                      <td>
+            <div style={{ fontWeight:700 }}>{fmt((o.total_cents || 0) + (o.service_fee_cents || 0) + (o.delivery_fee_cents || 0))}</div>
+            {(o.service_fee_cents || 0) > 0 && (
+              <div style={{ fontSize:'0.72rem', color:'var(--gray-400)' }}>
+                Envío: {fmt(o.delivery_fee_cents || 0)}
+              </div>
+            )}
+          </td>
                       <td style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>{fmtDate(o.created_at)}</td>
                     </tr>
                   ))}

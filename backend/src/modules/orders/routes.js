@@ -1,5 +1,8 @@
 // backend/modules/orders/routes.js
 import { Router } from 'express';
+
+const SERVICE_FEE_PCT  = 0.05; // 5% tarifa de servicio (para la plataforma)
+const DELIVERY_FEE_PCT = 0.10; // 10% tarifa de envío (para el conductor)
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
 import { orderEvents } from '../../events/orderEvents.js';
@@ -81,7 +84,7 @@ router.get('/pending-assignment', authenticate, authorize(['driver']), async (re
     let result;
     try {
       result = await query(
-        `SELECT o.id, o.status, o.total_cents, o.created_at,
+        `SELECT o.id, o.status, o.total_cents, o.service_fee_cents, o.delivery_fee_cents, o.tip_cents, o.created_at,
                 r.name AS restaurant_name, r.address AS restaurant_address,
                 o.delivery_address AS customer_address
          FROM orders o
@@ -121,9 +124,13 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       totalCents += m.rows[0].price_cents * item.quantity;
     }
 
+    const serviceFee  = Math.round(totalCents * SERVICE_FEE_PCT);
+    const deliveryFee = Math.round(totalCents * DELIVERY_FEE_PCT);
+
     const orderResult = await query(
-      'INSERT INTO orders(customer_id, restaurant_id, status, total_cents, delivery_address) VALUES($1,$2,$3,$4,$5) RETURNING *',
-      [req.user.userId, restaurantId, 'created', totalCents, deliveryAddress]
+      `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, delivery_address)
+       VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, deliveryAddress]
     );
     const order = orderResult.rows[0];
 
@@ -322,7 +329,12 @@ router.patch('/:id/suggestion-response', authenticate, authorize(['customer']), 
             [req.params.id, item.menuItemId, item.quantity, item.unitPriceCents]);
           newTotal += item.unitPriceCents * item.quantity;
         }
-        await query(`UPDATE orders SET total_cents=$1, suggestion_text=NULL, updated_at=NOW() WHERE id=$2`, [newTotal, req.params.id]);
+        const newServiceFee  = Math.round(newTotal * SERVICE_FEE_PCT);
+        const newDeliveryFee = Math.round(newTotal * DELIVERY_FEE_PCT);
+        await query(
+          `UPDATE orders SET total_cents=$1, service_fee_cents=$2, delivery_fee_cents=$3, suggestion_text=NULL, updated_at=NOW() WHERE id=$4`,
+          [newTotal, newServiceFee, newDeliveryFee, req.params.id]
+        );
       }
       await query('COMMIT');
     } catch (txError) { await query('ROLLBACK'); throw txError; }
@@ -389,7 +401,10 @@ router.get('/my', authenticate, async (req, res, next) => {
     const itemsByOrder = await getOrderItems(orderIds);
     const orders = result.rows.map(row => ({
       ...row,
-      items: itemsByOrder.get(row.id) || [],
+      items:             itemsByOrder.get(row.id) || [],
+      service_fee_cents:  Number(row.service_fee_cents  || 0),
+      delivery_fee_cents: Number(row.delivery_fee_cents || 0),
+      tip_cents:          Number(row.tip_cents          || 0),
       suggestion_items: parseSuggestionItems(row.suggestion_text),
       suggestion_note: parseSuggestionNote(row.suggestion_text),
     }));

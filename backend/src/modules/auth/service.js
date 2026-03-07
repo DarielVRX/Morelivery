@@ -79,7 +79,7 @@ export async function loginUser(payload) {
 
   const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 
-  let profile = { address: user.address || null, firstName: firstNameFromUsername(username), displayName: user.full_name || username, needsAddress: false };
+  let profile = { address: user.address || null, alias: user.alias || user.full_name || username, needsAddress: false };
 
   if (user.role === 'restaurant') {
     try {
@@ -121,8 +121,15 @@ export async function updateProfileAddress(userId, role, address, displayName) {
       const cleanName = cleanRestaurantName(displayName);
       try {
         await query('UPDATE restaurants SET name=$1 WHERE owner_user_id=$2', [cleanName, userId]);
-        await query('UPDATE users SET full_name=$1, alias=$1 WHERE id=$2', [displayName.trim(), userId]);
       } catch (e) { if (e?.code !== '42703') throw e; }
+      try {
+        await query('UPDATE users SET full_name=$1, alias=$1 WHERE id=$2', [displayName.trim(), userId]);
+      } catch (e) {
+        // alias column may not exist yet — retry with only full_name
+        if (e?.code === '42703') {
+          try { await query('UPDATE users SET full_name=$1 WHERE id=$2', [displayName.trim(), userId]); } catch (_) {}
+        } else throw e;
+      }
     }
   } else {
     // customer / driver / admin
@@ -136,8 +143,22 @@ export async function updateProfileAddress(userId, role, address, displayName) {
     if (address !== undefined && address !== null)         { updates.push(`address=$${i++}`);    vals.push(address); }
     if (updates.length > 0) {
       vals.push(userId);
-      try { await query(`UPDATE users SET ${updates.join(',')} WHERE id=$${i}`, vals); }
-      catch (e) { if (e?.code !== '42703') throw e; }
+      try {
+        await query(`UPDATE users SET ${updates.join(',')} WHERE id=$${i}`, vals);
+      } catch (e) {
+        if (e?.code === '42703') {
+          // alias column may not exist yet — retry without it
+          const safeUpdates = [];
+          const safeVals    = [];
+          let j = 1;
+          if (address !== undefined && address !== null)     { safeUpdates.push(`address=$${j++}`);   safeVals.push(address); }
+          if (displayName !== undefined && displayName !== null) { safeUpdates.push(`full_name=$${j++}`); safeVals.push(displayName.trim()); }
+          if (safeUpdates.length > 0) {
+            safeVals.push(userId);
+            try { await query(`UPDATE users SET ${safeUpdates.join(',')} WHERE id=$${j}`, safeVals); } catch (_) {}
+          }
+        } else throw e;
+      }
     }
   }
 
