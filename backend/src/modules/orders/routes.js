@@ -134,7 +134,7 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
     const orderResult = await query(
       `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, payment_method || 'cash', tipCents, deliveryAddress]
+      [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress]
     );
     const order = orderResult.rows[0];
 
