@@ -129,12 +129,12 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
     const deliveryFee    = Math.round(totalCents * DELIVERY_FEE_PCT);
     const restaurantFee  = Math.round(totalCents * RESTAURANT_FEE_PCT);
     const paymentMethod  = req.body.paymentMethod || 'cash';
-    const tip = Number(tip_cents) || 0;
+    const tipCents = Number(tip_cents) || 0;
 
     const orderResult = await query(
       `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod, tipCents, deliveryAddress]
+      [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, payment_method || 'cash', tipCents, deliveryAddress]
     );
     const order = orderResult.rows[0];
 
