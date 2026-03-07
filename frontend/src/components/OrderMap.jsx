@@ -29,48 +29,52 @@ const restIcon = new L.DivIcon({
 
 // ─── Capas de tiles progresivas ───────────────────────────────────────────────
 //
-// La idea: cuanto más alejado está el mapa, menos detalle necesitamos.
-// Usamos tres fuentes de tiles con diferente nivel de detalle:
+// Cuatro niveles de detalle mapeados a los umbrales pedidos:
 //
-//  zoom < 13  → Stamen Toner Lite: sólo contornos y etiquetas grandes.
-//               Muy limpio a escala ciudad/barrio, carga rápido.
+//  zoom ≤ 10  (~20 km) → Solo carreteras federales/autopistas.
+//                        CartoDB Voyager No Labels: limpio, sin ruido.
 //
-//  zoom 13–14 → OSM Standard: calles con nombres, puntos de interés básicos.
-//               Aparece cuando el mapa cubre ~2-4 km → ya conviene ver calles.
+//  zoom 11–12 (~5 km)  → Calles principales + nombres de ciudad/colonia.
+//                        OSM estándar con opacidad parcial.
 //
-//  zoom ≥ 15  → OSM Standard (mismo servidor) con opacidad completa.
-//               A ~1 km o menos el mapa muestra todo el detalle disponible:
-//               carriles, aceras, números, POIs.
+//  zoom 13–14 (~2 km)  → Red urbana casi completa, glorietas, avenidas.
+//                        OSM estándar con opacidad alta.
 //
-// La transición se hace con opacity CSS interpolada según zoom para evitar
-// el parpadeo brusco entre capas.
+//  zoom ≥ 15  (~1 km)  → Detalle completo: carriles, aceras, números, POIs.
+//                        OSM estándar opacidad total.
 //
-// Zoom de referencia en Leaflet para escalas urbanas:
-//   zoom 12  ≈ 5 km de ancho en pantalla típica
+// Zoom de referencia en Leaflet (pantalla ~360px ancho móvil):
+//   zoom 10  ≈ 20 km
+//   zoom 11  ≈ 10 km
+//   zoom 12  ≈ 5 km
 //   zoom 13  ≈ 2.5 km
-//   zoom 14  ≈ 1.2 km   ← umbral "calles navegables"
-//   zoom 15  ≈ 600 m
-//   zoom 16  ≈ 300 m
+//   zoom 14  ≈ 1.2 km
+//   zoom 15  ≈ 600 m    ← detalle navegación completo
+
+// Interpolación lineal entre dos valores
+function lerp(a, b, t) { return a + (b - a) * Math.max(0, Math.min(1, t)); }
 
 const TILE_LAYERS = [
   {
-    // Capa base: siempre visible, muy simplificada
-    url: 'https://tiles.stadiamaps.com/tiles/stamen_toner_lite/{z}/{x}/{y}{r}.png',
-    attribution: '© <a href="https://stamen.com">Stamen</a> © <a href="https://openstreetmap.org">OSM</a>',
+    // Capa 1: solo carreteras federales — visible a gran escala, se desvanece al acercar
+    // CartoDB Voyager sin etiquetas: muestra autopistas y vías principales, muy limpio
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png',
+    attribution: '© <a href="https://carto.com">CARTO</a> © <a href="https://openstreetmap.org">OSM</a>',
     minZoom: 0,
     maxZoom: 20,
-    // Opacidad: máxima cuando lejos, se desvanece cuando nos acercamos
-    opacityFn: (zoom) => zoom < 13 ? 1 : zoom < 15 ? Math.max(0, (15 - zoom) / 2) : 0,
+    // Máximo al alejar, se apaga al entrar en zoom 12 donde OSM ya da suficiente
+    opacityFn: (zoom) => zoom <= 11 ? 1 : zoom < 13 ? lerp(1, 0, (zoom - 11) / 2) : 0,
     zIndex: 1,
   },
   {
-    // Capa de detalle: calles con nombres, aparece gradualmente desde zoom 13
+    // Capa 2: calles principales — aparece en zoom 11, domina en zoom 13-14
+    // OSM estándar: muestra la red vial completa con nombres
     url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
     minZoom: 0,
     maxZoom: 20,
-    // Opacidad: 0 a zoom ≤ 12, sube suavemente, llega a 1 en zoom 15
-    opacityFn: (zoom) => zoom < 12 ? 0 : zoom < 15 ? (zoom - 12) / 3 : 1,
+    // Sube desde zoom 11, llega a completo en zoom 15
+    opacityFn: (zoom) => zoom < 11 ? 0 : zoom < 15 ? lerp(0, 1, (zoom - 11) / 4) : 1,
     zIndex: 2,
   },
 ];

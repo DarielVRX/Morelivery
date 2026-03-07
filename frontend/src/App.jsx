@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate, useLocation, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
@@ -134,7 +134,7 @@ function LandingScreen() {
 }
 
 // ─── Pantalla de login/registro por app ──────────────────────────────────────
-function AuthScreen({ mode = 'login' }) {
+const AuthScreen = memo(function AuthScreen({ mode = 'login' }) {
   const { appKey } = useParams();  // 'customer' | 'driver' | 'restaurant'
   const app = APPS.find(a => a.key === appKey);
   const { auth, login } = useAuth();
@@ -156,7 +156,7 @@ function AuthScreen({ mode = 'login' }) {
 
   if (!app) return <Navigate to="/" replace />;
 
-  async function submit() {
+  const submit = useCallback(async () => {
     setMessage('');
     try {
       if (!isLogin) {
@@ -184,7 +184,7 @@ function AuthScreen({ mode = 'login' }) {
     } catch (error) {
       setMessage(error.message);
     }
-  }
+  }, [username, password, address, displayName, appKey, isLogin, login, navigate, app]);
 
   const isOk = message.startsWith('Registro exitoso');
 
@@ -277,7 +277,7 @@ function AuthScreen({ mode = 'login' }) {
       </section>
     </div>
   );
-}
+}); // fin AuthScreen memo
 
 // ─── Estilos de landing ───────────────────────────────────────────────────────
 const styles = {
