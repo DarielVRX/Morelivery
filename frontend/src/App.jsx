@@ -143,14 +143,7 @@ const AuthScreen = memo(function AuthScreen({ mode = 'login' }) {
 
   const isLogin = mode === 'login';
 
-  // Si ya está logueado con ese mismo rol, redirigir
-  if (auth.user) {
-    if (auth.user.role === appKey) return <Navigate to={app?.home || `/${appKey}`} replace />;
-    // Si está logueado con otro rol, mostramos mensaje
-  }
-
-  if (!app) return <Navigate to="/" replace />;
-
+  // Todos los hooks PRIMERO — sin returns condicionales antes de hooks
   const submit = useCallback(async () => {
     setMessage('');
     try {
@@ -182,6 +175,10 @@ const AuthScreen = memo(function AuthScreen({ mode = 'login' }) {
   }, [username, password, address, displayName, appKey, isLogin, login, navigate, app]);
 
   const isOk = message.startsWith('Registro exitoso');
+
+  // Guards de redirección — DESPUÉS de todos los hooks
+  if (!app) return <Navigate to="/" replace />;
+  if (auth.user?.role === appKey) return <Navigate to={app.home} replace />;
 
   return (
     <div style={styles.authWrap}>
@@ -396,8 +393,7 @@ function AppRoutes() {
       {/* Login/registro por app */}
       <Route path="/:appKey/login"    element={<AuthScreen mode="login" />} />
       <Route path="/:appKey/register" element={<AuthScreen mode="register" />} />
-      {/* Admin: acceso directo por URL, sin mostrarse en la landing */}
-      <Route path="/admin/login" element={<AuthScreen mode="login" />} />
+
 
       {/* Rutas protegidas dentro del Layout */}
       <Route path="/*" element={
