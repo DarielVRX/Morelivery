@@ -135,7 +135,7 @@ async function applyOrderCooldownReduction(orderId) {
 
 // ─── Núcleo ───────────────────────────────────────────────────────────────────
 // SOLO se llama desde serializedOffer — nunca directamente desde fuera.
-async function offerNextDrivers(orderId, _onOffer) {
+export async function offerNextDrivers(orderId, _onOffer) {
   log(orderId, 'offerNextDrivers: start');
 
   // Verificar que el pedido sigue sin driver
