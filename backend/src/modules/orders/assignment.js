@@ -32,7 +32,7 @@ export async function expireTimedOutOffers(onOffer) {
          AND status NOT IN ('delivered','cancelled')`,
       [orderId]
     );
-    if (still.rowCount > 0) await offerNextDrivers(orderId, onOffer);
+    if (still.rowCount > 0) enqueueAssignment(orderId, onOffer);
   }
 }
 
@@ -62,6 +62,35 @@ export async function offerNextDrivers(orderId, _onOffer) {
   const processed = hist.rows[0].n;
   const round     = processed + 1;
   const batchSize = batchForRound(round);
+  // ─── Cola de asignación ───────────────────────────────────────────────────────
+  const assignmentQueue = [];
+  const processingOrders = new Set();
+  let queueRunning = false;
+
+  function enqueueAssignment(orderId, onOffer) {
+    if (!processingOrders.has(orderId)) {
+      assignmentQueue.push({ orderId, onOffer });
+      processingOrders.add(orderId);
+    }
+    processQueue();
+  }
+
+  async function processQueue() {
+    if (queueRunning) return;
+    queueRunning = true;
+
+    while (assignmentQueue.length > 0) {
+      const job = assignmentQueue.shift();
+      try {
+        await offerNextDrivers(job.orderId, job.onOffer);
+      } catch (e) {
+        console.error("assignment queue error", e);
+      }
+      processingOrders.delete(job.orderId);
+    }
+
+    queueRunning = false;
+  }
 
   // Candidatos: disponibles, con cupo, SIN oferta activa (pending) en CUALQUIER pedido,
   // sin cooldown en este pedido, sin haber rechazado/liberado este pedido
@@ -131,7 +160,7 @@ export async function offerNextDrivers(orderId, _onOffer) {
          )
        ORDER BY dp.driver_number ASC
        LIMIT 1`,
-      [orderid, ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
+      [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
     );
   }
 
@@ -178,7 +207,7 @@ export async function rejectOffer(orderId, driverId, onOffer) {
      WHERE order_id=$1 AND driver_id=$2 AND status='pending'`,
     [orderId, driverId, COOLDOWN_SECONDS]
   );
-  await offerNextDrivers(orderId, onOffer);
+  enqueueAssignment(orderId, onOffer);
 }
 
 // ─── Liberar (con cooldown) ───────────────────────────────────────────────────
@@ -195,7 +224,7 @@ export async function releaseOrder(orderId, driverId, onOffer) {
     `UPDATE orders SET driver_id=NULL, status='pending_driver', updated_at=NOW()
      WHERE id=$1 AND driver_id=$2`, [orderId, driverId]
   );
-  await offerNextDrivers(orderId, onOffer);
+  enqueueAssignment(orderId, onOffer);
 }
 
 // ─── Listener del driver ──────────────────────────────────────────────────────
@@ -220,10 +249,23 @@ export async function offerOrdersToDriver(driverId, _onOffer) {
   );
   let offered = 0;
   for (const row of open.rows) {
-    const n = await offerNextDrivers(row.id, _onOffer);
+    const n = await offerNextDrivers(job.orderId, job.onOffer);
     if (n > 0) offered++;
   }
   return offered;
+}
+
+export async function rejectOffer(orderId, driverId, onOffer) {
+  await query(
+    `UPDATE order_driver_offers
+    SET status='rejected',
+    wait_until = NOW() + ($3 * INTERVAL '1 second'),
+              updated_at = NOW()
+              WHERE order_id=$1 AND driver_id=$2 AND status='pending'`,
+              [orderId, driverId, COOLDOWN_SECONDS]
+  );
+
+  enqueueAssignment(orderId, onOffer);
 }
 
 // ─── Helper interno ───────────────────────────────────────────────────────────
