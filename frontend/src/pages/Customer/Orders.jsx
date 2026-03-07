@@ -17,41 +17,44 @@ const STATUS_COLOR = {
   delivered:'#16a34a', cancelled:'#dc2626', pending_driver:'#ef4444',
 };
 
-// Mapa conductor — solo cuando on_the_way, carga CSS una vez
+function ensureLeafletCSS() {
+  if (document.getElementById('leaflet-css')) return;
+  const lnk = document.createElement('link');
+  lnk.id='leaflet-css'; lnk.rel='stylesheet';
+  lnk.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  document.head.appendChild(lnk);
+}
+
 function DriverMap({ lat, lng, driverName }) {
   const ref    = useRef(null);
   const mapRef = useRef(null);
 
   useEffect(() => {
-    if (!ref.current) return;
-    import('leaflet').then(L => {
-      if (!document.getElementById('leaflet-css')) {
-        const lnk = document.createElement('link');
-        lnk.id='leaflet-css'; lnk.rel='stylesheet';
-        lnk.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        document.head.appendChild(lnk);
-      }
-      if (!L.Icon.Default.prototype._getIconUrl) {
+    if (!ref.current || mapRef.current) return;
+    ensureLeafletCSS();
+    const t = setTimeout(() => {
+      import('leaflet').then(L => {
+        if (!ref.current || mapRef.current) return;
         delete L.Icon.Default.prototype._getIconUrl;
         L.Icon.Default.mergeOptions({
           iconRetinaUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
           iconUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
           shadowUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
         });
-      }
-      if (ref.current._leaflet_id) {
-        mapRef.current?.marker?.setLatLng([lat,lng]);
-        return;
-      }
-      const map = L.map(ref.current, { zoomControl:false, attributionControl:false })
-        .setView([lat,lng], 15);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { keepBuffer:1 }).addTo(map);
-      const marker = L.circleMarker([lat,lng],
-        { radius:9, fillColor:'#2563eb', fillOpacity:1, color:'#fff', weight:2 })
-        .addTo(map).bindPopup(driverName||'Conductor');
-      mapRef.current = { map, marker };
-    }).catch(()=>{});
-    return () => { if (mapRef.current?.map && ref.current?._leaflet_id) { mapRef.current.map.remove(); mapRef.current=null; } };
+        const map = L.map(ref.current, { zoomControl:false, attributionControl:false })
+          .setView([lat,lng], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { keepBuffer:1 }).addTo(map);
+        const marker = L.circleMarker([lat,lng],
+          { radius:9, fillColor:'#2563eb', fillOpacity:1, color:'#fff', weight:2 })
+          .addTo(map).bindPopup(driverName||'Conductor');
+        mapRef.current = { map, marker };
+        setTimeout(() => map.invalidateSize(), 200);
+      }).catch(()=>{});
+    }, 50);
+    return () => {
+      clearTimeout(t);
+      if (mapRef.current?.map) { mapRef.current.map.remove(); mapRef.current=null; }
+    };
   }, []);
 
   useEffect(() => {

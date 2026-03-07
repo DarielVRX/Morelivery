@@ -1,6 +1,5 @@
 // backend/src/modules/orders/assignment.js
 import { query } from '../../config/db.js';
-import { sseHub } from '../events/hub.js';
 
 export const MAX_ACTIVE_ORDERS_PER_DRIVER = 4;
 export const OFFER_TIMEOUT_SECONDS        = 60;
@@ -15,7 +14,7 @@ function batchForRound(round) {
 }
 
 // ─── Expirar ofertas vencidas ─────────────────────────────────────────────────
-export async function expireTimedOutOffers() {
+export async function expireTimedOutOffers(onOffer) {
   const expired = await query(
     `UPDATE order_driver_offers
      SET status = 'expired', updated_at = NOW()
@@ -33,12 +32,13 @@ export async function expireTimedOutOffers() {
          AND status NOT IN ('delivered','cancelled')`,
       [orderId]
     );
-    if (still.rowCount > 0) await offerNextDrivers(orderId);
+    if (still.rowCount > 0) await offerNextDrivers(orderId, onOffer);
   }
 }
 
 // ─── Núcleo: una oferta activa a la vez, saltar drivers ocupados ──────────────
-export async function offerNextDrivers(orderId) {
+// _onOffer?: (driverId, orderId, data) => void  — callback para SSE, evita import circular
+export async function offerNextDrivers(orderId, _onOffer) {
   // Si ya hay oferta pending activa para este pedido, no crear otra
   const alreadyPending = await query(
     `SELECT 1 FROM order_driver_offers WHERE order_id=$1 AND status='pending'`,
@@ -136,7 +136,7 @@ export async function offerNextDrivers(orderId) {
   }
 
   for (const row of candidates.rows) {
-    await upsertOffer(orderId, row.user_id);
+    await upsertOffer(orderId, row.user_id, _onOffer);
   }
   return candidates.rowCount;
 }
@@ -169,7 +169,7 @@ export async function acceptOffer(orderId, driverId) {
 }
 
 // ─── Rechazar (con cooldown) ──────────────────────────────────────────────────
-export async function rejectOffer(orderId, driverId) {
+export async function rejectOffer(orderId, driverId, onOffer) {
   await query(
     `UPDATE order_driver_offers
      SET status='rejected',
@@ -178,11 +178,11 @@ export async function rejectOffer(orderId, driverId) {
      WHERE order_id=$1 AND driver_id=$2 AND status='pending'`,
     [orderId, driverId, COOLDOWN_SECONDS]
   );
-  await offerNextDrivers(orderId);
+  await offerNextDrivers(orderId, _onOffer);
 }
 
 // ─── Liberar (con cooldown) ───────────────────────────────────────────────────
-export async function releaseOrder(orderId, driverId) {
+export async function releaseOrder(orderId, driverId, onOffer) {
   await query(
     `UPDATE order_driver_offers
      SET status='released',
@@ -195,11 +195,11 @@ export async function releaseOrder(orderId, driverId) {
     `UPDATE orders SET driver_id=NULL, status='pending_driver', updated_at=NOW()
      WHERE id=$1 AND driver_id=$2`, [orderId, driverId]
   );
-  await offerNextDrivers(orderId);
+  await offerNextDrivers(orderId, _onOffer);
 }
 
 // ─── Listener del driver ──────────────────────────────────────────────────────
-export async function offerOrdersToDriver(driverId) {
+export async function offerOrdersToDriver(driverId, _onOffer) {
   const r = await query(
     `SELECT dp.is_available,
        (SELECT COUNT(*)::int FROM orders o
@@ -211,7 +211,7 @@ export async function offerOrdersToDriver(driverId) {
   const { is_available, active_count } = r.rows[0];
   if (!is_available || active_count >= MAX_ACTIVE_ORDERS_PER_DRIVER) return 0;
 
-  await expireTimedOutOffers();
+  await expireTimedOutOffers(_onOffer);
 
   const open = await query(
     `SELECT id FROM orders
@@ -220,14 +220,14 @@ export async function offerOrdersToDriver(driverId) {
   );
   let offered = 0;
   for (const row of open.rows) {
-    const n = await offerNextDrivers(row.id);
+    const n = await offerNextDrivers(row.id, _onOffer);
     if (n > 0) offered++;
   }
   return offered;
 }
 
 // ─── Helper interno ───────────────────────────────────────────────────────────
-async function upsertOffer(orderId, driverId) {
+async function upsertOffer(orderId, driverId, onOffer) {
   await query(
     `INSERT INTO order_driver_offers(order_id, driver_id, status, wait_until)
      VALUES($1, $2, 'pending', NULL)
@@ -235,31 +235,33 @@ async function upsertOffer(orderId, driverId) {
      DO UPDATE SET status='pending', updated_at=NOW(), wait_until=NULL`,
     [orderId, driverId]
   );
-  // Notificar al driver via SSE para que muestre la oferta sin esperar poll
-  try {
-    const info = await query(
-      `SELECT o.total_cents, r.name AS restaurant_name, r.address AS restaurant_address,
-              o.delivery_address AS customer_address,
-              split_part(d.full_name,'_',1) AS driver_name,
-              od.created_at AS offer_created_at
-       FROM orders o
-       JOIN restaurants r ON r.id=o.restaurant_id
-       LEFT JOIN users d ON d.id=$2
-       JOIN order_driver_offers od ON od.order_id=o.id AND od.driver_id=$2
-       WHERE o.id=$1`,
-      [orderId, driverId]
-    );
-    if (info.rowCount > 0) {
-      const row = info.rows[0];
-      sseHub.notifyNewOffer(driverId, `${orderId}_${driverId}`, {
-        orderId,
-        driverName:       row.driver_name,
-        restaurantName:   row.restaurant_name,
-        restaurantAddress:row.restaurant_address,
-        customerAddress:  row.customer_address,
-        totalCents:       row.total_cents,
-        offerCreatedAt:   row.offer_created_at,
-      });
-    }
-  } catch (_) {}
+  // Notificar via callback (evita import circular con sseHub)
+  if (onOffer) {
+    try {
+      const info = await query(
+        `SELECT o.total_cents, r.name AS restaurant_name, r.address AS restaurant_address,
+                o.delivery_address AS customer_address,
+                split_part(d.full_name,'_',1) AS driver_name,
+                od.created_at AS offer_created_at
+         FROM orders o
+         JOIN restaurants r ON r.id=o.restaurant_id
+         LEFT JOIN users d ON d.id=$2
+         JOIN order_driver_offers od ON od.order_id=o.id AND od.driver_id=$2
+         WHERE o.id=$1`,
+        [orderId, driverId]
+      );
+      if (info.rowCount > 0) {
+        const row = info.rows[0];
+        onOffer(driverId, orderId, {
+          orderId,
+          driverName:        row.driver_name,
+          restaurantName:    row.restaurant_name,
+          restaurantAddress: row.restaurant_address,
+          customerAddress:   row.customer_address,
+          totalCents:        row.total_cents,
+          offerCreatedAt:    row.offer_created_at,
+        });
+      }
+    } catch (_) {}
+  }
 }

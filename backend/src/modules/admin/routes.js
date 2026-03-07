@@ -182,4 +182,44 @@ router.patch('/orders/:id/status', authenticate, authorize(['admin']), async (re
   } catch (error) { return next(error); }
 });
 
+/* ── GET /admin/offer-stats — estado de asignación de pedidos sin driver ── */
+router.get('/offer-stats', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const result = await query(`
+      SELECT
+        o.id                                          AS order_id,
+        o.status,
+        o.created_at,
+        r.name                                        AS restaurant_name,
+        -- Ronda actual = drivers distintos procesados + 1
+        (SELECT COUNT(DISTINCT driver_id)::int
+           FROM order_driver_offers
+           WHERE order_id = o.id
+             AND status IN ('rejected','expired','released')) + 1  AS round,
+        -- Ofertas pendientes ahora mismo
+        (SELECT COUNT(*)::int FROM order_driver_offers
+           WHERE order_id = o.id AND status = 'pending')           AS pending,
+        -- Total rechazos
+        (SELECT COUNT(*)::int FROM order_driver_offers
+           WHERE order_id = o.id AND status = 'rejected')          AS rejected,
+        -- Total expiradas
+        (SELECT COUNT(*)::int FROM order_driver_offers
+           WHERE order_id = o.id AND status = 'expired')           AS expired,
+        -- Driver con oferta pendiente ahora
+        (SELECT split_part(u.full_name,'_',1)
+           FROM order_driver_offers od2
+           JOIN users u ON u.id = od2.driver_id
+           WHERE od2.order_id = o.id AND od2.status = 'pending'
+           LIMIT 1)                                                AS current_driver
+      FROM orders o
+      JOIN restaurants r ON r.id = o.restaurant_id
+      WHERE o.driver_id IS NULL
+        AND o.status NOT IN ('delivered','cancelled')
+      ORDER BY o.created_at ASC
+      LIMIT 50
+    `);
+    return res.json({ stats: result.rows });
+  } catch (error) { return next(error); }
+});
+
 export default router;
