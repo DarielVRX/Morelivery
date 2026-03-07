@@ -51,7 +51,7 @@ export async function expireTimedOutOffers(onOffer) {
     wait_until = NOW() + ($2::int * INTERVAL '1 second'),
                               updated_at = NOW()
                               WHERE status = 'pending'
-                              AND created_at < NOW() - ($1::int * INTERVAL '1 second')
+                              AND updated_at < NOW() - ($1::int * INTERVAL '1 second')
                               RETURNING order_id, driver_id`,
                               [OFFER_TIMEOUT_SECONDS, COOLDOWN_SECONDS]
   );
