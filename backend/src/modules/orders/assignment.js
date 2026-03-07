@@ -65,7 +65,7 @@ export async function expireTimedOutOffers(onOffer) {
   }
 }
 
-// ─── Reducción de cooldown por pedido ────────────────────────────────────────
+// ─── Reducción de cooldown por pedido  ────────────────────────────────────────
 async function applyOrderCooldownReduction(orderId) {
   const nearest = await query(
     `SELECT od.driver_id,
@@ -74,19 +74,16 @@ async function applyOrderCooldownReduction(orderId) {
     WHERE od.order_id = $1
     AND od.status IN ('rejected','expired','released')
     AND od.wait_until > NOW()
-    ORDER BY od.wait_until ASC
-    LIMIT 1`,
+    ORDER BY od.wait_until ASC LIMIT 1`,
     [orderId]
   );
 
-  if (nearest.rowCount === 0) {
-    log(orderId, 'cooldown reduction: no driver with active cooldown');
-    return null;
-  }
+  if (nearest.rowCount === 0) return null;
 
   const { driver_id, secs_remaining } = nearest.rows[0];
   const newWaitSecs = secs_remaining / COOLDOWN_DIVISOR;
 
+  // CORRECCIÓN AQUÍ: Añadimos ::float a $1 para que Postgres sepa el tipo de dato
   const waitExpr = newWaitSecs < 1
   ? `NOW() - INTERVAL '2 seconds'`
   : `NOW() + ($1::float * INTERVAL '1 second')`;
@@ -103,20 +100,15 @@ async function applyOrderCooldownReduction(orderId) {
                              [newWaitSecs, orderId, driver_id]
   );
 
-  if (result.rowCount === 0) {
-    // No logueamos aquí para evitar spam si el tick es muy rápido
-    return null;
-  }
+  if (result.rowCount === 0) return null;
 
   log(orderId, 'cooldown reduction applied', {
     driver_id,
-    secs_remaining: Math.round(secs_remaining),
-      new_wait_secs:  Math.round(newWaitSecs * 10) / 10,
+    new_wait_secs: Math.round(newWaitSecs * 10) / 10,
   });
 
   return { newWaitSecs };
 }
-
 // ─── Núcleo ───────────────────────────────────────────────────────────────────
 export async function offerNextDrivers(orderId, _onOffer) {
   log(orderId, 'offerNextDrivers: start');
