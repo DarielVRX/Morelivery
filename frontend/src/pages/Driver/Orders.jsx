@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
@@ -20,50 +20,47 @@ const STATUS_COLOR = {
 
 export default function DriverOrders() {
   const { auth } = useAuth();
-  const [orders, setOrders]               = useState([]);
-  const [loading, setLoading]             = useState(false);
-  const [tab, setTab]                     = useState('active');
-  const [reportingId, setReportingId]     = useState(null);
-  const [reportText, setReportText]       = useState('');
-  const [reportMsg, setReportMsg]         = useState('');
-  const loadDataRef                       = useRef(null);
+  const [orders, setOrders]         = useState([]);
+  const [waitingOrders, setWaiting] = useState([]); // pedidos sin ofertar
+  const [tab, setTab]               = useState('active');
+  const [reportingId, setReportingId] = useState(null);
+  const [reportText, setReportText]   = useState('');
+  const [reportMsg, setReportMsg]     = useState('');
+  const loadDataRef = useRef(null);
 
-  const loadData = useCallback(async () => {
-    if (!auth.token || loading) return;
-    setLoading(true);
+  async function loadData() {
+    if (!auth.token) return;
     try {
-      const d = await apiFetch('/orders/my', {}, auth.token);
-      setOrders(d.orders || []);
-    } catch (e) {
-      console.error('Error cargando pedidos:', e);
-    } finally {
-      setLoading(false);
-    }
-  }, [auth.token, loading]);
-
-  useEffect(() => { loadDataRef.current = loadData; }, [loadData]);
-  useEffect(() => { loadData(); }, [auth.token]);
-
-  useRealtimeOrders(
-    auth.token,
-    () => loadDataRef.current?.(),  // order_update
-    () => {},                        // driver_location
-    () => loadDataRef.current?.(),  // new_offer
-  );
+      const [myOrders, pending] = await Promise.all([
+        apiFetch('/orders/my', {}, auth.token),
+        apiFetch('/orders/pending-assignment', {}, auth.token).catch(() => ({ orders: [] })),
+      ]);
+      setOrders(myOrders.orders || []);
+      setWaiting(pending.orders || []);
+    } catch (_) {}
+  }
 
   async function sendReport(orderId) {
     if (!reportText.trim()) return;
     try {
       await apiFetch(`/orders/${orderId}/report`, {
-        method: 'POST', body: JSON.stringify({ text: reportText, reason: 'driver_report' })
+        method:'POST', body: JSON.stringify({ text: reportText, reason: 'driver_report' })
       }, auth.token);
       setReportingId(null); setReportText(''); setReportMsg('Reporte enviado');
       setTimeout(() => setReportMsg(''), 3000);
     } catch (e) { setReportMsg(e.message); }
   }
 
+  useEffect(() => { loadDataRef.current = loadData; });
+  useEffect(() => { loadData(); }, [auth.token]);
+  useRealtimeOrders(auth.token, () => loadDataRef.current?.(), () => {});
+
   const active = useMemo(() => orders.filter(o => !['delivered','cancelled'].includes(o.status)), [orders]);
   const past   = useMemo(() => orders.filter(o =>  ['delivered','cancelled'].includes(o.status)), [orders]);
+
+  // Pedidos sin ofertar: excluir los que ya son activos de este driver
+  const activeIds = useMemo(() => new Set(active.map(o => o.id)), [active]);
+  const unoffered = useMemo(() => waitingOrders.filter(o => !activeIds.has(o.id)), [waitingOrders, activeIds]);
 
   const tabStyle = (t) => ({
     padding:'0.4rem 1rem', cursor:'pointer', border:'none', borderRadius:6, fontWeight:600,
@@ -76,6 +73,34 @@ export default function DriverOrders() {
     <div>
       {reportMsg && <p className="flash flash-ok" style={{ marginBottom:'0.5rem' }}>{reportMsg}</p>}
       <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1rem' }}>Mis pedidos</h2>
+
+      {/* ── Pedidos en espera de conductor (sin oferta activa) ─────────── */}
+      {unoffered.length > 0 && (
+        <div style={{ marginBottom:'1.25rem' }}>
+          <p style={{ fontSize:'0.8rem', fontWeight:700, color:'var(--gray-500)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.5rem' }}>
+            Buscando conductor ({unoffered.length})
+          </p>
+          <ul style={{ listStyle:'none', padding:0 }}>
+            {unoffered.map(o => {
+              const color = STATUS_COLOR[o.status] || '#9ca3af';
+              return (
+                <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.4rem', padding:'0.6rem 0.75rem', opacity:0.7 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.2rem' }}>
+                    <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15`, fontSize:'0.72rem' }}>
+                      {STATUS_LABELS[o.status]}
+                    </span>
+                    <span style={{ fontWeight:700, fontSize:'0.875rem' }}>{fmt(o.total_cents)}</span>
+                  </div>
+                  <div style={{ fontSize:'0.8rem', color:'var(--gray-600)' }}>
+                    {o.restaurant_name}
+                    {o.restaurant_address && <span> · {o.restaurant_address}</span>}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       <div style={{ display:'flex', gap:'0.4rem', marginBottom:'1rem' }}>
         <button style={tabStyle('active')} onClick={() => setTab('active')}>Activos ({active.length})</button>
@@ -127,14 +152,12 @@ export default function DriverOrders() {
                   {past.slice(0, 50).map(o => (
                     <tr key={o.id}>
                       <td>
-                        <span className="badge" style={{ color:STATUS_COLOR[o.status], borderColor:`${STATUS_COLOR[o.status]}55`, background:`${STATUS_COLOR[o.status]}15`, fontSize:'0.7rem' }}>
-                          {STATUS_LABELS[o.status]}
-                        </span>
+                        <span className="badge" style={{ color:STATUS_COLOR[o.status], borderColor:`${STATUS_COLOR[o.status]}55`, background:`${STATUS_COLOR[o.status]}15`, fontSize:'0.7rem' }}>{STATUS_LABELS[o.status]}</span>
                         {['delivered','cancelled'].includes(o.status) && (
                           <div style={{ marginTop:'0.3rem' }}>
                             {reportingId === o.id ? (
                               <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem' }}>
-                                <textarea value={reportText} onChange={e => setReportText(e.target.value)}
+                                <textarea value={reportText} onChange={e=>setReportText(e.target.value)}
                                   placeholder="Describe el problema…" rows={2}
                                   style={{ fontSize:'0.78rem', width:'100%', boxSizing:'border-box' }} />
                                 <div style={{ display:'flex', gap:'0.3rem' }}>

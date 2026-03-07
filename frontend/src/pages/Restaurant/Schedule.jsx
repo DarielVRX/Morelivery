@@ -14,16 +14,10 @@ export default function RestaurantSchedule() {
       .catch(() => {});
   }, [auth.token]);
 
-  // Zona horaria del dispositivo
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
   return (
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.25rem', flexWrap:'wrap', gap:'0.5rem' }}>
         <h2 style={{ fontSize:'1.1rem', fontWeight:800 }}>Horario de atención</h2>
-        <span style={{ fontSize:'0.78rem', color:'var(--gray-600)', background:'var(--gray-100)', padding:'0.2rem 0.6rem', borderRadius:6 }}>
-          Zona horaria: {tz}
-        </span>
       </div>
 
       {isOpen !== null && (

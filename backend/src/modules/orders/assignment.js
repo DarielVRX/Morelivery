@@ -84,14 +84,18 @@ export async function expireTimedOutOffers(onOffer) {
 async function applyOrderCooldownReduction(orderId) {
   // 1. Buscamos al driver con el cooldown más bajo
   const nearest = await query(
-    `SELECT driver_id,
-    EXTRACT(EPOCH FROM (wait_until - NOW()))::float AS secs_remaining
-    FROM order_driver_offers
-    WHERE order_id = $1
-    AND status IN ('rejected','expired','released')
-    AND wait_until > NOW()
-    ORDER BY wait_until ASC
-    LIMIT 1`,
+    `SELECT od.driver_id,
+            EXTRACT(EPOCH FROM (od.wait_until - NOW()))::float AS secs_remaining
+     FROM order_driver_offers od
+     WHERE od.order_id = $1
+       AND od.status IN ('rejected','expired','released')
+       AND od.wait_until > NOW()
+       AND NOT EXISTS (
+         SELECT 1 FROM order_driver_offers od2
+         WHERE od2.driver_id = od.driver_id AND od2.status = 'pending'
+       )
+     ORDER BY od.wait_until ASC
+     LIMIT 1`,
     [orderId]
   );
 
@@ -104,19 +108,23 @@ async function applyOrderCooldownReduction(orderId) {
 
   // Si el cooldown reducido es < 1s, poner wait_until en el pasado → elegible ya.
   // Guard de idempotencia: solo actualiza si no fue reducido en el último segundo.
+  // Evitar ambigüedad de tipo con CASE WHEN ($n::float) — calcular SQL en JS
+  const waitSql    = newWaitSecs < 1
+    ? `NOW() - INTERVAL '2 seconds'`
+    : `NOW() + ($2::float * INTERVAL '1 second')`;
+  const waitParams = newWaitSecs < 1 ? [orderId, driver_id] : [orderId, newWaitSecs, driver_id];
+  const driverIdx  = newWaitSecs < 1 ? '$2' : '$3';
+
   const result = await query(
     `UPDATE order_driver_offers
-     SET wait_until  = CASE WHEN ($2::float < 1)
-                            THEN NOW() - INTERVAL '2 seconds'
-                            ELSE NOW() + ($2::float * INTERVAL '1 second')
-                       END,
+     SET wait_until = ${waitSql},
          updated_at = NOW()
-     WHERE order_id  = $3
-       AND driver_id = $4
+     WHERE order_id  = $1
+       AND driver_id = ${driverIdx}
        AND status    IN ('rejected','expired','released')
        AND wait_until > NOW()
        AND updated_at < NOW() - INTERVAL '1 second'`,
-    [orderId, newWaitSecs, orderId, driver_id]
+    waitParams
   );
 
   if (result.rowCount === 0) {

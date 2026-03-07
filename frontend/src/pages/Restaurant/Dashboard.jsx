@@ -30,6 +30,12 @@ export default function RestaurantDashboard() {
   const [message, setMessage]         = useState('');
   const [suggestionDrafts, setSuggestionDrafts] = useState({});
   const [openSuggestionFor, setOpenSuggestionFor] = useState('');
+  const [editingPhoto, setEditingPhoto]   = useState(false);
+  const [photoPreview, setPhotoPreview]   = useState(null);
+  const [photoDataUrl, setPhotoDataUrl]   = useState(null);
+  const [photoUrl, setPhotoUrl]           = useState('');
+  const [savingPhoto, setSavingPhoto]     = useState(false);
+  const photoFileRef = useRef(null);
 
   const loadDataRef = useRef(null);
 
@@ -62,6 +68,27 @@ export default function RestaurantDashboard() {
     setSuggestionDrafts(nextDrafts);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orders.length]);
+
+  function pickPhotoFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => { setPhotoPreview(e.target.result); setPhotoDataUrl(e.target.result); };
+    reader.readAsDataURL(file);
+  }
+
+  async function saveProfilePhoto() {
+    setSavingPhoto(true);
+    try {
+      const toSave = photoDataUrl || photoUrl.trim() || null;
+      if (!toSave) { setSavingPhoto(false); return; }
+      await apiFetch('/restaurants/my/profile-photo', {
+        method: 'PATCH', body: JSON.stringify({ photoUrl: toSave })
+      }, auth.token);
+      setEditingPhoto(false); setPhotoPreview(null); setPhotoDataUrl(null); setPhotoUrl('');
+      loadData();
+    } catch (e) { setMessage(e.message); }
+    finally { setSavingPhoto(false); }
+  }
 
   async function addProduct() {
     if (!description.trim()) return setMessage('Escribe una descripción');
@@ -124,20 +151,58 @@ export default function RestaurantDashboard() {
 
   return (
     <section className="role-panel">
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'0.5rem', marginBottom:'0.75rem' }}>
-        <div>
+      <div style={{ display:'flex', gap:'0.75rem', alignItems:'center', marginBottom:'1rem', flexWrap:'wrap' }}>
+        {/* Foto de perfil */}
+        <div style={{ position:'relative', flexShrink:0 }}>
+          {restaurant?.profile_photo
+            ? <img src={restaurant.profile_photo} alt=""
+                style={{ width:52, height:52, borderRadius:'50%', objectFit:'cover', border:'2px solid var(--gray-200)' }} />
+            : <div style={{ width:52, height:52, borderRadius:'50%', background:'var(--gray-100)', border:'2px solid var(--gray-200)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="1.5"><circle cx="12" cy="12" r="9"/><path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/><circle cx="12" cy="10" r="2"/></svg>
+              </div>
+          }
+          <button onClick={() => setEditingPhoto(e => !e)}
+            style={{ position:'absolute', bottom:-4, right:-4, width:20, height:20, borderRadius:'50%', background:'var(--brand)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4z"/></svg>
+          </button>
+        </div>
+        <div style={{ flex:1 }}>
           <h2 style={{ margin:0 }}>{restaurant?.name || 'Restaurante'}</h2>
           <span style={{ fontSize:'0.875rem', color: restaurant?.is_open ? '#16a34a' : '#dc2626', fontWeight:700 }}>
             {restaurant?.is_open ? '● Abierto' : '● Cerrado'}
           </span>
         </div>
-        <button onClick={loadData} style={{ fontSize:'0.82rem' }}>🔄</button>
+        <button onClick={loadData} style={{ background:'none', border:'1px solid var(--gray-200)', borderRadius:6, padding:'0.3rem 0.6rem', cursor:'pointer', fontSize:'0.8rem', color:'var(--gray-600)' }}>Actualizar</button>
       </div>
 
+      {/* Editor de foto de perfil */}
+      {editingPhoto && (
+        <div className="card" style={{ marginBottom:'0.75rem', padding:'0.875rem' }}>
+          <p style={{ fontWeight:700, fontSize:'0.875rem', marginBottom:'0.5rem' }}>Foto de perfil</p>
+          <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', marginBottom:'0.4rem' }}>
+            <button className="btn-sm" onClick={() => photoFileRef.current?.click()}>Seleccionar archivo</button>
+            <input ref={photoFileRef} type="file" accept="image/*" style={{ display:'none' }}
+              onChange={e => pickPhotoFile(e.target.files?.[0])} />
+            {photoPreview && <img src={photoPreview} alt="Vista previa" style={{ width:44, height:44, borderRadius:'50%', objectFit:'cover', border:'1px solid var(--gray-200)' }} />}
+          </div>
+          {!photoPreview && (
+            <input value={photoUrl} onChange={e => setPhotoUrl(e.target.value)}
+              placeholder="O pega una URL (https://...)" style={{ fontSize:'0.82rem', marginBottom:'0.4rem' }} />
+          )}
+          <div style={{ display:'flex', gap:'0.4rem' }}>
+            <button className="btn-primary btn-sm" onClick={saveProfilePhoto}
+              disabled={savingPhoto || (!photoPreview && !photoUrl.trim())}>
+              {savingPhoto ? 'Guardando…' : 'Guardar'}
+            </button>
+            <button className="btn-sm" onClick={() => { setEditingPhoto(false); setPhotoPreview(null); setPhotoDataUrl(null); setPhotoUrl(''); }}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
       <div style={{ display:'flex', gap:'0.4rem', marginBottom:'1.25rem', flexWrap:'wrap' }}>
-        <button style={tabStyle('orders')}  onClick={() => setTab('orders')}>📋 Pedidos ({activeOrders.length})</button>
-        <button style={tabStyle('menu')}    onClick={() => setTab('menu')}>🍽 Menú ({products.length})</button>
-        <button style={tabStyle('schedule')} onClick={() => setTab('schedule')}>🕐 Horario</button>
+        <button style={tabStyle('orders')}  onClick={() => setTab('orders')}>Pedidos ({activeOrders.length})</button>
+        <button style={tabStyle('menu')}    onClick={() => setTab('menu')}>Menu ({products.length})</button>
+        <button style={tabStyle('schedule')} onClick={() => setTab('schedule')}>Horario</button>
       </div>
 
       {message && <p style={{ color:'#c00', marginBottom:'0.5rem' }}>{message}</p>}

@@ -1,38 +1,39 @@
+// frontend/src/hooks/useOfferCountdown.js
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * Cuenta regresiva para ofertas.
- * @param {number} initialSecondsLeft - segundos restantes desde el backend
- *   Se debe pasar como número (no como timestamp ISO).
- *   Al recargar la página, el SSE debe reenviar el valor correcto y este hook
- *   lo resincroniza automáticamente.
+ * Cuenta regresiva basada en secondsLeft calculado por el SERVIDOR.
+ * - No depende del reloj del cliente para el valor inicial.
+ * - Al recargar, el SSE o el endpoint devuelven un secondsLeft fresco del servidor.
+ * - Cada segundo hace -1 localmente (interpolación suave).
+ *
+ * @param {number} initialSecondsLeft  segundos restantes según el servidor (número entero ≥ 0)
  */
 export function useOfferCountdown(initialSecondsLeft) {
-  const parse = (val) => {
-    const n = parseInt(val, 10);
-    return isNaN(n) || n < 0 ? 60 : n;
+  const parse = (v) => {
+    const n = typeof v === 'number' ? Math.round(v) : parseInt(v, 10);
+    return isNaN(n) || n < 0 ? 0 : n;
   };
 
   const [secondsLeft, setSecondsLeft] = useState(() => parse(initialSecondsLeft));
-  // Ref para el valor actual — el intervalo la lee sin re-montarse
-  const secondsRef = useRef(parse(initialSecondsLeft));
+  const ref = useRef(parse(initialSecondsLeft));
 
-  // Resincronizar cuando el backend envía un nuevo valor (reconnect SSE)
+  // Resincronizar cuando llega un valor nuevo del servidor (SSE push o recarga)
   useEffect(() => {
     const parsed = parse(initialSecondsLeft);
-    secondsRef.current = parsed;
+    ref.current = parsed;
     setSecondsLeft(parsed);
   }, [initialSecondsLeft]);
 
-  // Intervalo estable — se monta una vez, lee secondsRef para tener siempre el valor actual
+  // Intervalo estable — solo se monta una vez
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (secondsRef.current <= 0) return;
-      secondsRef.current = secondsRef.current - 1;
-      setSecondsLeft(secondsRef.current);
+    const id = setInterval(() => {
+      if (ref.current <= 0) return;
+      ref.current -= 1;
+      setSecondsLeft(ref.current);
     }, 1000);
-    return () => clearInterval(interval);
-  }, []); // mount/unmount solo
+    return () => clearInterval(id);
+  }, []);
 
   return {
     secondsLeft,

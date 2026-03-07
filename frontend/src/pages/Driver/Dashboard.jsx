@@ -42,8 +42,8 @@ function FlashMsg({msg}) {
 }
 
 /** Barra horizontal de fondo que se vacía en 60s — posicionada absolute dentro del li */
-function OfferProgressBar({ offerCreatedAt, onExpired }) {
-  const { secondsLeft, expired } = useOfferCountdown(offerCreatedAt);
+function OfferProgressBar({ secondsLeft: initSecs, onExpired }) {
+  const { secondsLeft, expired } = useOfferCountdown(initSecs ?? 60);
   const pct = Math.max(0, secondsLeft / 60) * 100;
   const color = secondsLeft <= 15 ? '#fecaca' : secondsLeft <= 30 ? '#fef3c7' : '#dcfce7';
 
@@ -245,13 +245,13 @@ export default function DriverDashboard() {
         <ul style={{listStyle:'none',padding:0}}>
           {offers.map(offer=>(
             <li key={offer.id} style={{marginBottom:'1rem',border:'1px solid #e5e7eb',borderRadius:8,padding:'0.875rem',position:'relative',overflow:'hidden'}}>
-              <OfferProgressBar offerCreatedAt={offer.offer_created_at} onExpired={loadData} />
+              <OfferProgressBar secondsLeft={offer.seconds_left ?? 60} onExpired={loadData} />
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:'0.5rem',flexWrap:'wrap'}}>
                 <div>
                   <strong>{offer.restaurant_name}</strong>
                   <span style={{color:'#6b7280',fontSize:'0.875rem',marginLeft:'0.5rem'}}>{formatMoney(offer.total_cents)}</span>
                 </div>
-                <OfferCountdown offerCreatedAt={offer.offer_created_at} onExpired={loadData} />
+                <OfferCountdown secondsLeft={offer.seconds_left ?? 60} onExpired={loadData} />
               </div>
               <div style={{fontSize:'0.875rem',marginTop:'0.25rem'}}><strong>Dir. retiro:</strong> {offer.restaurant_address||'—'}</div>
               <div style={{fontSize:'0.875rem'}}><strong>Dir. entrega:</strong> {offer.customer_address||'—'}</div>
