@@ -25,14 +25,14 @@ export async function registerUser(payload) {
   let result;
   try {
     result = await query(
-      'INSERT INTO users(full_name, email, password_hash, role, address) VALUES($1,$2,$3,$4,$5) RETURNING id, full_name, email, role, address',
-      [username, pseudoEmail, passwordHash, payload.role, userAddress]
+      'INSERT INTO users(full_name, alias, email, password_hash, role, address) VALUES($1,$2,$3,$4,$5,$6) RETURNING id, full_name, alias, email, role, address',
+      [username, payload.displayName?.trim() || username, pseudoEmail, passwordHash, payload.role, userAddress]
     );
   } catch (error) {
     if (error?.code === '42703') {
       result = await query(
-        'INSERT INTO users(full_name, email, password_hash, role) VALUES($1,$2,$3,$4) RETURNING id, full_name, email, role',
-        [username, pseudoEmail, passwordHash, payload.role]
+        'INSERT INTO users(full_name, alias, email, password_hash, role) VALUES($1,$2,$3,$4,$5) RETURNING id, full_name, alias, email, role',
+        [username, payload.displayName?.trim() || username, pseudoEmail, passwordHash, payload.role]
       );
     } else throw error;
   }
@@ -63,9 +63,9 @@ export async function loginUser(payload) {
 
   let result;
   try {
-    result = await query('SELECT id, full_name, email, password_hash, role, status, address FROM users WHERE email = $1', [pseudoEmail]);
+    result = await query('SELECT id, full_name, alias, email, password_hash, role, status, address FROM users WHERE email = $1', [pseudoEmail]);
   } catch (error) {
-    if (error?.code === '42703') result = await query('SELECT id, full_name, email, password_hash, role, status FROM users WHERE email = $1', [pseudoEmail]);
+    if (error?.code === '42703') result = await query('SELECT id, full_name, alias, email, password_hash, role, status FROM users WHERE email = $1', [pseudoEmail]);
     else throw error;
   }
 
@@ -121,7 +121,7 @@ export async function updateProfileAddress(userId, role, address, displayName) {
       const cleanName = cleanRestaurantName(displayName);
       try {
         await query('UPDATE restaurants SET name=$1 WHERE owner_user_id=$2', [cleanName, userId]);
-        await query('UPDATE users SET full_name=$1 WHERE id=$2', [displayName.trim(), userId]);
+        await query('UPDATE users SET full_name=$1, alias=$1 WHERE id=$2', [displayName.trim(), userId]);
       } catch (e) { if (e?.code !== '42703') throw e; }
     }
   } else {
@@ -129,7 +129,10 @@ export async function updateProfileAddress(userId, role, address, displayName) {
     const updates = [];
     const vals = [];
     let i = 1;
-    if (displayName !== undefined && displayName !== null) { updates.push(`full_name=$${i++}`); vals.push(displayName.trim()); }
+    if (displayName !== undefined && displayName !== null) {
+      updates.push(`full_name=$${i++}`); vals.push(displayName.trim());
+      updates.push(`alias=$${i++}`); vals.push(displayName.trim());
+    }
     if (address !== undefined && address !== null)         { updates.push(`address=$${i++}`);    vals.push(address); }
     if (updates.length > 0) {
       vals.push(userId);
@@ -140,12 +143,13 @@ export async function updateProfileAddress(userId, role, address, displayName) {
 
   // Leer valores confirmados desde la DB para devolver al cliente
   const confirmed = await query(
-    'SELECT full_name, address FROM users WHERE id=$1', [userId]
+    'SELECT full_name, alias, address FROM users WHERE id=$1', [userId]
   );
   const row = confirmed.rows[0] || {};
   return {
-    address:     row.address    ?? address ?? null,
-    displayName: row.full_name  ?? displayName ?? null,
+    address:     row.address ?? address ?? null,
+    displayName: row.alias  ?? row.full_name ?? displayName ?? null,
+    alias:       row.alias  ?? row.full_name ?? displayName ?? null,
   };
 }
 

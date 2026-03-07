@@ -58,7 +58,7 @@ async function computeIsOpen(restaurantId) {
 /* ── GET / — lista pública con is_open calculado en tiempo real ── */
 router.get('/', async (_req, res, next) => {
   try {
-    const result = await query('SELECT id, name, category, is_open, address FROM restaurants WHERE is_active = true ORDER BY name');
+    const result = await query('SELECT id, name, category, is_open, address, profile_photo FROM restaurants WHERE is_active = true ORDER BY name');
     const restaurants = await Promise.all(result.rows.map(async r => ({ ...r, is_open: await computeIsOpen(r.id) })));
     return res.json({ restaurants });
   } catch (error) {

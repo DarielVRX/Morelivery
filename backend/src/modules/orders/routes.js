@@ -360,8 +360,8 @@ router.get('/my', authenticate, async (req, res, next) => {
     try {
       result = await query(
         `SELECT o.*, r.name AS restaurant_name, r.address AS restaurant_address,
-                split_part(c.full_name,'_',1) AS customer_first_name, c.full_name AS customer_display_name,
-                split_part(d.full_name,'_',1) AS driver_first_name, c.address AS customer_address
+                COALESCE(c.alias, c.full_name) AS customer_first_name, c.full_name AS customer_display_name,
+                COALESCE(d.alias, d.full_name) AS driver_first_name, c.address AS customer_address
          FROM orders o
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id
@@ -374,8 +374,8 @@ router.get('/my', authenticate, async (req, res, next) => {
       if (!isMissingColumnError(error)) throw error;
       result = await query(
         `SELECT o.*, r.name AS restaurant_name, NULL AS restaurant_address,
-                split_part(c.full_name,'_',1) AS customer_first_name, c.full_name AS customer_display_name,
-                split_part(d.full_name,'_',1) AS driver_first_name, o.delivery_address AS customer_address
+                COALESCE(c.alias, c.full_name) AS customer_first_name, c.full_name AS customer_display_name,
+                COALESCE(d.alias, d.full_name) AS driver_first_name, o.delivery_address AS customer_address
          FROM orders o
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id
@@ -415,7 +415,7 @@ router.get('/:id/messages', authenticate, async (req, res, next) => {
     try {
       const msgs = await query(
         `SELECT m.id, m.sender_id, m.text, m.created_at,
-                split_part(u.full_name,'_',1) AS sender_name, u.role AS sender_role
+                COALESCE(u.alias, u.full_name) AS sender_name, u.role AS sender_role
          FROM order_messages m JOIN users u ON u.id=m.sender_id
          WHERE m.order_id=$1 ORDER BY m.created_at ASC`,
         [req.params.id]

@@ -162,6 +162,11 @@ export default function RestaurantOrders() {
                     </div>
                     <div style={{ fontSize:'0.83rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>
                       Cliente: <strong>{order.customer_first_name || '—'}</strong>
+                      {order.customer_address && (
+                        <span style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginLeft:'0.35rem' }}>
+                          · {order.customer_address}
+                        </span>
+                      )}
                       {' · '}
                       Conductor: <strong>{order.driver_first_name || 'Pendiente'}</strong>
                     </div>
