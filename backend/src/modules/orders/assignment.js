@@ -145,6 +145,17 @@ export async function offerNextDrivers(orderId, _onOffer) {
        AND status NOT IN ('delivered','cancelled')`,
     [orderId]
   );
+  for (const r of allAvail.rows) {
+    log(orderId, `  driver=${r.user_id}`, {
+      active_orders: `${r.active_count}/${MAX_ACTIVE_ORDERS_PER_DRIVER}`,
+      has_pending_offer: r.has_pending_offer,
+      offer_status_for_order: r.offer_status_for_order ?? 'none',
+      cooldown_secs_remaining: r.cooldown_secs_remaining ?? 0,
+      wait_until: r.cooldown_secs_remaining
+      ? new Date(Date.now() + r.cooldown_secs_remaining * 1000).toISOString()
+      : 'now'
+    });
+  }
   if (orderRow.rowCount === 0) {
     log(orderId, 'order not found or already assigned — abort');
     return 0;
