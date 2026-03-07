@@ -1,54 +1,44 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { apiFetch } from '../../api/client';
-import { useAuth } from '../../contexts/AuthContext';
-import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
-
-function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
-function fmtDate(iso) { return iso ? new Date(iso).toLocaleString('es', { dateStyle:'short', timeStyle:'short' }) : '—'; }
-
-const STATUS_LABELS = {
-  created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
-  preparing:'En preparación', ready:'Listo para retiro',
-  on_the_way:'En camino', delivered:'Entregado',
-  cancelled:'Cancelado', pending_driver:'Sin conductor',
-};
-const STATUS_COLOR = {
-  created:'#f59e0b', assigned:'#3b82f6', accepted:'#8b5cf6',
-  preparing:'#f97316', ready:'#16a34a', on_the_way:'#0891b2',
-  delivered:'#16a34a', cancelled:'#dc2626', pending_driver:'#ef4444',
-};
-
 export default function DriverOrders() {
   const { auth } = useAuth();
-  const [orders, setOrders]     = useState([]);
-  const [tab, setTab]           = useState('active');
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState('active'); // Asegurar que estas existan
   const [reportingId, setReportingId] = useState(null);
-  const [reportText, setReportText]   = useState('');
-  const [reportMsg, setReportMsg]     = useState('');
+  const [reportText, setReportText] = useState('');
+  const [reportMsg, setReportMsg] = useState('');
   const loadDataRef = useRef(null);
 
-  // Memorizamos la función para que no cambie en cada render
   const loadData = useCallback(async () => {
-    if (!auth.token) return;
+    if (!auth.token || loading) return;
+
+    setLoading(true);
     try {
       const d = await apiFetch('/orders/my', {}, auth.token);
       setOrders(d.orders || []);
-    } catch (_) {}
-  }, [auth.token]);
+    } catch (e) {
+      console.error("Error cargando pedidos:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [auth.token, loading]);
 
-  // Sincronizamos la referencia solo cuando loadData cambia
   useEffect(() => {
     loadDataRef.current = loadData;
   }, [loadData]);
 
-  // Carga inicial controlada por el token
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  // El listener ahora usa una referencia estable
-  useRealtimeOrders(auth.token, () => loadDataRef.current?.(), () => {});
+  // Usar la referencia en todos los callbacks necesarios
+  useRealtimeOrders(
+    auth.token,
+    () => loadDataRef.current?.(), // Actualización de pedido
+                    () => {},
+                    () => loadDataRef.current?.()  // Nueva oferta
+  );
 
+  // ... resto de tus funciones sendReport y el JSX
   async function sendReport(orderId) {
     if (!reportText.trim()) return;
     try {
