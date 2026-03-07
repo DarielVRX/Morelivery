@@ -1,27 +1,25 @@
-// frontend/src/hooks/useOfferCountdown.js
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 /**
- * Hook para contar segundos restantes de una oferta desde su creación.
- * @param {string|Date} offerCreatedAt - Fecha/hora de creación de la oferta
+ * Cuenta regresiva para ofertas.
+ * @param {number|string} initialSecondsLeft - segundos restantes iniciales desde backend
  */
-export function useOfferCountdown(offerCreatedAt) {
-  // Calcula los segundos restantes desde ahora
-  const computeSecondsLeft = () => {
-    const diff = Math.floor((Date.now() - new Date(offerCreatedAt).getTime()) / 1000);
-    return Math.max(0, 60 - diff);
+export function useOfferCountdown(initialSecondsLeft) {
+  const parse = (val) => {
+    const n = parseInt(val);
+    return isNaN(n) || n < 0 ? 60 : n;
   };
 
-  const [secondsLeft, setSecondsLeft] = useState(computeSecondsLeft);
+  const [secondsLeft, setSecondsLeft] = useState(parse(initialSecondsLeft));
 
-  // Resincroniza si cambia offerCreatedAt
+  // Resincronizar si el backend envía un nuevo valor
   useEffect(() => {
-    setSecondsLeft(computeSecondsLeft());
-  }, [offerCreatedAt]);
+    setSecondsLeft(parse(initialSecondsLeft));
+  }, [initialSecondsLeft]);
 
-  // Intervalo que decrementa cada segundo
+  // Intervalo de cuenta regresiva
   useEffect(() => {
-    if (secondsLeft <= 0) return; // No crear interval si ya expiró
+    if (secondsLeft <= 0) return; // nada que hacer si ya expiró
 
     const interval = setInterval(() => {
       setSecondsLeft(prev => {
@@ -34,7 +32,7 @@ export function useOfferCountdown(offerCreatedAt) {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, []); // Nota: dependencias vacías para que no se reinicie cada segundo
+  }, []); // se monta solo una vez
 
   return {
     secondsLeft,
