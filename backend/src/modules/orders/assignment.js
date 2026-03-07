@@ -82,52 +82,41 @@ export async function expireTimedOutOffers(onOffer) {
 // Reduce wait_until del driver más próximo a vencer a (secs_remaining / 5).
 // Guard de idempotencia: updated_at < NOW() - 1s evita doble reducción.
 async function applyOrderCooldownReduction(orderId) {
-  // 1. Buscamos al driver con el cooldown más bajo que sea mayor a 0
+  // 1. Buscamos al driver con el cooldown más bajo
   const nearest = await query(
-    `SELECT od.driver_id,
-    EXTRACT(EPOCH FROM (od.wait_until - NOW()))::float AS secs_remaining
-    FROM order_driver_offers od
-    WHERE od.order_id = $1
-    AND od.status IN ('rejected','expired','released')
-    AND od.wait_until > NOW()
-    ORDER BY od.wait_until ASC
+    `SELECT driver_id,
+    EXTRACT(EPOCH FROM (wait_until - NOW()))::float AS secs_remaining
+    FROM order_driver_offers
+    WHERE order_id = $1
+    AND status IN ('rejected','expired','released')
+    AND wait_until > NOW()
+    ORDER BY wait_until ASC
     LIMIT 1`,
     [orderId]
   );
 
   if (nearest.rowCount === 0) return null;
 
+  // EXTRAER CORRECTAMENTE: Aquí estaba el error de referencia
   const { driver_id, secs_remaining } = nearest.rows[0];
 
-  // Si el cooldown ya es muy bajo, no dividas más, simplemente libéralo
-  const newWaitSecs = secs_remaining / COOLDOWN_DIVISOR;
-
-  const waitExpr = newWaitSecs < 1
-  ? `NOW() - INTERVAL '2 seconds'`
-  : `NOW() + ($1::float * INTERVAL '1 second')`;
-
-  // 2. CORRECCIÓN: Quitamos la restricción de '1 second' para que
-  // permita reducciones rápidas si el flujo lo requiere.
-  const result = await query(
+  // 2. Aplicar la reducción directamente en la DB para evitar desfases de red/reloj
+  await query(
     `UPDATE order_driver_offers
-    SET wait_until = ${waitExpr},
-    updated_at = NOW()
-    WHERE order_id  = $2
-    AND driver_id = $3
-    AND status IN ('rejected','expired','released')
-    AND wait_until > NOW()`, // Quitamos el filtro de updated_at < NOW() - 1s
-                             [newWaitSecs, orderId, driver_id]
+    SET wait_until = NOW() + (($2::float / $3::float) * INTERVAL '1 second'),
+              updated_at = NOW()
+              WHERE order_id = $1 AND driver_id = $4`,
+              [orderId, secs_remaining, COOLDOWN_DIVISOR, driver_id]
   );
 
-  if (result.rowCount === 0) return null;
-
-  log(orderId, 'cooldown reduction applied', {
+  log(orderId, `cooldown reduction applied`, {
     driver_id,
-    new_wait_secs: Math.round(newWaitSecs * 10) / 10,
+    new_wait_secs: secs_remaining / COOLDOWN_DIVISOR
   });
 
-  return { newWaitSecs };
+  return driver_id;
 }
+
 // ─── Núcleo ───────────────────────────────────────────────────────────────────
 // SOLO se llama desde serializedOffer — nunca directamente desde fuera.
 export async function offerNextDrivers(orderId, _onOffer) {
@@ -229,7 +218,7 @@ export async function offerNextDrivers(orderId, _onOffer) {
     // Si new_wait_secs < 1 el driver quedó elegible de inmediato (wait_until en el pasado).
     // Reintentar la query de candidatos ahora mismo.
     // Si new_wait_secs >= 1 todavía tiene cooldown — esperar al próximo expire tick.
-    const newWaitSecs = secs_remaining / COOLDOWN_DIVISOR;
+   const new_wait_secs = row.cooldown_secs_remaining / COOLDOWN_DIVISOR;
     if (newWaitSecs < 1) {
       candidates = await queryCandidates(orderId, 1);
       log(orderId, `candidates after immediate reduction: ${candidates.rowCount}`, { drivers: candidates.rows.map(r => r.user_id) });
@@ -405,7 +394,7 @@ async function upsertOffer(orderId, driverId, onOffer) {
       `SELECT o.total_cents, r.name AS restaurant_name, r.address AS restaurant_address,
       o.delivery_address AS customer_address,
       split_part(d.full_name,'_',1) AS driver_name,
-                             -- Calculamos los segundos restantes reales usando solo el reloj de la DB
+                             -- Esto garantiza que el tiempo sea relativo a la DB
                              GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + ($3::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
                              FROM orders o
                              JOIN restaurants r ON r.id=o.restaurant_id
