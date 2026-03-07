@@ -28,24 +28,23 @@ function Collapsible({ title, defaultOpen = false, children }) {
 
 function Flash({ text, isError }) {
   if (!text) return null;
-  return (
-    <p className={`flash ${isError ? 'flash-error' : 'flash-ok'}`} style={{ marginTop:'0.5rem' }}>
-      {text}
-    </p>
-  );
+  return <p className={`flash ${isError ? 'flash-error' : 'flash-ok'}`} style={{ marginTop:'0.5rem' }}>{text}</p>;
 }
+
+const ROLE_LABELS = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
 
 export default function ProfilePage() {
   const { auth, patchUser, logout } = useAuth();
   const user = auth.user;
 
-  // Datos personales
-  const [displayName, setDisplayName] = useState(user?.display_name || user?.username || '');
+  // Datos personales (nombre para mostrar a terceros + dirección)
+  const [displayName, setDisplayName] = useState(user?.display_name || user?.full_name || user?.username || '');
   const [address, setAddress]         = useState(user?.address && user.address !== 'address-pending' ? user.address : '');
   const [profileMsg, setProfileMsg]   = useState('');
   const [profileErr, setProfileErr]   = useState(false);
 
-  // Contraseña
+  // Cambiar contraseña + usuario de login (ambos en la misma sección)
+  const [loginUsername, setLoginUsername]   = useState(user?.username || '');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword]         = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -60,29 +59,52 @@ export default function ProfilePage() {
     if (!displayName.trim()) { setProfileMsg('El nombre no puede estar vacío'); setProfileErr(true); return; }
     try {
       const body = { displayName: displayName.trim() };
-      // Todos los roles pueden tener dirección
       if (address.trim()) body.address = address.trim();
       const data = await apiFetch('/auth/profile', { method:'PATCH', body: JSON.stringify(body) }, auth.token);
-      // Actualizar contexto con valores confirmados desde la DB
       patchUser({
         display_name: data.profile.displayName,
         full_name:    data.profile.displayName,
         address:      data.profile.address,
       });
-      // Sincronizar estado local con lo que devolvió la DB
       if (data.profile.displayName) setDisplayName(data.profile.displayName);
       if (data.profile.address)     setAddress(data.profile.address);
       setProfileMsg('Perfil actualizado'); setProfileErr(false);
     } catch (e) { setProfileMsg(e.message); setProfileErr(true); }
   }
 
-  async function changePassword() {
-    if (!newPassword) { setPwdMsg('Ingresa la nueva contraseña'); setPwdErr(true); return; }
-    if (newPassword !== confirmPassword) { setPwdMsg('Las contraseñas no coinciden'); setPwdErr(true); return; }
-    if (newPassword.length < 6) { setPwdMsg('Mínimo 6 caracteres'); setPwdErr(true); return; }
+  async function changePasswordAndLogin() {
+    // Requiere contraseña actual siempre
+    if (!currentPassword) { setPwdMsg('Ingresa tu contraseña actual'); setPwdErr(true); return; }
+
+    const changingPwd  = !!newPassword;
+    const changingUser = loginUsername.trim() && loginUsername.trim() !== user?.username;
+
+    if (!changingPwd && !changingUser) {
+      setPwdMsg('No hay cambios que guardar'); setPwdErr(false); return;
+    }
+    if (changingPwd) {
+      if (newPassword !== confirmPassword) { setPwdMsg('Las contraseñas no coinciden'); setPwdErr(true); return; }
+      if (newPassword.length < 6) { setPwdMsg('Mínimo 6 caracteres'); setPwdErr(true); return; }
+    }
+
     try {
-      await apiFetch('/auth/password', { method:'PATCH', body: JSON.stringify({ currentPassword, newPassword }) }, auth.token);
-      setPwdMsg('Contraseña actualizada'); setPwdErr(false);
+      // Cambiar contraseña
+      if (changingPwd) {
+        await apiFetch('/auth/password', {
+          method:'PATCH', body: JSON.stringify({ currentPassword, newPassword })
+        }, auth.token);
+      }
+      // Cambiar usuario de login (email interno)
+      if (changingUser) {
+        await apiFetch('/auth/login-username', {
+          method:'PATCH', body: JSON.stringify({ currentPassword, newUsername: loginUsername.trim() })
+        }, auth.token);
+        patchUser({ username: loginUsername.trim() });
+      }
+      setPwdMsg(changingPwd && changingUser ? 'Contraseña y usuario actualizados'
+        : changingPwd ? 'Contraseña actualizada'
+        : 'Usuario de acceso actualizado');
+      setPwdErr(false);
       setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
     } catch (e) { setPwdMsg(e.message); setPwdErr(true); }
   }
@@ -90,21 +112,22 @@ export default function ProfilePage() {
   async function deleteAccount() {
     if (!window.confirm('¿Eliminar tu cuenta permanentemente? Esta acción no se puede deshacer.')) return;
     try {
-      await apiFetch('/auth/delete-account', { method:'DELETE' }, auth.token);
+      // Ruta correcta: DELETE /auth/account (no /auth/delete-account)
+      await apiFetch('/auth/account', { method:'DELETE' }, auth.token);
       logout();
     } catch (e) { setDeleteMsg(e.message); setDeleteErr(true); }
   }
+
+  const avatarLetter = (displayName[0] || '?').toUpperCase();
 
   return (
     <div>
       <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem' }}>Mi perfil</h2>
 
-      {/* Info de cuenta */}
+      {/* Tarjeta de cuenta */}
       <div className="card" style={{ marginBottom:'0.75rem', display:'flex', gap:'0.75rem', alignItems:'center' }}>
         <div style={{ width:44, height:44, borderRadius:'50%', background:'var(--brand-light)', border:'2px solid var(--brand)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-          <span style={{ fontWeight:800, fontSize:'1.1rem', color:'var(--brand)' }}>
-            {(displayName[0] || '?').toUpperCase()}
-          </span>
+          <span style={{ fontWeight:800, fontSize:'1.1rem', color:'var(--brand)' }}>{avatarLetter}</span>
         </div>
         <div>
           <div style={{ fontWeight:700 }}>{displayName}</div>
@@ -114,8 +137,11 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* Datos personales */}
-      <Collapsible title="Datos personales" defaultOpen>
+      {/* Datos personales — cerrado por defecto */}
+      <Collapsible title="Datos personales" defaultOpen={false}>
+        <p style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.65rem' }}>
+          Este nombre se muestra a otros usuarios en la plataforma.
+        </p>
         <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
           <label>
             Nombre para mostrar
@@ -131,18 +157,37 @@ export default function ProfilePage() {
         <Flash text={profileMsg} isError={profileErr} />
       </Collapsible>
 
-      {/* Cambiar contraseña */}
-      <Collapsible title="Cambiar contraseña">
+      {/* Seguridad — contraseña y usuario de acceso */}
+      <Collapsible title="Seguridad">
+        <p style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.65rem' }}>
+          El usuario de acceso es el que usas para iniciar sesión. Es distinto al nombre que ven otros usuarios.
+        </p>
         <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
-          <label>Contraseña actual<input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} /></label>
-          <label>Nueva contraseña<input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} /></label>
-          <label>Confirmar contraseña<input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} /></label>
+          <label>
+            Usuario de acceso
+            <input value={loginUsername} onChange={e => setLoginUsername(e.target.value)}
+              placeholder="Ej: juangarcia91" autoComplete="username" />
+          </label>
+          <label>Contraseña actual (requerida)
+            <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
+              autoComplete="current-password" />
+          </label>
+          <label>Nueva contraseña (opcional)
+            <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
+              autoComplete="new-password" placeholder="Dejar vacío para no cambiar" />
+          </label>
+          {newPassword && (
+            <label>Confirmar nueva contraseña
+              <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+                autoComplete="new-password" />
+            </label>
+          )}
         </div>
-        <button className="btn-primary btn-sm" onClick={changePassword}>Cambiar contraseña</button>
+        <button className="btn-primary btn-sm" onClick={changePasswordAndLogin}>Guardar cambios</button>
         <Flash text={pwdMsg} isError={pwdErr} />
       </Collapsible>
 
-      {/* Cerrar sesión — ancho completo */}
+      {/* Cerrar sesión */}
       <button
         onClick={logout}
         style={{
@@ -151,16 +196,16 @@ export default function ProfilePage() {
           fontWeight:700, fontSize:'0.9rem', cursor:'pointer', marginBottom:'0.75rem',
           color:'var(--gray-800)', transition:'background 0.15s',
         }}
-        onMouseEnter={e=>e.currentTarget.style.background='var(--gray-200)'}
-        onMouseLeave={e=>e.currentTarget.style.background='var(--gray-100)'}
+        onMouseEnter={e => e.currentTarget.style.background='var(--gray-200)'}
+        onMouseLeave={e => e.currentTarget.style.background='var(--gray-100)'}
       >
         Cerrar sesión
       </button>
 
-      {/* Eliminar cuenta */}
+      {/* Administración */}
       <Collapsible title="Administración de cuenta">
         <p style={{ fontSize:'0.85rem', color:'var(--gray-600)', marginBottom:'0.75rem' }}>
-          Eliminar tu cuenta es permanente. No podrás recuperarla.
+          Eliminar tu cuenta es permanente. No podrás recuperarla ni tienes pedidos activos pendientes.
         </p>
         <button className="btn-danger btn-sm" onClick={deleteAccount}>Eliminar cuenta</button>
         <Flash text={deleteMsg} isError={deleteErr} />
@@ -168,5 +213,3 @@ export default function ProfilePage() {
     </div>
   );
 }
-
-const ROLE_LABELS = { customer:'Cliente', restaurant:'Restaurante', driver:'Conductor', admin:'Administrador' };

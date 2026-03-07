@@ -117,9 +117,19 @@ export default function CustomerOrders() {
     } catch (e) { setMsg(e.message); }
   }
 
+  const [restaurantMenus, setRestaurantMenus] = useState({});
+  async function loadMenu(restaurantId) {
+    if (!restaurantId || restaurantMenus[restaurantId]) return;
+    try {
+      const d = await apiFetch(`/restaurants/${restaurantId}/menu`, {}, auth.token);
+      setRestaurantMenus(prev => ({ ...prev, [restaurantId]: d.menu || [] }));
+    } catch (_) {}
+  }
+
   function openSuggestion(order) {
     setSuggestionFor(order.id);
     setSuggDrafts(prev => ({ ...prev, [order.id]: prev[order.id] || toDraft(order.suggestion_items||[]) }));
+    if (order.restaurant_id) loadMenu(order.restaurant_id);
   }
 
   function adjustSugg(orderId, menuItemId, delta) {
@@ -179,20 +189,22 @@ export default function CustomerOrders() {
           {suggestionFor === order.id ? (
             <>
               <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginBottom:'0.65rem' }}>
-                {(order.suggestion_items||[]).map(item => {
-                  const qty = (suggDrafts[order.id]||{})[item.menuItemId] ?? item.quantity;
+                {(restaurantMenus[order.restaurant_id] || order.suggestion_items || []).map(item => {
+                  const id  = item.id || item.menuItemId;
+                  const qty = (suggDrafts[order.id]||{})[id] ?? (order.suggestion_items||[]).find(s=>s.menuItemId===id)?.quantity ?? 0;
                   return (
-                    <div key={item.menuItemId} style={{
+                    <div key={id} style={{
                       display:'flex', alignItems:'center', gap:'0.5rem',
                       background: qty>0 ? 'var(--brand-light)':'#fff',
                       border:`1px solid ${qty>0 ? '#bfdbfe':'var(--gray-200)'}`,
                       borderRadius:6, padding:'0.4rem 0.75rem',
                     }}>
                       <span style={{ flex:1, fontSize:'0.875rem', fontWeight: qty>0 ? 600:400 }}>{item.name}</span>
+                      <span style={{ fontSize:'0.75rem', color:'var(--gray-400)' }}>${((item.price_cents||item.unitPriceCents||0)/100).toFixed(2)}</span>
                       <div className="qty-control">
-                        <button className="qty-btn" disabled={qty===0} onClick={()=>adjustSugg(order.id,item.menuItemId,-1)}>−</button>
+                        <button className="qty-btn" disabled={qty===0} onClick={()=>adjustSugg(order.id,id,-1)}>−</button>
                         <span className="qty-num">{qty}</span>
-                        <button className="qty-btn add" onClick={()=>adjustSugg(order.id,item.menuItemId,1)}>+</button>
+                        <button className="qty-btn add" onClick={()=>adjustSugg(order.id,id,1)}>+</button>
                       </div>
                     </div>
                   );

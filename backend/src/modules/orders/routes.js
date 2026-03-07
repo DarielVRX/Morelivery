@@ -10,11 +10,6 @@ import { AppError } from '../../utils/errors.js';
 import { offerNextDrivers, expireTimedOutOffers } from './assignment.js';
 import { sseHub } from '../events/hub.js';
 
-// FIX: callback SSE para notificar ofertas al crear pedidos
-function offerCb(driverId, orderId, data) {
-  try { sseHub.notifyNewOffer(driverId, orderId, data); } catch (_) {}
-}
-
 const router = Router();
 
 function isMissingColumnError(e) { return e?.code === '42703'; }
@@ -105,7 +100,7 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
         [order.id, item.menuItemId, item.quantity, m.rows[0].price_cents]);
     }
 
-    try { await offerNextDrivers(order.id, offerCb); } catch (e) { // FIX: pasar callback SSE
+    try { await offerNextDrivers(order.id); } catch (e) {
       if (!isMissingRelationError(e) && !isMissingColumnError(e)) throw e;
     }
 
@@ -174,7 +169,20 @@ router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admi
     let driverNote     = order.driver_note;
     let restaurantNote = order.restaurant_note;
     if (req.user.role === 'restaurant' && nextStatus === 'preparing') driverNote     = 'Restaurante: pedido en preparación';
-    if (req.user.role === 'restaurant' && nextStatus === 'ready')     driverNote     = 'Restaurante: pedido listo para retiro';
+    // Guard: no permitir marcar listo si se envió sugerencia hace menos de 5 min sin respuesta
+    if (req.user.role === 'restaurant' && nextStatus === 'ready') {
+      const suggCheck = await query(
+        `SELECT suggestion_status, EXTRACT(EPOCH FROM (NOW()-updated_at))::int AS secs
+         FROM orders WHERE id=$1`,
+        [req.params.id]
+      );
+      if (suggCheck.rowCount > 0) {
+        const { suggestion_status, secs } = suggCheck.rows[0];
+        if (suggestion_status === 'pending_customer' && secs < 300)
+          return next(new AppError(409, `Hay una sugerencia pendiente de respuesta. Debes esperar al menos ${Math.ceil((300-secs)/60)} min más o hasta que el cliente responda`));
+      }
+      driverNote = 'Restaurante: pedido listo para retiro';
+    }
     if (req.user.role === 'driver'     && nextStatus === 'on_the_way') restaurantNote = 'Driver: pedido en camino';
     if (req.user.role === 'driver'     && nextStatus === 'delivered')  restaurantNote = 'Driver: pedido entregado';
 
@@ -241,14 +249,30 @@ router.patch('/:id/suggest', authenticate, authorize(['restaurant']), validate(s
       note: req.validatedBody.note || null
     };
 
-    // Verificar que el pedido no está en estado 'ready' o posterior
+    // Verificar estado y reglas de negocio
     const orderCheck = await query(
-      `SELECT status FROM orders WHERE id=$1 AND restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id=$2)`,
+      `SELECT status, suggestion_status, updated_at,
+              EXTRACT(EPOCH FROM (NOW() - updated_at))::int AS secs_since_update
+       FROM orders WHERE id=$1 AND restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id=$2)`,
       [req.params.id, req.user.userId]
     );
     if (orderCheck.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
-    if (['ready','on_the_way','delivered','cancelled'].includes(orderCheck.rows[0].status))
-      return next(new AppError(409, 'No se pueden hacer sugerencias una vez el pedido está listo'));
+    const ord = orderCheck.rows[0];
+
+    // Bloqueado si el pedido ya está listo o posterior
+    if (['ready','on_the_way','delivered','cancelled'].includes(ord.status))
+      return next(new AppError(409, 'No se pueden hacer sugerencias una vez el pedido está listo para retiro'));
+
+    // Si hay una sugerencia pendiente sin respuesta, no enviar otra
+    if (ord.suggestion_status === 'pending_customer')
+      return next(new AppError(409, 'Ya hay una sugerencia pendiente de respuesta del cliente'));
+
+    // Espera mínima de 5 minutos entre sugerencias
+    const MIN_SUGGEST_INTERVAL = 5 * 60; // 300 s
+    if (ord.suggestion_status === 'rejected' && ord.secs_since_update < MIN_SUGGEST_INTERVAL) {
+      const remaining = MIN_SUGGEST_INTERVAL - ord.secs_since_update;
+      return next(new AppError(429, `Debes esperar ${Math.ceil(remaining / 60)} min antes de enviar otra sugerencia`));
+    }
 
     const result = await query(
       `UPDATE orders SET suggestion_text=$1, suggestion_status='pending_customer', updated_at=NOW()
@@ -270,6 +294,10 @@ router.patch('/:id/suggestion-response', authenticate, authorize(['customer']), 
     const orderResult = await query('SELECT * FROM orders WHERE id=$1 AND customer_id=$2', [req.params.id, req.user.userId]);
     if (orderResult.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
     const order = orderResult.rows[0];
+
+    // Bloquear respuesta si el pedido ya está listo (restaurante marcó ready antes de que cliente respondiera)
+    if (['ready','on_the_way','delivered','cancelled'].includes(order.status))
+      return next(new AppError(409, 'El pedido ya fue procesado. La sugerencia ya no está disponible'));
 
     try {
       await query('BEGIN');
@@ -304,6 +332,31 @@ router.patch('/:id/suggestion-response', authenticate, authorize(['customer']), 
 
     const updatedOrder = await query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
     return res.json({ order: updatedOrder.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+
+/* ── PATCH /:id/cancel-restaurant ── Cancelación por Tienda ── */
+router.patch('/:id/cancel-restaurant', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const { note } = req.body || {};
+    if (!note?.trim()) return next(new AppError(400, 'El motivo de cancelación es obligatorio'));
+    const check = await query(
+      `SELECT o.id, o.status, o.customer_id FROM orders o
+       JOIN restaurants r ON r.id=o.restaurant_id
+       WHERE o.id=$1 AND r.owner_user_id=$2`,
+      [req.params.id, req.user.userId]
+    );
+    if (check.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
+    if (['delivered','cancelled','on_the_way'].includes(check.rows[0].status))
+      return next(new AppError(409, 'El pedido no puede cancelarse en su estado actual'));
+    await query(
+      `UPDATE orders SET status='cancelled', restaurant_note=$1, cancelled_at=NOW(), updated_at=NOW() WHERE id=$2`,
+      [note.trim(), req.params.id]
+    );
+    await notifyOrderParties(req.params.id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
+    logEvent('order.cancelled_by_restaurant', { orderId: req.params.id, restaurantUserId: req.user.userId, note });
+    return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
 
