@@ -79,7 +79,7 @@ export async function loginUser(payload) {
 
   const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 
-  let profile = { address: user.address || null, firstName: firstNameFromUsername(username), needsAddress: false };
+  let profile = { address: user.address || null, firstName: firstNameFromUsername(username), displayName: user.full_name || username, needsAddress: false };
 
   if (user.role === 'restaurant') {
     try {

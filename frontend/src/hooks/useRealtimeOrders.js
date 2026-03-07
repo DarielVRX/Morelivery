@@ -3,10 +3,14 @@ import { useCallback, useEffect, useRef } from 'react';
 import { API_BASE } from '../api/client';
 
 /**
- * SSE listener central.
- * onOrderUpdate(data)    — order_update / offer_assigned (admin)
+ * SSE listener central — una sola conexión estable por token.
+ *
+ * CRÍTICO: los callbacks se guardan en refs para que connect() no tenga
+ * dependencias cambiantes y NO se recree el SSE en cada render.
+ *
+ * onOrderUpdate(data)    — order_update / offer_assigned
  * onDriverLocation(data) — driver_location
- * onNewOffer(data)       — new_offer  (driver: oferta entrante sin esperar poll)
+ * onNewOffer(data)       — new_offer  (push sin esperar poll)
  * onChatMessage(data)    — chat_message
  */
 export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewOffer, onChatMessage) {
@@ -15,32 +19,50 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
   const mountedRef     = useRef(true);
   const retryCount     = useRef(0);
 
+  // Guardar callbacks en refs para que connect() no dependa de ellos
+  // y no se destruya/recree el SSE cuando cambian los callbacks
+  const cbUpdate   = useRef(onOrderUpdate);
+  const cbLocation = useRef(onDriverLocation);
+  const cbOffer    = useRef(onNewOffer);
+  const cbChat     = useRef(onChatMessage);
+
+  // Actualizar refs cuando cambian los callbacks (sin re-conectar)
+  useEffect(() => { cbUpdate.current   = onOrderUpdate;    }, [onOrderUpdate]);
+  useEffect(() => { cbLocation.current = onDriverLocation; }, [onDriverLocation]);
+  useEffect(() => { cbOffer.current    = onNewOffer;       }, [onNewOffer]);
+  useEffect(() => { cbChat.current     = onChatMessage;    }, [onChatMessage]);
+
   const connect = useCallback(() => {
     if (!token || !mountedRef.current) return;
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
 
     const url = `${API_BASE}/events?token=${encodeURIComponent(token)}`;
-    const es  = new EventSource(url);
+    console.log(`[SSE] connecting (attempt ${retryCount.current + 1})`);
+    const es = new EventSource(url);
     esRef.current = es;
 
     es.addEventListener('order_update', (e) => {
-      try { onOrderUpdate?.(JSON.parse(e.data)); } catch (_) {}
+      try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {}
     });
     es.addEventListener('driver_location', (e) => {
-      try { onDriverLocation?.(JSON.parse(e.data)); } catch (_) {}
+      try { cbLocation.current?.(JSON.parse(e.data)); } catch (_) {}
     });
     es.addEventListener('new_offer', (e) => {
-      try { onNewOffer?.(JSON.parse(e.data)); } catch (_) {}
+      try {
+        const data = JSON.parse(e.data);
+        console.log(`[SSE] new_offer received orderId=${data.orderId} secondsLeft=${data.secondsLeft}`);
+        cbOffer.current?.(data);
+      } catch (_) {}
     });
     es.addEventListener('offer_assigned', (e) => {
-      // admin: oferta asignada a driver — reutiliza el mismo callback
-      try { onOrderUpdate?.(JSON.parse(e.data)); } catch (_) {}
+      try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {}
     });
     es.addEventListener('chat_message', (e) => {
-      try { onChatMessage?.(JSON.parse(e.data)); } catch (_) {}
+      try { cbChat.current?.(JSON.parse(e.data)); } catch (_) {}
     });
     es.addEventListener('connected', () => {
       retryCount.current = 0;
+      console.log('[SSE] connected');
       clearTimeout(reconnectTimer.current);
     });
 
@@ -48,17 +70,14 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
       es.close();
       esRef.current = null;
       if (!mountedRef.current) return;
-
       clearTimeout(reconnectTimer.current);
-
-      // Backoff exponencial: 5s, 10s, 20s… hasta máximo 30s
-      const delay = Math.min(5000 * Math.pow(2, retryCount.current), 30000);
+      // Backoff exponencial: 4s, 8s, 16s… máximo 30s
+      const delay = Math.min(4000 * Math.pow(2, retryCount.current), 30000);
       retryCount.current++;
-
-      console.warn(`SSE Error. Reintentando en ${delay / 1000}s... (Intento ${retryCount.current})`);
+      console.warn(`[SSE] error — retrying in ${delay / 1000}s (attempt ${retryCount.current})`);
       reconnectTimer.current = setTimeout(connect, delay);
     };
-  }, [token]); // solo token como dependencia — los callbacks se llaman por referencia
+  }, [token]); // SOLO token como dependencia — no los callbacks
 
   useEffect(() => {
     mountedRef.current = true;

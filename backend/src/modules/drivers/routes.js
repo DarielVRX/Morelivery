@@ -18,14 +18,32 @@ function makeOfferCallback() {
 }
 const offerCb = makeOfferCallback();
 
+// Rate-limit del listener: evitar que el mismo driver dispare offerOrdersToDriver
+// más de una vez cada 10s (el SSE se reconecta seguido y el frontend llama /listener)
+const listenerLastCall = new Map(); // driverId → timestamp
+const LISTENER_MIN_INTERVAL_MS = 10_000;
+
 function isMissingColumnError(e)   { return e?.code === '42703'; }
 function isMissingRelationError(e) { return e?.code === '42P01'; }
 
 /* ── POST /drivers/listener ── driver anuncia presencia ─────────────────────── */
 router.post('/listener', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
+    const driverId = req.user.userId;
+    const now = Date.now();
+    const last = listenerLastCall.get(driverId) || 0;
+
+    if (now - last < LISTENER_MIN_INTERVAL_MS) {
+      // Demasiado frecuente — solo expirar ofertas, no re-encolear pedidos
+      console.log(`[drivers] /listener driver=${driverId} rate-limited (${Math.round((now-last)/1000)}s since last)`);
+      await expireTimedOutOffers(offerCb);
+      return res.json({ ok: true, rateLimited: true });
+    }
+
+    listenerLastCall.set(driverId, now);
+    console.log(`[drivers] /listener driver=${driverId} — running offerOrdersToDriver`);
     await expireTimedOutOffers(offerCb);
-    await offerOrdersToDriver(req.user.userId, offerCb);
+    await offerOrdersToDriver(driverId, offerCb);
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });

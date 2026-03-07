@@ -70,8 +70,12 @@ export async function expireTimedOutOffers(onOffer) {
                               [orderId]
     );
     if (still.rowCount > 0) {
-      log(orderId, 'offer expired — enqueuing');
-      serializedOffer(orderId, onOffer);
+      if (orderQueues.has(orderId)) {
+        log(orderId, 'offer expired — already has active chain, skip re-enqueue');
+      } else {
+        log(orderId, 'offer expired — enqueuing');
+        serializedOffer(orderId, onOffer);
+      }
     } else {
       log(orderId, 'offer expired — order no longer needs driver, skipping');
     }
@@ -228,7 +232,7 @@ export async function offerNextDrivers(orderId, _onOffer) {
     if (!reduced) {
       // Ningún cooldown que reducir: todos los drivers están bloqueados por
       // capacidad o pending offer en otro pedido — esperar al próximo tick.
-      logWarn(orderId, 'no cooldown to reduce — all drivers busy elsewhere');
+      logWarn(orderId, 'no cooldown to reduce — all drivers have active pending offers. Pedido huérfano: esperando wake-up event (reject/expire de otro pedido)');
       await query(`UPDATE orders SET status='pending_driver', updated_at=NOW() WHERE id=$1 AND driver_id IS NULL`, [orderId]);
       return 0;
     }
@@ -346,12 +350,19 @@ export async function rejectOffer(orderId, driverId, onOffer) {
     WHERE order_id=$1 AND driver_id=$2 AND status='pending'`,
     [orderId, driverId, COOLDOWN_SECONDS]
   );
-  // Limpiar otras pendientes del mismo driver en otros pedidos
-  await query(
+  // Liberar otras pending del mismo driver → despertar esos pedidos huérfanos
+  const freed = await query(
     `UPDATE order_driver_offers SET status='expired', updated_at=NOW()
-    WHERE driver_id=$1 AND status='pending' AND order_id<>$2`,
+     WHERE driver_id=$1 AND status='pending' AND order_id<>$2
+     RETURNING order_id`,
     [driverId, orderId]
   );
+  for (const row of freed.rows) {
+    if (!orderQueues.has(row.order_id)) {
+      log(row.order_id, `woken up — driver=${driverId} freed after rejecting ${orderId}`);
+      serializedOffer(row.order_id, onOffer);
+    }
+  }
   serializedOffer(orderId, onOffer);
 }
 
@@ -366,8 +377,18 @@ export async function releaseOrder(orderId, driverId, onOffer) {
   );
   await query(`UPDATE orders SET driver_id=NULL, status='pending_driver', updated_at=NOW()
   WHERE id=$1 AND driver_id=$2`, [orderId, driverId]);
-  await query(`UPDATE order_driver_offers SET status='expired', updated_at=NOW()
-  WHERE driver_id=$1 AND status='pending'`, [driverId]);
+  const freedRelease = await query(
+    `UPDATE order_driver_offers SET status='expired', updated_at=NOW()
+     WHERE driver_id=$1 AND status='pending'
+     RETURNING order_id`,
+    [driverId]
+  );
+  for (const row of freedRelease.rows) {
+    if (row.order_id !== orderId && !orderQueues.has(row.order_id)) {
+      log(row.order_id, `woken up — driver=${driverId} released`);
+      serializedOffer(row.order_id, onOffer);
+    }
+  }
   serializedOffer(orderId, onOffer);
 }
 
@@ -393,16 +414,26 @@ export async function offerOrdersToDriver(driverId, _onOffer) {
 
   const open = await query(
     `SELECT id, status FROM orders
-    WHERE driver_id IS NULL
-    AND status IN ('created','pending_driver','preparing','ready')
-    ORDER BY created_at ASC LIMIT 5`
+     WHERE driver_id IS NULL
+       AND status IN ('created','pending_driver','preparing','ready')
+       -- No re-encolear pedidos que ya tienen una oferta pending activa en otro driver
+       AND NOT EXISTS (
+         SELECT 1 FROM order_driver_offers od
+         WHERE od.order_id = orders.id AND od.status = 'pending'
+       )
+     ORDER BY created_at ASC LIMIT 5`
   );
-  console.log(`[assignment] offerOrdersToDriver: ${open.rowCount} open order(s)`,
+  console.log(`[assignment] offerOrdersToDriver: ${open.rowCount} open order(s) without active pending offer`,
               open.rows.map(r => `order=${r.id} status=${r.status}`)
   );
 
   let offered = 0;
   for (const row of open.rows) {
+    // Doble check: también skip si ya hay cadena activa en memoria
+    if (orderQueues.has(row.id)) {
+      console.log(`[assignment] offerOrdersToDriver: order=${row.id} already has active chain in memory — skip`);
+      continue;
+    }
     serializedOffer(row.id, _onOffer);
     offered++;
   }

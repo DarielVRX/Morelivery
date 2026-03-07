@@ -31,6 +31,7 @@ export default function RestaurantOrders() {
   const [reportText, setReportText]   = useState('');
   const [reportMsg, setReportMsg]     = useState('');
   const [suggestionFor, setSuggestionFor]   = useState('');
+  const [readyCooldown, setReadyCooldown]   = useState({}); // orderId → secsRemaining
   const [suggDrafts, setSuggDrafts]         = useState({});
   const loadDataRef = useRef(null);
 
@@ -70,15 +71,32 @@ export default function RestaurantOrders() {
     });
   }
 
+  const READY_COOLDOWN_SECS = 5 * 60; // 5 min tras enviar sugerencia
+
   async function sendSuggestion(order) {
     const draft = suggDrafts[order.id] || {};
     const items = Object.entries(draft).filter(([,q]) => q > 0).map(([menuItemId, quantity]) => ({ menuItemId, quantity }));
     if (items.length === 0) return setMsg('La sugerencia debe tener al menos 1 producto');
     try {
       await apiFetch(`/orders/${order.id}/suggest`, { method:'PATCH', body: JSON.stringify({ items }) }, auth.token);
+      setReadyCooldown(prev => ({ ...prev, [order.id]: READY_COOLDOWN_SECS }));
       setSuggestionFor(''); loadData();
     } catch (e) { setMsg(e.message); }
   }
+
+  // Countdown del botón Listo (5 min tras enviar sugerencia)
+  useEffect(() => {
+    const id = setInterval(() => {
+      setReadyCooldown(prev => {
+        const next = { ...prev };
+        for (const [oid, secs] of Object.entries(next)) {
+          if (secs <= 1) delete next[oid]; else next[oid] = secs - 1;
+        }
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   async function cancelOrder(orderId) {
     const note = window.prompt('Motivo de cancelación (obligatorio):');
@@ -157,10 +175,18 @@ export default function RestaurantOrders() {
                       {!['preparing','ready','on_the_way','delivered','cancelled'].includes(order.status) && (
                         <button className="btn-sm" onClick={() => changeStatus(order.id, 'preparing')}>En preparación</button>
                       )}
-                      {order.status !== 'ready' && !['on_the_way','delivered','cancelled'].includes(order.status) && (
-                        <button className="btn-sm" style={{ background:'var(--success)', color:'#fff', borderColor:'var(--success)' }}
-                          onClick={() => changeStatus(order.id, 'ready')}>Listo</button>
-                      )}
+                      {order.status !== 'ready' && !['on_the_way','delivered','cancelled'].includes(order.status) && (() => {
+                        const cd = readyCooldown[order.id] || 0;
+                        return (
+                          <button className="btn-sm"
+                            style={{ background: cd > 0 ? 'var(--gray-200)' : 'var(--success)', color: cd > 0 ? 'var(--gray-500)' : '#fff', borderColor: cd > 0 ? 'var(--gray-300)' : 'var(--success)' }}
+                            disabled={cd > 0}
+                            title={cd > 0 ? `Espera ${Math.floor(cd/60)}:${String(cd%60).padStart(2,'0')} min antes de marcar Listo` : ''}
+                            onClick={() => changeStatus(order.id, 'ready')}>
+                            {cd > 0 ? `Listo (${Math.floor(cd/60)}:${String(cd%60).padStart(2,'0')})` : 'Listo'}
+                          </button>
+                        );
+                      })()}
                       {!['ready','on_the_way','delivered','cancelled'].includes(order.status) && (
                         <button className="btn-sm"
                           onClick={() => setSuggestionFor(s => s === order.id ? '' : order.id)}
@@ -196,6 +222,16 @@ export default function RestaurantOrders() {
                           ))}
                         </div>
                         <p style={{ fontSize:'0.75rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>Sugerencia:</p>
+                        {/* Total en tiempo real de la sugerencia */}
+                        {(() => {
+                          const draft = suggDrafts[order.id] || {};
+                          const total = products.reduce((s, p) => s + (draft[p.id] || 0) * p.price_cents, 0);
+                          return total > 0 ? (
+                            <div style={{ fontWeight:700, fontSize:'0.88rem', color:'var(--brand)', marginBottom:'0.4rem', textAlign:'right' }}>
+                              Total sugerencia: {fmt(total)}
+                            </div>
+                          ) : null;
+                        })()}
                         <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginBottom:'0.65rem' }}>
                           {products.map(p => {
                             const qty = (suggDrafts[order.id] || {})[p.id] ?? 0;

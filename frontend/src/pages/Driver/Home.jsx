@@ -115,9 +115,14 @@ export default function DriverHome() {
   const hasActiveOrder = Boolean(activeOrder && !['delivered','cancelled'].includes(activeOrder.status));
   const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, availability, hasActiveOrder);
 
-  const loadData = useCallback(async () => {
+  // Anunciar presencia al backend — solo al montar, no en cada loadData
+  const announceListener = useCallback(async () => {
     if (!auth.token) return;
     try { await apiFetch('/drivers/listener', { method:'POST' }, auth.token); } catch (_) {}
+  }, [auth.token]);
+
+  const loadData = useCallback(async () => {
+    if (!auth.token) return;
     try {
       const [od, off] = await Promise.all([
         apiFetch('/orders/my', {}, auth.token),
@@ -137,17 +142,22 @@ export default function DriverHome() {
   useEffect(() => { loadDataRef.current = loadData; });
   useEffect(() => {
     setAvailability(Boolean(auth.user?.driver?.is_available));
-    loadData();
+    // Anunciar presencia y cargar datos al montar
+    announceListener().then(() => loadData());
   }, [auth.token]);
 
   // SSE: recibir ofertas push sin esperar poll
   const handleNewOffer = useCallback((data) => {
+    console.log(`[DriverHome] handleNewOffer orderId=${data.orderId} secondsLeft=${data.secondsLeft}`);
     setPendingOffer(prev => {
-      if (prev) return prev; // Ya hay una oferta, ignorar (no debería pasar con la nueva lógica)
+      if (prev) return prev; // Ya hay una oferta activa
       return { id: data.orderId, ...data, seconds_left: data.secondsLeft ?? 60 };
     });
-    // Recargar también para tener datos completos
-    setTimeout(() => loadDataRef.current?.(), 500);
+    // Recargar para datos completos (items), pero sin llamar al listener de nuevo
+    setTimeout(() => {
+      apiFetch('/drivers/offers', {}, data._token || '').catch(() => {});
+      loadDataRef.current?.();
+    }, 400);
   }, []);
 
   useRealtimeOrders(

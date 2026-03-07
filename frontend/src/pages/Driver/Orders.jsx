@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
@@ -62,6 +62,37 @@ export default function DriverOrders() {
   const activeIds = useMemo(() => new Set(active.map(o => o.id)), [active]);
   const unoffered = useMemo(() => waitingOrders.filter(o => !activeIds.has(o.id)), [waitingOrders, activeIds]);
 
+  const [actionMsg, setActionMsg] = useState('');
+  const [actionLoading, setActionLoading] = useState(null);
+  const [releaseNote, setReleaseNote]     = useState('');
+  const [releasingId, setReleasingId]     = useState(null);
+
+  async function acceptDirectly(orderId) {
+    setActionLoading(orderId);
+    try {
+      await apiFetch(`/drivers/offers/${orderId}/accept`, { method:'POST' }, auth.token);
+      setActionMsg('Pedido aceptado');
+      loadData();
+      setTimeout(() => setActionMsg(''), 3000);
+    } catch (e) { setActionMsg(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  async function releaseOrder(orderId) {
+    if (!releaseNote.trim()) { setActionMsg('Escribe una nota antes de liberar'); return; }
+    setActionLoading(orderId);
+    try {
+      await apiFetch(`/drivers/release/${orderId}`, {
+        method:'POST', body: JSON.stringify({ note: releaseNote.trim() })
+      }, auth.token);
+      setReleasingId(null); setReleaseNote('');
+      setActionMsg('Pedido liberado');
+      loadData();
+      setTimeout(() => setActionMsg(''), 3000);
+    } catch (e) { setActionMsg(e.message); }
+    finally { setActionLoading(null); }
+  }
+
   const tabStyle = (t) => ({
     padding:'0.4rem 1rem', cursor:'pointer', border:'none', borderRadius:6, fontWeight:600,
     fontSize:'0.875rem', transition:'background 0.15s',
@@ -71,7 +102,8 @@ export default function DriverOrders() {
 
   return (
     <div>
-      {reportMsg && <p className="flash flash-ok" style={{ marginBottom:'0.5rem' }}>{reportMsg}</p>}
+      {reportMsg  && <p className="flash flash-ok"    style={{ marginBottom:'0.5rem' }}>{reportMsg}</p>}
+      {actionMsg  && <p className="flash flash-ok"    style={{ marginBottom:'0.5rem' }}>{actionMsg}</p>}
       <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1rem' }}>Mis pedidos</h2>
 
       {/* ── Pedidos en espera de conductor (sin oferta activa) ─────────── */}
@@ -84,17 +116,25 @@ export default function DriverOrders() {
             {unoffered.map(o => {
               const color = STATUS_COLOR[o.status] || '#9ca3af';
               return (
-                <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.4rem', padding:'0.6rem 0.75rem', opacity:0.7 }}>
+                <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.4rem', padding:'0.6rem 0.75rem' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.2rem' }}>
                     <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15`, fontSize:'0.72rem' }}>
                       {STATUS_LABELS[o.status]}
                     </span>
                     <span style={{ fontWeight:700, fontSize:'0.875rem' }}>{fmt(o.total_cents)}</span>
                   </div>
-                  <div style={{ fontSize:'0.8rem', color:'var(--gray-600)' }}>
+                  <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.4rem' }}>
                     {o.restaurant_name}
                     {o.restaurant_address && <span> · {o.restaurant_address}</span>}
                   </div>
+                  <button
+                    className="btn-sm btn-primary"
+                    disabled={actionLoading === o.id}
+                    onClick={() => acceptDirectly(o.id)}
+                    style={{ fontSize:'0.78rem' }}
+                  >
+                    {actionLoading === o.id ? 'Aceptando…' : 'Aceptar pedido'}
+                  </button>
                 </li>
               );
             })}
@@ -129,6 +169,28 @@ export default function DriverOrders() {
                       <ul style={{ fontSize:'0.82rem', margin:'0.25rem 0 0 1rem' }}>
                         {o.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
                       </ul>
+                    )}
+                    {/* Liberar pedido asignado */}
+                    {['assigned','accepted'].includes(o.status) && (
+                      <div style={{ marginTop:'0.4rem' }}>
+                        {releasingId === o.id ? (
+                          <div style={{ display:'flex', gap:'0.3rem', alignItems:'center', flexWrap:'wrap' }}>
+                            <input value={releaseNote} onChange={e => setReleaseNote(e.target.value)}
+                              placeholder="Motivo de liberación…"
+                              style={{ flex:1, fontSize:'0.8rem', minWidth:120 }} />
+                            <button className="btn-sm" style={{ background:'var(--danger)', color:'#fff', borderColor:'var(--danger)', fontSize:'0.78rem' }}
+                              disabled={actionLoading === o.id}
+                              onClick={() => releaseOrder(o.id)}>
+                              {actionLoading === o.id ? 'Liberando…' : 'Confirmar'}
+                            </button>
+                            <button className="btn-sm" style={{ fontSize:'0.78rem' }}
+                              onClick={() => { setReleasingId(null); setReleaseNote(''); }}>Cancelar</button>
+                          </div>
+                        ) : (
+                          <button className="btn-sm" style={{ fontSize:'0.78rem', color:'var(--danger)', borderColor:'var(--danger)' }}
+                            onClick={() => setReleasingId(o.id)}>Liberar pedido</button>
+                        )}
+                      </div>
                     )}
                   </li>
                 );

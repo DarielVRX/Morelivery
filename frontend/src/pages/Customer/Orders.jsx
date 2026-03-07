@@ -141,8 +141,17 @@ export default function CustomerOrders() {
 
   async function respondSuggestion(orderId, accepted) {
     try {
+      const body = { accepted };
+      if (accepted) {
+        // Enviar SIEMPRE los items del cliente — son los que deben aplicarse
+        const draft = suggDrafts[orderId] || {};
+        const items = Object.entries(draft)
+          .filter(([,q]) => Number(q) > 0)
+          .map(([menuItemId, qty]) => ({ menuItemId, quantity: Number(qty) }));
+        if (items.length > 0) body.items = items;
+      }
       await apiFetch(`/orders/${orderId}/suggestion-response`, {
-        method:'PATCH', body: JSON.stringify({ accepted })
+        method:'PATCH', body: JSON.stringify(body)
       }, auth.token);
       setSuggestionFor(''); loadData();
     } catch (e) { setMsg(e.message); }
@@ -215,8 +224,23 @@ export default function CustomerOrders() {
                   Nota: {order.suggestion_note}
                 </p>
               )}
+              {/* Total en tiempo real basado en cantidades del cliente */}
+              {(() => {
+                const draft = suggDrafts[order.id] || {};
+                const allItems = restaurantMenus[order.restaurant_id] || order.suggestion_items || [];
+                const total = allItems.reduce((s, item) => {
+                  const id = item.id || item.menuItemId;
+                  const pc = item.price_cents || item.unitPriceCents || 0;
+                  return s + (Number(draft[id]) || 0) * pc;
+                }, 0);
+                return total > 0 ? (
+                  <div style={{ fontWeight:700, fontSize:'0.9rem', color:'var(--brand)', marginBottom:'0.4rem', textAlign:'right' }}>
+                    Total: {fmt(total)}
+                  </div>
+                ) : null;
+              })()}
               <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
-                <button className="btn-primary btn-sm" onClick={()=>respondSuggestion(order.id,true)}>Aceptar cambio</button>
+                <button className="btn-primary btn-sm" onClick={()=>respondSuggestion(order.id,true)}>Aceptar</button>
                 <button className="btn-sm btn-danger" onClick={()=>respondSuggestion(order.id,false)}>Rechazar</button>
                 <button className="btn-sm" onClick={()=>cancelOrder(order.id)}>Cancelar pedido</button>
               </div>
