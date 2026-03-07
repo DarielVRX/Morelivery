@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { apiFetch } from '../api/client';
-import { useAuth } from '../contexts/AuthContext';
+import { apiFetch } from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 function fmtDate(ts) {
