@@ -34,7 +34,9 @@ function ProtectedAny({ children }) {
 }
 
 // ─── Configuración de las 3 apps ─────────────────────────────────────────────
-// admin no aparece en la landing pero sí tiene AuthScreen en /admin/login
+// Admin separado — nunca aparece en APPS públicos ni en la landing
+const ADMIN_APP = { key: 'admin', label: 'Admin', description: '', home: '/admin', icon: null };
+
 const APPS = [
   {
     key: 'customer',
@@ -63,13 +65,6 @@ const APPS = [
     ),
   },
   {
-    key: 'admin',
-    label: 'Administrador',
-    description: 'Panel de administración',
-    home: '/admin',
-    icon: null, // no se muestra en landing
-  },
-  {
     key: 'restaurant',
     label: 'Tienda',
     description: 'Gestiona tu tienda',
@@ -89,7 +84,7 @@ function LandingScreen() {
 
   // Si ya está logueado, redirigir a su app
   if (auth.user) {
-    const app = APPS.find(a => a.key === auth.user.role);
+    const app = APPS.find(a => a.key === auth.user.role) ?? (auth.user.role === 'admin' ? ADMIN_APP : null);
     return <Navigate to={app?.home || `/${auth.user.role}`} replace />;
   }
 
@@ -103,7 +98,7 @@ function LandingScreen() {
         </div>
 
         <div style={styles.appGrid}>
-          {APPS.map(app => (
+          {APPS.filter(app => app.icon !== null).map(app => (
             <Link key={app.key} to={`/${app.key}/login`} style={{ textDecoration: 'none' }}>
               <div style={styles.appCard} className="app-card">
                 <div style={styles.appIcon}>{app.icon}</div>
@@ -136,7 +131,7 @@ function LandingScreen() {
 // ─── Pantalla de login/registro por app ──────────────────────────────────────
 const AuthScreen = memo(function AuthScreen({ mode = 'login' }) {
   const { appKey } = useParams();  // 'customer' | 'driver' | 'restaurant'
-  const app = APPS.find(a => a.key === appKey);
+  const app = APPS.find(a => a.key === appKey) ?? (appKey === 'admin' ? ADMIN_APP : null);
   const { auth, login } = useAuth();
   const navigate = useNavigate();
 
