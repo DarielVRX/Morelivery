@@ -114,32 +114,39 @@ export async function loginUser(payload) {
 export async function updateProfileAddress(userId, role, address, displayName) {
   if (role === 'restaurant') {
     if (address !== undefined && address !== null) {
-      try { await query('UPDATE restaurants SET address = $1 WHERE owner_user_id = $2', [address, userId]); }
+      try { await query('UPDATE restaurants SET address=$1 WHERE owner_user_id=$2', [address, userId]); }
       catch (e) { if (e?.code !== '42703') throw e; }
     }
     if (displayName !== undefined && displayName !== null) {
-      // Guardar tal como viene (preservar mayúsculas)
       const cleanName = cleanRestaurantName(displayName);
       try {
-        await query('UPDATE restaurants SET name = $1 WHERE owner_user_id = $2', [cleanName, userId]);
-        // full_name en users también con el valor original
-        await query('UPDATE users SET full_name = $1 WHERE id = $2', [displayName.trim(), userId]);
+        await query('UPDATE restaurants SET name=$1 WHERE owner_user_id=$2', [cleanName, userId]);
+        await query('UPDATE users SET full_name=$1 WHERE id=$2', [displayName.trim(), userId]);
       } catch (e) { if (e?.code !== '42703') throw e; }
     }
-    return { address, displayName };
+  } else {
+    // customer / driver / admin
+    const updates = [];
+    const vals = [];
+    let i = 1;
+    if (displayName !== undefined && displayName !== null) { updates.push(`full_name=$${i++}`); vals.push(displayName.trim()); }
+    if (address !== undefined && address !== null)         { updates.push(`address=$${i++}`);    vals.push(address); }
+    if (updates.length > 0) {
+      vals.push(userId);
+      try { await query(`UPDATE users SET ${updates.join(',')} WHERE id=$${i}`, vals); }
+      catch (e) { if (e?.code !== '42703') throw e; }
+    }
   }
-  // customer / driver / cualquier rol
-  const updates = [];
-  const vals = [];
-  let i = 1;
-  if (displayName !== undefined && displayName !== null) { updates.push(`full_name=$${i++}`); vals.push(displayName.trim()); }
-  if (address !== undefined && address !== null)         { updates.push(`address=$${i++}`);    vals.push(address); }
-  if (updates.length > 0) {
-    vals.push(userId);
-    try { await query(`UPDATE users SET ${updates.join(',')} WHERE id=$${i}`, vals); }
-    catch (e) { if (e?.code !== '42703') throw e; }
-  }
-  return { address, displayName };
+
+  // Leer valores confirmados desde la DB para devolver al cliente
+  const confirmed = await query(
+    'SELECT full_name, address FROM users WHERE id=$1', [userId]
+  );
+  const row = confirmed.rows[0] || {};
+  return {
+    address:     row.address    ?? address ?? null,
+    displayName: row.full_name  ?? displayName ?? null,
+  };
 }
 
 export async function changePassword(userId, currentPassword, newPassword) {

@@ -186,8 +186,8 @@ router.post('/menu-items', authenticate, authorize(['restaurant']), validate(cre
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
     const { name, description, priceCents } = req.validatedBody;
-    // priceCents viene convertido desde pesos × 100 en el frontend — validar rango
-    if (!Number.isInteger(priceCents) || priceCents < 100 || priceCents > 10_000_00) {
+    // priceCents validado: entero entre $1 y $10,000
+    if (!Number.isInteger(priceCents) || priceCents < 100 || priceCents > 1_000_000) {
       return next(new AppError(400, 'El precio debe estar entre $1.00 y $10,000.00'));
     }
     const result = await query(
@@ -207,8 +207,16 @@ router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), validat
     if (item.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
     const cur = item.rows[0];
     const p = req.validatedBody;
-    // imageUrl llega en req.body directamente (no validado por schema, es opcional)
-    const imageUrl = req.body.imageUrl !== undefined ? req.body.imageUrl : cur.image_url;
+    // imageUrl: acepta base64 (data:image/...) o null para eliminar imagen
+    let imageUrl = cur.image_url;
+    if (req.body.imageUrl !== undefined) {
+      if (req.body.imageUrl === null || req.body.imageUrl === '') {
+        imageUrl = null;
+      } else if (typeof req.body.imageUrl === 'string') {
+        // base64 o URL — aceptar sin restricción de formato
+        imageUrl = req.body.imageUrl;
+      }
+    }
     const result = await query(
       'UPDATE menu_items SET name=$1, description=$2, price_cents=$3, is_available=$4, image_url=$5 WHERE id=$6 RETURNING *',
       [p.name ?? cur.name, p.description ?? cur.description ?? '', p.priceCents ?? cur.price_cents, p.isAvailable ?? cur.is_available, imageUrl, req.params.id]

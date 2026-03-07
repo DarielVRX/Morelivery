@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
@@ -14,73 +14,103 @@ const STATUS_LABELS = {
   cancelled:'Cancelado', pending_driver:'Buscando conductor',
 };
 
-function FullMap({ driverPos, activeOrder }) {
+// Mapa ligero — instancia única, destruida al desmontar
+function DriverMap({ driverPos }) {
   const ref    = useRef(null);
   const mapRef = useRef(null);
 
   useEffect(() => {
-    if (!ref.current) return;
-    const center = driverPos ? [driverPos.lat, driverPos.lng] : [20.6597, -103.3496];
+    if (!ref.current || !driverPos) return;
 
     import('leaflet').then(L => {
-      import('leaflet/dist/leaflet.css').catch(() => {});
+      // Solo cargar CSS una vez
+      if (!document.getElementById('leaflet-css')) {
+        const link = document.createElement('link');
+        link.id   = 'leaflet-css';
+        link.rel  = 'stylesheet';
+        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+        document.head.appendChild(link);
+      }
+
       if (!L.Icon.Default.prototype._getIconUrl) {
         delete L.Icon.Default.prototype._getIconUrl;
         L.Icon.Default.mergeOptions({
           iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-          iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-          shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+          iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+          shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
         });
       }
 
-      if (ref.current._leaflet_id && mapRef.current) {
-        if (driverPos) {
-          if (mapRef.current.driverMarker) mapRef.current.driverMarker.setLatLng([driverPos.lat, driverPos.lng]);
-          else {
-            mapRef.current.driverMarker = L.circleMarker([driverPos.lat, driverPos.lng],
-              { radius:9, fillColor:'#2563eb', fillOpacity:1, color:'#fff', weight:2 })
-              .addTo(mapRef.current.map).bindPopup('Tu posición');
-          }
-        }
-        return;
-      }
+      if (!ref.current._leaflet_id) {
+        const map = L.map(ref.current, {
+          zoomControl: false,
+          attributionControl: false,
+          // Reducir memoria: menos tiles cacheados
+          maxZoom: 18,
+        }).setView([driverPos.lat, driverPos.lng], 15);
 
-      const map = L.map(ref.current, { zoomControl:false, attributionControl:false }).setView(center, 14);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-      L.control.zoom({ position:'bottomright' }).addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          keepBuffer: 1,  // menos tiles en buffer = menos memoria
+          updateWhenIdle: true,
+        }).addTo(map);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-      const markers = {};
-      if (driverPos) {
-        markers.driverMarker = L.circleMarker([driverPos.lat, driverPos.lng],
-          { radius:9, fillColor:'#2563eb', fillOpacity:1, color:'#fff', weight:2 })
-          .addTo(map).bindPopup('Tu posición');
+        const marker = L.circleMarker([driverPos.lat, driverPos.lng], {
+          radius: 9, fillColor: '#2563eb', fillOpacity: 1, color: '#fff', weight: 2,
+        }).addTo(map);
+
+        mapRef.current = { map, marker };
+      } else if (mapRef.current) {
+        mapRef.current.marker?.setLatLng([driverPos.lat, driverPos.lng]);
+        mapRef.current.map?.panTo([driverPos.lat, driverPos.lng], { animate: true, duration: 0.5 });
       }
-      if (activeOrder?.delivery_lat) {
-        markers.destMarker = L.marker([activeOrder.delivery_lat, activeOrder.delivery_lng])
-          .addTo(map).bindPopup('Punto de entrega');
-      }
-      mapRef.current = { map, ...markers };
     }).catch(() => {});
-  }, [driverPos?.lat, driverPos?.lng, activeOrder?.id]);
 
-  return <div ref={ref} style={{ position:'fixed', inset:0, zIndex:0, background:'#e8e8e8' }} />;
+    return () => {
+      // Destruir mapa al desmontar para liberar memoria
+      if (mapRef.current?.map && ref.current?._leaflet_id) {
+        mapRef.current.map.remove();
+        mapRef.current = null;
+      }
+    };
+  }, []);  // Solo inicializar una vez
+
+  // Actualizar posición sin re-crear el mapa
+  useEffect(() => {
+    if (!mapRef.current || !driverPos) return;
+    mapRef.current.marker?.setLatLng([driverPos.lat, driverPos.lng]);
+    mapRef.current.map?.panTo([driverPos.lat, driverPos.lng], { animate: true, duration: 0.5 });
+  }, [driverPos?.lat, driverPos?.lng]);
+
+  if (!driverPos) return (
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f3f4f6', borderRadius: 0 }}>
+      <div style={{ textAlign: 'center', color: 'var(--gray-400)', fontSize: '0.85rem' }}>
+        <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📍</div>
+        Esperando señal GPS…
+      </div>
+    </div>
+  );
+
+  return <div ref={ref} style={{ height: '100%', width: '100%' }} />;
 }
 
 export default function DriverHome() {
   const { auth } = useAuth();
-  const [offers, setOffers]           = useState([]);
-  const [activeOrder, setActiveOrder] = useState(null);
-  const [availability, setAvailability] = useState(false);
-  const [loadingOffer, setLoadingOffer] = useState('');
+  const [activeOrder,   setActiveOrder]   = useState(null);
+  const [availability,  setAvailability]  = useState(false);
+  const [pendingOffer,  setPendingOffer]  = useState(null); // UNA sola oferta a la vez
+  const [loadingOffer,  setLoadingOffer]  = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('');
-  const [releaseNote, setReleaseNote]   = useState('');
-  const [showRelease, setShowRelease]   = useState(false);
+  const [releaseNote,   setReleaseNote]   = useState('');
+  const [showRelease,   setShowRelease]   = useState(false);
   const [msg, setMsg] = useState('');
-  const loadDataRef = useRef(null);
+  const loadDataRef   = useRef(null);
 
-  const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, availability);
+  // GPS activo si disponible O tiene pedido activo
+  const hasActiveOrder = Boolean(activeOrder && !['delivered','cancelled'].includes(activeOrder.status));
+  const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, availability, hasActiveOrder);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     if (!auth.token) return;
     try { await apiFetch('/drivers/listener', { method:'POST' }, auth.token); } catch (_) {}
     try {
@@ -88,21 +118,39 @@ export default function DriverHome() {
         apiFetch('/orders/my', {}, auth.token),
         apiFetch('/drivers/offers', {}, auth.token),
       ]);
-      // Pedido en curso = el más antiguo aceptado/activo
+      // Pedido más antiguo activo
       const active = (od.orders || [])
         .filter(o => !['delivered','cancelled'].includes(o.status))
         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0] || null;
       setActiveOrder(active);
-      setOffers(off.offers || []);
+      // Una sola oferta a la vez
+      const offers = off.offers || [];
+      setPendingOffer(offers.length > 0 ? offers[0] : null);
     } catch (_) {}
-  }
+  }, [auth.token]);
 
   useEffect(() => { loadDataRef.current = loadData; });
   useEffect(() => {
     setAvailability(Boolean(auth.user?.driver?.is_available));
     loadData();
   }, [auth.token]);
-  useRealtimeOrders(auth.token, () => loadDataRef.current?.(), () => {});
+
+  // SSE: recibir ofertas push sin esperar poll
+  const handleNewOffer = useCallback((data) => {
+    setPendingOffer(prev => {
+      if (prev) return prev; // Ya hay una oferta, ignorar (no debería pasar con la nueva lógica)
+      return { id: data.orderId, ...data, offer_created_at: data.offerCreatedAt };
+    });
+    // Recargar también para tener datos completos
+    setTimeout(() => loadDataRef.current?.(), 500);
+  }, []);
+
+  useRealtimeOrders(
+    auth.token,
+    () => loadDataRef.current?.(),
+    () => {},
+    handleNewOffer,
+  );
 
   async function toggleAvailability() {
     try {
@@ -113,24 +161,34 @@ export default function DriverHome() {
     } catch (e) { setMsg(e.message); }
   }
 
-  async function acceptOffer(orderId) {
-    setLoadingOffer(orderId);
-    try { await apiFetch(`/drivers/offers/${orderId}/accept`, { method:'POST' }, auth.token); loadData(); }
-    catch (e) { setMsg(e.message); }
-    finally { setLoadingOffer(''); }
+  async function acceptOffer() {
+    if (!pendingOffer) return;
+    setLoadingOffer(true);
+    try {
+      await apiFetch(`/drivers/offers/${pendingOffer.id}/accept`, { method:'POST' }, auth.token);
+      setPendingOffer(null);
+      loadData();
+    } catch (e) { setMsg(e.message); }
+    finally { setLoadingOffer(false); }
   }
 
-  async function rejectOffer(orderId) {
-    setLoadingOffer(orderId);
-    try { await apiFetch(`/drivers/offers/${orderId}/reject`, { method:'POST' }, auth.token); loadData(); }
-    catch (e) { setMsg(e.message); }
-    finally { setLoadingOffer(''); }
+  async function rejectOffer() {
+    if (!pendingOffer) return;
+    setLoadingOffer(true);
+    try {
+      await apiFetch(`/drivers/offers/${pendingOffer.id}/reject`, { method:'POST' }, auth.token);
+      setPendingOffer(null);
+      loadData();
+    } catch (e) { setMsg(e.message); }
+    finally { setLoadingOffer(false); }
   }
 
   async function changeStatus(orderId, status) {
     setLoadingStatus(status);
-    try { await apiFetch(`/orders/${orderId}/status`, { method:'PATCH', body: JSON.stringify({ status }) }, auth.token); loadData(); }
-    catch (e) { setMsg(e.message); }
+    try {
+      await apiFetch(`/orders/${orderId}/status`, { method:'PATCH', body: JSON.stringify({ status }) }, auth.token);
+      loadData();
+    } catch (e) { setMsg(e.message); }
     finally { setLoadingStatus(''); }
   }
 
@@ -144,80 +202,82 @@ export default function DriverHome() {
     } catch (e) { setMsg(e.message); }
   }
 
-  const panelStyle = {
-    position:'absolute', bottom:0, left:0, right:0, zIndex:20,
-    background:'#fffffff5', borderRadius:'16px 16px 0 0',
-    boxShadow:'0 -4px 20px #0002', padding:'0.75rem',
-    maxHeight:'60vh', overflowY:'auto',
-  };
-
   return (
-    <div style={{ position:'relative', height:'calc(100dvh - var(--header-h))', overflow:'hidden', margin:'-1rem -1.25rem', marginBottom:'calc(-1rem - var(--nav-h-mobile))' }}>
-      <FullMap driverPos={myPosition} activeOrder={activeOrder} />
+    <div style={{ display:'flex', flexDirection:'column', height:'calc(100dvh - var(--header-h))', margin:'-1rem -1.25rem', marginBottom:'calc(-1rem - var(--nav-h-mobile))', overflow:'hidden' }}>
 
-      {/* Disponibilidad — overlay superior */}
-      <div style={{ position:'absolute', top:12, left:12, right:12, zIndex:10 }}>
-        <div style={{ background:'#ffffffee', borderRadius:12, padding:'0.55rem 0.85rem', boxShadow:'0 2px 8px #0002', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
-          <div>
-            <div style={{ fontWeight:700, fontSize:'0.85rem' }}>
-              {availability ? '● Disponible' : '○ No disponible'}
-            </div>
-            {myPosition && <div style={{ fontSize:'0.72rem', color:'var(--gray-600)' }}>GPS · ±{myPosition.accuracy} m</div>}
-            {gpsError   && <div style={{ fontSize:'0.72rem', color:'var(--danger)' }}>{gpsError}</div>}
+      {/* ── Encabezado FIJO ─────────────────────────────────────────── */}
+      <div style={{ flexShrink:0, background:'#fff', borderBottom:'1px solid var(--gray-200)', padding:'0.65rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, zIndex:10 }}>
+        <div>
+          <div style={{ fontWeight:700, fontSize:'0.875rem' }}>
+            {availability ? '● Disponible' : '○ No disponible'}
           </div>
-          <button onClick={toggleAvailability} className={availability ? 'btn-primary btn-sm' : 'btn-sm'} style={{ whiteSpace:'nowrap', flexShrink:0 }}>
-            {availability ? 'Disponible' : 'No disponible'}
-          </button>
+          {myPosition && <div style={{ fontSize:'0.7rem', color:'var(--gray-600)' }}>GPS · ±{myPosition.accuracy}m</div>}
+          {gpsError   && <div style={{ fontSize:'0.7rem', color:'var(--danger)', maxWidth:200 }}>{gpsError}</div>}
         </div>
+        <button onClick={toggleAvailability} className={availability ? 'btn-primary btn-sm' : 'btn-sm'}>
+          {availability ? 'Disponible' : 'No disponible'}
+        </button>
       </div>
 
       {msg && (
-        <div className="flash flash-error" style={{ position:'absolute', top:70, left:12, right:12, zIndex:10, borderRadius:8 }}>
-          {msg}
-          <button onClick={() => setMsg('')} style={{ float:'right', border:'none', background:'none', cursor:'pointer', fontWeight:700 }}>✕</button>
+        <div className="flash flash-error" style={{ flexShrink:0, borderRadius:0, margin:0, display:'flex', justifyContent:'space-between' }}>
+          <span style={{ fontSize:'0.83rem' }}>{msg}</span>
+          <button onClick={() => setMsg('')} style={{ border:'none', background:'none', cursor:'pointer', fontWeight:700 }}>✕</button>
         </div>
       )}
 
-      {/* Panel ofertas */}
-      {offers.length > 0 && (
-        <div style={{ ...panelStyle, borderTop:'2px solid var(--brand)' }}>
-          <div style={{ fontSize:'0.72rem', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', color:'var(--brand)', marginBottom:'0.5rem' }}>
-            {offers.length} oferta{offers.length > 1 ? 's' : ''} disponible{offers.length > 1 ? 's' : ''}
+      {/* ── Mapa (ocupa el espacio restante) ───────────────────────── */}
+      <div style={{ flex:1, minHeight:0, position:'relative' }}>
+        <DriverMap driverPos={myPosition} />
+
+        {/* Sin actividad */}
+        {!activeOrder && !pendingOffer && (
+          <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', background:'#ffffffdd', borderRadius:20, padding:'0.45rem 1.1rem', fontSize:'0.82rem', color:'var(--gray-600)', boxShadow:'0 2px 8px #0002', whiteSpace:'nowrap', zIndex:5 }}>
+            {availability ? 'En espera de pedidos…' : 'Activa disponibilidad para recibir pedidos'}
           </div>
-          {offers.map(offer => (
-            <div key={offer.id} style={{ background:'#fff', border:'1px solid var(--gray-200)', borderRadius:10, padding:'0.75rem', marginBottom:'0.5rem', borderLeft:'3px solid var(--brand)' }}>
-              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.3rem' }}>
-                <span style={{ fontWeight:700 }}>{offer.restaurant_name}</span>
-                <span style={{ fontWeight:700 }}>{fmt(offer.total_cents)}</span>
-              </div>
-              <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>
-                {offer.restaurant_address && <div>Retiro: {offer.restaurant_address}</div>}
-                {offer.customer_address   && <div>Entrega: {offer.customer_address}</div>}
-              </div>
-              {(offer.items||[]).length > 0 && (
-                <ul style={{ fontSize:'0.8rem', margin:'0 0 0.4rem 1rem', color:'var(--gray-600)' }}>
-                  {offer.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
-                </ul>
-              )}
-              {/* offerCreatedAt es el prop correcto */}
-              <OfferCountdown offerCreatedAt={offer.offer_created_at} />
-              <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem' }}>
-                <button className="btn-primary btn-sm" style={{ flex:1 }} disabled={loadingOffer===offer.id} onClick={() => acceptOffer(offer.id)}>
-                  {loadingOffer===offer.id ? 'Aceptando…' : 'Aceptar'}
-                </button>
-                <button className="btn-sm" disabled={loadingOffer===offer.id} onClick={() => rejectOffer(offer.id)}>Rechazar</button>
-              </div>
-            </div>
-          ))}
+        )}
+      </div>
+
+      {/* ── Oferta entrante (SOBRE el pedido activo) ────────────────── */}
+      {pendingOffer && (
+        <div style={{ flexShrink:0, background:'#fff', borderTop:'3px solid var(--brand)', padding:'0.75rem 1rem', boxShadow:'0 -4px 16px #0002', zIndex:20 }}>
+          <div style={{ fontSize:'0.72rem', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', color:'var(--brand)', marginBottom:'0.4rem' }}>
+            Nueva oferta
+          </div>
+          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.25rem' }}>
+            <span style={{ fontWeight:700 }}>{pendingOffer.restaurant_name}</span>
+            <span style={{ fontWeight:700 }}>{fmt(pendingOffer.total_cents)}</span>
+          </div>
+          <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>
+            {pendingOffer.restaurant_address && <div>Retiro: {pendingOffer.restaurant_address}</div>}
+            {pendingOffer.customer_address   && <div>Entrega: {pendingOffer.customer_address}</div>}
+          </div>
+          {(pendingOffer.items||[]).length > 0 && (
+            <ul style={{ fontSize:'0.78rem', margin:'0 0 0.35rem 1rem', color:'var(--gray-600)' }}>
+              {pendingOffer.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
+            </ul>
+          )}
+          <OfferCountdown
+            offerCreatedAt={pendingOffer.offer_created_at}
+            onExpired={() => { setPendingOffer(null); loadData(); }}
+          />
+          <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.5rem' }}>
+            <button className="btn-primary btn-sm" style={{ flex:1 }} disabled={loadingOffer} onClick={acceptOffer}>
+              {loadingOffer ? 'Aceptando…' : 'Aceptar'}
+            </button>
+            <button className="btn-sm" disabled={loadingOffer} onClick={rejectOffer}>Rechazar</button>
+          </div>
         </div>
       )}
 
-      {/* Panel pedido activo — sin mapa inline */}
-      {activeOrder && offers.length === 0 && (
-        <div style={{ ...panelStyle, borderTop:'2px solid var(--success)' }}>
-          <div style={{ fontSize:'0.72rem', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', color:'var(--success)', marginBottom:'0.4rem' }}>Pedido en curso</div>
-          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.3rem' }}>
-            <span style={{ fontWeight:700 }}>{STATUS_LABELS[activeOrder.status]}</span>
+      {/* ── Pedido activo ────────────────────────────────────────────── */}
+      {activeOrder && (
+        <div style={{ flexShrink:0, background:'#fff', borderTop:'2px solid var(--success)', padding:'0.75rem 1rem', zIndex:10 }}>
+          <div style={{ fontSize:'0.72rem', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', color:'var(--success)', marginBottom:'0.25rem' }}>
+            Pedido en curso
+          </div>
+          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.25rem' }}>
+            <span style={{ fontWeight:700, fontSize:'0.9rem' }}>{STATUS_LABELS[activeOrder.status]}</span>
             <span style={{ fontWeight:700 }}>{fmt(activeOrder.total_cents)}</span>
           </div>
           <div style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginBottom:'0.4rem' }}>
@@ -226,11 +286,11 @@ export default function DriverHome() {
           <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
             <button className="btn-sm"
               style={{ background: activeOrder.status==='ready' ? 'var(--brand)':'', color: activeOrder.status==='ready' ? '#fff':'' }}
-              disabled={loadingStatus==='on_the_way'||activeOrder.status!=='ready'}
+              disabled={loadingStatus==='on_the_way' || activeOrder.status!=='ready'}
               onClick={() => changeStatus(activeOrder.id,'on_the_way')}>En camino</button>
             <button className="btn-sm"
               style={{ background: activeOrder.status==='on_the_way' ? 'var(--success)':'', color: activeOrder.status==='on_the_way' ? '#fff':'' }}
-              disabled={loadingStatus==='delivered'||activeOrder.status!=='on_the_way'}
+              disabled={loadingStatus==='delivered' || activeOrder.status!=='on_the_way'}
               onClick={() => changeStatus(activeOrder.id,'delivered')}>Entregado</button>
             {!['on_the_way','delivered','cancelled'].includes(activeOrder.status) && (
               <button className="btn-sm btn-danger" onClick={() => setShowRelease(s=>!s)}>Liberar</button>
@@ -238,9 +298,8 @@ export default function DriverHome() {
           </div>
           {showRelease && (
             <div style={{ marginTop:'0.5rem' }}>
-              <textarea value={releaseNote} onChange={e => setReleaseNote(e.target.value)}
-                placeholder="Motivo (obligatorio)" rows={2}
-                style={{ width:'100%', boxSizing:'border-box', marginBottom:'0.4rem' }} />
+              <textarea value={releaseNote} onChange={e=>setReleaseNote(e.target.value)}
+                placeholder="Motivo (obligatorio)" rows={2} style={{ width:'100%', boxSizing:'border-box', marginBottom:'0.4rem' }} />
               <div style={{ display:'flex', gap:'0.4rem' }}>
                 <button className="btn-sm btn-danger" onClick={doRelease}>Confirmar</button>
                 <button className="btn-sm" onClick={() => { setShowRelease(false); setReleaseNote(''); }}>Cancelar</button>
@@ -250,11 +309,8 @@ export default function DriverHome() {
         </div>
       )}
 
-      {!activeOrder && offers.length === 0 && (
-        <div style={{ position:'absolute', bottom:24, left:'50%', transform:'translateX(-50%)', zIndex:10, background:'#ffffffdd', borderRadius:20, padding:'0.5rem 1.25rem', fontSize:'0.85rem', color:'var(--gray-600)', boxShadow:'0 2px 8px #0002', whiteSpace:'nowrap' }}>
-          {availability ? 'En espera de pedidos…' : 'Activa tu disponibilidad para recibir pedidos'}
-        </div>
-      )}
+      {/* Espacio para nav móvil — el padding-bottom del page-content no aplica aquí */}
+      <div style={{ height:'var(--nav-h-mobile)', flexShrink:0, background:'transparent' }} />
     </div>
   );
 }
