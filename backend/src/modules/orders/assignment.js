@@ -114,7 +114,7 @@ async function applyOrderCooldownReduction(orderId) {
     new_wait_secs: secs_remaining / COOLDOWN_DIVISOR
   });
 
-  return driver_id;
+  return driver_id, new_wait_secs;
 }
 
 // ─── Núcleo ───────────────────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ export async function offerNextDrivers(orderId, _onOffer) {
     // Reintentar la query de candidatos ahora mismo.
     // Si new_wait_secs >= 1 todavía tiene cooldown — esperar al próximo expire tick.
     // CORRECCIÓN: Usar la variable 'reduced' que ya tienes definida arriba
-    const newWaitSecs = reduced ? 0 : 60; // Si hubo reducción, asumimos elegibilidad inmediata o espera mínima
+    const newWaitSecs = reduced?.new_wait_secs ?? 60; // Si hubo reducción, asumimos elegibilidad inmediata o espera mínima
 
     if (newWaitSecs < 1) {
       candidates = await queryCandidates(orderId, 1);

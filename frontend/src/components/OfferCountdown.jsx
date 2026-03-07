@@ -17,10 +17,9 @@ export default function OfferCountdown({ secondsLeft: serverSecondsLeft, onExpir
 
   // Usamos 'count' (el número) para todos los cálculos
   const color = expired ? '#9ca3af' : urgent ? '#dc2626' : count <= 30 ? '#f59e0b' : '#16a34a';
-  const pct   = Math.max(0, count / OFFER_TIMEOUT_SECONDS);
-  const r     = 16;
+  const pct = Math.max(0, Math.min(1, count / OFFER_TIMEOUT_SECONDS || 0));
+  const dash = circ * pct;
   const circ  = 2 * Math.PI * r;
-  const dash  = circ * pct;
 
   return (
     <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>

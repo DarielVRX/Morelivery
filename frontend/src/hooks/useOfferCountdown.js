@@ -12,13 +12,11 @@ export function useOfferCountdown(initialSecondsLeft) {
 
   useEffect(() => {
     if (secondsLeft <= 0) return;
-
     const interval = setInterval(() => {
-      setSecondsLeft((prev) => Math.max(0, prev - 1));
+      setSecondsLeft(prev => Math.max(0, prev - 1));
     }, 1000);
-
     return () => clearInterval(interval);
-  }, [secondsLeft > 0]);
+  }, [secondsLeft]); // depende del valor real, no del booleano
 
   return {
     secondsLeft,
