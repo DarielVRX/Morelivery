@@ -1,13 +1,15 @@
+// frontend/src/components/OfferCountdown.jsx
 import { useEffect } from 'react';
 import { useOfferCountdown } from '../hooks/useOfferCountdown';
 
 const OFFER_TIMEOUT_SECONDS = 60;
+const SVG_SIZE = 40;
+const RADIUS   = 16;
 
-export default function OfferCountdown({ secondsLeft: serverSecondsLeft, onExpired }) {
-  // 1. Usamos serverSecondsLeft que viene de las props
-  // 2. Renombramos la salida del hook a 'count' para evitar confusiones
-  const { secondsLeft: count, urgent, expired } = useOfferCountdown(serverSecondsLeft);
+export default function OfferCountdown({ offerCreatedAt, onExpired }) {
+  const { secondsLeft, urgent, expired } = useOfferCountdown(offerCreatedAt);
 
+  // Llamar onExpired una sola vez
   useEffect(() => {
     if (expired && onExpired) {
       const t = setTimeout(onExpired, 100);
@@ -15,31 +17,70 @@ export default function OfferCountdown({ secondsLeft: serverSecondsLeft, onExpir
     }
   }, [expired, onExpired]);
 
-  // Usamos 'count' (el número) para todos los cálculos
-  const color = expired ? '#9ca3af' : urgent ? '#dc2626' : count <= 30 ? '#f59e0b' : '#16a34a';
-  const pct = Math.max(0, Math.min(1, count / OFFER_TIMEOUT_SECONDS || 0));
+  const color = expired
+  ? '#9ca3af'
+  : urgent
+  ? '#dc2626'
+  : secondsLeft <= 30
+  ? '#f59e0b'
+  : '#16a34a';
+
+  const pct  = Math.max(0, Math.min(1, secondsLeft / OFFER_TIMEOUT_SECONDS));
+  const circ = 2 * Math.PI * RADIUS;
   const dash = circ * pct;
-  const circ  = 2 * Math.PI * r;
 
   return (
     <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
-    <svg width="40" height="40" style={{ transform:'rotate(-90deg)', flexShrink:0 }}>
-    <circle cx="20" cy="20" r={r} fill="none" stroke="#e5e7eb" strokeWidth="3.5" />
-    <circle cx="20" cy="20" r={r} fill="none" stroke={color} strokeWidth="3.5"
-    strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
-    style={{ transition:'stroke-dasharray 0.9s linear, stroke 0.3s' }} />
-    <text x="20" y="20" textAnchor="middle" dominantBaseline="central"
-    style={{ transform:'rotate(90deg)', transformOrigin:'20px 20px', fontSize:'10px', fontWeight:700, fill:color, fontFamily:'monospace' }}>
-    {/* AQUÍ SE CORRIGE EL NaN: usamos 'count' que es el estado del hook */}
-    {expired ? '—' : count}
-    </text>
+    <div style={{ position:'relative', width:SVG_SIZE, height:SVG_SIZE, flexShrink:0 }}>
+    <svg width={SVG_SIZE} height={SVG_SIZE} style={{ transform:'rotate(-90deg)' }}>
+    <circle
+    cx={SVG_SIZE/2}
+    cy={SVG_SIZE/2}
+    r={RADIUS}
+    fill="none"
+    stroke="#e5e7eb"
+    strokeWidth="3.5"
+    />
+    <circle
+    cx={SVG_SIZE/2}
+    cy={SVG_SIZE/2}
+    r={RADIUS}
+    fill="none"
+    stroke={color}
+    strokeWidth="3.5"
+    strokeDasharray={`${dash} ${circ}`}
+    strokeLinecap="round"
+    style={{ transition:'stroke-dasharray 0.9s linear, stroke 0.3s' }}
+    />
     </svg>
+    {/* Icono C centrado */}
+    <div style={{
+      position:'absolute',
+      top:'50%',
+      left:'50%',
+      transform:'translate(-50%, -50%)',
+          fontSize:'12px',
+          fontWeight:700,
+          fontFamily:'monospace',
+          color
+    }}>
+    C
+    </div>
+    </div>
     <div>
-    <div style={{ fontSize:'0.75rem', color:'#6b7280', lineHeight:1 }}>Tiempo</div>
-    <div style={{ fontWeight:700, fontSize:'0.9rem', color }}>
-    {expired ? 'Expirada' : `${count}s`}
+    <div style={{ fontSize:'0.75rem', color:'var(--gray-600)', lineHeight:1 }}>Tiempo</div>
+    <div style={{
+      fontWeight:700,
+      fontSize:'0.9rem',
+      color,
+      animation: urgent && !expired ? 'pulse-text 0.8s ease-in-out infinite' : 'none'
+    }}>
+    {expired ? 'Expirada' : urgent ? `⚠ ${secondsLeft}s` : `${secondsLeft}s`}
     </div>
     </div>
-    </div>
+    <style>{`
+      @keyframes pulse-text { 0%,100%{opacity:1} 50%{opacity:0.35} }
+      `}</style>
+      </div>
   );
 }
