@@ -315,7 +315,7 @@ export default function CustomerOrders() {
                         <span style={{ fontWeight:700, fontSize:'0.875rem' }}>{order.restaurant_name}</span>
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
-                        <span style={{ fontWeight:700 }}>{fmt(order.total_cents)}</span>
+                        <span style={{ fontWeight:700 }}>{fmt((order.total_cents||0)+(order.service_fee_cents||0)+(order.delivery_fee_cents||0)+(order.tip_cents||0))}</span>
                         <span style={{ color:'var(--gray-400)', fontSize:'0.8rem' }}>{isExp?'▲':'▼'}</span>
                       </div>
                     </div>
@@ -364,29 +364,51 @@ export default function CustomerOrders() {
           ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
           : (
             <ul style={{ listStyle:'none', padding:0 }}>
-              {past.slice(0,30).map(o => (
-                <li key={o.id} className="card" style={{ marginBottom:'0.5rem', padding:'0.75rem' }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.35rem' }}>
-                    <span className="badge" style={{ color:STATUS_COLOR[o.status], borderColor:`${STATUS_COLOR[o.status]}55`, background:`${STATUS_COLOR[o.status]}15`, fontSize:'0.72rem' }}>{STATUS_LABELS[o.status]}</span>
-                    <span style={{ fontWeight:700 }}>{fmt(o.total_cents)}</span>
-                  </div>
-                  <div style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginBottom:'0.4rem' }}>{o.restaurant_name}</div>
-                  <FeeBreakdown order={o} />
-                  {reportingId===o.id ? (
-                    <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginTop:'0.4rem' }}>
-                      <textarea value={reportText} onChange={e=>setReportText(e.target.value)}
-                        placeholder="Describe el problema…" rows={2}
-                        style={{ fontSize:'0.82rem', width:'100%', boxSizing:'border-box' }} />
-                      <div style={{ display:'flex', gap:'0.3rem' }}>
-                        <button className="btn-sm" style={{ background:'var(--danger)', color:'#fff', borderColor:'var(--danger)' }} onClick={()=>sendReport(o.id)}>Enviar reporte</button>
-                        <button className="btn-sm" onClick={()=>{ setReportingId(null); setReportText(''); }}>Cancelar</button>
+              {past.slice(0,50).map(o => {
+                const color    = STATUS_COLOR[o.status] || '#9ca3af';
+                const grandTotal = (o.total_cents||0)+(o.service_fee_cents||0)+(o.delivery_fee_cents||0)+(o.tip_cents||0);
+                const isHExp   = expanded === ('h_'+o.id);
+                return (
+                  <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden' }}>
+                    <div onClick={() => setExpanded(isHExp ? null : 'h_'+o.id)}
+                      style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.75rem', cursor:'pointer', gap:'0.5rem' }}>
+                      <div>
+                        <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15`, marginRight:'0.5rem', fontSize:'0.7rem' }}>
+                          {STATUS_LABELS[o.status]}
+                        </span>
+                        <span style={{ fontWeight:600, fontSize:'0.875rem' }}>{o.restaurant_name}</span>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
+                        <span style={{ fontWeight:700 }}>{fmt(grandTotal)}</span>
+                        <span style={{ color:'var(--gray-400)', fontSize:'0.8rem' }}>{isHExp?'▲':'▼'}</span>
                       </div>
                     </div>
-                  ) : (
-                    <button className="btn-sm" style={{ fontSize:'0.78rem' }} onClick={()=>setReportingId(o.id)}>Reportar</button>
-                  )}
-                </li>
-              ))}
+                    {isHExp && (
+                      <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
+                        <FeeBreakdown order={o} />
+                        {(o.items||[]).length > 0 && (
+                          <ul style={{ fontSize:'0.82rem', margin:'0.35rem 0 0.35rem 1rem' }}>
+                            {o.items.map(i=><li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
+                          </ul>
+                        )}
+                        {reportingId===o.id ? (
+                          <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginTop:'0.3rem' }}>
+                            <textarea value={reportText} onChange={e=>setReportText(e.target.value)}
+                              placeholder="Describe el problema…" rows={2}
+                              style={{ fontSize:'0.82rem', width:'100%', boxSizing:'border-box' }} />
+                            <div style={{ display:'flex', gap:'0.3rem' }}>
+                              <button className="btn-sm" style={{ background:'var(--danger)', color:'#fff', borderColor:'var(--danger)' }} onClick={()=>sendReport(o.id)}>Enviar reporte</button>
+                              <button className="btn-sm" onClick={()=>{ setReportingId(null); setReportText(''); }}>Cancelar</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button className="btn-sm" style={{ fontSize:'0.78rem', marginTop:'0.3rem' }} onClick={()=>setReportingId(o.id)}>Reportar problema</button>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )
       )}
