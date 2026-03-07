@@ -207,24 +207,58 @@ export default function RestaurantPage() {
               Guarda tu dirección en Perfil antes de pedir
             </p>
           )}
+          {/* Método de pago */}
+          <div style={{ display:'flex', gap:'0.4rem', marginBottom:'0.5rem' }}>
+            {[['cash','Efectivo'],['card','Tarjeta'],['spei','SPEI']].map(([val,label]) => (
+              <button key={val} onClick={() => setPaymentMethod(val)}
+                style={{ flex:1, padding:'0.35rem', cursor:'pointer',
+                  border:`2px solid ${paymentMethod===val?'var(--brand)':'var(--gray-200)'}`,
+                  borderRadius:6, background: paymentMethod===val?'var(--brand-light)':'#fff',
+                  fontWeight: paymentMethod===val?700:400, fontSize:'0.8rem' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {/* Agradecimiento */}
+          <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', marginBottom:'0.5rem', flexWrap:'wrap' }}>
+            <span style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>Agradecimiento:</span>
+            <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap' }}>
+              {[0,1000,2000,5000].map(v => (
+                <button key={v} onClick={() => setTipCents(v)}
+                  style={{ padding:'0.2rem 0.45rem', cursor:'pointer',
+                    border:`1px solid ${tipCents===v?'var(--success)':'var(--gray-200)'}`,
+                    borderRadius:6, background: tipCents===v?'#f0fdf4':'#fff',
+                    color: tipCents===v?'var(--success)':'var(--gray-600)',
+                    fontSize:'0.75rem', fontWeight: tipCents===v?700:400 }}>
+                  {v===0?'—':fmt(v)}
+                </button>
+              ))}
+              <input type="number" min="0" placeholder="$ otro"
+                onChange={e => setTipCents(Math.max(0, Math.round(Number(e.target.value||0)*100)))}
+                style={{ width:62, fontSize:'0.75rem', padding:'0.2rem 0.4rem',
+                  border:'1px solid var(--gray-200)', borderRadius:6 }} />
+            </div>
+          </div>
+          {/* Desglose */}
           <div style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.3rem' }}>
             <div style={{ display:'flex', justifyContent:'space-between' }}>
               <span>Subtotal</span><span>{fmt(subtotal)}</span>
             </div>
             <div style={{ display:'flex', justifyContent:'space-between' }}>
-              <span>Tarifa de servicio (5%)</span><span>{fmt(serviceFee)}</span>
+              <span>Tarifa de servicio</span><span>{fmt(serviceFee)}</span>
             </div>
             <div style={{ display:'flex', justifyContent:'space-between' }}>
-              <span>Tarifa de envío (10%)</span><span>{fmt(deliveryFee)}</span>
+              <span>Tarifa de envío</span><span>{fmt(deliveryFee)}</span>
             </div>
+            {tipCents > 0 && (
+              <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)' }}>
+                <span>Agradecimiento</span><span>+{fmt(tipCents)}</span>
+              </div>
+            )}
           </div>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
             <span style={{ fontWeight:800 }}>Total: {fmt(total)}</span>
-            <button
-              className="btn-primary"
-              disabled={!canOrder || ordering}
-              onClick={createOrder}
-            >
+            <button className="btn-primary" disabled={!canOrder || ordering} onClick={createOrder}>
               {ordering ? 'Procesando…' : 'Hacer pedido'}
             </button>
           </div>

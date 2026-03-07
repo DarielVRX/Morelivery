@@ -5,6 +5,27 @@ import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
+// Desglose para Tienda — lo que recibe neto
+function FeeBreakdown({ order }) {
+  const sub     = order.total_cents           || 0;
+  const resFee  = order.restaurant_fee_cents  || 0;
+  const neto    = sub - resFee;
+  if (!sub) return null;
+  return (
+    <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', borderTop:'1px solid var(--gray-100)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
+      <div style={{ display:'flex', justifyContent:'space-between' }}>
+        <span>Subtotal del pedido</span><span>{fmt(sub)}</span>
+      </div>
+      <div style={{ display:'flex', justifyContent:'space-between', color:'var(--danger)' }}>
+        <span>Tarifa de servicio</span><span>−{fmt(resFee)}</span>
+      </div>
+      <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--success)', marginTop:'0.2rem' }}>
+        <span>Tu ganancia</span><span>{fmt(neto)}</span>
+      </div>
+    </div>
+  );
+}
+
 const STATUS_LABELS = {
   created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
   preparing:'En preparación', ready:'Listo para retiro',
@@ -180,6 +201,12 @@ export default function RestaurantOrders() {
                         {order.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
                       </ul>
                     )}
+                    {order.payment_method && (
+                      <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.3rem' }}>
+                        Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[order.payment_method]||order.payment_method}</strong>
+                      </div>
+                    )}
+                    <FeeBreakdown order={order} />
                     <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginTop:'0.4rem' }}>
                       {/* Preparing y Ready independientes — no requieren secuencia */}
                       {!['preparing','ready','on_the_way','delivered','cancelled'].includes(order.status) && (
@@ -312,6 +339,12 @@ export default function RestaurantOrders() {
                             {o.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
                           </ul>
                         )}
+                        {o.payment_method && (
+                          <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.2rem' }}>
+                            Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[o.payment_method]||o.payment_method}</strong>
+                          </div>
+                        )}
+                        <FeeBreakdown order={o} />
                         {reportingId === o.id ? (
                           <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginTop:'0.3rem' }}>
                             <textarea value={reportText} onChange={e=>setReportText(e.target.value)}

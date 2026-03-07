@@ -7,6 +7,7 @@ function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
 // Desglose de tarifas — visible solo para Cliente y Conductor
 // total_cents = subtotal neto (lo que ve la Tienda)
+// Desglose para Cliente — lo que paga
 function FeeBreakdown({ order }) {
   const sub      = order.total_cents          || 0;
   const svc      = order.service_fee_cents    || 0;
@@ -20,10 +21,10 @@ function FeeBreakdown({ order }) {
         <span>Subtotal</span><span>{fmt(sub)}</span>
       </div>
       <div style={{ display:'flex', justifyContent:'space-between' }}>
-        <span>Tarifa de servicio (5%)</span><span>{fmt(svc)}</span>
+        <span>Tarifa de servicio</span><span>{fmt(svc)}</span>
       </div>
       <div style={{ display:'flex', justifyContent:'space-between' }}>
-        <span>Tarifa de envío (10%)</span><span>{fmt(del_fee)}</span>
+        <span>Tarifa de envío</span><span>{fmt(del_fee)}</span>
       </div>
       {tip > 0 && (
         <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)' }}>
@@ -31,7 +32,7 @@ function FeeBreakdown({ order }) {
         </div>
       )}
       <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--gray-700)', marginTop:'0.2rem' }}>
-        <span>Total cliente</span><span>{fmt(grandTotal)}</span>
+        <span>Total</span><span>{fmt(grandTotal)}</span>
       </div>
     </div>
   );
@@ -110,6 +111,7 @@ export default function CustomerOrders() {
   const [orders, setOrders]               = useState([]);
   const [tab, setTab]                     = useState('active');
   const [expanded, setExpanded]           = useState(null);
+  const [tipDraft, setTipDraft]           = useState({}); // orderId -> cents draft
   const [driverPos, setDriverPos]         = useState({});
   const [suggestionFor, setSuggestionFor] = useState('');
   const [suggDrafts, setSuggDrafts]       = useState({});
@@ -188,6 +190,15 @@ export default function CustomerOrders() {
       }, auth.token);
       setSuggestionFor(''); loadData();
     } catch (e) { setMsg(e.message); }
+  }
+
+  async function saveTip(orderId, cents, isPast, currentTip) {
+    const val = Math.max(0, Math.round(Number(cents) * 100));
+    if (isPast && val < currentTip) return; // en historial no se puede restar
+    try {
+      await apiFetch(`/orders/${orderId}/tip`, { method:'PATCH', body: JSON.stringify({ tipCents: val }) }, auth.token);
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, tip_cents: val } : o));
+    } catch (e) { setMsg(e.message || 'Error al guardar agradecimiento'); }
   }
 
   async function sendReport(orderId) {
@@ -321,7 +332,30 @@ export default function CustomerOrders() {
                     </div>
                     {isExp && (
                       <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
+                        {/* Método de pago */}
+                        {order.payment_method && (
+                          <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.3rem', marginTop:'0.35rem' }}>
+                            Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[order.payment_method]||order.payment_method}</strong>
+                          </div>
+                        )}
                         <FeeBreakdown order={order} />
+                        {/* Agradecimiento editable en activos */}
+                        <div style={{ marginTop:'0.4rem', display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+                          <span style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>Agradecimiento:</span>
+                          <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap' }}>
+                            {[0,1000,2000,5000].map(v => (
+                              <button key={v}
+                                onClick={() => { setTipDraft(d => ({...d, [order.id]:v})); saveTip(order.id, v/100, false, order.tip_cents||0); }}
+                                style={{ padding:'0.2rem 0.45rem', cursor:'pointer',
+                                  border:`1px solid ${(tipDraft[order.id]??order.tip_cents)===v?'var(--success)':'var(--gray-200)'}`,
+                                  borderRadius:6, background:(tipDraft[order.id]??order.tip_cents)===v?'#f0fdf4':'#fff',
+                                  color:(tipDraft[order.id]??order.tip_cents)===v?'var(--success)':'var(--gray-600)',
+                                  fontSize:'0.75rem', fontWeight:(tipDraft[order.id]??order.tip_cents)===v?700:400 }}>
+                                {v===0?'—':fmt(v)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                         {order.customer_address && (
                           <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.3rem', marginTop:'0.35rem' }}>
                             Dirección: <strong>{order.customer_address}</strong>
@@ -385,12 +419,39 @@ export default function CustomerOrders() {
                     </div>
                     {isHExp && (
                       <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
+                        {/* Método de pago */}
+                        {o.payment_method && (
+                          <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.3rem' }}>
+                            Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[o.payment_method]||o.payment_method}</strong>
+                          </div>
+                        )}
                         <FeeBreakdown order={o} />
                         {(o.items||[]).length > 0 && (
                           <ul style={{ fontSize:'0.82rem', margin:'0.35rem 0 0.35rem 1rem' }}>
                             {o.items.map(i=><li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
                           </ul>
                         )}
+                        {/* Agradecimiento — historial solo suma */}
+                        <div style={{ marginTop:'0.35rem', display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+                          <span style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>Agregar agradecimiento:</span>
+                          <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap' }}>
+                            {[1000,2000,5000].map(v => (
+                              <button key={v}
+                                onClick={() => saveTip(o.id, (o.tip_cents||0)/100 + v/100, true, o.tip_cents||0)}
+                                style={{ padding:'0.2rem 0.45rem', cursor:'pointer',
+                                  border:'1px solid var(--success)', borderRadius:6,
+                                  background:'#f0fdf4', color:'var(--success)',
+                                  fontSize:'0.75rem', fontWeight:600 }}>
+                                +{fmt(v)}
+                              </button>
+                            ))}
+                          </div>
+                          {(o.tip_cents||0) > 0 && (
+                            <span style={{ fontSize:'0.78rem', color:'var(--success)', fontWeight:700 }}>
+                              Total: {fmt(o.tip_cents)}
+                            </span>
+                          )}
+                        </div>
                         {reportingId===o.id ? (
                           <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginTop:'0.3rem' }}>
                             <textarea value={reportText} onChange={e=>setReportText(e.target.value)}
