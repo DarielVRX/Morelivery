@@ -67,6 +67,22 @@ export default function RestaurantPage() {
     setSelectedItems(p => ({ ...p, [itemId]: Math.max(0, (Number(p[itemId]) || 0) + delta) }));
   }
 
+  async function sendProposal() {
+    if (!activeOrder) return;
+    if (!proposalNote.trim()) { setMsg('Escribe tu propuesta'); return; }
+    try {
+      // El cliente envía su propia nota — se guarda como restaurant_note para que el restaurante la vea
+      // No requiere confirmación: es solo comunicación directa
+      await apiFetch(`/orders/${activeOrder.id}/messages`, {
+        method:'POST',
+        body: JSON.stringify({ text: `[PROPUESTA CLIENTE] ${proposalNote.trim()}` })
+      }, auth.token);
+      setProposalNote(''); setShowProposal(false);
+      setMsg('Propuesta enviada al restaurante');
+      setTimeout(()=>setMsg(''),4000);
+    } catch (e) { setMsg(e.message); }
+  }
+
   async function createOrder() {
     if (!auth.token) return navigate('/login');
     if (!isCustomer)  return setMsg('Solo los clientes pueden hacer pedidos');
@@ -103,7 +119,16 @@ export default function RestaurantPage() {
       </button>
 
       {/* Cabecera restaurante */}
-      <div style={{ marginBottom:'1.25rem' }}>
+      <div style={{ marginBottom:'1.25rem', display:'flex', gap:'0.875rem', alignItems:'flex-start' }}>
+        {/* Foto de perfil de la tienda */}
+        {restaurant?.profile_photo
+          ? <img src={restaurant.profile_photo} alt={restaurant?.name}
+              style={{ width:60, height:60, borderRadius:'50%', objectFit:'cover', border:'2px solid var(--gray-200)', flexShrink:0 }} />
+          : <div style={{ width:60, height:60, borderRadius:'50%', background:'var(--gray-100)', border:'2px solid var(--gray-200)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="1.5"><circle cx="12" cy="12" r="9"/><path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/><circle cx="12" cy="10" r="2"/></svg>
+            </div>
+        }
+        <div style={{ flex:1 }}>
         <h2 style={{ fontSize:'1.2rem', fontWeight:800, margin:'0 0 0.2rem' }}>{restaurant?.name}</h2>
         {restaurant?.address && (
           <p style={{ color:'var(--gray-600)', fontSize:'0.85rem', margin:'0 0 0.35rem' }}>{restaurant.address}</p>
@@ -122,7 +147,8 @@ export default function RestaurantPage() {
             Este restaurante está cerrado. Puedes explorar el menú pero los pedidos están deshabilitados.
           </p>
         )}
-      </div>
+        </div>{/* fin contenido */}
+      </div>{/* fin cabecera */}
 
       {msg && <p className="flash flash-error" style={{ marginBottom:'0.75rem' }}>{msg}</p>}
 

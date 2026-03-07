@@ -33,7 +33,7 @@ export default function RestaurantDashboard() {
   const [editingPhoto, setEditingPhoto]   = useState(false);
   const [photoPreview, setPhotoPreview]   = useState(null);
   const [photoDataUrl, setPhotoDataUrl]   = useState(null);
-  const [photoUrl, setPhotoUrl]           = useState('');
+
   const [savingPhoto, setSavingPhoto]     = useState(false);
   const photoFileRef = useRef(null);
 
@@ -77,14 +77,13 @@ export default function RestaurantDashboard() {
   }
 
   async function saveProfilePhoto() {
+    if (!photoDataUrl) return;
     setSavingPhoto(true);
     try {
-      const toSave = photoDataUrl || photoUrl.trim() || null;
-      if (!toSave) { setSavingPhoto(false); return; }
       await apiFetch('/restaurants/my/profile-photo', {
-        method: 'PATCH', body: JSON.stringify({ photoUrl: toSave })
+        method: 'PATCH', body: JSON.stringify({ photoUrl: photoDataUrl })
       }, auth.token);
-      setEditingPhoto(false); setPhotoPreview(null); setPhotoDataUrl(null); setPhotoUrl('');
+      setEditingPhoto(false); setPhotoPreview(null); setPhotoDataUrl(null);
       loadData();
     } catch (e) { setMessage(e.message); }
     finally { setSavingPhoto(false); }
@@ -185,16 +184,12 @@ export default function RestaurantDashboard() {
               onChange={e => pickPhotoFile(e.target.files?.[0])} />
             {photoPreview && <img src={photoPreview} alt="Vista previa" style={{ width:44, height:44, borderRadius:'50%', objectFit:'cover', border:'1px solid var(--gray-200)' }} />}
           </div>
-          {!photoPreview && (
-            <input value={photoUrl} onChange={e => setPhotoUrl(e.target.value)}
-              placeholder="O pega una URL (https://...)" style={{ fontSize:'0.82rem', marginBottom:'0.4rem' }} />
-          )}
           <div style={{ display:'flex', gap:'0.4rem' }}>
             <button className="btn-primary btn-sm" onClick={saveProfilePhoto}
-              disabled={savingPhoto || (!photoPreview && !photoUrl.trim())}>
+              disabled={savingPhoto || !photoPreview}>
               {savingPhoto ? 'Guardando…' : 'Guardar'}
             </button>
-            <button className="btn-sm" onClick={() => { setEditingPhoto(false); setPhotoPreview(null); setPhotoDataUrl(null); setPhotoUrl(''); }}>Cancelar</button>
+            <button className="btn-sm" onClick={() => { setEditingPhoto(false); setPhotoPreview(null); setPhotoDataUrl(null); }}>Cancelar</button>
           </div>
         </div>
       )}
