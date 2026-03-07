@@ -109,7 +109,7 @@ router.get('/pending-assignment', authenticate, authorize(['driver']), async (re
 });
 
 router.post('/', authenticate, authorize(['customer']), validate(createOrderSchema), async (req, res, next) => {
-  const { restaurantId, items, payment_method, tip_cents } = req.validatedBody;
+  const { restaurantId, items, paymentMethod, tipCents } = req.validatedBody;
   try {
     let deliveryAddress = 'address-pending';
     try {
