@@ -1,54 +1,129 @@
 // frontend/src/components/OrderMap.jsx
-// Mapa de seguimiento con OpenStreetMap (Leaflet) + tiempo estimado (OSRM público)
-// Sin API key, sin costo.
-// Instalar: npm install leaflet react-leaflet
+// Mapa con tiles progresivos: detalle mínimo a escala ciudad, calles completas ~1km
+// Leaflet + OpenStreetMap. Sin API key.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// Fix icono default de Leaflet con bundlers
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
 const driverIcon = new L.DivIcon({
   html: '<div style="font-size:1.5rem;line-height:1">🛵</div>',
-  className: '',
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
+  className: '', iconSize: [28, 28], iconAnchor: [14, 14],
 });
 const destIcon = new L.DivIcon({
   html: '<div style="font-size:1.5rem;line-height:1">📍</div>',
-  className: '',
-  iconSize: [28, 28],
-  iconAnchor: [14, 28],
+  className: '', iconSize: [28, 28], iconAnchor: [14, 28],
 });
 const restIcon = new L.DivIcon({
   html: '<div style="font-size:1.5rem;line-height:1">🍽</div>',
-  className: '',
-  iconSize: [28, 28],
-  iconAnchor: [14, 28],
+  className: '', iconSize: [28, 28], iconAnchor: [14, 28],
 });
 
-/** Mueve el mapa para encuadrar todos los puntos */
+// ─── Capas de tiles progresivas ───────────────────────────────────────────────
+//
+// La idea: cuanto más alejado está el mapa, menos detalle necesitamos.
+// Usamos tres fuentes de tiles con diferente nivel de detalle:
+//
+//  zoom < 13  → Stamen Toner Lite: sólo contornos y etiquetas grandes.
+//               Muy limpio a escala ciudad/barrio, carga rápido.
+//
+//  zoom 13–14 → OSM Standard: calles con nombres, puntos de interés básicos.
+//               Aparece cuando el mapa cubre ~2-4 km → ya conviene ver calles.
+//
+//  zoom ≥ 15  → OSM Standard (mismo servidor) con opacidad completa.
+//               A ~1 km o menos el mapa muestra todo el detalle disponible:
+//               carriles, aceras, números, POIs.
+//
+// La transición se hace con opacity CSS interpolada según zoom para evitar
+// el parpadeo brusco entre capas.
+//
+// Zoom de referencia en Leaflet para escalas urbanas:
+//   zoom 12  ≈ 5 km de ancho en pantalla típica
+//   zoom 13  ≈ 2.5 km
+//   zoom 14  ≈ 1.2 km   ← umbral "calles navegables"
+//   zoom 15  ≈ 600 m
+//   zoom 16  ≈ 300 m
+
+const TILE_LAYERS = [
+  {
+    // Capa base: siempre visible, muy simplificada
+    url: 'https://tiles.stadiamaps.com/tiles/stamen_toner_lite/{z}/{x}/{y}{r}.png',
+    attribution: '© <a href="https://stamen.com">Stamen</a> © <a href="https://openstreetmap.org">OSM</a>',
+    minZoom: 0,
+    maxZoom: 20,
+    // Opacidad: máxima cuando lejos, se desvanece cuando nos acercamos
+    opacityFn: (zoom) => zoom < 13 ? 1 : zoom < 15 ? Math.max(0, (15 - zoom) / 2) : 0,
+    zIndex: 1,
+  },
+  {
+    // Capa de detalle: calles con nombres, aparece gradualmente desde zoom 13
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
+    minZoom: 0,
+    maxZoom: 20,
+    // Opacidad: 0 a zoom ≤ 12, sube suavemente, llega a 1 en zoom 15
+    opacityFn: (zoom) => zoom < 12 ? 0 : zoom < 15 ? (zoom - 12) / 3 : 1,
+    zIndex: 2,
+  },
+];
+
+// ─── Componente que actualiza opacidades al cambiar el zoom ───────────────────
+function AdaptiveTiles() {
+  const map = useMap();
+  const refs = useRef([]);
+  const [zoom, setZoom] = useState(map.getZoom());
+
+  useMapEvents({
+    zoomend: () => setZoom(map.getZoom()),
+  });
+
+  useEffect(() => {
+    refs.current.forEach((layer, i) => {
+      if (!layer) return;
+      const opacity = TILE_LAYERS[i].opacityFn(zoom);
+      // setOpacity en Leaflet mueve el valor al elemento canvas/img subyacente
+      layer.setOpacity(Math.max(0, Math.min(1, opacity)));
+    });
+  }, [zoom]);
+
+  return (
+    <>
+      {TILE_LAYERS.map((layer, i) => (
+        <TileLayer
+          key={layer.url}
+          url={layer.url}
+          attribution={layer.attribution}
+          minZoom={layer.minZoom}
+          maxZoom={layer.maxZoom}
+          zIndex={layer.zIndex}
+          opacity={layer.opacityFn(zoom)}
+          ref={el => { refs.current[i] = el; }}
+        />
+      ))}
+    </>
+  );
+}
+
+// ─── FitBounds ────────────────────────────────────────────────────────────────
 function FitBounds({ points }) {
   const map = useMap();
+  const pointsKey = JSON.stringify(points);
   useEffect(() => {
     if (points.length < 2) return;
     map.fitBounds(L.latLngBounds(points), { padding: [40, 40] });
-  }, [JSON.stringify(points)]);
+  }, [pointsKey]);
   return null;
 }
 
-/**
- * Obtiene ruta real desde OSRM (instancia pública gratuita de OpenStreetMap)
- * Devuelve { route: [[lat,lng],...], durationSeconds: number, distanceMeters: number }
- */
+// ─── Ruta OSRM ───────────────────────────────────────────────────────────────
 async function fetchRoute(from, to) {
   try {
     const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=simplified&geometries=geojson`;
@@ -59,7 +134,7 @@ async function fetchRoute(from, to) {
     return {
       route: route.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
       durationSeconds: Math.round(route.duration),
-      distanceMeters: Math.round(route.distance),
+      distanceMeters:  Math.round(route.distance),
     };
   } catch {
     return null;
@@ -73,25 +148,24 @@ function formatETA(seconds) {
   return `~${Math.floor(mins / 60)}h ${mins % 60}min`;
 }
 
+// ─── Componente principal ─────────────────────────────────────────────────────
 /**
  * Props:
- *  driverPos  = { lat, lng } | null
- *  pickupPos  = { lat, lng } | null  (restaurante)
- *  deliveryPos = { lat, lng } | null (dirección del cliente)
- *  showPickup = boolean (mostrar punto de recogida)
- *  height     = string (default '280px')
+ *  driverPos   = { lat, lng } | null
+ *  pickupPos   = { lat, lng } | null  (restaurante)
+ *  deliveryPos = { lat, lng } | null  (dirección del cliente)
+ *  showPickup  = boolean
+ *  height      = string (default '280px')
  */
 export default function OrderMap({ driverPos, pickupPos, deliveryPos, showPickup = true, height = '280px' }) {
-  const [routeToPickup, setRouteToPickup] = useState(null);
+  const [routeToPickup,   setRouteToPickup]   = useState(null);
   const [routeToDelivery, setRouteToDelivery] = useState(null);
   const routeFetchRef = useRef(0);
 
-  // Centro inicial: primer punto disponible
   const center = useMemo(() => {
-    return driverPos || pickupPos || deliveryPos || { lat: 20.67, lng: -103.35 }; // Guadalajara fallback
+    return driverPos || pickupPos || deliveryPos || { lat: 20.67, lng: -103.35 };
   }, []);
 
-  // Calcular rutas cuando cambia la posición del driver
   useEffect(() => {
     const id = ++routeFetchRef.current;
     async function calc() {
@@ -131,10 +205,8 @@ export default function OrderMap({ driverPos, pickupPos, deliveryPos, showPickup
         style={{ height, width: '100%' }}
         zoomControl={true}
       >
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='© <a href="https://openstreetmap.org">OpenStreetMap</a>'
-        />
+        {/* Tiles progresivos en lugar de un TileLayer fijo */}
+        <AdaptiveTiles />
         <FitBounds points={allPoints} />
 
         {driverPos && (
@@ -153,11 +225,9 @@ export default function OrderMap({ driverPos, pickupPos, deliveryPos, showPickup
           </Marker>
         )}
 
-        {/* Ruta driver → restaurante (azul) */}
         {showPickup && routeToPickup?.route && (
           <Polyline positions={routeToPickup.route} color="#2563eb" weight={3} opacity={0.7} />
         )}
-        {/* Ruta driver → entrega (verde) */}
         {!showPickup && routeToDelivery?.route && (
           <Polyline positions={routeToDelivery.route} color="#16a34a" weight={3} opacity={0.7} />
         )}
