@@ -45,11 +45,13 @@ function batchForRound(round) {
 export async function expireTimedOutOffers(onOffer) {
   const expired = await query(
     `UPDATE order_driver_offers
-     SET status = 'expired', updated_at = NOW()
-     WHERE status = 'pending'
-       AND created_at < NOW() - ($1 * INTERVAL '1 second')
-     RETURNING order_id`,
-    [OFFER_TIMEOUT_SECONDS]
+    SET status = 'expired',
+    wait_until = NOW() + ($2::int * INTERVAL '1 second'),
+                              updated_at = NOW()
+                              WHERE status = 'pending'
+                              AND created_at < NOW() - ($1::int * INTERVAL '1 second')
+                              RETURNING order_id`,
+                              [OFFER_TIMEOUT_SECONDS, COOLDOWN_SECONDS]
   );
   if (expired.rowCount === 0) return;
 
@@ -111,13 +113,13 @@ export async function offerNextDrivers(orderId, _onOffer) {
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
          WHERE od.order_id = $1 AND od.driver_id = dp.user_id
-           AND od.status IN ('pending','accepted','rejected')
+           AND od.status IN ('pending','accepted')
        )
        -- no cooldown vigente en este pedido
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
          WHERE od.order_id = $1 AND od.driver_id = dp.user_id
-           AND od.status IN ('rejected','released')
+           AND od.status IN ('rejected','released', 'expired')
            AND od.wait_until IS NOT NULL AND od.wait_until > NOW()
        )
      ORDER BY dp.driver_number ASC
