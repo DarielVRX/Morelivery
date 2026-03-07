@@ -7,7 +7,7 @@ const SVG_SIZE = 40;
 const RADIUS   = 16;
 
 export default function OfferCountdown({ offerCreatedAt, onExpired }) {
-  const { secondsLeft, urgent, expired } = useOfferCountdown(offerCreatedAt);
+  const { secondsLeft = 0, urgent, expired } = useOfferCountdown(offerCreatedAt);
 
   // Llamar onExpired una sola vez
   useEffect(() => {
@@ -25,6 +25,7 @@ export default function OfferCountdown({ offerCreatedAt, onExpired }) {
   ? '#f59e0b'
   : '#16a34a';
 
+  // Cálculo del círculo seguro
   const pct  = Math.max(0, Math.min(1, secondsLeft / OFFER_TIMEOUT_SECONDS));
   const circ = 2 * Math.PI * RADIUS;
   const dash = circ * pct;
