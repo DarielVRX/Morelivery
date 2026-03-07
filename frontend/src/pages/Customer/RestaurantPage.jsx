@@ -37,8 +37,6 @@ export default function RestaurantPage() {
   const [loading, setLoading]       = useState(true);
   const [msg, setMsg]               = useState('');
   const [ordering, setOrdering]     = useState(false);
-  const [tipCents, setTipCents] = useState(0);
-
   const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' por defecto
   const [tipCents, setTipCents]           = useState(0);      // Propina por defecto
 
