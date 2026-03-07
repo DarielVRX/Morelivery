@@ -47,14 +47,13 @@ function serializedOffer(orderId, onOffer) {
 export async function expireTimedOutOffers(onOffer) {
   const expired = await query(
     `UPDATE order_driver_offers
-    SET status = 'expired',
-    wait_until = NOW() + ($2::int * INTERVAL '1 second'),
-                              updated_at = NOW()
-                              WHERE status = 'pending'
-                              -- Usamos updated_at para que sea sensible al último intento, no a la creación inicial
-                              AND updated_at < NOW() - ($1::int * INTERVAL '1 second')
-                              RETURNING order_id, driver_id`,
-                              [OFFER_TIMEOUT_SECONDS, COOLDOWN_SECONDS]
+     SET status     = 'expired',
+         wait_until = NOW() + ($2::int * INTERVAL '1 second'),
+         updated_at = NOW()
+     WHERE status = 'pending'
+       AND created_at < NOW() - ($1::int * INTERVAL '1 second')
+     RETURNING order_id, driver_id`,
+    [OFFER_TIMEOUT_SECONDS, COOLDOWN_SECONDS]
   );
   if (expired.rowCount === 0) return;
 
@@ -377,14 +376,14 @@ export async function offerOrdersToDriver(driverId, _onOffer) {
               open.rows.map(r => `order=${r.id} status=${r.status}`)
   );
 
+  // Encolar TODOS los pedidos sin conductor.
+  // Cada pedido corre en su propia cola serializada → no hay paralelismo por pedido.
+  // queryCandidates garantiza que un driver solo recibe 1 oferta activa a la vez,
+  // así que no hay riesgo de saturar al driver con múltiples ofertas simultáneas.
   let offered = 0;
   for (const row of open.rows) {
-    // Encolar en lugar de llamar directo — evita ejecuciones paralelas
     serializedOffer(row.id, _onOffer);
     offered++;
-    // Solo encolar el primero: el driver recibirá una oferta y luego
-    // el listener volverá a llamarse si sigue disponible.
-    break;
   }
   console.log(`[assignment] offerOrdersToDriver: driver=${driverId} done — enqueued ${offered} order(s)`);
   return offered;
