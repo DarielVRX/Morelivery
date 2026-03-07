@@ -37,6 +37,7 @@ export default function RestaurantPage() {
   const [loading, setLoading]       = useState(true);
   const [msg, setMsg]               = useState('');
   const [ordering, setOrdering]     = useState(false);
+  const [tipCents, setTipCents] = useState(0);
 
   const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' por defecto
   const [tipCents, setTipCents]           = useState(0);      // Propina por defecto
@@ -67,7 +68,7 @@ export default function RestaurantPage() {
   }, 0);
   const serviceFee   = Math.round(subtotal * 0.05);
   const deliveryFee  = Math.round(subtotal * 0.10);
-  const total        = subtotal + serviceFee + deliveryFee; // lo que paga el cliente
+  const total        = subtotal + serviceFee + deliveryFee + tipCents; // lo que paga el cliente
 
   function adjust(itemId, delta) {
     setSelectedItems(p => ({ ...p, [itemId]: Math.max(0, (Number(p[itemId]) || 0) + delta) }));
