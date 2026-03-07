@@ -111,7 +111,7 @@ export async function offerNextDrivers(orderId, _onOffer) {
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
          WHERE od.order_id = $1 AND od.driver_id = dp.user_id
-           AND od.status IN ('pending','accepted')
+           AND od.status IN ('pending','accepted','rejected')
        )
        -- no cooldown vigente en este pedido
        AND NOT EXISTS (
@@ -206,6 +206,16 @@ export async function rejectOffer(orderId, driverId, onOffer) {
      WHERE order_id=$1 AND driver_id=$2 AND status='pending'`,
     [orderId, driverId, COOLDOWN_SECONDS]
   );
+
+  await query(
+    `UPDATE order_driver_offers
+    SET status='expired', updated_at=NOW()
+    WHERE driver_id=$1
+    AND status='pending'
+    AND order_id <> $2`,
+    [driverId, orderId]
+  );
+
   enqueueAssignment(orderId, onOffer);
 }
 
@@ -222,6 +232,13 @@ export async function releaseOrder(orderId, driverId, onOffer) {
   await query(
     `UPDATE orders SET driver_id=NULL, status='pending_driver', updated_at=NOW()
      WHERE id=$1 AND driver_id=$2`, [orderId, driverId]
+  );
+  // 🔑 liberar cualquier pending restante del driver
+  await query(
+    `UPDATE order_driver_offers
+    SET status='expired', updated_at=NOW()
+    WHERE driver_id=$1 AND status='pending'`,
+    [driverId]
   );
   enqueueAssignment(orderId, onOffer);
 }
