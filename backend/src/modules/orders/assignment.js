@@ -138,31 +138,21 @@ async function applyOrderCooldownReduction(orderId) {
 export async function offerNextDrivers(orderId, _onOffer) {
   log(orderId, 'offerNextDrivers: start');
 
-  // Verificar que el pedido sigue sin driver
+  // 1. Check order status first
   const orderRow = await query(
     `SELECT id, offer_cooldown_triggered FROM orders
-     WHERE id=$1 AND driver_id IS NULL
-       AND status NOT IN ('delivered','cancelled')`,
-    [orderId]
+    WHERE id=$1 AND driver_id IS NULL
+    AND status NOT IN ('delivered','cancelled')`,
+                               [orderId]
   );
-  for (const r of allAvail.rows) {
-    log(orderId, `  driver=${r.user_id}`, {
-      active_orders: `${r.active_count}/${MAX_ACTIVE_ORDERS_PER_DRIVER}`,
-      has_pending_offer: r.has_pending_offer,
-      offer_status_for_order: r.offer_status_for_order ?? 'none',
-      cooldown_secs_remaining: r.cooldown_secs_remaining ?? 0,
-      wait_until: r.cooldown_secs_remaining
-      ? new Date(Date.now() + r.cooldown_secs_remaining * 1000).toISOString()
-      : 'now'
-    });
-  }
+
   if (orderRow.rowCount === 0) {
     log(orderId, 'order not found or already assigned — abort');
     return 0;
   }
   const cooldownTriggered = orderRow.rows[0].offer_cooldown_triggered;
 
-  // Si ya hay oferta pending, no crear otra
+  // 2. Check for existing pending offers
   const pending = await query(
     `SELECT driver_id FROM order_driver_offers WHERE order_id=$1 AND status='pending'`,
     [orderId]
@@ -172,27 +162,28 @@ export async function offerNextDrivers(orderId, _onOffer) {
     return 0;
   }
 
-  // Diagnóstico completo de drivers
+  // 3. FETCH allAvail BEFORE using it for logging
   const allAvail = await query(
     `SELECT dp.user_id,
-            (SELECT COUNT(*)::int FROM orders o
-             WHERE o.driver_id=dp.user_id AND o.status=ANY($1::text[])) AS active_count,
-            EXISTS (
-              SELECT 1 FROM order_driver_offers od
-              WHERE od.driver_id=dp.user_id AND od.status='pending'
-            ) AS has_pending_offer,
-            (SELECT status FROM order_driver_offers od
-             WHERE od.order_id=$2 AND od.driver_id=dp.user_id
-             ORDER BY updated_at DESC LIMIT 1) AS offer_status_for_order,
-            (SELECT EXTRACT(EPOCH FROM (wait_until - NOW()))::int
-             FROM order_driver_offers od
-             WHERE od.order_id=$2 AND od.driver_id=dp.user_id
-               AND wait_until > NOW()
-             ORDER BY updated_at DESC LIMIT 1) AS cooldown_secs_remaining
-     FROM driver_profiles dp WHERE dp.is_available=true`,
-    [ACTIVE_STATUSES, orderId]
+    (SELECT COUNT(*)::int FROM orders o
+    WHERE o.driver_id=dp.user_id AND o.status=ANY($1::text[])) AS active_count,
+                               EXISTS (
+                                 SELECT 1 FROM order_driver_offers od
+                                 WHERE od.driver_id=dp.user_id AND od.status='pending'
+                               ) AS has_pending_offer,
+                               (SELECT status FROM order_driver_offers od
+                               WHERE od.order_id=$2 AND od.driver_id=dp.user_id
+                               ORDER BY updated_at DESC LIMIT 1) AS offer_status_for_order,
+                               (SELECT EXTRACT(EPOCH FROM (wait_until - NOW()))::int
+                               FROM order_driver_offers od
+                               WHERE od.order_id=$2 AND od.driver_id=dp.user_id
+                               AND wait_until > NOW()
+                               ORDER BY updated_at DESC LIMIT 1) AS cooldown_secs_remaining
+                               FROM driver_profiles dp WHERE dp.is_available=true`,
+                               [ACTIVE_STATUSES, orderId]
   );
 
+  // 4. NOW it is safe to log the diagnostic data
   log(orderId, `available drivers: ${allAvail.rowCount}`);
   for (const r of allAvail.rows) {
     log(orderId, `  driver=${r.user_id}`, {
