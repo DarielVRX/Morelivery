@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 
 export function useOfferCountdown(initialSecondsLeft) {
   // Ahora recibimos un número entero, no una fecha
-  const [secondsLeft, setSecondsLeft] = useState(initialSecondsLeft);
+  const parsedInitial = parseInt(initialSecondsLeft);
+  const [secondsLeft, setSecondsLeft] = useState(isNaN(parsedInitial) ? 60 : parsedInitial);
 
   useEffect(() => {
     // Si llega una actualización del backend (ej. por reconexión), resincronizamos
