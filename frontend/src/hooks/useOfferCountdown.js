@@ -1,22 +1,29 @@
 import { useEffect, useState } from 'react';
 
 export function useOfferCountdown(initialSecondsLeft) {
-  // Ahora recibimos un número entero, no una fecha
   const parsedInitial = parseInt(initialSecondsLeft);
   const [secondsLeft, setSecondsLeft] = useState(isNaN(parsedInitial) ? 60 : parsedInitial);
 
+  // Resincronizar si el backend envía un nuevo valor
   useEffect(() => {
-    // Si llega una actualización del backend (ej. por reconexión), resincronizamos
-    setSecondsLeft(initialSecondsLeft);
+    setSecondsLeft(isNaN(parsedInitial) ? 60 : parsedInitial);
   }, [initialSecondsLeft]);
 
+  // Intervalo de cuenta regresiva
   useEffect(() => {
-    if (secondsLeft <= 0) return;
+    if (secondsLeft <= 0) return; // nada que hacer si ya expiró
     const interval = setInterval(() => {
-      setSecondsLeft(prev => Math.max(0, prev - 1));
+      setSecondsLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
     }, 1000);
+
     return () => clearInterval(interval);
-  }, [secondsLeft]); // depende del valor real, no del booleano
+  }, []); // solo se monta una vez
 
   return {
     secondsLeft,
