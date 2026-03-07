@@ -1,8 +1,9 @@
 // backend/modules/orders/routes.js
 import { Router } from 'express';
 
-const SERVICE_FEE_PCT  = 0.05; // 5% tarifa de servicio (para la plataforma)
-const DELIVERY_FEE_PCT = 0.10; // 10% tarifa de envío (para el conductor)
+const SERVICE_FEE_PCT      = 0.05;  // 5% tarifa de plataforma
+const DELIVERY_FEE_PCT     = 0.10;  // 10% tarifa de envío
+const RESTAURANT_FEE_PCT   = 0.10;  // 10% tarifa de servicio a la tienda
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
 import { orderEvents } from '../../events/orderEvents.js';
@@ -84,7 +85,7 @@ router.get('/pending-assignment', authenticate, authorize(['driver']), async (re
     let result;
     try {
       result = await query(
-        `SELECT o.id, o.status, o.total_cents, o.service_fee_cents, o.delivery_fee_cents, o.tip_cents, o.created_at,
+        `SELECT o.id, o.status, o.total_cents, o.service_fee_cents, o.delivery_fee_cents, o.restaurant_fee_cents, o.tip_cents, o.payment_method, o.created_at,
                 r.name AS restaurant_name, r.address AS restaurant_address,
                 o.delivery_address AS customer_address
          FROM orders o
@@ -124,13 +125,15 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       totalCents += m.rows[0].price_cents * item.quantity;
     }
 
-    const serviceFee  = Math.round(totalCents * SERVICE_FEE_PCT);
-    const deliveryFee = Math.round(totalCents * DELIVERY_FEE_PCT);
+    const serviceFee     = Math.round(totalCents * SERVICE_FEE_PCT);
+    const deliveryFee    = Math.round(totalCents * DELIVERY_FEE_PCT);
+    const restaurantFee  = Math.round(totalCents * RESTAURANT_FEE_PCT);
+    const paymentMethod  = req.body.paymentMethod || 'cash';
 
     const orderResult = await query(
-      `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, delivery_address)
-       VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, deliveryAddress]
+      `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, delivery_address)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod, deliveryAddress]
     );
     const order = orderResult.rows[0];
 
@@ -329,11 +332,12 @@ router.patch('/:id/suggestion-response', authenticate, authorize(['customer']), 
             [req.params.id, item.menuItemId, item.quantity, item.unitPriceCents]);
           newTotal += item.unitPriceCents * item.quantity;
         }
-        const newServiceFee  = Math.round(newTotal * SERVICE_FEE_PCT);
-        const newDeliveryFee = Math.round(newTotal * DELIVERY_FEE_PCT);
+        const newServiceFee     = Math.round(newTotal * SERVICE_FEE_PCT);
+        const newDeliveryFee    = Math.round(newTotal * DELIVERY_FEE_PCT);
+        const newRestaurantFee  = Math.round(newTotal * RESTAURANT_FEE_PCT);
         await query(
-          `UPDATE orders SET total_cents=$1, service_fee_cents=$2, delivery_fee_cents=$3, suggestion_text=NULL, updated_at=NOW() WHERE id=$4`,
-          [newTotal, newServiceFee, newDeliveryFee, req.params.id]
+          `UPDATE orders SET total_cents=$1, service_fee_cents=$2, delivery_fee_cents=$3, restaurant_fee_cents=$4, suggestion_text=NULL, updated_at=NOW() WHERE id=$5`,
+          [newTotal, newServiceFee, newDeliveryFee, newRestaurantFee, req.params.id]
         );
       }
       await query('COMMIT');
@@ -366,6 +370,23 @@ router.post('/:id/complaint', authenticate, authorize(['customer']), async (req,
 });
 
 /* ── GET /my ── */
+// PATCH /:id/tip — cliente actualiza agradecimiento (solo puede subir en historial, libre en activos)
+router.patch('/:id/tip', authenticate, authorize(['customer']), async (req, res, next) => {
+  const tipCents = Number(req.body.tipCents);
+  if (!Number.isFinite(tipCents) || tipCents < 0) return next(new AppError(400, 'Monto inválido'));
+  try {
+    const ord = await query('SELECT tip_cents, status, customer_id FROM orders WHERE id=$1', [req.params.id]);
+    if (ord.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
+    const o = ord.rows[0];
+    if (o.customer_id !== req.user.userId) return next(new AppError(403, 'Sin permiso'));
+    // En historial (delivered/cancelled) solo se puede agregar, no restar
+    const isPast = ['delivered', 'cancelled'].includes(o.status);
+    if (isPast && tipCents < (o.tip_cents || 0)) return next(new AppError(400, 'En el historial el agradecimiento solo puede aumentar'));
+    await query('UPDATE orders SET tip_cents=$1, updated_at=NOW() WHERE id=$2', [tipCents, req.params.id]);
+    res.json({ tipCents });
+  } catch (e) { next(e); }
+});
+
 router.get('/my', authenticate, async (req, res, next) => {
   try {
     let result;
@@ -404,7 +425,9 @@ router.get('/my', authenticate, async (req, res, next) => {
       items:             itemsByOrder.get(row.id) || [],
       service_fee_cents:  Number(row.service_fee_cents  || 0),
       delivery_fee_cents: Number(row.delivery_fee_cents || 0),
-      tip_cents:          Number(row.tip_cents          || 0),
+      tip_cents:           Number(row.tip_cents           || 0),
+      restaurant_fee_cents: Number(row.restaurant_fee_cents || 0),
+      payment_method:       row.payment_method || 'cash',
       suggestion_items: parseSuggestionItems(row.suggestion_text),
       suggestion_note: parseSuggestionNote(row.suggestion_text),
     }));
