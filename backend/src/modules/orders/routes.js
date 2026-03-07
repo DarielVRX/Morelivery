@@ -10,6 +10,11 @@ import { AppError } from '../../utils/errors.js';
 import { offerNextDrivers, expireTimedOutOffers } from './assignment.js';
 import { sseHub } from '../events/hub.js';
 
+// FIX: callback SSE para notificar ofertas al crear pedidos
+function offerCb(driverId, orderId, data) {
+  try { sseHub.notifyNewOffer(driverId, orderId, data); } catch (_) {}
+}
+
 const router = Router();
 
 function isMissingColumnError(e) { return e?.code === '42703'; }
@@ -100,7 +105,7 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
         [order.id, item.menuItemId, item.quantity, m.rows[0].price_cents]);
     }
 
-    try { await offerNextDrivers(order.id); } catch (e) {
+    try { await offerNextDrivers(order.id, offerCb); } catch (e) { // FIX: pasar callback SSE
       if (!isMissingRelationError(e) && !isMissingColumnError(e)) throw e;
     }
 
