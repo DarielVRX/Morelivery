@@ -140,8 +140,12 @@ export async function offerNextDrivers(orderId, _onOffer) {
       return 0;
     }
     await query(
-      `DELETE FROM order_driver_offers
-       WHERE order_id=$1 AND status IN ('rejected','expired','released')`, [orderId]
+      `UPDATE order_driver_offers
+      SET wait_until = LEAST(wait_until, NOW() + (60 * INTERVAL '1 second'))
+      WHERE order_id=$1
+      AND status IN ('rejected','expired','released')
+      AND wait_until > NOW()`,
+                [orderId]
     );
     await query(
       `UPDATE orders SET status='pending_driver', updated_at=NOW()
