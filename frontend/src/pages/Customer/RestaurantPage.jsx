@@ -38,6 +38,9 @@ export default function RestaurantPage() {
   const [msg, setMsg]               = useState('');
   const [ordering, setOrdering]     = useState(false);
 
+  const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' por defecto
+  const [tipCents, setTipCents]           = useState(0);      // Propina por defecto
+
   const isCustomer  = auth.user?.role === 'customer';
   const hasAddress  = Boolean(auth.user?.address && auth.user.address !== 'address-pending');
 
@@ -98,7 +101,7 @@ export default function RestaurantPage() {
 
     setOrdering(true);
     try {
-      await apiFetch('/orders', { method:'POST', body: JSON.stringify({ restaurantId: id, items }) }, auth.token);
+      await apiFetch('/orders', { method:'POST', body: JSON.stringify({ restaurantId: id, items, paymentMethod, tipCents }) }, auth.token);
       setMsg('');
       setSelectedItems({});
       setTimeout(() => navigate('/customer/pedidos'), 800);
