@@ -165,6 +165,11 @@ export default function DriverOrders() {
                     <div style={{ fontSize:'0.83rem', color:'var(--gray-600)' }}>
                       {o.restaurant_name} · {fmtDate(o.created_at)}
                     </div>
+                    {o.customer_address && (
+                      <div style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginTop:'0.2rem' }}>
+                        Entregar en: <strong>{o.customer_address}</strong>
+                      </div>
+                    )}
                     {(o.items || []).length > 0 && (
                       <ul style={{ fontSize:'0.82rem', margin:'0.25rem 0 0 1rem' }}>
                         {o.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}

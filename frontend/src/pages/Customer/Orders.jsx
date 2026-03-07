@@ -288,6 +288,11 @@ export default function CustomerOrders() {
                     </div>
                     {isExp && (
                       <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
+                        {order.customer_address && (
+                          <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.3rem' }}>
+                            Dirección: <strong>{order.customer_address}</strong>
+                          </div>
+                        )}
                         <div style={{ fontSize:'0.83rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>
                           Conductor: <strong>{order.driver_first_name||'Buscando…'}</strong>
                         </div>

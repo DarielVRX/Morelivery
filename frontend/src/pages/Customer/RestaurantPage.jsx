@@ -118,8 +118,11 @@ export default function RestaurantPage() {
         ← Volver
       </button>
 
-      {/* Cabecera restaurante */}
-      <div style={{ marginBottom:'1.25rem', display:'flex', gap:'0.875rem', alignItems:'flex-start' }}>
+      {/* Cabecera restaurante — fondo rosado suave para contraste */}
+      <div style={{ margin:'0 -1rem 0', padding:'1rem 1rem 1.1rem',
+        background:'var(--brand-light)', borderBottom:'2px solid #e3aaaa',
+        marginBottom:'1.25rem' }}>
+      <div style={{ display:'flex', gap:'0.875rem', alignItems:'flex-start' }}>
         {/* Foto de perfil de la tienda */}
         {restaurant?.profile_photo
           ? <img src={restaurant.profile_photo} alt={restaurant?.name}
@@ -148,11 +151,14 @@ export default function RestaurantPage() {
           </p>
         )}
         </div>{/* fin contenido */}
-      </div>{/* fin cabecera */}
+      </div>{/* fin flex */}
+      </div>{/* fin fondo rosado */}
 
       {msg && <p className="flash flash-error" style={{ marginBottom:'0.75rem' }}>{msg}</p>}
 
       {/* Menú */}
+      <h3 style={{ fontSize:'0.95rem', fontWeight:800, color:'var(--gray-700)',
+        margin:'0 0 0.75rem', letterSpacing:'0.01em' }}>Menú</h3>
       {menu.length === 0 ? (
         <p style={{ color:'var(--gray-600)' }}>Sin productos disponibles.</p>
       ) : (

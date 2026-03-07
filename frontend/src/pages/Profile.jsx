@@ -38,7 +38,7 @@ export default function ProfilePage() {
   const user = auth.user;
 
   // Datos personales (nombre para mostrar a terceros + dirección)
-  const [displayName, setDisplayName] = useState(user?.display_name || user?.full_name || user?.username || '');
+  const [alias, setAlias] = useState(user?.alias || user?.display_name || user?.full_name || '');
   const [address, setAddress]         = useState(user?.address && user.address !== 'address-pending' ? user.address : '');
   const [profileMsg, setProfileMsg]   = useState('');
   const [profileErr, setProfileErr]   = useState(false);
@@ -56,17 +56,18 @@ export default function ProfilePage() {
   const [deleteErr, setDeleteErr] = useState(false);
 
   async function saveProfile() {
-    if (!displayName.trim()) { setProfileMsg('El nombre no puede estar vacío'); setProfileErr(true); return; }
+    if (!alias.trim()) { setProfileMsg('El nombre no puede estar vacío'); setProfileErr(true); return; }
     try {
-      const body = { displayName: displayName.trim() };
+      const body = { displayName: alias.trim() };
       if (address.trim()) body.address = address.trim();
       const data = await apiFetch('/auth/profile', { method:'PATCH', body: JSON.stringify(body) }, auth.token);
       patchUser({
-        display_name: data.profile.displayName,
-        full_name:    data.profile.displayName,
+        alias:        data.profile.alias ?? data.profile.displayName,
+        full_name:    data.profile.alias ?? data.profile.displayName,
         address:      data.profile.address,
       });
-      if (data.profile.displayName) setDisplayName(data.profile.displayName);
+      const newAlias = data.profile.alias ?? data.profile.displayName;
+      if (newAlias) setAlias(newAlias);
       if (data.profile.address)     setAddress(data.profile.address);
       setProfileMsg('Perfil actualizado'); setProfileErr(false);
     } catch (e) { setProfileMsg(e.message); setProfileErr(true); }
@@ -118,7 +119,7 @@ export default function ProfilePage() {
     } catch (e) { setDeleteMsg(e.message); setDeleteErr(true); }
   }
 
-  const avatarLetter = (displayName[0] || '?').toUpperCase();
+  const avatarLetter = (alias[0] || '?').toUpperCase();
 
   return (
     <div>
@@ -130,9 +131,9 @@ export default function ProfilePage() {
           <span style={{ fontWeight:800, fontSize:'1.1rem', color:'var(--brand)' }}>{avatarLetter}</span>
         </div>
         <div>
-          <div style={{ fontWeight:700 }}>{displayName}</div>
+          <div style={{ fontWeight:700 }}>{alias}</div>
           <div style={{ fontSize:'0.8rem', color:'var(--gray-600)' }}>
-            @{user?.username} · {ROLE_LABELS[user?.role] || user?.role}
+            {ROLE_LABELS[user?.role] || user?.role}
           </div>
         </div>
       </div>
@@ -145,7 +146,7 @@ export default function ProfilePage() {
         <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
           <label>
             Nombre para mostrar
-            <input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Ej: Juan García" />
+            <input value={alias} onChange={e => setAlias(e.target.value)} placeholder="Ej: Juan García" />
           </label>
           <label>
             Dirección

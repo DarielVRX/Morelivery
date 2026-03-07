@@ -44,7 +44,7 @@ export default function Layout({ children }) {
 
   const role  = auth.user?.role;
   const items = getNavItems(role);
-  const displayName = auth.user?.display_name || auth.user?.username || '';
+  const displayName = auth.user?.alias || auth.user?.display_name || auth.user?.full_name || '';
 
   const shouldAskAddress = Boolean(
     auth.user &&

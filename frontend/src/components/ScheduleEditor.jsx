@@ -39,7 +39,7 @@ export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChan
     setSaving(true); setMsg({ text: '', ok: true });
     try {
       await apiFetch('/restaurants/my/schedule', { method: 'PUT', body: JSON.stringify({ schedule }) }, token);
-      setMsg({ text: '✅ Horario guardado', ok: true });
+      setMsg({ text: 'Horario guardado', ok: true });
     } catch (e) { setMsg({ text: e.message, ok: false }); }
     finally { setSaving(false); }
   }
@@ -51,7 +51,7 @@ export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChan
       setOverride(d.manual_open_override);
       setIsOpen(d.is_open);
       onIsOpenChange?.(d.is_open);
-      const labels = { true: '✅ Abierto manualmente', false: '✅ Cerrado manualmente', null: '✅ Siguiendo horario' };
+      const labels = { true: 'Abierto manualmente', false: 'Cerrado manualmente', null: 'Siguiendo horario' };
       setMsg({ text: labels[String(value)], ok: true });
     } catch (e) { setMsg({ text: e.message, ok: false }); }
     finally { setToggling(false); }
@@ -76,19 +76,19 @@ export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChan
             style={{ padding:'0.3rem 0.75rem', borderRadius:6, border:'none', cursor:'pointer',
               background: override === true  ? '#16a34a' : '#e5e7eb',
               color:      override === true  ? '#fff'    : '#374151', fontWeight:600, fontSize:'0.82rem' }}>
-            🔓 Abrir ahora
+            Abrir ahora
           </button>
           <button onClick={() => doToggle(false)} disabled={toggling || override === false}
             style={{ padding:'0.3rem 0.75rem', borderRadius:6, border:'none', cursor:'pointer',
               background: override === false ? '#dc2626' : '#e5e7eb',
               color:      override === false ? '#fff'    : '#374151', fontWeight:600, fontSize:'0.82rem' }}>
-            🔒 Cerrar ahora
+            Cerrar ahora
           </button>
           {override !== null && (
             <button onClick={() => doToggle(null)} disabled={toggling}
               style={{ padding:'0.3rem 0.75rem', borderRadius:6, border:'1px solid #e5e7eb',
                 background:'#fff', cursor:'pointer', fontSize:'0.82rem' }}>
-              🔄 Seguir horario
+              Seguir horario
             </button>
           )}
         </div>
