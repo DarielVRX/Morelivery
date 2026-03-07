@@ -59,6 +59,7 @@ export default function CustomerHome() {
   function openSugg(order) {
     setSuggFor(order.id);
     setSuggDrafts(prev => ({ ...prev, [order.id]: prev[order.id]||toDraft(order.suggestion_items||[]) }));
+    if (order.restaurant_id) loadMenu(order.restaurant_id);
   }
   function adjustSugg(orderId, menuItemId, delta) {
     setSuggDrafts(prev => {
@@ -73,6 +74,25 @@ export default function CustomerHome() {
       }, auth.token);
       setSuggFor(''); loadSuggestions();
     } catch (e) { setMsg(e.message); }
+  }
+
+  async function cancelOrder(orderId) {
+    const note = window.prompt('Motivo de cancelación (obligatorio):');
+    if (!note?.trim()) return;
+    try {
+      await apiFetch(`/orders/${orderId}/cancel`, { method:'PATCH', body: JSON.stringify({ note }) }, auth.token);
+      loadSuggestions();
+    } catch (e) { setMsg(e.message); }
+  }
+
+  // Menú completo del restaurante para cada sugerencia (para que el cliente pueda editar)
+  const [restaurantMenus, setRestaurantMenus] = useState({});
+  async function loadMenu(restaurantId) {
+    if (restaurantMenus[restaurantId]) return;
+    try {
+      const d = await apiFetch(`/restaurants/${restaurantId}/menu`, {}, auth.token);
+      setRestaurantMenus(prev => ({ ...prev, [restaurantId]: d.menu || [] }));
+    } catch (_) {}
   }
 
   const visible = pendingSugg.filter(o => !dismissedSugg.has(o.id));
@@ -102,29 +122,35 @@ export default function CustomerHome() {
 
           {suggFor===order.id ? (
             <>
+              <p style={{ fontSize:'0.75rem', color:'var(--gray-500)', marginBottom:'0.4rem' }}>
+                Ajusta las cantidades o acepta la propuesta del restaurante:
+              </p>
               <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginBottom:'0.65rem' }}>
-                {(order.suggestion_items||[]).map(item => {
-                  const qty = (suggDrafts[order.id]||{})[item.menuItemId]??item.quantity;
+                {(restaurantMenus[order.restaurant_id] || order.suggestion_items || []).map(item => {
+                  const id  = item.id || item.menuItemId;
+                  const qty = (suggDrafts[order.id]||{})[id] ?? (order.suggestion_items||[]).find(s=>s.menuItemId===id)?.quantity ?? 0;
                   return (
-                    <div key={item.menuItemId} style={{
+                    <div key={id} style={{
                       display:'flex', alignItems:'center', gap:'0.5rem',
                       background: qty>0 ? 'var(--brand-light)':'#fff',
                       border:`1px solid ${qty>0?'#bfdbfe':'var(--gray-200)'}`,
                       borderRadius:6, padding:'0.4rem 0.75rem',
                     }}>
                       <span style={{ flex:1, fontSize:'0.875rem', fontWeight:qty>0?600:400 }}>{item.name}</span>
+                      <span style={{ fontSize:'0.75rem', color:'var(--gray-400)' }}>${((item.price_cents||item.unitPriceCents||0)/100).toFixed(2)}</span>
                       <div className="qty-control">
-                        <button className="qty-btn" disabled={qty===0} onClick={()=>adjustSugg(order.id,item.menuItemId,-1)}>−</button>
+                        <button className="qty-btn" disabled={qty===0} onClick={()=>adjustSugg(order.id,id,-1)}>−</button>
                         <span className="qty-num">{qty}</span>
-                        <button className="qty-btn add" onClick={()=>adjustSugg(order.id,item.menuItemId,1)}>+</button>
+                        <button className="qty-btn add" onClick={()=>adjustSugg(order.id,id,1)}>+</button>
                       </div>
                     </div>
                   );
                 })}
               </div>
               <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
-                <button className="btn-primary btn-sm" onClick={()=>respondSugg(order.id,true)}>Aceptar cambio</button>
+                <button className="btn-primary btn-sm" onClick={()=>respondSugg(order.id,true)}>Aceptar</button>
                 <button className="btn-sm btn-danger" onClick={()=>respondSugg(order.id,false)}>Rechazar</button>
+                <button className="btn-sm" onClick={()=>cancelOrder(order.id)}>Cancelar pedido</button>
               </div>
             </>
           ) : (

@@ -13,31 +13,26 @@ function firstNameFromUsername(username) { return username.split(/[_\-.\s]/)[0] 
 const PENDING_STATUSES = ['created','assigned','accepted','preparing','ready','on_the_way','pending_driver'];
 
 export async function registerUser(payload) {
-  const username    = normalizeUsername(payload.username);
+  const username = normalizeUsername(payload.username);
   const pseudoEmail = pseudoEmailFromUsername(username);
-  const role        = payload.role;
 
-  // Unicidad por (email, role) — el mismo username puede existir en otro rol
-  const existing = await query(
-    'SELECT id FROM users WHERE email = $1 AND role = $2',
-    [pseudoEmail, role]
-  );
-  if (existing.rowCount > 0) throw new AppError(409, 'Ese nombre de usuario ya está registrado para este tipo de cuenta');
+  const existing = await query('SELECT id FROM users WHERE email = $1', [pseudoEmail]);
+  if (existing.rowCount > 0) throw new AppError(409, 'Ese nombre de usuario ya está registrado');
 
   const passwordHash = await bcrypt.hash(payload.password, 12);
-  const userAddress  = role === 'customer' ? payload.address || null : null;
+  const userAddress = payload.role === 'customer' ? payload.address || null : null;
 
   let result;
   try {
     result = await query(
       'INSERT INTO users(full_name, email, password_hash, role, address) VALUES($1,$2,$3,$4,$5) RETURNING id, full_name, email, role, address',
-      [username, pseudoEmail, passwordHash, role, userAddress]
+      [username, pseudoEmail, passwordHash, payload.role, userAddress]
     );
   } catch (error) {
     if (error?.code === '42703') {
       result = await query(
         'INSERT INTO users(full_name, email, password_hash, role) VALUES($1,$2,$3,$4) RETURNING id, full_name, email, role',
-        [username, pseudoEmail, passwordHash, role]
+        [username, pseudoEmail, passwordHash, payload.role]
       );
     } else throw error;
   }
@@ -63,44 +58,24 @@ export async function registerUser(payload) {
 }
 
 export async function loginUser(payload) {
-  const username    = normalizeUsername(payload.username);
+  const username = normalizeUsername(payload.username);
   const pseudoEmail = pseudoEmailFromUsername(username);
-  const role        = payload.role; // ahora el frontend envía el rol según la app
-
-  if (!role) throw new AppError(400, 'Se requiere el tipo de cuenta para iniciar sesión');
 
   let result;
   try {
-    result = await query(
-      'SELECT id, full_name, email, password_hash, role, status, address FROM users WHERE email = $1 AND role = $2',
-      [pseudoEmail, role]
-    );
+    result = await query('SELECT id, full_name, email, password_hash, role, status, address FROM users WHERE email = $1', [pseudoEmail]);
   } catch (error) {
-    if (error?.code === '42703') {
-      result = await query(
-        'SELECT id, full_name, email, password_hash, role, status FROM users WHERE email = $1 AND role = $2',
-        [pseudoEmail, role]
-      );
-    } else throw error;
+    if (error?.code === '42703') result = await query('SELECT id, full_name, email, password_hash, role, status FROM users WHERE email = $1', [pseudoEmail]);
+    else throw error;
   }
 
-  if (result.rowCount === 0) {
-    logEvent('auth.login_error', { username, role, reason: 'user_not_found' });
-    // Mensaje genérico — no revelamos si el usuario existe en otro rol
-    throw new AppError(401, 'Usuario no encontrado. ¿Ya tienes cuenta? Regístrate.');
-  }
+  if (result.rowCount === 0) { logEvent('auth.login_error', { username, reason: 'user_not_found' }); throw new AppError(401, 'Credenciales inválidas'); }
 
   const user = result.rows[0];
-  if (user.status !== 'active') {
-    logEvent('auth.login_error', { username, role, reason: 'suspended' });
-    throw new AppError(403, 'Cuenta suspendida');
-  }
+  if (user.status !== 'active') { logEvent('auth.login_error', { username, reason: 'suspended' }); throw new AppError(403, 'Cuenta suspendida'); }
 
   const matches = await bcrypt.compare(payload.password, user.password_hash);
-  if (!matches) {
-    logEvent('auth.login_error', { username, role, reason: 'bad_password' });
-    throw new AppError(401, 'Contraseña incorrecta');
-  }
+  if (!matches) { logEvent('auth.login_error', { username, reason: 'bad_password' }); throw new AppError(401, 'Credenciales inválidas'); }
 
   const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 
@@ -110,7 +85,7 @@ export async function loginUser(payload) {
     try {
       const r = await query('SELECT id, name, address, is_open FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
       profile.restaurant = r.rows[0] || null;
-      profile.address    = r.rows[0]?.address || null;
+      profile.address = r.rows[0]?.address || null;
     } catch (error) {
       if (error?.code === '42703') {
         const r = await query('SELECT id, name FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
@@ -150,8 +125,9 @@ export async function updateProfileAddress(userId, role, address, displayName) {
       } catch (e) { if (e?.code !== '42703') throw e; }
     }
   } else {
+    // customer / driver / admin
     const updates = [];
-    const vals    = [];
+    const vals = [];
     let i = 1;
     if (displayName !== undefined && displayName !== null) { updates.push(`full_name=$${i++}`); vals.push(displayName.trim()); }
     if (address !== undefined && address !== null)         { updates.push(`address=$${i++}`);    vals.push(address); }
@@ -162,11 +138,14 @@ export async function updateProfileAddress(userId, role, address, displayName) {
     }
   }
 
-  const confirmed = await query('SELECT full_name, address FROM users WHERE id=$1', [userId]);
+  // Leer valores confirmados desde la DB para devolver al cliente
+  const confirmed = await query(
+    'SELECT full_name, address FROM users WHERE id=$1', [userId]
+  );
   const row = confirmed.rows[0] || {};
   return {
-    address:     row.address   ?? address ?? null,
-    displayName: row.full_name ?? displayName ?? null,
+    address:     row.address    ?? address ?? null,
+    displayName: row.full_name  ?? displayName ?? null,
   };
 }
 
@@ -182,6 +161,7 @@ export async function changePassword(userId, currentPassword, newPassword) {
 }
 
 export async function deleteAccount(userId, role) {
+  // Bloquear si tiene pedidos activos
   let hasPending = false;
 
   if (role === 'customer') {
@@ -199,10 +179,30 @@ export async function deleteAccount(userId, role) {
     hasPending = r.rowCount > 0;
   }
 
-  if (hasPending) throw new AppError(409, 'No puedes eliminar tu cuenta mientras tengas pedidos activos.');
+  if (hasPending) {
+    throw new AppError(409, 'No puedes eliminar tu cuenta mientras tengas pedidos activos. Completa o cancela tus pedidos primero.');
+  }
 
   await query('DELETE FROM users WHERE id = $1', [userId]);
   return { ok: true };
+}
+
+export async function updateLoginUsername(userId, role, currentPassword, newUsername) {
+  const normalized = normalizeUsername(newUsername);
+  const newEmail   = pseudoEmailFromUsername(normalized);
+
+  // Verificar contraseña actual
+  const r = await query('SELECT password_hash FROM users WHERE id=$1', [userId]);
+  if (r.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
+  const matches = await bcrypt.compare(currentPassword, r.rows[0].password_hash);
+  if (!matches) throw new AppError(401, 'Contraseña actual incorrecta');
+
+  // Verificar disponibilidad del nuevo username en el mismo rol
+  const taken = await query('SELECT id FROM users WHERE email=$1 AND role=$2 AND id<>$3', [newEmail, role, userId]);
+  if (taken.rowCount > 0) throw new AppError(409, 'Ese usuario de acceso ya está en uso');
+
+  await query('UPDATE users SET email=$1, updated_at=NOW() WHERE id=$2', [newEmail, userId]);
+  return { username: normalized };
 }
 
 export function cleanRestaurantName(name) {

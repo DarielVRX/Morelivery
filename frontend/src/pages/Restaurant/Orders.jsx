@@ -80,6 +80,15 @@ export default function RestaurantOrders() {
     } catch (e) { setMsg(e.message); }
   }
 
+  async function cancelOrder(orderId) {
+    const note = window.prompt('Motivo de cancelación (obligatorio):');
+    if (!note?.trim()) return;
+    try {
+      await apiFetch(`/orders/${orderId}/cancel-restaurant`, { method:'PATCH', body: JSON.stringify({ note }) }, auth.token);
+      loadData();
+    } catch (e) { setMsg(e.message); }
+  }
+
   async function sendReport(orderId) {
     if (!reportText.trim()) return;
     try {
@@ -152,16 +161,32 @@ export default function RestaurantOrders() {
                         <button className="btn-sm" style={{ background:'var(--success)', color:'#fff', borderColor:'var(--success)' }}
                           onClick={() => changeStatus(order.id, 'ready')}>Listo</button>
                       )}
-                      <button className="btn-sm" onClick={() => setSuggestionFor(s => s === order.id ? '' : order.id)}
-                        style={{ background: suggestionFor === order.id ? 'var(--brand-light)' : undefined }}>
-                        Sugerir cambio
-                      </button>
+                      {!['ready','on_the_way','delivered','cancelled'].includes(order.status) && (
+                        <button className="btn-sm"
+                          onClick={() => setSuggestionFor(s => s === order.id ? '' : order.id)}
+                          style={{ background: suggestionFor === order.id ? 'var(--brand-light)' : undefined }}>
+                          Sugerir cambio
+                        </button>
+                      )}
+                      {!['delivered','cancelled','on_the_way'].includes(order.status) && (
+                        <button className="btn-sm btn-danger" onClick={() => cancelOrder(order.id)}>
+                          Cancelar
+                        </button>
+                      )}
                     </div>
 
                     {/* Panel sugerencia */}
                     {suggestionFor === order.id && (
                       <div style={{ marginTop:'0.75rem', background:'var(--gray-50)', border:'1px solid var(--gray-200)', borderRadius:8, padding:'0.875rem' }}>
                         <p style={{ fontWeight:700, fontSize:'0.875rem', marginBottom:'0.5rem' }}>Proponer cambio al cliente</p>
+                        {order.suggestion_status === 'pending_customer' && (
+                          <p style={{ fontSize:'0.8rem', color:'#92400e', background:'#fffbeb', border:'1px solid #f59e0b', borderRadius:6, padding:'0.4rem 0.6rem', marginBottom:'0.5rem' }}>
+                            Ya hay una sugerencia pendiente de respuesta.
+                          </p>
+                        )}
+                        <p style={{ fontSize:'0.75rem', color:'var(--gray-500)', marginBottom:'0.35rem' }}>
+                          Nota: al marcar el pedido como Listo debes esperar al menos 5 minutos despues de enviar una sugerencia.
+                        </p>
                         <p style={{ fontSize:'0.75rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>Pedido original:</p>
                         <div style={{ background:'#fff', border:'1px solid var(--gray-200)', borderRadius:6, padding:'0.4rem 0.75rem', marginBottom:'0.65rem' }}>
                           {(order.items || []).map(i => (
