@@ -81,6 +81,7 @@ export async function expireTimedOutOffers(onOffer) {
 // Reduce wait_until del driver más próximo a vencer a (secs_remaining / 5).
 // Guard de idempotencia: updated_at < NOW() - 1s evita doble reducción.
 async function applyOrderCooldownReduction(orderId) {
+  // 1. Buscamos al driver con el cooldown más bajo que sea mayor a 0
   const nearest = await query(
     `SELECT od.driver_id,
     EXTRACT(EPOCH FROM (od.wait_until - NOW()))::float AS secs_remaining
@@ -93,21 +94,19 @@ async function applyOrderCooldownReduction(orderId) {
     [orderId]
   );
 
-  if (nearest.rowCount === 0) {
-    log(orderId, 'cooldown reduction: no driver with active cooldown');
-    return false;
-  }
+  if (nearest.rowCount === 0) return null;
 
   const { driver_id, secs_remaining } = nearest.rows[0];
+
+  // Si el cooldown ya es muy bajo, no dividas más, simplemente libéralo
   const newWaitSecs = secs_remaining / COOLDOWN_DIVISOR;
 
-  // Si el resultado es < 1s, ponemos wait_until en el pasado:
-  // el driver queda elegible INMEDIATAMENTE en el próximo queryCandidates.
-  // Usamos -2s para asegurar que wait_until > NOW() sea falso.
   const waitExpr = newWaitSecs < 1
   ? `NOW() - INTERVAL '2 seconds'`
   : `NOW() + ($1::float * INTERVAL '1 second')`;
 
+  // 2. CORRECCIÓN: Quitamos la restricción de '1 second' para que
+  // permita reducciones rápidas si el flujo lo requiere.
   const result = await query(
     `UPDATE order_driver_offers
     SET wait_until = ${waitExpr},
@@ -115,24 +114,19 @@ async function applyOrderCooldownReduction(orderId) {
     WHERE order_id  = $2
     AND driver_id = $3
     AND status IN ('rejected','expired','released')
-    AND wait_until > NOW()
-    AND updated_at < NOW() - INTERVAL '1 second'`,
+    AND wait_until > NOW()`, // Quitamos el filtro de updated_at < NOW() - 1s
                              [newWaitSecs, orderId, driver_id]
   );
 
-  if (result.rowCount === 0) {
-    log(orderId, 'cooldown reduction skipped — already reduced recently', { driver_id });
-    return false;
-  }
+  if (result.rowCount === 0) return null;
 
   log(orderId, 'cooldown reduction applied', {
     driver_id,
-    secs_remaining: Math.round(secs_remaining),
-      new_wait_secs:  Math.round(newWaitSecs * 10) / 10,
+    new_wait_secs: Math.round(newWaitSecs * 10) / 10,
   });
-  return true;
-}
 
+  return { newWaitSecs };
+}
 // ─── Núcleo ───────────────────────────────────────────────────────────────────
 // SOLO se llama desde serializedOffer — nunca directamente desde fuera.
 export async function offerNextDrivers(orderId, _onOffer) {
