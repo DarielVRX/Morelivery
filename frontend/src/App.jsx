@@ -34,6 +34,7 @@ function ProtectedAny({ children }) {
 }
 
 // ─── Configuración de las 3 apps ─────────────────────────────────────────────
+// admin no aparece en la landing pero sí tiene AuthScreen en /admin/login
 const APPS = [
   {
     key: 'customer',
@@ -60,6 +61,13 @@ const APPS = [
         <path d="M10 18h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
       </svg>
     ),
+  },
+  {
+    key: 'admin',
+    label: 'Administrador',
+    description: 'Panel de administración',
+    home: '/admin',
+    icon: null, // no se muestra en landing
   },
   {
     key: 'restaurant',
@@ -168,14 +176,8 @@ function AuthScreen({ mode = 'login' }) {
 
       const data = await apiFetch('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, role: appKey }),
       });
-
-      // Validar que el rol coincide con la app donde intentó entrar
-      if (data.user.role !== appKey) {
-        setMessage(`Esta cuenta es de tipo "${APPS.find(a => a.key === data.user.role)?.label || data.user.role}". Accede desde la sección correcta.`);
-        return;
-      }
 
       login({ token: data.token, user: data.user });
       navigate(app.home);
@@ -399,6 +401,8 @@ function AppRoutes() {
       {/* Login/registro por app */}
       <Route path="/:appKey/login"    element={<AuthScreen mode="login" />} />
       <Route path="/:appKey/register" element={<AuthScreen mode="register" />} />
+      {/* Admin: acceso directo por URL, sin mostrarse en la landing */}
+      <Route path="/admin/login" element={<AuthScreen mode="login" />} />
 
       {/* Rutas protegidas dentro del Layout */}
       <Route path="/*" element={
