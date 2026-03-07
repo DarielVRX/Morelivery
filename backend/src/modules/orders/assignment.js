@@ -249,23 +249,37 @@ async function queryCandidates(orderId, batchSize) {
   return query(
     `SELECT dp.user_id
     FROM driver_profiles dp
+    JOIN users u ON u.id = dp.user_id
     WHERE dp.is_available = true
-    AND (SELECT COUNT(*)::int FROM orders o
-    WHERE o.driver_id=dp.user_id AND o.status=ANY($3::text[])) < $4
+    AND u.status = 'active'
+    -- 1. El driver no debe exceder el máximo de órdenes activas
+    AND (
+      SELECT COUNT(*)::int
+      FROM orders o
+      WHERE o.driver_id = dp.user_id
+      AND o.status = ANY($3::text[])
+    ) < $4
+    -- 2. El driver no debe tener ninguna otra oferta PENDING de CUALQUIER orden
     AND NOT EXISTS (
       SELECT 1 FROM order_driver_offers od
-      WHERE od.driver_id=dp.user_id AND od.status='pending'
+      WHERE od.driver_id = dp.user_id
+      AND od.status = 'pending'
     )
+    -- 3. No enviar si el driver ya tiene esta orden como 'accepted' (evitar duplicados)
     AND NOT EXISTS (
       SELECT 1 FROM order_driver_offers od
-      WHERE od.order_id=$1 AND od.driver_id=dp.user_id
-      AND od.status IN ('pending','accepted')
+      WHERE od.order_id = $1
+      AND od.driver_id = dp.user_id
+      AND od.status = 'accepted'
     )
+    -- 4. COOLDOWN POR PAREJA (Orden + Driver):
+    -- Solo se excluye si tiene un cooldown activo específicamente PARA ESTA ORDEN.
     AND NOT EXISTS (
       SELECT 1 FROM order_driver_offers od
-      WHERE od.order_id=$1 AND od.driver_id=dp.user_id
-      AND od.status IN ('rejected','released','expired')
-      AND od.wait_until IS NOT NULL AND od.wait_until > NOW()
+      WHERE od.order_id = $1
+      AND od.driver_id = dp.user_id
+      AND od.status IN ('rejected', 'released', 'expired')
+      AND od.wait_until > NOW()
     )
     ORDER BY dp.driver_number ASC
     LIMIT $2`,
