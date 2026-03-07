@@ -196,7 +196,7 @@ export default function CustomerOrders() {
     const val = Math.max(0, Math.round(Number(cents) * 100));
     if (isPast && val < currentTip) return; // en historial no se puede restar
     try {
-      await apiFetch(`/orders/${orderId}/tip`, { method:'PATCH', body: JSON.stringify({ tipCents: val }) }, auth.token);
+      await apiFetch(`/orders/${orderId}/tip`, { method:'PATCH', body: JSON.stringify({ tip_cents: val }) }, auth.token);
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, tip_cents: val } : o));
     } catch (e) { setMsg(e.message || 'Error al guardar agradecimiento'); }
   }
