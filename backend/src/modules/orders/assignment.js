@@ -6,6 +6,34 @@ export const OFFER_TIMEOUT_SECONDS        = 60;
 export const COOLDOWN_SECONDS             = 300;
 
 const ACTIVE_STATUSES = ['assigned','accepted','preparing','ready','on_the_way'];
+const assignmentQueue = [];
+const processingOrders = new Set();
+let queueRunning = false;
+
+function enqueueAssignment(orderId, onOffer) {
+  if (!processingOrders.has(orderId)) {
+    assignmentQueue.push({ orderId, onOffer });
+    processingOrders.add(orderId);
+  }
+  processQueue();
+}
+
+async function processQueue() {
+  if (queueRunning) return;
+  queueRunning = true;
+
+  while (assignmentQueue.length > 0) {
+    const job = assignmentQueue.shift();
+    try {
+      await offerNextDrivers(job.orderId, job.onOffer);
+    } catch (e) {
+      console.error("assignment queue error", e);
+    }
+    processingOrders.delete(job.orderId);
+  }
+
+  queueRunning = false;
+}
 
 function batchForRound(round) {
   if (round <= 5)  return 1;
@@ -63,35 +91,6 @@ export async function offerNextDrivers(orderId, _onOffer) {
   const round     = processed + 1;
   const batchSize = batchForRound(round);
   // ─── Cola de asignación ───────────────────────────────────────────────────────
-  const assignmentQueue = [];
-  const processingOrders = new Set();
-  let queueRunning = false;
-
-  function enqueueAssignment(orderId, onOffer) {
-    if (!processingOrders.has(orderId)) {
-      assignmentQueue.push({ orderId, onOffer });
-      processingOrders.add(orderId);
-    }
-    processQueue();
-  }
-
-  async function processQueue() {
-    if (queueRunning) return;
-    queueRunning = true;
-
-    while (assignmentQueue.length > 0) {
-      const job = assignmentQueue.shift();
-      try {
-        await offerNextDrivers(job.orderId, job.onOffer);
-      } catch (e) {
-        console.error("assignment queue error", e);
-      }
-      processingOrders.delete(job.orderId);
-    }
-
-    queueRunning = false;
-  }
-
   // Candidatos: disponibles, con cupo, SIN oferta activa (pending) en CUALQUIER pedido,
   // sin cooldown en este pedido, sin haber rechazado/liberado este pedido
   let candidates = await query(
@@ -249,23 +248,10 @@ export async function offerOrdersToDriver(driverId, _onOffer) {
   );
   let offered = 0;
   for (const row of open.rows) {
-    const n = await offerNextDrivers(job.orderId, job.onOffer);
+    const n = await offerNextDrivers(row.id, _onOffer);
     if (n > 0) offered++;
   }
   return offered;
-}
-
-export async function rejectOffer(orderId, driverId, onOffer) {
-  await query(
-    `UPDATE order_driver_offers
-    SET status='rejected',
-    wait_until = NOW() + ($3 * INTERVAL '1 second'),
-              updated_at = NOW()
-              WHERE order_id=$1 AND driver_id=$2 AND status='pending'`,
-              [orderId, driverId, COOLDOWN_SECONDS]
-  );
-
-  enqueueAssignment(orderId, onOffer);
 }
 
 // ─── Helper interno ───────────────────────────────────────────────────────────
