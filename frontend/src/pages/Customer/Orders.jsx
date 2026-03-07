@@ -445,6 +445,17 @@ export default function CustomerOrders() {
                                 +{fmt(v)}
                               </button>
                             ))}
+                            <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            placeholder="$ otro"
+                            onChange={e => {
+                              const val = e.target.value.replace(/\D/g, ''); // Solo permite números
+                              setTipCents(Math.round(Number(val || 0) * 100));
+                            }}
+                            style={{ width: 62, fontSize: '0.75rem', padding: '0.2rem 0.4rem', border: '1px solid var(--gray-200)', borderRadius: 6 }}
+                            />
                           </div>
                           {(o.tip_cents||0) > 0 && (
                             <span style={{ fontSize:'0.78rem', color:'var(--success)', fontWeight:700 }}>
