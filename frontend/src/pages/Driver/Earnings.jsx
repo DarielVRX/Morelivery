@@ -26,9 +26,12 @@ export default function DriverEarnings() {
   }, [auth.token]);
 
   // Calcular totales
-  const totalDeliveryFee = orders.reduce((s, o) => s + (o.delivery_fee_cents || 0), 0);
-  const totalTips        = orders.reduce((s, o) => s + (o.tip_cents          || 0), 0);
-  const totalEarnings    = totalDeliveryFee + totalTips;
+  const totalEarnings = orders.reduce((s, o) => {
+    const del = o.delivery_fee_cents || 0;
+    const svc = o.service_fee_cents  || 0;
+    const tip = o.tip_cents          || 0;
+    return s + del + Math.round(svc * 0.5) + tip;
+  }, 0);
 
   if (loading) return <div style={{ padding:'2rem', textAlign:'center', color:'var(--gray-400)' }}>Cargando…</div>;
 
@@ -50,14 +53,6 @@ export default function DriverEarnings() {
           </div>
           <div style={{ fontSize:'1.25rem', fontWeight:800, color:'var(--success)' }}>{fmt(totalEarnings)}</div>
         </div>
-        <div className="card" style={{ textAlign:'center', padding:'0.75rem' }}>
-          <div style={{ fontSize:'0.72rem', color:'var(--gray-500)', marginBottom:'0.2rem', fontWeight:600 }}>Tarifas de envío</div>
-          <div style={{ fontWeight:700 }}>{fmt(totalDeliveryFee)}</div>
-        </div>
-        <div className="card" style={{ textAlign:'center', padding:'0.75rem' }}>
-          <div style={{ fontSize:'0.72rem', color:'var(--gray-500)', marginBottom:'0.2rem', fontWeight:600 }}>Agradecimientos</div>
-          <div style={{ fontWeight:700, color:'var(--success)' }}>{fmt(totalTips)}</div>
-        </div>
       </div>
 
       {/* Historial por pedido */}
@@ -70,24 +65,29 @@ export default function DriverEarnings() {
           </h3>
           <ul style={{ listStyle:'none', padding:0 }}>
             {orders.map(o => {
-              const envio = o.delivery_fee_cents || 0;
-              const tip   = o.tip_cents          || 0;
-              const total = envio + tip;
+              const del_fee  = o.delivery_fee_cents || 0;
+              const svc      = o.service_fee_cents  || 0;
+              const tip      = o.tip_cents           || 0;
+              const earning  = del_fee + Math.round(svc * 0.5) + tip;
+              const isCash   = (o.payment_method || 'cash') === 'cash';
+              const grandTotal = (o.total_cents||0) + svc + del_fee + tip;
               return (
                 <li key={o.id} className="card" style={{ marginBottom:'0.5rem', padding:'0.7rem 0.875rem' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.2rem' }}>
                     <span style={{ fontWeight:700, fontSize:'0.9rem' }}>{o.restaurant_name}</span>
-                    <span style={{ fontWeight:800, color:'var(--success)' }}>{fmt(total)}</span>
+                    <span style={{ fontWeight:800, color:'var(--success)' }}>{fmt(earning)}</span>
                   </div>
                   <div style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>
                     {fmtDate(o.created_at)}
-                    {envio > 0 && <span> · Envío: {fmt(envio)}</span>}
-                    {tip   > 0 && <span style={{ color:'var(--success)' }}> · Agradecimiento: +{fmt(tip)}</span>}
+                    {' · '}{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[o.payment_method]||'Efectivo'}
+                    {tip > 0 && <span style={{ color:'var(--success)' }}> · Agradecimiento: +{fmt(tip)}</span>}
                   </div>
-                  {/* Subtotal a pagar a la tienda */}
-                  <div style={{ fontSize:'0.78rem', color:'var(--gray-400)', marginTop:'0.15rem' }}>
-                    Cobrar a tienda: {fmt(o.total_cents || 0)}
-                  </div>
+                  {isCash && (
+                    <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginTop:'0.15rem' }}>
+                      <span>Cobrar: <strong style={{ color:'var(--brand)' }}>{fmt(grandTotal)}</strong></span>
+                      <span style={{ marginLeft:'0.5rem' }}>· Pagar tienda: <strong>{fmt(o.total_cents||0)}</strong></span>
+                    </div>
+                  )}
                 </li>
               );
             })}

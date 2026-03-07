@@ -7,126 +7,38 @@ import OfferCountdown from '../../components/OfferCountdown';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
-// Desglose de tarifas para conductor
+// Desglose para Conductor
 function FeeBreakdown({ order }) {
-  const sub     = order.total_cents          || 0;
-  const svc     = order.service_fee_cents    || 0;
-  const del_fee = order.delivery_fee_cents   || 0;
-  const tip     = order.tip_cents            || 0;
-  const grandTotal = sub + svc + del_fee + tip;
+  const sub           = order.total_cents          || 0;
+  const svc           = order.service_fee_cents    || 0;
+  const del_fee       = order.delivery_fee_cents   || 0;
+  const tip           = order.tip_cents            || 0;
+  const isCash        = (order.payment_method || 'cash') === 'cash';
+  const driverEarning = del_fee + Math.round(svc * 0.5) + tip;
+  const grandTotal    = sub + svc + del_fee + tip;
   if (!svc && !del_fee) return null;
   return (
     <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', borderTop:'1px solid var(--gray-100)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
-      <div style={{ display:'flex', justifyContent:'space-between' }}>
-        <span>A pagar a tienda</span><span>{fmt(sub)}</span>
-      </div>
-      <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)' }}>
-        <span>Tu tarifa de envío</span><span>{fmt(del_fee)}</span>
+      {isCash && (
+        <>
+          <div style={{ display:'flex', justifyContent:'space-between', color:'var(--gray-700)' }}>
+            <span>A pagar a tienda</span><span>{fmt(sub)}</span>
+          </div>
+          <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--brand)', marginBottom:'0.15rem' }}>
+            <span>Cobrar a cliente</span><span>{fmt(grandTotal)}</span>
+          </div>
+        </>
+      )}
+      <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--success)', marginTop:'0.1rem' }}>
+        <span>Tu ganancia</span><span>{fmt(driverEarning)}</span>
       </div>
       {tip > 0 && (
-        <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)' }}>
-          <span>Agradecimiento</span><span>+{fmt(tip)}</span>
-        </div>
+        <div style={{ fontSize:'0.72rem', color:'var(--success)', textAlign:'right' }}>incl. agradecimiento {fmt(tip)}</div>
       )}
-      <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--gray-700)', marginTop:'0.2rem' }}>
-        <span>Total pagado por cliente</span><span>{fmt(grandTotal)}</span>
-      </div>
     </div>
   );
 }
 
-
-const STATUS_LABELS = {
-  created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
-  preparing:'En preparación', ready:'Listo para retiro',
-  on_the_way:'En camino', delivered:'Entregado',
-  cancelled:'Cancelado', pending_driver:'Buscando conductor',
-};
-
-// ── Cargar CSS de Leaflet una sola vez ───────────────────────────────────────
-function ensureLeafletCSS() {
-  if (document.getElementById('leaflet-css')) return;
-  const lnk = document.createElement('link');
-  lnk.id = 'leaflet-css'; lnk.rel = 'stylesheet';
-  lnk.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-  document.head.appendChild(lnk);
-}
-
-// Mapa ligero — instancia única destruida al desmontar
-function DriverMap({ driverPos }) {
-  const containerRef = useRef(null);
-  const mapRef       = useRef(null); // { map, marker }
-
-  // Inicializar una vez cuando hay posición
-  useEffect(() => {
-    if (!containerRef.current || !driverPos) return;
-    if (mapRef.current) return; // ya inicializado
-
-    ensureLeafletCSS();
-
-    // Dar un tick para que el CSS se aplique y el contenedor tenga tamaño
-    const t = setTimeout(() => {
-      import('leaflet').then(L => {
-        if (!containerRef.current || mapRef.current) return;
-
-        delete L.Icon.Default.prototype._getIconUrl;
-        L.Icon.Default.mergeOptions({
-          iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-          iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-          shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-        });
-
-        const map = L.map(containerRef.current, {
-          zoomControl: false, attributionControl: false,
-        }).setView([driverPos.lat, driverPos.lng], 15);
-
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          keepBuffer: 1, updateWhenIdle: true,
-        }).addTo(map);
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
-
-        const marker = L.circleMarker([driverPos.lat, driverPos.lng], {
-          radius: 9, fillColor: '#2563eb', fillOpacity: 1, color: '#fff', weight: 2,
-        }).addTo(map);
-
-        mapRef.current = { map, marker };
-
-        // Forzar re-cálculo del tamaño por si el contenedor cambió durante la inicialización
-        setTimeout(() => map.invalidateSize(), 200);
-      }).catch(() => {});
-    }, 50);
-
-    return () => clearTimeout(t);
-  }, [Boolean(driverPos)]); // solo cuando pasa de null → posición
-
-  // Destruir al desmontar
-  useEffect(() => {
-    return () => {
-      if (mapRef.current?.map) {
-        mapRef.current.map.remove();
-        mapRef.current = null;
-      }
-    };
-  }, []);
-
-  // Actualizar posición
-  useEffect(() => {
-    if (!mapRef.current || !driverPos) return;
-    mapRef.current.marker.setLatLng([driverPos.lat, driverPos.lng]);
-    mapRef.current.map.panTo([driverPos.lat, driverPos.lng], { animate: true, duration: 0.5 });
-  }, [driverPos?.lat, driverPos?.lng]);
-
-  if (!driverPos) return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f3f4f6' }}>
-      <div style={{ textAlign: 'center', color: 'var(--gray-400)', fontSize: '0.85rem' }}>
-        <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📍</div>
-        Esperando señal GPS…
-      </div>
-    </div>
-  );
-
-  return <div ref={containerRef} style={{ height: '100%', width: '100%' }} />;
-}
 
 export default function DriverHome() {
   const { auth } = useAuth();
@@ -333,6 +245,11 @@ export default function DriverHome() {
           </div>
           {showOrderDetail && (
             <div style={{ marginBottom:'0.4rem' }}>
+              {activeOrder.payment_method && (
+                <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.2rem' }}>
+                  Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[activeOrder.payment_method]||activeOrder.payment_method}</strong>
+                </div>
+              )}
               {(activeOrder.items || []).length > 0 && (
                 <ul style={{ fontSize:'0.82rem', margin:'0 0 0.25rem 1rem', color:'var(--gray-700)' }}>
                   {activeOrder.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}

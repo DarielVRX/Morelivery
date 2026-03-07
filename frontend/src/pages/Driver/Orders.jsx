@@ -6,29 +6,34 @@ import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
 // Desglose de tarifas para conductor
+// Desglose para Conductor
 function FeeBreakdown({ order }) {
-  const sub     = order.total_cents          || 0;
-  const svc     = order.service_fee_cents    || 0;
-  const del_fee = order.delivery_fee_cents   || 0;
-  const tip     = order.tip_cents            || 0;
-  const grandTotal = sub + svc + del_fee + tip;
+  const sub           = order.total_cents          || 0;
+  const svc           = order.service_fee_cents    || 0;
+  const del_fee       = order.delivery_fee_cents   || 0;
+  const tip           = order.tip_cents            || 0;
+  const isCash        = (order.payment_method || 'cash') === 'cash';
+  const driverEarning = del_fee + Math.round(svc * 0.5) + tip;
+  const grandTotal    = sub + svc + del_fee + tip;
   if (!svc && !del_fee) return null;
   return (
     <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', borderTop:'1px solid var(--gray-100)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
-      <div style={{ display:'flex', justifyContent:'space-between' }}>
-        <span>A pagar a tienda</span><span>{fmt(sub)}</span>
-      </div>
-      <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)' }}>
-        <span>Tu tarifa de envío</span><span>{fmt(del_fee)}</span>
+      {isCash && (
+        <>
+          <div style={{ display:'flex', justifyContent:'space-between', color:'var(--gray-700)' }}>
+            <span>A pagar a tienda</span><span>{fmt(sub)}</span>
+          </div>
+          <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--brand)', marginBottom:'0.15rem' }}>
+            <span>Cobrar a cliente</span><span>{fmt(grandTotal)}</span>
+          </div>
+        </>
+      )}
+      <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--success)', marginTop:'0.1rem' }}>
+        <span>Tu ganancia</span><span>{fmt(driverEarning)}</span>
       </div>
       {tip > 0 && (
-        <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)' }}>
-          <span>Agradecimiento</span><span>+{fmt(tip)}</span>
-        </div>
+        <div style={{ fontSize:'0.72rem', color:'var(--success)', textAlign:'right' }}>incl. agradecimiento {fmt(tip)}</div>
       )}
-      <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--gray-700)', marginTop:'0.2rem' }}>
-        <span>Total pagado por cliente</span><span>{fmt(grandTotal)}</span>
-      </div>
     </div>
   );
 }
@@ -169,6 +174,11 @@ export default function DriverOrders() {
                           {o.restaurant_address}
                         </div>
                       )}
+                      {o.payment_method && (
+                        <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.3rem' }}>
+                          Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[o.payment_method]||o.payment_method}</strong>
+                        </div>
+                      )}
                       <FeeBreakdown order={o} />
                       <button
                         className="btn-sm btn-primary"
@@ -228,6 +238,11 @@ export default function DriverOrders() {
                       <ul style={{ fontSize:'0.82rem', margin:'0.25rem 0 0 1rem' }}>
                         {o.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
                       </ul>
+                    )}
+                    {o.payment_method && (
+                      <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.2rem', marginTop:'0.25rem' }}>
+                        Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[o.payment_method]||o.payment_method}</strong>
+                      </div>
                     )}
                     <FeeBreakdown order={o} />
                     {/* Liberar pedido asignado */}
