@@ -131,7 +131,7 @@ export async function offerNextDrivers(orderId, _onOffer) {
          )
        ORDER BY dp.driver_number ASC
        LIMIT 1`,
-      [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
+      [orderid, ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
     );
   }
 
@@ -178,7 +178,7 @@ export async function rejectOffer(orderId, driverId, onOffer) {
      WHERE order_id=$1 AND driver_id=$2 AND status='pending'`,
     [orderId, driverId, COOLDOWN_SECONDS]
   );
-  await offerNextDrivers(orderId, _onOffer);
+  await offerNextDrivers(orderId, onOffer);
 }
 
 // ─── Liberar (con cooldown) ───────────────────────────────────────────────────
@@ -195,7 +195,7 @@ export async function releaseOrder(orderId, driverId, onOffer) {
     `UPDATE orders SET driver_id=NULL, status='pending_driver', updated_at=NOW()
      WHERE id=$1 AND driver_id=$2`, [orderId, driverId]
   );
-  await offerNextDrivers(orderId, _onOffer);
+  await offerNextDrivers(orderId, onOffer);
 }
 
 // ─── Listener del driver ──────────────────────────────────────────────────────
