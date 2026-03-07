@@ -149,6 +149,7 @@ async function offerNextDrivers(orderId, _onOffer) {
     log(orderId, 'order not found or already assigned — abort');
     return 0;
   }
+  export { offerNextDrivers };
   const cooldownTriggered = orderRow.rows[0].offer_cooldown_triggered;
 
   // Si ya hay oferta pending, no crear otra
