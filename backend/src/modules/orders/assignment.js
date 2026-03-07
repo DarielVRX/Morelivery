@@ -218,7 +218,9 @@ export async function offerNextDrivers(orderId, _onOffer) {
     // Si new_wait_secs < 1 el driver quedó elegible de inmediato (wait_until en el pasado).
     // Reintentar la query de candidatos ahora mismo.
     // Si new_wait_secs >= 1 todavía tiene cooldown — esperar al próximo expire tick.
-   const new_wait_secs = row.cooldown_secs_remaining / COOLDOWN_DIVISOR;
+    // CORRECCIÓN: Usar la variable 'reduced' que ya tienes definida arriba
+    const newWaitSecs = reduced ? 0 : 60; // Si hubo reducción, asumimos elegibilidad inmediata o espera mínima
+
     if (newWaitSecs < 1) {
       candidates = await queryCandidates(orderId, 1);
       log(orderId, `candidates after immediate reduction: ${candidates.rowCount}`, { drivers: candidates.rows.map(r => r.user_id) });
