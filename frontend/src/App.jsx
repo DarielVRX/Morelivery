@@ -124,10 +124,19 @@ function AppRoutes() {
   // Auth pages NO usan el Layout (evita re-renders del header durante el typing)
   if (isAuthPage) {
     return (
-      <Routes>
-        <Route path="/login"    element={<AuthScreen mode="login" />} />
-        <Route path="/register" element={<AuthScreen mode="register" />} />
-      </Routes>
+      <>
+        {/* Header minimal en login — sin nav, muestra "Morelivery" sin username */}
+        <header className="app-header">
+          <div className="brand-block" style={{ textDecoration:'none' }}>
+            <img className="brand-logo" src="/logo.svg" alt="Morelivery" />
+            <div><h1>Morelivery</h1></div>
+          </div>
+        </header>
+        <Routes>
+          <Route path="/login"    element={<AuthScreen mode="login" />} />
+          <Route path="/register" element={<AuthScreen mode="register" />} />
+        </Routes>
+      </>
     );
   }
 

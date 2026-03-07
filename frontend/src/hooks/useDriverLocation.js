@@ -1,8 +1,10 @@
 // frontend/src/hooks/useDriverLocation.js
+// GPS activo cuando: driver disponible OR tiene pedido activo
+// Se detiene solo cuando AMBAS condiciones son falsas.
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api/client';
 
-const SEND_INTERVAL_MS  = 12000; // 12s
+const SEND_INTERVAL_MS    = 12000;
 const MIN_DISTANCE_METERS = 15;
 
 function haversineMeters(lat1, lng1, lat2, lng2) {
@@ -14,28 +16,25 @@ function haversineMeters(lat1, lng1, lat2, lng2) {
 }
 
 /**
- * Obtiene posición GPS y la envía al backend periódicamente.
- * Solo activo si isActive=true (driver disponible).
- * Soporte de background via Page Visibility API:
- *   - cuando la página queda en background, el watchPosition sigue corriendo
- *     porque es una API del dispositivo, no del tab.
- *   - cuando vuelve al frente, forzamos un send inmediato.
+ * @param token       JWT del driver
+ * @param isAvailable driver marcó disponibilidad
+ * @param hasActiveOrder driver tiene pedido activo (accepted/on_the_way/etc)
+ * GPS activo si isAvailable OR hasActiveOrder
  */
-export function useDriverLocation(token, isActive) {
+export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
   const [position, setPosition] = useState(null);
   const [error, setError]       = useState(null);
   const lastSent    = useRef(null);
   const intervalRef = useRef(null);
   const watchRef    = useRef(null);
-  const posRef      = useRef(null); // copia sincrónica para el interval
+  const posRef      = useRef(null);
+
+  const shouldTrack = Boolean(token && (isAvailable || hasActiveOrder));
 
   useEffect(() => {
-    if (!isActive || !token) {
-      // Detener todo cuando no disponible
-      if (watchRef.current != null) {
-        navigator.geolocation?.clearWatch(watchRef.current);
-        watchRef.current = null;
-      }
+    if (!shouldTrack) {
+      navigator.geolocation?.clearWatch(watchRef.current);
+      watchRef.current = null;
       clearInterval(intervalRef.current);
       intervalRef.current = null;
       setPosition(null);
@@ -48,7 +47,6 @@ export function useDriverLocation(token, isActive) {
       return;
     }
 
-    // Escuchar cambios de posición
     watchRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         if (pos.coords.accuracy > 2000) {
@@ -64,7 +62,6 @@ export function useDriverLocation(token, isActive) {
       { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
     );
 
-    // Enviar al backend periódicamente
     async function maybeSend() {
       const current = posRef.current;
       if (!current) return;
@@ -76,18 +73,15 @@ export function useDriverLocation(token, isActive) {
 
     intervalRef.current = setInterval(maybeSend, SEND_INTERVAL_MS);
 
-    // Page Visibility API: cuando el tab vuelve al frente, enviar inmediatamente
-    function onVisibilityChange() {
-      if (!document.hidden) maybeSend();
-    }
-    document.addEventListener('visibilitychange', onVisibilityChange);
+    function onVisible() { if (!document.hidden) maybeSend(); }
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       navigator.geolocation.clearWatch(watchRef.current);
       clearInterval(intervalRef.current);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
+      document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [isActive, token]);
+  }, [shouldTrack, token]);
 
   return { position, error };
 }

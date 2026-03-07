@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 
 /* ── helpers ── */
 function fmt(cents) { return cents != null ? `$${(cents/100).toFixed(2)}` : '—'; }
@@ -64,6 +65,7 @@ function Td({ children, style }) {
 
 export default function AdminDashboard() {
   const { auth } = useAuth();
+  const [liveOffers, setLiveOffers] = useState([]); // feed en tiempo real
   const [tab, setTab]               = useState('orders');
   const [orders, setOrders]         = useState([]);
   const [metrics, setMetrics]       = useState(null);
@@ -145,6 +147,28 @@ export default function AdminDashboard() {
       {loading && <p style={{ color:'#9ca3af', fontSize:'0.875rem' }}>Cargando…</p>}
 
       {/* ════ PEDIDOS ════ */}
+      {/* ── Feed en tiempo real de asignaciones ─────────────────── */}
+      {liveOffers.length > 0 && (
+        <div style={{ marginBottom:'1rem' }}>
+          <div className="section-title">Asignaciones en tiempo real</div>
+          <div style={{ background:'#fff', border:'1px solid var(--gray-200)', borderRadius:'var(--radius)', overflow:'hidden' }}>
+            {liveOffers.map(ev => (
+              <div key={ev.id} style={{ padding:'0.5rem 0.75rem', borderBottom:'1px solid var(--gray-100)', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:'0.82rem' }}>
+                <div>
+                  <span style={{ fontWeight:700, color:'var(--brand)' }}>{ev.driverName||'Driver'}</span>
+                  <span style={{ color:'var(--gray-600)' }}> recibió oferta · </span>
+                  <span style={{ fontWeight:600 }}>{ev.restaurantName||'—'}</span>
+                  {ev.totalCents && <span style={{ color:'var(--gray-600)' }}> · ${(ev.totalCents/100).toFixed(2)}</span>}
+                </div>
+                <span style={{ color:'var(--gray-400)', fontSize:'0.72rem', flexShrink:0 }}>
+                  {new Date(ev.ts).toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {tab === 'orders' && (
         <>
           <div style={{ display:'flex', gap:'0.5rem', flexWrap:'wrap', marginBottom:'0.75rem', alignItems:'center' }}>

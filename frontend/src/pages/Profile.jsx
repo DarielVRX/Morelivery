@@ -63,10 +63,15 @@ export default function ProfilePage() {
       // Todos los roles pueden tener dirección
       if (address.trim()) body.address = address.trim();
       const data = await apiFetch('/auth/profile', { method:'PATCH', body: JSON.stringify(body) }, auth.token);
+      // Actualizar contexto con valores confirmados desde la DB
       patchUser({
-        display_name: data.profile.displayName || displayName.trim(),
-        address: data.profile.address ?? address.trim(),
+        display_name: data.profile.displayName,
+        full_name:    data.profile.displayName,
+        address:      data.profile.address,
       });
+      // Sincronizar estado local con lo que devolvió la DB
+      if (data.profile.displayName) setDisplayName(data.profile.displayName);
+      if (data.profile.address)     setAddress(data.profile.address);
       setProfileMsg('Perfil actualizado'); setProfileErr(false);
     } catch (e) { setProfileMsg(e.message); setProfileErr(true); }
   }
@@ -137,13 +142,23 @@ export default function ProfilePage() {
         <Flash text={pwdMsg} isError={pwdErr} />
       </Collapsible>
 
-      {/* Cerrar sesión */}
-      <div className="card" style={{ marginBottom:'0.75rem' }}>
-        <button className="btn-sm" onClick={logout}>Cerrar sesión</button>
-      </div>
+      {/* Cerrar sesión — ancho completo */}
+      <button
+        onClick={logout}
+        style={{
+          width:'100%', padding:'0.7rem', background:'var(--gray-100)',
+          border:'1px solid var(--gray-200)', borderRadius:'var(--radius)',
+          fontWeight:700, fontSize:'0.9rem', cursor:'pointer', marginBottom:'0.75rem',
+          color:'var(--gray-800)', transition:'background 0.15s',
+        }}
+        onMouseEnter={e=>e.currentTarget.style.background='var(--gray-200)'}
+        onMouseLeave={e=>e.currentTarget.style.background='var(--gray-100)'}
+      >
+        Cerrar sesión
+      </button>
 
       {/* Eliminar cuenta */}
-      <Collapsible title="Zona de peligro">
+      <Collapsible title="Administración de cuenta">
         <p style={{ fontSize:'0.85rem', color:'var(--gray-600)', marginBottom:'0.75rem' }}>
           Eliminar tu cuenta es permanente. No podrás recuperarla.
         </p>

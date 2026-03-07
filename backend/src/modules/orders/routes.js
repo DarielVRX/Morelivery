@@ -236,6 +236,15 @@ router.patch('/:id/suggest', authenticate, authorize(['restaurant']), validate(s
       note: req.validatedBody.note || null
     };
 
+    // Verificar que el pedido no está en estado 'ready' o posterior
+    const orderCheck = await query(
+      `SELECT status FROM orders WHERE id=$1 AND restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id=$2)`,
+      [req.params.id, req.user.userId]
+    );
+    if (orderCheck.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
+    if (['ready','on_the_way','delivered','cancelled'].includes(orderCheck.rows[0].status))
+      return next(new AppError(409, 'No se pueden hacer sugerencias una vez el pedido está listo'));
+
     const result = await query(
       `UPDATE orders SET suggestion_text=$1, suggestion_status='pending_customer', updated_at=NOW()
        WHERE id=$2 AND restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id=$3) RETURNING *`,
