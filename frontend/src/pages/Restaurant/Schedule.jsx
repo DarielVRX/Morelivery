@@ -16,17 +16,22 @@ export default function RestaurantSchedule() {
 
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.25rem', flexWrap:'wrap', gap:'0.5rem' }}>
-        <h2 style={{ fontSize:'1.1rem', fontWeight:800 }}>Horario de atención</h2>
-      </div>
-
-      {isOpen !== null && (
-        <div style={{ marginBottom:'1rem' }}>
-          <span style={{ fontWeight:700, color: isOpen ? 'var(--success)' : 'var(--danger)', fontSize:'0.9rem' }}>
-            {isOpen ? 'Abierto ahora' : 'Cerrado ahora'}
-          </span>
+      {/* ── Encabezado Horario ─────────────────────────────────────────── */}
+      <div style={{ margin:'0 -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg,#c0546a 0%,#8a3a4e 100%)', color:'#fff' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div>
+            <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>🕐 Horario de atención</div>
+            <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Configura cuándo recibes pedidos</div>
+          </div>
+          {isOpen !== null && (
+            <span style={{ fontWeight:700, fontSize:'0.82rem', padding:'0.2rem 0.65rem',
+              background: isOpen ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)',
+              borderRadius:20, border:'1px solid rgba(255,255,255,0.3)' }}>
+              {isOpen ? '● Abierto' : '● Cerrado'}
+            </span>
+          )}
         </div>
-      )}
+      </div>
 
       <ScheduleEditor
         token={auth.token}

@@ -31,6 +31,8 @@ export default function SplitLayout({ homeContent, ordersContent }) {
         className={`orders-tab-trigger${mobileOpen ? ' open' : ''}`}
         onClick={() => setMobileOpen(v => !v)}
         aria-label={mobileOpen ? 'Cerrar pedidos' : 'Ver pedidos'}
+        style={{ right: mobileOpen ? 'min(85vw, 360px)' : 0,
+                 transition:'right 0.28s cubic-bezier(0.4,0,0.2,1), background 0.2s' }}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -159,14 +161,10 @@ export default function SplitLayout({ homeContent, ordersContent }) {
             box-shadow: -2px 0 8px rgba(0,0,0,0.18);
             z-index: 325;
             padding: 0;
-            transition: background 0.2s,
-                        right 0.28s cubic-bezier(0.4,0,0.2,1),
-                        transform 0.28s cubic-bezier(0.4,0,0.2,1);
+            /* Solo transicionar background — right se mueve via JS inline style */
+            transition: background 0.2s;
           }
-          /* Cuando el drawer está abierto, el botón se mueve con él */
           .orders-tab-trigger.open {
-            right: min(85vw, 360px);
-            transform: translateY(-50%);
             background: var(--gray-500);
           }
 
