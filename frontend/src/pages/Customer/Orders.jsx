@@ -367,7 +367,6 @@ export default function CustomerOrders() {
                             />
                             </div>
                           </div>
-                        </div>
                         {order.customer_address && (
                           <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.3rem', marginTop:'0.35rem' }}>
                             Dirección: <strong>{order.customer_address}</strong>
