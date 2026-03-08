@@ -57,19 +57,42 @@ function ensureLeafletCSS() {
   document.head.appendChild(lnk);
 }
 
+// Reverse geocoding con Nominatim (gratuito, sin API key)
+async function reverseGeocode(lat, lng) {
+  try {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
+      { headers: { 'Accept-Language': 'es' } }
+    );
+    if (!r.ok) return null;
+    const d = await r.json();
+    // Priorizar nombre de negocio/POI, luego dirección legible
+    const addr = d.address || {};
+    const poi  = addr.amenity || addr.shop || addr.office || addr.building || addr.tourism || null;
+    const road = addr.road || addr.pedestrian || addr.footway || '';
+    const num  = addr.house_number ? ` ${addr.house_number}` : '';
+    const col  = addr.suburb || addr.neighbourhood || addr.city_district || '';
+    if (poi) return `${poi}${road ? ` · ${road}${num}` : ''}`;
+    if (road) return `${road}${num}${col ? `, ${col}` : ''}`;
+    return d.display_name?.split(',').slice(0,2).join(', ') || null;
+  } catch { return null; }
+}
+
 // Mapa ligero — instancia única destruida al desmontar
-function DriverMap({ driverPos }) {
-  const containerRef = useRef(null);
-  const mapRef       = useRef(null); // { map, marker }
+// customPin: { lat, lng } | null  — marcador manual del driver
+// onCustomPin: (latlng | null) => void
+// hasActiveOrder: boolean — si true, oculta el pin y deshabilita clicks
+function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
+  const containerRef  = useRef(null);
+  const mapRef        = useRef(null); // { map, driverMarker, customMarker }
 
   // Inicializar una vez cuando hay posición
   useEffect(() => {
     if (!containerRef.current || !driverPos) return;
-    if (mapRef.current) return; // ya inicializado
+    if (mapRef.current) return;
 
     ensureLeafletCSS();
 
-    // Dar un tick para que el CSS se aplique y el contenedor tenga tamaño
     const t = setTimeout(() => {
       import('leaflet').then(L => {
         if (!containerRef.current || mapRef.current) return;
@@ -90,19 +113,24 @@ function DriverMap({ driverPos }) {
         }).addTo(map);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        const marker = L.circleMarker([driverPos.lat, driverPos.lng], {
+        // Marcador GPS del driver (azul)
+        const driverMarker = L.circleMarker([driverPos.lat, driverPos.lng], {
           radius: 9, fillColor: '#2563eb', fillOpacity: 1, color: '#fff', weight: 2,
         }).addTo(map);
 
-        mapRef.current = { map, marker };
+        // Click en mapa → pin personalizado (solo sin pedido activo)
+        map.on('click', (e) => {
+          if (hasActiveOrder) return;
+          onCustomPin?.({ lat: e.latlng.lat, lng: e.latlng.lng });
+        });
 
-        // Forzar re-cálculo del tamaño por si el contenedor cambió durante la inicialización
+        mapRef.current = { map, driverMarker, customMarker: null };
         setTimeout(() => map.invalidateSize(), 200);
       }).catch(() => {});
     }, 50);
 
     return () => clearTimeout(t);
-  }, [Boolean(driverPos)]); // solo cuando pasa de null → posición
+  }, [Boolean(driverPos)]);
 
   // Destruir al desmontar
   useEffect(() => {
@@ -114,23 +142,55 @@ function DriverMap({ driverPos }) {
     };
   }, []);
 
-  // Actualizar posición
+  // Actualizar posición GPS
   useEffect(() => {
     if (!mapRef.current || !driverPos) return;
-    mapRef.current.marker.setLatLng([driverPos.lat, driverPos.lng]);
+    mapRef.current.driverMarker.setLatLng([driverPos.lat, driverPos.lng]);
     mapRef.current.map.panTo([driverPos.lat, driverPos.lng], { animate: true, duration: 0.5 });
   }, [driverPos?.lat, driverPos?.lng]);
 
+  // Sincronizar hasActiveOrder en el listener del mapa
+  useEffect(() => {
+    if (!mapRef.current?.map) return;
+    const map = mapRef.current.map;
+    map.off('click');
+    if (!hasActiveOrder) {
+      map.on('click', (e) => onCustomPin?.({ lat: e.latlng.lat, lng: e.latlng.lng }));
+    }
+  }, [hasActiveOrder, onCustomPin]);
+
+  // Agregar/quitar pin personalizado
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const { map } = mapRef.current;
+    import('leaflet').then(L => {
+      // Quitar pin anterior
+      if (mapRef.current.customMarker) {
+        mapRef.current.customMarker.remove();
+        mapRef.current.customMarker = null;
+      }
+      // Agregar nuevo si existe y no hay pedido activo
+      if (customPin && !hasActiveOrder) {
+        const icon = L.divIcon({
+          html: `<div style="width:22px;height:22px;border-radius:50% 50% 50% 0;background:var(--brand);border:2px solid #fff;box-shadow:0 2px 6px #0004;transform:rotate(-45deg)"></div>`,
+          iconSize: [22, 22], iconAnchor: [11, 22], className: ''
+        });
+        const cm = L.marker([customPin.lat, customPin.lng], { icon }).addTo(map);
+        mapRef.current.customMarker = cm;
+      }
+    });
+  }, [customPin?.lat, customPin?.lng, hasActiveOrder]);
+
   if (!driverPos) return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f3f4f6' }}>
-    <div style={{ textAlign: 'center', color: 'var(--gray-400)', fontSize: '0.85rem' }}>
-    <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📍</div>
-    Esperando señal GPS…
-    </div>
+    <div style={{ height:'100%', display:'flex', alignItems:'center', justifyContent:'center', background:'#f3f4f6' }}>
+      <div style={{ textAlign:'center', color:'var(--gray-400)', fontSize:'0.85rem' }}>
+        <div style={{ fontSize:'2rem', marginBottom:'0.5rem' }}>📍</div>
+        Esperando señal GPS…
+      </div>
     </div>
   );
 
-  return <div ref={containerRef} style={{ height: '100%', width: '100%' }} />;
+  return <div ref={containerRef} style={{ height:'100%', width:'100%' }} />;
 }
 
 export default function DriverHome() {
@@ -143,11 +203,28 @@ export default function DriverHome() {
   const [releaseNote,   setReleaseNote]   = useState('');
   const [showRelease,   setShowRelease]   = useState(false);
   const [showOrderDetail, setShowOrderDetail] = useState(false);
+  const [customPin,    setCustomPin]     = useState(null);   // { lat, lng }
+  const [pinAddress,   setPinAddress]    = useState(null);   // string | null
+  const [loadingPin,   setLoadingPin]    = useState(false);
   const [msg, setMsg] = useState('');
   const loadDataRef   = useRef(null);
 
   // GPS activo si disponible O tiene pedido activo
   const hasActiveOrder = Boolean(activeOrder && !['delivered','cancelled'].includes(activeOrder.status));
+
+  // Limpiar pin personalizado cuando hay pedido activo
+  useEffect(() => {
+    if (hasActiveOrder) { setCustomPin(null); setPinAddress(null); }
+  }, [hasActiveOrder]);
+
+  // Reverse geocoding cuando cambia el pin
+  useEffect(() => {
+    if (!customPin) { setPinAddress(null); return; }
+    setLoadingPin(true);
+    reverseGeocode(customPin.lat, customPin.lng)
+      .then(addr => setPinAddress(addr || `${customPin.lat.toFixed(5)}, ${customPin.lng.toFixed(5)}`))
+      .finally(() => setLoadingPin(false));
+  }, [customPin?.lat, customPin?.lng]);
   const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, availability, hasActiveOrder);
 
   // Anunciar presencia al backend — solo al montar, no en cada loadData
@@ -278,14 +355,54 @@ export default function DriverHome() {
 
       {/* ── Mapa (ocupa el espacio restante) ───────────────────────── */}
       <div style={{ flex:1, minHeight:0, position:'relative', overflow:'hidden', zIndex:0 }}>
-        <DriverMap driverPos={myPosition} />
+        <DriverMap
+          driverPos={myPosition}
+          customPin={customPin}
+          onCustomPin={setCustomPin}
+          hasActiveOrder={hasActiveOrder}
+        />
 
-        {/* Sin actividad */}
-        {!activeOrder && !pendingOffer && (
-          <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', background:'#ffffffdd', borderRadius:20, padding:'0.45rem 1.1rem', fontSize:'0.82rem', color:'var(--gray-600)', boxShadow:'0 2px 8px #0002', whiteSpace:'nowrap', zIndex:5 }}>
-            {availability ? 'En espera de pedidos…' : 'Activa disponibilidad para recibir pedidos'}
+        {/* Panel de pin personalizado */}
+        {!hasActiveOrder && customPin && (
+          <div style={{
+            position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)',
+            background:'#fff', borderRadius:10, padding:'0.5rem 0.875rem',
+            boxShadow:'0 2px 12px #0003', maxWidth:'calc(100% - 2rem)', zIndex:10,
+            display:'flex', alignItems:'center', gap:'0.5rem', minWidth:180,
+          }}>
+            <span style={{ fontSize:'1rem', flexShrink:0 }}>📍</span>
+            <div style={{ flex:1, minWidth:0 }}>
+              {loadingPin
+                ? <span style={{ fontSize:'0.78rem', color:'var(--gray-400)' }}>Buscando dirección…</span>
+                : <span style={{ fontSize:'0.78rem', color:'var(--gray-700)', fontWeight:600,
+                    overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block' }}>
+                    {pinAddress}
+                  </span>
+              }
+              <span style={{ fontSize:'0.7rem', color:'var(--gray-400)' }}>Toca de nuevo para mover</span>
+            </div>
+            <button
+              onClick={() => { setCustomPin(null); setPinAddress(null); }}
+              style={{ border:'none', background:'none', cursor:'pointer', color:'var(--gray-400)',
+                fontSize:'1rem', lineHeight:1, padding:'0.15rem', flexShrink:0 }}>
+              ✕
+            </button>
           </div>
         )}
+
+        {/* Hint inicial — solo si disponible y sin pin y sin oferta */}
+        {!hasActiveOrder && !customPin && !pendingOffer && availability && myPosition && (
+          <div style={{
+            position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)',
+            background:'#ffffffdd', borderRadius:20, padding:'0.4rem 1rem',
+            fontSize:'0.78rem', color:'var(--gray-500)', boxShadow:'0 2px 8px #0002',
+            whiteSpace:'nowrap', zIndex:5, pointerEvents:'none',
+          }}>
+            Toca el mapa para marcar tu ubicación
+          </div>
+        )}
+
+
       </div>
 
       {/* ── Oferta entrante (SOBRE el pedido activo) ────────────────── */}
