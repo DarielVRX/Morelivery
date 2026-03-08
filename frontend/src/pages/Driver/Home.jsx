@@ -7,6 +7,13 @@ import OfferCountdown from '../../components/OfferCountdown';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
+const STATUS_LABELS = {
+  created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
+  preparing:'En preparación', ready:'Listo para retiro',
+  on_the_way:'En camino', delivered:'Entregado',
+  cancelled:'Cancelado', pending_driver:'Buscando conductor',
+};
+
 // Desglose para Conductor
 function FeeBreakdown({ order }) {
   const sub           = order.total_cents          || 0;
@@ -37,6 +44,17 @@ function FeeBreakdown({ order }) {
       )}
     </div>
   );
+}
+
+function ensureLeafletCSS() {
+  if (document.getElementById('leaflet-css')) return;
+
+  const lnk = document.createElement('link');
+  lnk.id = 'leaflet-css';
+  lnk.rel = 'stylesheet';
+  lnk.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+
+  document.head.appendChild(lnk);
 }
 
 // Mapa ligero — instancia única destruida al desmontar
