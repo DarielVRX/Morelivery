@@ -198,19 +198,12 @@ export default function RestaurantPage() {
         </ul>
       )}
 
-      {/* Resumen pegajoso */}
+      {/* Desglose — debajo del menú, como contenido normal */}
       {isCustomer && total > 0 && !isClosed && (
-        <div style={{
-          position:'sticky', bottom:0, background:'#fff',
-          borderTop:'1px solid var(--gray-200)', padding:'0.875rem 0 0', marginTop:'1rem'
-        }}>
-          {!hasAddress && (
-            <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem', fontWeight:600 }}>
-              Guarda tu dirección en Perfil antes de pedir
-            </p>
-          )}
+        <div style={{ marginTop:'1rem', padding:'0.875rem', background:'var(--gray-50,#f9fafb)', borderRadius:10, border:'1px solid var(--gray-100)' }}>
           {/* Método de pago */}
-          <div style={{ display:'flex', gap:'0.4rem', marginBottom:'0.5rem' }}>
+          <p style={{ fontSize:'0.75rem', fontWeight:700, color:'var(--gray-500)', marginBottom:'0.35rem', textTransform:'uppercase', letterSpacing:'0.04em' }}>Método de pago</p>
+          <div style={{ display:'flex', gap:'0.4rem', marginBottom:'0.75rem' }}>
             {[['cash','Efectivo'],['card','Tarjeta'],['spei','SPEI']].map(([val,label]) => (
               <button key={val} onClick={() => setPaymentMethod(val)}
                 style={{ flex:1, padding:'0.35rem', cursor:'pointer',
@@ -222,55 +215,57 @@ export default function RestaurantPage() {
             ))}
           </div>
           {/* Agradecimiento */}
-          <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', marginBottom:'0.5rem', flexWrap:'wrap' }}>
-            <span style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>Agradecimiento:</span>
-            <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap' }}>
-              {[0,1000,2000,5000].map(v => (
-                <button key={v} onClick={() => setTipCents(v)}
-                  style={{ padding:'0.2rem 0.45rem', cursor:'pointer',
-                    border:`1px solid ${tipCents===v?'var(--success)':'var(--gray-200)'}`,
-                    borderRadius:6, background: tipCents===v?'#f0fdf4':'#fff',
-                    color: tipCents===v?'var(--success)':'var(--gray-600)',
-                    fontSize:'0.75rem', fontWeight: tipCents===v?700:400 }}>
-                  {v===0?'—':fmt(v)}
-                </button>
-              ))}
-              <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              placeholder="$ otro"
-              onChange={e => {
-                const val = e.target.value.replace(/\D/g, ''); // Solo permite números
-                setTipCents(Math.round(Number(val || 0) * 100));
+          <p style={{ fontSize:'0.75rem', fontWeight:700, color:'var(--gray-500)', marginBottom:'0.35rem', textTransform:'uppercase', letterSpacing:'0.04em' }}>Agradecimiento al conductor</p>
+          <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', marginBottom:'0.75rem' }}>
+            {[0,1000,2000,5000].map(v => (
+              <button key={v} onClick={() => setTipCents(v)}
+                style={{ padding:'0.25rem 0.5rem', cursor:'pointer',
+                  border:`1px solid ${tipCents===v?'var(--success)':'var(--gray-200)'}`,
+                  borderRadius:6, background: tipCents===v?'#f0fdf4':'#fff',
+                  color: tipCents===v?'var(--success)':'var(--gray-600)',
+                  fontSize:'0.78rem', fontWeight: tipCents===v?700:400 }}>
+                {v===0?'—':fmt(v)}
+              </button>
+            ))}
+            <input
+              type="text" inputMode="numeric" pattern="[0-9]*" placeholder="$ otro"
+              onBlur={e => {
+                const val = e.target.value.replace(/\D/g,'');
+                const cents = Math.round(Number(val||0)*100);
+                if (cents >= 0) setTipCents(cents);
+                e.target.value = '';
               }}
-              style={{ width: 62, fontSize: '0.75rem', padding: '0.2rem 0.4rem', border: '1px solid var(--gray-200)', borderRadius: 6 }}
-              />
-            </div>
+              style={{ width:62, fontSize:'0.75rem', padding:'0.25rem 0.4rem', border:'1px solid var(--gray-200)', borderRadius:6 }}
+            />
           </div>
-          {/* Desglose */}
-          <div style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.3rem' }}>
-            <div style={{ display:'flex', justifyContent:'space-between' }}>
-              <span>Subtotal</span><span>{fmt(subtotal)}</span>
-            </div>
-            <div style={{ display:'flex', justifyContent:'space-between' }}>
-              <span>Tarifa de servicio</span><span>{fmt(serviceFee)}</span>
-            </div>
-            <div style={{ display:'flex', justifyContent:'space-between' }}>
-              <span>Tarifa de envío</span><span>{fmt(deliveryFee)}</span>
-            </div>
+          {/* Desglose de tarifas */}
+          <div style={{ fontSize:'0.8rem', color:'var(--gray-500)', borderTop:'1px solid var(--gray-100)', paddingTop:'0.5rem' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.15rem' }}><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
+            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.15rem' }}><span>Tarifa de servicio (5%)</span><span>{fmt(serviceFee)}</span></div>
+            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.15rem' }}><span>Tarifa de envío (10%)</span><span>{fmt(deliveryFee)}</span></div>
             {tipCents > 0 && (
-              <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)', marginBottom:'0.15rem' }}>
                 <span>Agradecimiento</span><span>+{fmt(tipCents)}</span>
               </div>
             )}
+            <div style={{ display:'flex', justifyContent:'space-between', fontWeight:800, fontSize:'0.875rem', marginTop:'0.35rem', paddingTop:'0.35rem', borderTop:'1px solid var(--gray-200)' }}>
+              <span>Total</span><span>{fmt(total)}</span>
+            </div>
           </div>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <span style={{ fontWeight:800 }}>Total: {fmt(total)}</span>
-            <button className="btn-primary" disabled={!canOrder || ordering} onClick={createOrder}>
-              {ordering ? 'Procesando…' : 'Hacer pedido'}
-            </button>
-          </div>
+        </div>
+      )}
+
+      {/* Botón sticky */}
+      {isCustomer && total > 0 && !isClosed && (
+        <div style={{ position:'sticky', bottom:0, background:'#fff', borderTop:'1px solid var(--gray-100)', padding:'0.75rem 0', marginTop:'0.75rem' }}>
+          {!hasAddress && (
+            <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem', fontWeight:600 }}>
+              Guarda tu dirección en Perfil antes de pedir
+            </p>
+          )}
+          <button className="btn-primary" style={{ width:'100%' }} disabled={!canOrder || ordering} onClick={createOrder}>
+            {ordering ? 'Procesando…' : `Hacer pedido · ${fmt(total)}`}
+          </button>
         </div>
       )}
 

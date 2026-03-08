@@ -253,7 +253,7 @@ export default function DriverHome() {
   }
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
+    <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
 
       {/* ── Encabezado FIJO ─────────────────────────────────────────── */}
       <div style={{ flexShrink:0, background:'#fff', borderBottom:'1px solid var(--gray-200)', padding:'0.65rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, zIndex:10 }}>

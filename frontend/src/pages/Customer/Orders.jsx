@@ -34,24 +34,6 @@ function FeeBreakdown({ order }) {
       <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--gray-700)', marginTop:'0.2rem' }}>
         <span>Total</span><span>{fmt(grandTotal)}</span>
       </div>
-      {/* Footer sticky: toggle historial/activos */}
-      <div style={{
-        position:'sticky', bottom:0, background:'#fff',
-        borderTop:'1px solid var(--gray-200)', padding:'0.6rem 0',
-        display:'flex', justifyContent:'center', zIndex:10
-      }}>
-        <button
-          onClick={() => setTab(t => t==='active' ? 'past' : 'active')}
-          style={{
-            background: tab==='active' ? 'var(--gray-100)' : 'var(--brand)',
-            color:       tab==='active' ? 'var(--gray-700)' : '#fff',
-            border:'none', borderRadius:20, padding:'0.4rem 1.5rem',
-            fontWeight:700, fontSize:'0.82rem', cursor:'pointer',
-            transition:'background 0.2s, color 0.2s'
-          }}>
-          {tab==='active' ? 'Ver historial →' : '← Ver activos'}
-        </button>
-      </div>
     </div>
   );
 }
@@ -238,8 +220,34 @@ export default function CustomerOrders() {
   });
 
   return (
-    <div>
-      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1rem' }}>Mis pedidos</h2>
+    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+      {/* ── Encabezado fijo ─────────────────────────────────────────── */}
+      <div style={{
+        flexShrink:0, background:'#fff', borderBottom:'2px solid var(--brand-light)',
+        padding:'0.65rem 1rem 0', zIndex:30,
+        boxShadow:'0 1px 4px rgba(0,0,0,0.04)'
+      }}>
+        <div style={{ fontWeight:800, fontSize:'1rem', color:'var(--brand)', letterSpacing:'-0.01em', marginBottom:'0.4rem' }}>
+          Mis pedidos
+        </div>
+        <div style={{ display:'flex', gap:0, borderTop:'1px solid var(--gray-100)' }}>
+          {[['active','Activos'],['past','Historial']].map(([val, label]) => (
+            <button key={val} onClick={() => setTab(val)}
+              style={{
+                flex:1, background:'none', border:'none', cursor:'pointer',
+                padding:'0.4rem 0.5rem', fontSize:'0.78rem', fontWeight: tab===val ? 800 : 500,
+                color: tab===val ? 'var(--brand)' : 'var(--gray-500)',
+                borderBottom: tab===val ? '2px solid var(--brand)' : '2px solid transparent',
+                marginBottom:'-1px', transition:'color 0.15s'
+              }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Contenido scrolleable ─────────────────────────────────── */}
+      <div style={{ flex:1, overflowY:'auto', padding:'0.75rem 1rem', paddingBottom:'calc(var(--nav-h-mobile) + 2.5rem)' }}>
 
       {/* ── Sugerencias flotantes ─────────────────────────────────────── */}
       {pendingSuggestions.map(order => (
@@ -320,9 +328,6 @@ export default function CustomerOrders() {
 
       <div style={{ display:'flex', gap:'0.4rem', marginBottom:'1rem' }}>
         {/* tabs se controlan desde el footer — aquí solo el título */}
-        <span style={{ fontSize:'0.82rem', color:'var(--gray-500)', fontWeight:600 }}>
-          {tab==='active' ? `Activos (${active.length})` : `Historial (${past.length})`}
-        </span>
       </div>
 
       {/* Activos */}
@@ -550,6 +555,7 @@ export default function CustomerOrders() {
             <span>Activos</span></>
           )}
         </button>
+      </div>
       </div>
     </div>
   );
