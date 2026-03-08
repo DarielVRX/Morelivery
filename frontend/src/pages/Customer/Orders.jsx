@@ -354,6 +354,18 @@ export default function CustomerOrders() {
                                 {v===0?'—':fmt(v)}
                               </button>
                             ))}
+                            <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            placeholder="$ otro"
+                            onChange={e => {
+                              const val = e.target.value.replace(/\D/g, ''); // Solo permite números
+                              setTipCents(Math.round(Number(val || 0) * 100));
+                            }}
+                            style={{ width: 62, fontSize: '0.75rem', padding: '0.2rem 0.4rem', border: '1px solid var(--gray-200)', borderRadius: 6 }}
+                            />
+                            </div>
                           </div>
                         </div>
                         {order.customer_address && (
@@ -456,7 +468,7 @@ export default function CustomerOrders() {
                             }}
                             style={{ width: 62, fontSize: '0.75rem', padding: '0.2rem 0.4rem', border: '1px solid var(--gray-200)', borderRadius: 6 }}
                             />
-                          </div>
+                            </div>
                           {(o.tip_cents||0) > 0 && (
                             <span style={{ fontSize:'0.78rem', color:'var(--success)', fontWeight:700 }}>
                               Total: {fmt(o.tip_cents)}
