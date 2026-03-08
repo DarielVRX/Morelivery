@@ -110,6 +110,7 @@ router.get('/pending-assignment', authenticate, authorize(['driver']), async (re
 
 router.post('/', authenticate, authorize(['customer']), validate(createOrderSchema), async (req, res, next) => {
   const { restaurantId, items, payment_method, tip_cents } = req.validatedBody;
+  console.log(`[order.create] userId=${req.user?.userId} payment_method=${payment_method} tip_cents=${tip_cents} items=${items?.length}`);
   try {
     let deliveryAddress = 'address-pending';
     try {
@@ -374,17 +375,25 @@ router.post('/:id/complaint', authenticate, authorize(['customer']), async (req,
 // PATCH /:id/tip — cliente actualiza agradecimiento (solo puede subir en historial, libre en activos)
 router.patch('/:id/tip', authenticate, authorize(['customer']), async (req, res, next) => {
   const tipCents = Number(req.body.tip_cents);
-  if (!Number.isFinite(tipCents) || tipCents < 0) return next(new AppError(400, 'Monto inválido'));
+  console.log(`[tip] PATCH /${req.params.id}/tip userId=${req.user?.userId} body=${JSON.stringify(req.body)} tipCents=${tipCents}`);
+  if (!Number.isFinite(tipCents) || tipCents < 0) {
+    console.log(`[tip] REJECTED invalid amount: tipCents=${tipCents}`);
+    return next(new AppError(400, 'Monto inválido'));
+  }
   try {
     const ord = await query('SELECT tip_cents, delivered_tip_cents, status, customer_id FROM orders WHERE id=$1', [req.params.id]);
     if (ord.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
     const o = ord.rows[0];
+    console.log(`[tip] DB current: tip_cents=${o.tip_cents} delivered_tip_cents=${o.delivered_tip_cents} status=${o.status}`);
     if (o.customer_id !== req.user.userId) return next(new AppError(403, 'Sin permiso'));
-    // En historial (delivered/cancelled) solo se puede agregar, no restar
     const isPast = ['delivered', 'cancelled'].includes(o.status);
     const minTip = isPast ? (o.delivered_tip_cents || o.tip_cents || 0) : 0;
-    if (isPast && tipCents < minTip) return next(new AppError(400, `El agradecimiento no puede ser menor a ${minTip}`));
+    if (isPast && tipCents < minTip) {
+      console.log(`[tip] REJECTED below minimum: tipCents=${tipCents} minTip=${minTip}`);
+      return next(new AppError(400, `El agradecimiento no puede ser menor a ${minTip}`));
+    }
     await query('UPDATE orders SET tip_cents=$1, updated_at=NOW() WHERE id=$2', [tipCents, req.params.id]);
+    console.log(`[tip] SUCCESS orderId=${req.params.id} new_tip_cents=${tipCents}`);
     res.json({ tip_cents: tipCents });
   } catch (e) { next(e); }
 });

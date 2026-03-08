@@ -151,16 +151,36 @@ export default function RestaurantOrders() {
   });
 
   return (
-    <div>
-      {reportMsg && <p className="flash flash-ok" style={{ marginBottom:'0.5rem' }}>{reportMsg}</p>}
-      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1rem' }}>Pedidos</h2>
-
-      <div style={{ display:'flex', gap:'0.4rem', marginBottom:'1rem' }}>
-        <span style={{ fontSize:'0.82rem', color:'var(--gray-500)', fontWeight:600 }}>
-          {tab === 'active' ? `Activos (${active.length})` : `Historial (${past.length})`}
-        </span>
+    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+      {/* ── Encabezado fijo ─────────────────────────────────────────── */}
+      <div style={{
+        flexShrink:0, background:'#fff', borderBottom:'2px solid var(--brand-light)',
+        padding:'0.65rem 1rem 0', zIndex:30,
+        boxShadow:'0 1px 4px rgba(0,0,0,0.04)'
+      }}>
+        <div style={{ fontWeight:800, fontSize:'1rem', color:'var(--brand)', letterSpacing:'-0.01em', marginBottom:'0.4rem' }}>
+          Mis pedidos
+        </div>
+        <div style={{ display:'flex', gap:0, borderTop:'1px solid var(--gray-100)' }}>
+          {[['active','Activos'],['past','Historial']].map(([val, label]) => (
+            <button key={val} onClick={() => setTab(val)}
+              style={{
+                flex:1, background:'none', border:'none', cursor:'pointer',
+                padding:'0.4rem 0.5rem', fontSize:'0.78rem', fontWeight: tab===val ? 800 : 500,
+                color: tab===val ? 'var(--brand)' : 'var(--gray-500)',
+                borderBottom: tab===val ? '2px solid var(--brand)' : '2px solid transparent',
+                marginBottom:'-1px', transition:'color 0.15s'
+              }}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
+      {/* ── Contenido scrolleable ─────────────────────────────────── */}
+      <div style={{ flex:1, overflowY:'auto', padding:'0.75rem 1rem', paddingBottom:'calc(var(--nav-h-mobile) + 2.5rem)' }}>
+
+      {reportMsg && <p className="flash flash-ok" style={{ marginBottom:'0.5rem' }}>{reportMsg}</p>}
       {msg && <p className="flash flash-error">{msg}</p>}
 
       {/* Activos */}
@@ -386,6 +406,7 @@ export default function RestaurantOrders() {
             <span>Activos</span></>
           )}
         </button>
+      </div>
       </div>
     </div>
   );

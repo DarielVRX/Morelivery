@@ -82,8 +82,13 @@ export default function SplitLayout({ homeContent, ordersContent }) {
           .split-home-col {
             flex: 1;
             min-width: 0;
-            overflow: hidden; /* DriverHome maneja su propio scroll */
+            overflow-y: auto;   /* scroll independiente */
+            overflow-x: hidden;
             position: relative;
+          }
+          /* DriverHome ocupa toda la altura sin scroll externo */
+          .split-home-col:has(.driver-map-root) {
+            overflow: hidden;
           }
           /* En desktop, el drawer y el overlay no se usan */
           .orders-drawer-wrap { display: none !important; }
