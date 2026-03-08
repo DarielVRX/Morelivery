@@ -370,7 +370,7 @@ export default function CustomerOrders() {
                           <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap' }}>
                             {[0,1000,2000,5000].map(v => (
                               <button key={v}
-                                onClick={() => { setTipDraft(d => ({...d, [order.id]:v})); saveTip(order.id, v, false, 0); }}
+                                onClick={() => setTipDraft(d => ({...d, [order.id]: v}))}
                                 style={{ padding:'0.2rem 0.45rem', cursor:'pointer',
                                   border:`1px solid ${(tipDraft[order.id]??order.tip_cents)===v?'var(--success)':'var(--gray-200)'}`,
                                   borderRadius:6, background:(tipDraft[order.id]??order.tip_cents)===v?'#f0fdf4':'#fff',
@@ -380,19 +380,25 @@ export default function CustomerOrders() {
                               </button>
                             ))}
                             <input
-                            type="text"
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            placeholder="$ otro"
-                            onBlur={e => {
-                              const val = e.target.value.replace(/\D/g, '');
-                              const cents = Math.round(Number(val||0) * 100);
-                              if (cents > 0) { setTipDraft(d => ({...d, [order.id]:cents})); saveTip(order.id, cents, false, 0); }
-                            }}
-                            style={{ width: 62, fontSize: '0.75rem', padding: '0.2rem 0.4rem', border: '1px solid var(--gray-200)', borderRadius: 6 }}
+                              type="text" inputMode="numeric" pattern="[0-9]*" placeholder="$ otro"
+                              onBlur={e => {
+                                const val = e.target.value.replace(/\D/g,'');
+                                const cents = Math.round(Number(val||0)*100);
+                                if (cents > 0) setTipDraft(d => ({...d, [order.id]: cents}));
+                                e.target.value = '';
+                              }}
+                              style={{ width:62, fontSize:'0.75rem', padding:'0.2rem 0.4rem', border:'1px solid var(--gray-200)', borderRadius:6 }}
                             />
                             </div>
                           </div>
+                          {/* Botón confirmar tip activos */}
+                          {tipDraft[order.id] !== undefined && tipDraft[order.id] !== order.tip_cents && (
+                            <button
+                              onClick={() => saveTip(order.id, tipDraft[order.id], false, 0)}
+                              style={{ marginTop:'0.3rem', padding:'0.25rem 0.9rem', background:'var(--success)', color:'#fff', border:'none', borderRadius:6, fontWeight:700, fontSize:'0.78rem', cursor:'pointer' }}>
+                              Confirmar agradecimiento
+                            </button>
+                          )}
                         {order.customer_address && (
                           <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.3rem', marginTop:'0.35rem' }}>
                             Dirección: <strong>{order.customer_address}</strong>
@@ -468,35 +474,39 @@ export default function CustomerOrders() {
                             {o.items.map(i=><li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
                           </ul>
                         )}
-                        {/* Agradecimiento — editable, mínimo = valor al momento de entregar */}
+                        {/* Agradecimiento — editable con draft, mínimo = delivered_tip_cents */}
                         {(() => {
-                          const minTip = o.delivered_tip_cents || 0;
+                          const minTip  = o.delivered_tip_cents || 0;
+                          const draft   = tipDraft[o.id] ?? o.tip_cents ?? minTip;
+                          const isDirty = draft !== o.tip_cents;
+                          const canSave = draft >= minTip;
                           return (
                             <div style={{ marginTop:'0.35rem' }}>
                               <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
                                 <span style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>Agradecimiento:</span>
                                 <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', alignItems:'center' }}>
-                                  {[0,1000,2000,5000].filter(v => v === 0 || v >= minTip).map(v => (
-                                    <button key={v}
-                                      onClick={() => saveTip(o.id, v === 0 ? minTip : v, true, minTip)}
-                                      disabled={v > 0 && v < minTip}
-                                      style={{ padding:'0.2rem 0.45rem', cursor: v > 0 && v < minTip ? 'default' : 'pointer',
-                                        border:`1px solid ${(o.tip_cents)===(v===0?minTip:v)?'var(--success)':'var(--gray-200)'}`,
-                                        borderRadius:6,
-                                        background:(o.tip_cents)===(v===0?minTip:v)?'#f0fdf4':'#fff',
-                                        color:(o.tip_cents)===(v===0?minTip:v)?'var(--success)':'var(--gray-600)',
-                                        fontSize:'0.75rem', fontWeight:(o.tip_cents)===(v===0?minTip:v)?700:400,
-                                        opacity: v > 0 && v < minTip ? 0.4 : 1 }}>
-                                      {v === 0 ? (minTip > 0 ? fmt(minTip) : '—') : fmt(v)}
-                                    </button>
-                                  ))}
+                                  {[0,1000,2000,5000].map(v => {
+                                    const cents = v === 0 ? 0 : v;
+                                    return (
+                                      <button key={v}
+                                        onClick={() => setTipDraft(d => ({...d, [o.id]: cents}))}
+                                        style={{ padding:'0.2rem 0.45rem', cursor:'pointer',
+                                          border:`1px solid ${draft===cents?'var(--success)':'var(--gray-200)'}`,
+                                          borderRadius:6,
+                                          background: draft===cents?'#f0fdf4':'#fff',
+                                          color: draft===cents?'var(--success)':'var(--gray-600)',
+                                          fontSize:'0.75rem', fontWeight: draft===cents?700:400 }}>
+                                        {v===0?'—':fmt(v)}
+                                      </button>
+                                    );
+                                  })}
                                   <input
                                     type="text" inputMode="numeric" pattern="[0-9]*"
                                     placeholder="$ otro"
                                     onBlur={e => {
                                       const val = e.target.value.replace(/\D/g,'');
                                       const cents = Math.round(Number(val||0)*100);
-                                      if (cents >= minTip) saveTip(o.id, cents, true, minTip);
+                                      if (cents > 0) setTipDraft(d => ({...d, [o.id]: cents}));
                                       e.target.value = '';
                                     }}
                                     style={{ width:62, fontSize:'0.75rem', padding:'0.2rem 0.4rem', border:'1px solid var(--gray-200)', borderRadius:6 }}
@@ -505,7 +515,20 @@ export default function CustomerOrders() {
                               </div>
                               {minTip > 0 && (
                                 <div style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.15rem' }}>
-                                  Mínimo: {fmt(minTip)}
+                                  Mínimo al entregar: {fmt(minTip)}
+                                </div>
+                              )}
+                              {isDirty && (
+                                <div style={{ marginTop:'0.3rem', display:'flex', alignItems:'center', gap:'0.5rem' }}>
+                                  <button
+                                    onClick={() => { if (canSave) saveTip(o.id, draft, true, minTip); }}
+                                    disabled={!canSave}
+                                    style={{ padding:'0.25rem 0.9rem', background: canSave?'var(--success)':'var(--gray-300)', color:'#fff', border:'none', borderRadius:6, fontWeight:700, fontSize:'0.78rem', cursor: canSave?'pointer':'default' }}>
+                                    Confirmar agradecimiento
+                                  </button>
+                                  {!canSave && (
+                                    <span style={{ fontSize:'0.72rem', color:'var(--danger)' }}>Mínimo: {fmt(minTip)}</span>
+                                  )}
                                 </div>
                               )}
                             </div>

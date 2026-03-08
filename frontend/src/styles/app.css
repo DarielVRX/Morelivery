@@ -157,6 +157,7 @@ a:hover { text-decoration: underline; }
   flex: 1;
   min-height: 0;
   height: 100%;
+  display: flex; /* asegurar que sea el flex container para las columnas */
 }
 
 /* ── Barra nav inferior móvil ──────────────────────────────────────────────── */
