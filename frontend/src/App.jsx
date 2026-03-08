@@ -4,20 +4,19 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import SplitLayout from './components/SplitLayout';
 
-import CustomerHome    from './pages/Customer/Home';
-import CustomerOrders  from './pages/Customer/Orders';
-import RestaurantPage  from './pages/Customer/RestaurantPage';
+import { lazy, Suspense } from 'react';
 
-import RestaurantMenu     from './pages/Restaurant/Menu';
-import RestaurantOrders   from './pages/Restaurant/Orders';
-import RestaurantSchedule from './pages/Restaurant/Schedule';
-
-import DriverHome     from './pages/Driver/Home';
-import DriverOrders   from './pages/Driver/Orders';
-import DriverEarnings from './pages/Driver/Earnings';
-
-import AdminDashboard from './pages/Admin/Dashboard';
-import ProfilePage    from './pages/Profile';
+const CustomerHome    = lazy(() => import('./pages/Customer/Home'));
+const CustomerOrders  = lazy(() => import('./pages/Customer/Orders'));
+const RestaurantPage  = lazy(() => import('./pages/Customer/RestaurantPage'));
+const RestaurantMenu     = lazy(() => import('./pages/Restaurant/Menu'));
+const RestaurantOrders   = lazy(() => import('./pages/Restaurant/Orders'));
+const RestaurantSchedule = lazy(() => import('./pages/Restaurant/Schedule'));
+const DriverHome     = lazy(() => import('./pages/Driver/Home'));
+const DriverOrders   = lazy(() => import('./pages/Driver/Orders'));
+const DriverEarnings = lazy(() => import('./pages/Driver/Earnings'));
+const AdminDashboard = lazy(() => import('./pages/Admin/Dashboard'));
+const ProfilePage    = lazy(() => import('./pages/Profile'));
 import { apiFetch }   from './api/client';
 
 function ProtectedRole({ role, children }) {
@@ -65,7 +64,7 @@ function AuthScreen({ mode = 'login' }) {
         body: JSON.stringify({ username, password })
       });
       login({ token: data.token, user: data.user });
-      const dest = data.user.role === 'restaurant' ? '/restaurant/pedidos' : `/${data.user.role}`;
+      const dest = `/${data.user.role}`;
       navigate(dest);
     } catch (error) {
       setMessage(error.message);
@@ -143,6 +142,7 @@ function AppRoutes() {
 
   return (
     <Layout>
+      <Suspense fallback={<div style={{padding:'2rem',textAlign:'center',color:'var(--gray-400)'}}>Cargando…</div>}>
       <Routes>
         <Route path="/"        element={<Navigate to={auth.user ? `/${auth.user.role}` : '/login'} replace />} />
         <Route path="/login"   element={<AuthScreen mode="login" />} />
@@ -185,6 +185,7 @@ function AppRoutes() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
     </Layout>
   );
 }

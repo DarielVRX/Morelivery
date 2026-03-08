@@ -225,7 +225,7 @@ export default function DriverOrders() {
         active.length === 0
           ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin pedidos activos.</p>
           : (
-            <ul style={{ listStyle:'none', padding:0 }}>
+            <ul className="orders-tab-panel" style={{ listStyle:'none', padding:0 }}>
               {active.map(o => {
                 const color = STATUS_COLOR[o.status] || '#9ca3af';
                 return (
@@ -299,7 +299,7 @@ export default function DriverOrders() {
         past.length === 0
           ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
           : (
-            <ul style={{ listStyle:'none', padding:0 }}>
+            <ul className="orders-tab-panel reverse" style={{ listStyle:'none', padding:0 }}>
               {past.slice(0, 50).map(o => {
                 const color    = STATUS_COLOR[o.status] || '#9ca3af';
                 const isHExp   = expanded === ('h_'+o.id);
@@ -349,6 +349,30 @@ export default function DriverOrders() {
             </ul>
           )
       )}
+
+      {/* ── Footer: toggle historial con slide ──────────────────── */}
+      <div style={{
+        position:'sticky', bottom:0, background:'#fff',
+        borderTop:'1px solid var(--gray-200)', padding:'0.55rem 1rem',
+        display:'flex', justifyContent:'center', zIndex:50, flexShrink:0
+      }}>
+        <button
+          onClick={() => setTab(t => t === 'active' ? 'past' : 'active')}
+          style={{
+            display:'flex', alignItems:'center', gap:'0.4rem',
+            background:'var(--brand)', color:'#fff',
+            border:'none', borderRadius:20, padding:'0.35rem 1.25rem',
+            fontWeight:700, fontSize:'0.8rem', cursor:'pointer'
+          }}>
+          {tab === 'active' ? (
+            <><span>Historial</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg></>
+          ) : (
+            <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+            <span>Activos</span></>
+          )}
+        </button>
+      </div>
     </div>
   );
 }
