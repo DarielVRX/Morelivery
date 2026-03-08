@@ -4,11 +4,8 @@ import { useEffect, useState } from 'react';
 export default function SplitLayout({ homeContent, ordersContent }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Bloquear scroll del body en mobile cuando panel abierto
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const isMobile = window.innerWidth < 768;
-    if (isMobile && mobileOpen) {
+    if (mobileOpen) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = '';
@@ -19,19 +16,17 @@ export default function SplitLayout({ homeContent, ordersContent }) {
   return (
     <div className="split-root">
 
-      {/* ── Desktop: dos columnas ────────────────────────────────────── */}
-      {/* Orders — 33% izquierda */}
+      {/* ── Desktop: columna órdenes sticky ──────────────────────────── */}
       <aside className="split-orders-col">
         {ordersContent}
       </aside>
 
-      {/* Home — 67% derecha */}
+      {/* ── Desktop: columna principal ────────────────────────────────── */}
       <section className="split-home-col">
         {homeContent}
       </section>
 
-      {/* ── Mobile: trigger fijo + drawer ────────────────────────────── */}
-      {/* Trigger FUERA del drawer para que siempre sea visible */}
+      {/* ── Mobile: botón tab fijo ────────────────────────────────────── */}
       <button
         className={`orders-tab-trigger${mobileOpen ? ' open' : ''}`}
         onClick={() => setMobileOpen(v => !v)}
@@ -43,67 +38,80 @@ export default function SplitLayout({ homeContent, ordersContent }) {
         </svg>
       </button>
 
+      {/* ── Mobile: drawer ────────────────────────────────────────────── */}
       <div className={`orders-drawer-wrap${mobileOpen ? ' open' : ''}`}>
         <div className="orders-drawer-inner">
           {ordersContent}
         </div>
       </div>
 
-      {/* Overlay oscuro detrás del drawer */}
+      {/* Overlay */}
       <div
         className={`orders-overlay${mobileOpen ? ' visible' : ''}`}
         onClick={() => setMobileOpen(false)}
       />
 
       <style>{`
-        /* ── Contenedor raíz ────────────────────────────────── */
+        /* ── Raíz ────────────────────────────────────────────── */
         .split-root {
-          width: 100%;
           display: flex;
+          width: 100%;
           flex: 1;
-          height: 100%;
           min-height: 0;
           position: relative;
-          overflow: hidden;
         }
 
-        /* ── Desktop (≥768px) ───────────────────────────────── */
+        /* ════════════ Desktop ≥768px ════════════════════════ */
         @media (min-width: 768px) {
+
+          /* Columna Orders: sticky a la izquierda, alto total, scrollea sola */
           .split-orders-col {
+            position: sticky;
+            top: 0;
+            align-self: flex-start;
             width: 33%;
             min-width: 260px;
             max-width: 380px;
+            height: 100vh;            /* toda la pantalla */
             flex-shrink: 0;
-            height: 100%;
-            border-right: 1px solid var(--gray-200);
             display: flex;
             flex-direction: column;
-            overflow: hidden;
-            position: relative;
+            border-right: 1px solid var(--gray-200);
+            background: #fff;
+            overflow: hidden;         /* el Orders interno maneja su scroll */
           }
+
+          /* Columna Home: scrollea independientemente */
           .split-home-col {
             flex: 1;
             min-width: 0;
-            height: 100%;
+            min-height: 100vh;        /* mínimo viewport */
             overflow-y: auto;
             overflow-x: hidden;
-            position: relative;
           }
-          /* DriverHome ocupa toda la altura sin scroll externo */
+
+          /* DriverHome necesita altura fija sin scroll externo */
           .split-home-col:has(.driver-map-root) {
+            height: 100vh;
             overflow: hidden;
           }
-          /* En desktop, el drawer, overlay y trigger no se usan */
-          .orders-drawer-wrap  { display: none !important; }
-          .orders-overlay      { display: none !important; }
-          .orders-tab-trigger  { display: none !important; }
+
+          /* Ocultar elementos mobile */
+          .orders-drawer-wrap { display: none !important; }
+          .orders-overlay     { display: none !important; }
+          .orders-tab-trigger { display: none !important; }
         }
 
-        /* ── Mobile (<768px) ────────────────────────────────── */
+        /* ════════════ Mobile <768px ═════════════════════════ */
         @media (max-width: 767px) {
-          /* Home ocupa todo */
+
           .split-orders-col { display: none; }
-          .split-home-col   { flex: 1; min-width: 0; overflow: hidden; }
+
+          .split-home-col {
+            flex: 1;
+            min-width: 0;
+            overflow-x: hidden;
+          }
 
           /* Overlay */
           .orders-overlay {
@@ -116,13 +124,13 @@ export default function SplitLayout({ homeContent, ordersContent }) {
           }
           .orders-overlay.visible { display: block; }
 
-          /* Drawer wrapper — se traslada junto al trigger */
+          /* Drawer */
           .orders-drawer-wrap {
             position: fixed;
             top: 0;
             right: 0;
             bottom: 0;
-            width: 82vw;
+            width: 85vw;
             max-width: 360px;
             z-index: 320;
             transform: translateX(100%);
@@ -132,7 +140,7 @@ export default function SplitLayout({ homeContent, ordersContent }) {
             transform: translateX(0);
           }
 
-          /* Trigger: posición fija, independiente del drawer */
+          /* Botón tab: media luna fija en el borde derecho */
           .orders-tab-trigger {
             position: fixed;
             right: 0;
@@ -148,27 +156,28 @@ export default function SplitLayout({ homeContent, ordersContent }) {
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: -2px 0 8px rgba(0,0,0,0.15);
-            padding: 0;
+            box-shadow: -2px 0 8px rgba(0,0,0,0.18);
             z-index: 325;
-            transition: background 0.2s, right 0.28s cubic-bezier(0.4,0,0.2,1);
+            padding: 0;
+            transition: background 0.2s,
+                        right 0.28s cubic-bezier(0.4,0,0.2,1),
+                        transform 0.28s cubic-bezier(0.4,0,0.2,1);
           }
+          /* Cuando el drawer está abierto, el botón se mueve con él */
           .orders-tab-trigger.open {
-            right: min(82vw, 360px);
+            right: min(85vw, 360px);
+            transform: translateY(-50%);
             background: var(--gray-500);
           }
 
-          /* Contenido del drawer */
+          /* Interior del drawer */
           .orders-drawer-inner {
-            flex: 1;
+            height: 100%;
             background: #fff;
-            overflow-y: auto;
-            padding: 0.75rem 1rem;
-            padding-top: calc(56px + 0.75rem); /* header height */
-            padding-bottom: calc(var(--nav-h-mobile) + 0.5rem);
-            box-shadow: -4px 0 24px rgba(0,0,0,0.12);
-            scrollbar-width: thin;
-            scrollbar-color: var(--gray-200) transparent;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;          /* el Orders interno maneja su scroll */
+            box-shadow: -4px 0 24px rgba(0,0,0,0.14);
           }
         }
       `}</style>

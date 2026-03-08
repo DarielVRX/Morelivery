@@ -256,13 +256,13 @@ export default function DriverHome() {
     <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
 
       {/* ── Encabezado FIJO ─────────────────────────────────────────── */}
-      <div style={{ flexShrink:0, background:'#fff', borderBottom:'1px solid var(--gray-200)', padding:'0.65rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, zIndex:10 }}>
+      <div style={{ flexShrink:0, background:'linear-gradient(135deg,var(--brand) 0%,#7c1d35 100%)', padding:'0.65rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, zIndex:10 }}>
         <div>
-          <div style={{ fontWeight:700, fontSize:'0.875rem' }}>
+          <div style={{ fontWeight:700, fontSize:'0.875rem', color:'#fff' }}>
             {availability ? '● Disponible' : '○ No disponible'}
           </div>
-          {myPosition && <div style={{ fontSize:'0.7rem', color:'var(--gray-600)' }}>GPS · ±{myPosition.accuracy}m</div>}
-          {gpsError   && <div style={{ fontSize:'0.7rem', color:'var(--danger)', maxWidth:200 }}>{gpsError}</div>}
+          {myPosition && <div style={{ fontSize:'0.7rem', color:'rgba(255,255,255,0.8)' }}>GPS · ±{myPosition.accuracy}m</div>}
+          {gpsError   && <div style={{ fontSize:'0.7rem', color:'#ffb3b3', maxWidth:200 }}>{gpsError}</div>}
         </div>
         <button onClick={toggleAvailability} className={availability ? 'btn-primary btn-sm' : 'btn-sm'}>
           {availability ? 'Disponible' : 'No disponible'}
