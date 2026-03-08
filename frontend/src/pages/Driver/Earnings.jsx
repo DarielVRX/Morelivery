@@ -37,7 +37,11 @@ export default function DriverEarnings() {
 
   return (
     <div>
-      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1rem' }}>Ganancias</h2>
+      {/* ── Encabezado Ganancias ────────────────────────────────────────── */}
+      <div style={{ margin:'0 -1rem 1rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg,#16a34a 0%,#14532d 100%)', color:'#fff' }}>
+        <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>💰 Ganancias</div>
+        <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Historial de entregas y comisiones</div>
+      </div>
 
       {/* Resumen */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.6rem', marginBottom:'1.25rem' }}>

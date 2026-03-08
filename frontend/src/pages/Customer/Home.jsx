@@ -164,7 +164,11 @@ export default function CustomerHome() {
 
       {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
 
-      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1rem' }}>Tiendas</h2>
+      {/* ── Encabezado Tiendas ─────────────────────────────────────────── */}
+      <div style={{ margin:'0 -1rem 1rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg,var(--brand) 0%,var(--brand-dark,#b5254e) 100%)', color:'#fff' }}>
+        <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>🛍 Tiendas</div>
+        <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Elige dónde quieres pedir</div>
+      </div>
 
       {restaurants.length===0 ? (
         <p style={{ color:'var(--gray-600)' }}>No hay restaurantes disponibles.</p>

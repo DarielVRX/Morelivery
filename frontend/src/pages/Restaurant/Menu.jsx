@@ -147,7 +147,11 @@ export default function RestaurantMenu() {
 
   return (
     <div style={{ backgroundColor: '#fff9f8', minHeight:'100vh', padding:'1rem' }}>
-      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem', color:'#8a5e5e' }}>Gestión de menú</h2>
+      {/* ── Encabezado Gestión de menú ─────────────────────────────────── */}
+      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg,#c0546a 0%,#8a3a4e 100%)', color:'#fff' }}>
+        <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>📋 Gestión de menú</div>
+        <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Productos, precios e imagen de tu tienda</div>
+      </div>
 
       {/* ── Foto de perfil de la tienda ── */}
       <div style={{ display:'flex', alignItems:'center', gap:'0.875rem', marginBottom:'1.25rem',
