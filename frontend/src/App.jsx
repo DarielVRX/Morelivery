@@ -83,7 +83,7 @@ function AuthScreen({ mode = 'login' }) {
           <label>Tipo de cuenta
             <select value={role} onChange={e => setRole(e.target.value)}>
               <option value="customer">Cliente</option>
-              <option value="restaurant">Restaurante</option>
+              <option value="restaurant">Tienda</option>
               <option value="driver">Conductor</option>
             </select>
           </label>
@@ -92,7 +92,7 @@ function AuthScreen({ mode = 'login' }) {
 
       {!isLogin && role === 'restaurant' && (
         <div className="row">
-          <label>Nombre del restaurante<input placeholder="Ej: Tacos El Güero" value={displayName} onChange={e => setDisplayName(e.target.value)} /></label>
+          <label>Nombre de la tienda<input placeholder="Ej: Tacos El Güero" value={displayName} onChange={e => setDisplayName(e.target.value)} /></label>
         </div>
       )}
       {!isLogin && ['customer','restaurant'].includes(role) && (

@@ -52,9 +52,9 @@ export default function RestaurantPage() {
           apiFetch(`/restaurants/${id}/menu`)
         ]);
         const found = (listData.restaurants || []).find(r => r.id === id);
-        setRestaurant(found || { id, name: 'Restaurante', is_open: true });
+        setRestaurant(found || { id, name: 'Tienda', is_open: true });
         setMenu((menuData.menu || []).filter(i => i.is_available !== false));
-      } catch (e) { setMsg('Error cargando el restaurante'); }
+      } catch (e) { setMsg('Error cargando la tienda'); }
       finally { setLoading(false); }
     }
     load();
@@ -152,7 +152,7 @@ export default function RestaurantPage() {
         </span>
         {isClosed && (
           <p style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginTop:'0.5rem' }}>
-            Este restaurante está cerrado. Puedes explorar el menú pero los pedidos están deshabilitados.
+            Esta tienda está cerrada. Puedes explorar el menú pero los pedidos están deshabilitados.
           </p>
         )}
         </div>{/* fin contenido */}
@@ -216,17 +216,21 @@ export default function RestaurantPage() {
           </div>
           {/* Agradecimiento */}
           <p style={{ fontSize:'0.75rem', fontWeight:700, color:'var(--gray-500)', marginBottom:'0.35rem', textTransform:'uppercase', letterSpacing:'0.04em' }}>Agradecimiento al conductor</p>
-          <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', marginBottom:'0.75rem' }}>
-            {[0,1000,2000,5000].map(v => (
-              <button key={v} onClick={() => setTipCents(v)}
-                style={{ padding:'0.25rem 0.5rem', cursor:'pointer',
-                  border:`1px solid ${tipCents===v?'var(--success)':'var(--gray-200)'}`,
-                  borderRadius:6, background: tipCents===v?'#f0fdf4':'#fff',
-                  color: tipCents===v?'var(--success)':'var(--gray-600)',
-                  fontSize:'0.78rem', fontWeight: tipCents===v?700:400 }}>
-                {v===0?'—':fmt(v)}
-              </button>
-            ))}
+          <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', marginBottom:'0.75rem', alignItems:'center' }}>
+            {[{pct:0,label:'—'},{pct:5,label:'5%'},{pct:10,label:'10%'},{pct:20,label:'20%'}].map(({pct,label}) => {
+              const v = pct===0 ? 0 : Math.round(subtotal * pct / 100);
+              const sel = tipCents === v;
+              return (
+                <button key={pct} onClick={() => setTipCents(v)}
+                  style={{ padding:'0.25rem 0.5rem', cursor:'pointer',
+                    border:`1px solid ${sel?'var(--success)':'var(--gray-200)'}`,
+                    borderRadius:6, background: sel?'#f0fdf4':'#fff',
+                    color: sel?'var(--success)':'var(--gray-600)',
+                    fontSize:'0.78rem', fontWeight: sel?700:400 }}>
+                  {label}{pct>0&&subtotal>0?` (${fmt(v)})`:''}
+                </button>
+              );
+            })}
             <input
               type="text" inputMode="numeric" pattern="[0-9]*" placeholder="$ otro"
               onBlur={e => {

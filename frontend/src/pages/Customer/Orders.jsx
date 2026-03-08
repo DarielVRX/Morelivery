@@ -368,17 +368,26 @@ export default function CustomerOrders() {
                         <div style={{ marginTop:'0.4rem', display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
                           <span style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>Agradecimiento:</span>
                           <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap' }}>
-                            {[0,1000,2000,5000].map(v => (
-                              <button key={v}
-                                onClick={() => setTipDraft(d => ({...d, [order.id]: v}))}
-                                style={{ padding:'0.2rem 0.45rem', cursor:'pointer',
-                                  border:`1px solid ${(tipDraft[order.id]??order.tip_cents)===v?'var(--success)':'var(--gray-200)'}`,
-                                  borderRadius:6, background:(tipDraft[order.id]??order.tip_cents)===v?'#f0fdf4':'#fff',
-                                  color:(tipDraft[order.id]??order.tip_cents)===v?'var(--success)':'var(--gray-600)',
-                                  fontSize:'0.75rem', fontWeight:(tipDraft[order.id]??order.tip_cents)===v?700:400 }}>
-                                {v===0?'—':fmt(v)}
-                              </button>
-                            ))}
+                            {(() => {
+                              const sub = order.total_cents || 0;
+                              const pcts = [{pct:0,label:'—'},{pct:5,label:'5%'},{pct:10,label:'10%'},{pct:20,label:'20%'}];
+                              return pcts.map(({pct,label}) => {
+                                const v = pct===0 ? 0 : Math.round(sub * pct / 100);
+                                const cur = tipDraft[order.id] ?? order.tip_cents;
+                                const sel = cur === v;
+                                return (
+                                  <button key={pct}
+                                    onClick={() => setTipDraft(d => ({...d, [order.id]: v}))}
+                                    style={{ padding:'0.2rem 0.5rem', cursor:'pointer',
+                                      border:`1px solid ${sel?'var(--success)':'var(--gray-200)'}`,
+                                      borderRadius:6, background:sel?'#f0fdf4':'#fff',
+                                      color:sel?'var(--success)':'var(--gray-600)',
+                                      fontSize:'0.75rem', fontWeight:sel?700:400 }}>
+                                    {label}{pct>0&&sub>0?` (${fmt(v)})`:''}
+                                  </button>
+                                );
+                              });
+                            })()}
                             <input
                               type="text" inputMode="numeric" pattern="[0-9]*" placeholder="$ otro"
                               onBlur={e => {
@@ -485,18 +494,20 @@ export default function CustomerOrders() {
                               <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
                                 <span style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>Agradecimiento:</span>
                                 <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', alignItems:'center' }}>
-                                  {[0,1000,2000,5000].map(v => {
-                                    const cents = v === 0 ? 0 : v;
+                                  {[{pct:0,label:'—'},{pct:5,label:'5%'},{pct:10,label:'10%'},{pct:20,label:'20%'}].map(({pct,label}) => {
+                                    const sub = o.total_cents || 0;
+                                    const cents = pct===0 ? 0 : Math.round(sub * pct / 100);
+                                    const sel = draft === cents;
                                     return (
-                                      <button key={v}
+                                      <button key={pct}
                                         onClick={() => setTipDraft(d => ({...d, [o.id]: cents}))}
-                                        style={{ padding:'0.2rem 0.45rem', cursor:'pointer',
-                                          border:`1px solid ${draft===cents?'var(--success)':'var(--gray-200)'}`,
+                                        style={{ padding:'0.2rem 0.5rem', cursor:'pointer',
+                                          border:`1px solid ${sel?'var(--success)':'var(--gray-200)'}`,
                                           borderRadius:6,
-                                          background: draft===cents?'#f0fdf4':'#fff',
-                                          color: draft===cents?'var(--success)':'var(--gray-600)',
-                                          fontSize:'0.75rem', fontWeight: draft===cents?700:400 }}>
-                                        {v===0?'—':fmt(v)}
+                                          background: sel?'#f0fdf4':'#fff',
+                                          color: sel?'var(--success)':'var(--gray-600)',
+                                          fontSize:'0.75rem', fontWeight: sel?700:400 }}>
+                                        {label}{pct>0&&sub>0?` (${fmt(cents)})`:''}
                                       </button>
                                     );
                                   })}

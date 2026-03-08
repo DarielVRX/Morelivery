@@ -85,7 +85,7 @@ export default function CustomerHome() {
     } catch (e) { setMsg(e.message); }
   }
 
-  // Menú completo del restaurante para cada sugerencia (para que el cliente pueda editar)
+  // Menú completo de la tienda para cada sugerencia (para que el cliente pueda editar)
   const [restaurantMenus, setRestaurantMenus] = useState({});
   async function loadMenu(restaurantId) {
     if (restaurantMenus[restaurantId]) return;
@@ -123,7 +123,7 @@ export default function CustomerHome() {
           {suggFor===order.id ? (
             <>
               <p style={{ fontSize:'0.75rem', color:'var(--gray-500)', marginBottom:'0.4rem' }}>
-                Ajusta las cantidades o acepta la propuesta del restaurante:
+                Ajusta las cantidades o acepta la propuesta de la tienda:
               </p>
               <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginBottom:'0.65rem' }}>
                 {(restaurantMenus[order.restaurant_id] || order.suggestion_items || []).map(item => {
@@ -164,7 +164,7 @@ export default function CustomerHome() {
 
       {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
 
-      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1rem' }}>Restaurantes</h2>
+      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1rem' }}>Tiendas</h2>
 
       {restaurants.length===0 ? (
         <p style={{ color:'var(--gray-600)' }}>No hay restaurantes disponibles.</p>
@@ -174,7 +174,7 @@ export default function CustomerHome() {
             <li key={r.id} onClick={()=>navigate(`/restaurant/${r.id}`)}
               style={{
                 display:'flex', justifyContent:'space-between', alignItems:'center',
-                gap:'0.75rem', padding:'0.875rem 1rem',
+                gap:'0.75rem', padding:'0.75rem 1rem',
                 border:'1px solid var(--gray-200)', borderRadius:'var(--radius)',
                 marginBottom:'0.5rem', background:'#fff', cursor:'pointer',
                 opacity: r.is_open ? 1 : 0.7, transition:'box-shadow 0.15s',
@@ -182,6 +182,14 @@ export default function CustomerHome() {
               onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 10px rgba(0,0,0,0.07)'}
               onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}
             >
+              {/* Foto de perfil de la tienda */}
+              {r.profile_photo
+                ? <img src={r.profile_photo} alt={r.name}
+                    style={{ width:42, height:42, borderRadius:'50%', objectFit:'cover', border:'1px solid var(--gray-200)', flexShrink:0 }} />
+                : <div style={{ width:42, height:42, borderRadius:'50%', background:'var(--gray-100)', border:'1px solid var(--gray-200)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="1.5"><circle cx="12" cy="12" r="9"/><path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/><circle cx="12" cy="10" r="2"/></svg>
+                  </div>
+              }
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ fontWeight:700, fontSize:'0.975rem' }}>{r.name}</div>
                 {r.address && (
