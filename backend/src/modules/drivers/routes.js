@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
-import { offerOrdersToDriver, expireTimedOutOffers, acceptOffer, rejectOffer, releaseOrder } from '../orders/assignment.js';
+import { offerOrdersToDriver, expireTimedOutOffers, acceptOffer, rejectOffer, releaseOrder } from '../orders/assignment/index.js';
 import { sseHub } from '../events/hub.js';
 import { AppError } from '../../utils/errors.js';
 

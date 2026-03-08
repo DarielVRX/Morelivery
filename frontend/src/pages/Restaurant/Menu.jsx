@@ -165,12 +165,9 @@ export default function RestaurantMenu() {
               </div>
           }
           <button onClick={() => { setEditingPP(e => !e); ppClear(); }}
-            style={{ position:'absolute', bottom:-4, right:-4, width:22, height:22, borderRadius:'50%',
-              background:'#e3aaaa', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5">
-              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
-              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
-            </svg>
+            style={{ position:'absolute', bottom:-4, right:-4, width:24, height:24, borderRadius:'50%',
+              background:'var(--brand)', border:'2px solid #fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:0 }}>
+            <span style={{ color:'#fff', fontSize:'1rem', lineHeight:1, fontWeight:300, marginTop:'-1px' }}>+</span>
           </button>
         </div>
         <div>

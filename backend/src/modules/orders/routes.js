@@ -11,7 +11,7 @@ import { logEvent } from '../../utils/logger.js';
 import { validate } from '../../middlewares/validate.js';
 import { createOrderSchema, suggestionResponseSchema, suggestionSchema, updateOrderStatusSchema } from './schemas.js';
 import { AppError } from '../../utils/errors.js';
-import { offerNextDrivers, expireTimedOutOffers } from './assignment.js';
+import { offerNextDrivers, expireTimedOutOffers } from './assignment/index.js';
 import { sseHub } from '../events/hub.js';
 
 const router = Router();

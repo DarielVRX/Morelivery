@@ -61,8 +61,10 @@ export default function SplitLayout({ homeContent, ordersContent }) {
           width: 100%;
           display: flex;
           flex: 1;
+          height: 100%;
           min-height: 0;
           position: relative;
+          overflow: hidden;
         }
 
         /* ── Desktop (≥768px) ───────────────────────────────── */
@@ -91,9 +93,10 @@ export default function SplitLayout({ homeContent, ordersContent }) {
           .split-home-col:has(.driver-map-root) {
             overflow: hidden;
           }
-          /* En desktop, el drawer y el overlay no se usan */
-          .orders-drawer-wrap { display: none !important; }
-          .orders-overlay     { display: none !important; }
+          /* En desktop, el drawer, overlay y trigger no se usan */
+          .orders-drawer-wrap  { display: none !important; }
+          .orders-overlay      { display: none !important; }
+          .orders-tab-trigger  { display: none !important; }
         }
 
         /* ── Mobile (<768px) ────────────────────────────────── */

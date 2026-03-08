@@ -3,7 +3,7 @@ import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../api/client';
 
-const ROLE_LABELS = { customer:'Cliente', restaurant:'Restaurante', driver:'Conductor', admin:'Administrador' };
+const ROLE_LABELS = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
 
 function IconHome()     { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>; }
 function IconOrders()   { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M7 9h10M7 13h8M7 17h5"/></svg>; }
@@ -41,7 +41,7 @@ export default function Layout({ children }) {
 
   const role  = auth.user?.role;
   const items = getNavItems(role);
-  const displayName = auth.user?.display_name || auth.user?.username || '';
+  const displayName = auth.user?.alias || auth.user?.full_name || auth.user?.username || '';
 
   const shouldAskAddress = Boolean(
     auth.user &&
