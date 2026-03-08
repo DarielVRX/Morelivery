@@ -30,21 +30,20 @@ export default function SplitLayout({ homeContent, ordersContent }) {
         {homeContent}
       </section>
 
-      {/* ── Mobile: tab trigger + drawer ───────────────────────────── */}
-      {/* Tab trigger: medio círculo en el borde del drawer, se mueve con él */}
+      {/* ── Mobile: trigger fijo + drawer ────────────────────────────── */}
+      {/* Trigger FUERA del drawer para que siempre sea visible */}
+      <button
+        className={`orders-tab-trigger${mobileOpen ? ' open' : ''}`}
+        onClick={() => setMobileOpen(v => !v)}
+        aria-label={mobileOpen ? 'Cerrar pedidos' : 'Ver pedidos'}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points={mobileOpen ? '15 18 9 12 15 6' : '9 18 15 12 9 6'}/>
+        </svg>
+      </button>
+
       <div className={`orders-drawer-wrap${mobileOpen ? ' open' : ''}`}>
-        {/* El trigger está DENTRO del wrapper para moverse junto al drawer */}
-        <button
-          className="orders-tab-trigger"
-          onClick={() => setMobileOpen(v => !v)}
-          aria-label={mobileOpen ? 'Cerrar pedidos' : 'Ver pedidos'}
-        >
-          {/* Flecha apunta hacia afuera (izquierda cerrado, derecha abierto) */}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points={mobileOpen ? '15 18 9 12 15 6' : '9 18 15 12 9 6'}/>
-          </svg>
-        </button>
         <div className="orders-drawer-inner">
           {ordersContent}
         </div>
@@ -73,6 +72,7 @@ export default function SplitLayout({ homeContent, ordersContent }) {
             min-width: 260px;
             max-width: 380px;
             flex-shrink: 0;
+            height: 100%;
             border-right: 1px solid var(--gray-200);
             display: flex;
             flex-direction: column;
@@ -82,7 +82,8 @@ export default function SplitLayout({ homeContent, ordersContent }) {
           .split-home-col {
             flex: 1;
             min-width: 0;
-            overflow-y: auto;   /* scroll independiente */
+            height: 100%;
+            overflow-y: auto;
             overflow-x: hidden;
             position: relative;
           }
@@ -123,16 +124,15 @@ export default function SplitLayout({ homeContent, ordersContent }) {
             z-index: 320;
             transform: translateX(100%);
             transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-            display: flex;
           }
           .orders-drawer-wrap.open {
             transform: translateX(0);
           }
 
-          /* Trigger: medio círculo pegado al borde izquierdo del drawer */
+          /* Trigger: posición fija, independiente del drawer */
           .orders-tab-trigger {
-            position: absolute;
-            left: -28px;   /* sobresale a la izquierda del drawer */
+            position: fixed;
+            right: 0;
             top: 50%;
             transform: translateY(-50%);
             width: 28px;
@@ -147,10 +147,11 @@ export default function SplitLayout({ homeContent, ordersContent }) {
             justify-content: center;
             box-shadow: -2px 0 8px rgba(0,0,0,0.15);
             padding: 0;
-            flex-shrink: 0;
-            transition: background 0.2s;
+            z-index: 325;
+            transition: background 0.2s, right 0.28s cubic-bezier(0.4,0,0.2,1);
           }
-          .orders-drawer-wrap.open .orders-tab-trigger {
+          .orders-tab-trigger.open {
+            right: min(82vw, 360px);
             background: var(--gray-500);
           }
 

@@ -100,7 +100,7 @@ export default function RestaurantPage() {
 
     setOrdering(true);
     try {
-      await apiFetch('/orders', { method:'POST', body: JSON.stringify({ restaurantId: id, items, paymentMethod: paymentMethod, tipCents: tipCents }) }, auth.token);
+      await apiFetch('/orders', { method:'POST', body: JSON.stringify({ restaurantId: id, items, payment_method: paymentMethod, tip_cents: tipCents }) }, auth.token);
       setMsg('');
       setSelectedItems({});
       setTimeout(() => navigate('/customer/pedidos'), 800);
