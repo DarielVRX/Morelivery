@@ -66,35 +66,34 @@ export default function SplitLayout({ homeContent, ordersContent }) {
         /* ════════════ Desktop ≥768px ════════════════════════ */
         @media (min-width: 768px) {
 
-          /* Columna Orders: sticky a la izquierda, alto total, scrollea sola */
+          /* Columna Orders: fija, completamente independiente del scroll de home */
           .split-orders-col {
-            position: sticky;
-            top: 0;
-            align-self: flex-start;
-            width: 33%;
+            position: fixed;
+            top: var(--header-h, 56px);
+            bottom: 0;
+            left: 0;
+            width: min(33%, 380px);
             min-width: 260px;
-            max-width: 380px;
-            height: 100vh;            /* toda la pantalla */
-            flex-shrink: 0;
             display: flex;
             flex-direction: column;
             border-right: 1px solid var(--gray-200);
             background: #fff;
-            overflow: hidden;         /* el Orders interno maneja su scroll */
+            overflow: hidden;
+            z-index: 10;
           }
 
-          /* Columna Home: scrollea independientemente */
+          /* Columna Home: empieza después de la columna fixed */
           .split-home-col {
-            flex: 1;
+            margin-left: min(33%, 380px);
             min-width: 0;
-            min-height: 100vh;        /* mínimo viewport */
+            min-height: 100%;
             overflow-y: auto;
             overflow-x: hidden;
           }
 
-          /* DriverHome necesita altura fija sin scroll externo */
+          /* DriverHome ocupa toda la columna home sin scroll externo */
           .split-home-col:has(.driver-map-root) {
-            height: 100vh;
+            height: 100%;
             overflow: hidden;
           }
 

@@ -91,6 +91,13 @@ export default function DriverOrders() {
 
   const active = useMemo(() => orders.filter(o => !['delivered','cancelled'].includes(o.status)), [orders]);
   const past   = useMemo(() => orders.filter(o =>  ['delivered','cancelled'].includes(o.status)), [orders]);
+  // Mismo criterio que DriverHome: pedido activo con accepted_at más antiguo
+  const activeOrderId = useMemo(() => {
+    if (active.length === 0) return null;
+    return [...active].sort((a,b) =>
+      new Date(a.accepted_at||a.created_at) - new Date(b.accepted_at||b.created_at)
+    )[0]?.id ?? null;
+  }, [active]);
 
   // Pedidos sin ofertar: excluir los que ya son activos de este driver
   const activeIds = useMemo(() => new Set(active.map(o => o.id)), [active]);
@@ -183,43 +190,39 @@ export default function DriverOrders() {
               const grandTotal = (o.total_cents||0)+(o.service_fee_cents||0)+(o.delivery_fee_cents||0);
               const isUExp = expanded === ('u_'+o.id);
               return (
-                <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.5rem', padding:0, overflow:'hidden' }}>
-                  <div onClick={() => setExpanded(isUExp ? null : 'u_'+o.id)}
-                    style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.65rem 0.75rem', cursor:'pointer', gap:'0.5rem' }}>
-                    <div>
-                      <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15`, fontSize:'0.72rem', marginRight:'0.4rem' }}>
-                        {STATUS_LABELS[o.status]}
-                      </span>
-                      <span style={{ fontWeight:600, fontSize:'0.875rem' }}>{o.restaurant_name}</span>
-                    </div>
-                    <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
-                      <span style={{ fontWeight:700, fontSize:'0.875rem' }}>{fmt(grandTotal)}</span>
-                      <span style={{ color:'var(--gray-400)', fontSize:'0.8rem' }}>{isUExp?'▲':'▼'}</span>
-                    </div>
+                <li key={o.id} className="card" style={{ borderLeft:`3px solid var(--brand)`,
+                  marginBottom:'0.5rem', padding:'0.6rem 0.75rem 0.75rem', overflow:'hidden' }}>
+                  {/* Vista igual que oferta en home */}
+                  <div style={{ fontSize:'0.7rem', fontWeight:800, textTransform:'uppercase',
+                    letterSpacing:'0.5px', color:'var(--brand)', marginBottom:'0.25rem' }}>
+                    Pedido disponible
                   </div>
-                  {isUExp && (
-                    <div style={{ padding:'0 0.75rem 0.65rem', borderTop:`1px solid ${color}22` }}>
-                      {o.restaurant_address && (
-                        <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.3rem' }}>
-                          {o.restaurant_address}
-                        </div>
-                      )}
-                      {o.payment_method && (
-                        <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.3rem' }}>
-                          Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[o.payment_method]||o.payment_method}</strong>
-                        </div>
-                      )}
-                      <FeeBreakdown order={o} />
-                      <button
-                        className="btn-sm btn-primary"
-                        disabled={actionLoading === o.id}
-                        onClick={() => acceptDirectly(o.id)}
-                        style={{ fontSize:'0.78rem', marginTop:'0.5rem' }}
-                      >
-                        {actionLoading === o.id ? 'Aceptando…' : 'Aceptar pedido'}
-                      </button>
-                    </div>
-                  )}
+                  <div style={{ fontSize:'0.82rem', color:'var(--gray-700)', marginBottom:'0.3rem' }}>
+                    {o.restaurant_address && (
+                      <div><span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Tienda: </span>
+                        <strong>{o.restaurant_address}</strong></div>
+                    )}
+                    {(o.customer_address||o.delivery_address) && (
+                      <div><span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Cliente: </span>
+                        <strong>{o.customer_address||o.delivery_address}</strong></div>
+                    )}
+                  </div>
+                  {(() => {
+                    const earn = (o.delivery_fee_cents||0)+Math.round((o.service_fee_cents||0)*0.5)+(o.tip_cents||0);
+                    return earn > 0 ? (
+                      <div style={{ fontSize:'0.85rem', fontWeight:800, color:'var(--success)', marginBottom:'0.3rem' }}>
+                        Tu ganancia: {fmt(earn)}
+                      </div>
+                    ) : null;
+                  })()}
+                  <button
+                    className="btn-primary btn-sm"
+                    style={{ width:'100%' }}
+                    disabled={actionLoading === o.id}
+                    onClick={() => acceptDirectly(o.id)}
+                  >
+                    {actionLoading === o.id ? 'Aceptando…' : 'Aceptar pedido'}
+                  </button>
                 </li>
               );
             })}
@@ -236,66 +239,109 @@ export default function DriverOrders() {
           : (
             <ul className="orders-tab-panel" style={{ listStyle:'none', padding:0 }}>
               {active.map(o => {
-                const color = STATUS_COLOR[o.status] || '#9ca3af';
+                const color      = STATUS_COLOR[o.status] || '#9ca3af';
+                const isActive   = o.id === activeOrderId;
+                const isOnTheWay = o.status === 'on_the_way';
+                const isCash     = (o.payment_method||'cash') === 'cash';
+                const grandTotal = (o.total_cents||0)+(o.service_fee_cents||0)+(o.delivery_fee_cents||0)+(o.tip_cents||0);
+                const DRIVER_ST  = { assigned:'Asignado', on_the_way:'En camino', preparing:'En tienda', ready:'Listo retiro' };
                 return (
-                  <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden' }}>
+                  <li key={o.id} className="card" style={{ borderLeft:`3px solid ${isActive ? 'var(--success)' : color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden', opacity: isActive ? 1 : 0.6 }}>
+                    {/* Cabecera compacta */}
                     <div onClick={() => setExpanded(expanded===o.id ? null : o.id)}
-                      style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.75rem', cursor:'pointer', gap:'0.5rem' }}>
-                      <div>
-                        <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15`, marginRight:'0.5rem' }}>
-                          {STATUS_LABELS[o.status]}
-                        </span>
-                        <span style={{ fontWeight:600, fontSize:'0.875rem' }}>{o.restaurant_name}</span>
+                      style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                        padding:'0.6rem 0.75rem', cursor:'pointer', gap:'0.5rem' }}>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:'0.35rem', flexWrap:'wrap' }}>
+                          <span style={{ fontSize:'0.7rem', fontWeight:800, textTransform:'uppercase',
+                            color: isActive ? 'var(--success)' : color }}>
+                            {DRIVER_ST[o.status] || STATUS_LABELS[o.status]}
+                          </span>
+                          {!isActive && <span style={{ fontSize:'0.68rem', color:'var(--gray-400)' }}>no activo en home</span>}
+                        </div>
+                        {!isOnTheWay
+                          ? <div style={{ fontSize:'0.8rem', fontWeight:600 }}>{o.restaurant_name}</div>
+                          : <div style={{ fontSize:'0.8rem', fontWeight:600 }}>{o.customer_name || 'Cliente'}</div>
+                        }
                       </div>
-                      <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
-                        <span style={{ fontWeight:700 }}>{fmt((o.total_cents||0)+(o.delivery_fee_cents||0))}</span>
-                        <span style={{ color:'var(--gray-400)', fontSize:'0.8rem' }}>{expanded===o.id?'▲':'▼'}</span>
-                      </div>
+                      <span style={{ color:'var(--gray-400)', fontSize:'0.8rem', flexShrink:0 }}>
+                        {expanded===o.id ? '▲' : '▼'}
+                      </span>
                     </div>
+                    {/* Detalle expandible */}
                     {expanded===o.id && (
-                    <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
-                    <div style={{ fontSize:'0.83rem', color:'var(--gray-600)', marginBottom:'0.2rem' }}>
-                      {fmtDate(o.created_at)}
-                    </div>
-                    {o.customer_address && (
-                      <div style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.2rem' }}>
-                        Entregar en: <strong>{o.customer_address}</strong>
-                      </div>
-                    )}
-                    {(o.items || []).length > 0 && (
-                      <ul style={{ fontSize:'0.82rem', margin:'0.25rem 0 0 1rem' }}>
-                        {o.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
-                      </ul>
-                    )}
-                    {o.payment_method && (
-                      <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.2rem', marginTop:'0.25rem' }}>
-                        Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[o.payment_method]||o.payment_method}</strong>
-                      </div>
-                    )}
-                    <FeeBreakdown order={o} />
-                    {/* Liberar pedido asignado */}
-                    {['assigned','accepted'].includes(o.status) && (
-                      <div style={{ marginTop:'0.4rem' }}>
-                        {releasingId === o.id ? (
-                          <div style={{ display:'flex', gap:'0.3rem', alignItems:'center', flexWrap:'wrap' }}>
-                            <input value={releaseNote} onChange={e => setReleaseNote(e.target.value)}
-                              placeholder="Motivo de liberación…"
-                              style={{ flex:1, fontSize:'0.8rem', minWidth:120 }} />
-                            <button className="btn-sm" style={{ background:'var(--danger)', color:'#fff', borderColor:'var(--danger)', fontSize:'0.78rem' }}
-                              disabled={actionLoading === o.id}
-                              onClick={() => releaseOrder(o.id)}>
-                              {actionLoading === o.id ? 'Liberando…' : 'Confirmar'}
-                            </button>
-                            <button className="btn-sm" style={{ fontSize:'0.78rem' }}
-                              onClick={() => { setReleasingId(null); setReleaseNote(''); }}>Cancelar</button>
-                          </div>
+                      <div style={{ padding:'0 0.75rem 0.65rem', borderTop:`1px solid ${color}22`,
+                        maxHeight:260, overflowY:'auto' }}>
+                        {!isOnTheWay ? (
+                          <>
+                            {o.restaurant_address && <div style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>{o.restaurant_address}</div>}
+                            {isCash
+                              ? <div style={{ fontSize:'0.8rem', fontWeight:700, color:'var(--brand)', marginTop:'0.2rem' }}>
+                                  Cobrar al llegar: {fmt(grandTotal)}
+                                </div>
+                              : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.2rem' }}>
+                                  {o.payment_method==='card' ? '💳 Pago con tarjeta — no cobrar' : '🏦 SPEI — no cobrar'}
+                                </div>
+                            }
+                          </>
                         ) : (
-                          <button className="btn-sm" style={{ fontSize:'0.78rem', color:'var(--danger)', borderColor:'var(--danger)' }}
-                            onClick={() => setReleasingId(o.id)}>Liberar pedido</button>
+                          <>
+                            {(o.customer_address||o.delivery_address) && <div style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>{o.customer_address||o.delivery_address}</div>}
+                            {isCash
+                              ? <div style={{ fontSize:'0.8rem', fontWeight:700, color:'var(--brand)', marginTop:'0.2rem' }}>Cobrar: {fmt(grandTotal)}</div>
+                              : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.2rem' }}>
+                                  {o.payment_method==='card' ? '💳 Ya pagó con tarjeta' : '🏦 Ya pagó SPEI'}
+                                </div>
+                            }
+                          </>
+                        )}
+                        {(o.items||[]).length > 0 && (
+                          <ul style={{ fontSize:'0.78rem', margin:'0.25rem 0 0 1rem', color:'var(--gray-700)' }}>
+                            {o.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
+                          </ul>
+                        )}
+                        <FeeBreakdown order={o} />
+                        {/* Controles solo para el pedido activo en home */}
+                        {isActive && (
+                          <div style={{ marginTop:'0.5rem' }}>
+                            <div style={{ display:'flex', gap:'0.35rem', flexWrap:'wrap', marginBottom:'0.3rem' }}>
+                              <button className="btn-sm"
+                                style={{ background:o.status==='ready'?'var(--brand)':'', color:o.status==='ready'?'#fff':'' }}
+                                disabled={actionLoading===o.id || o.status!=='ready'}
+                                onClick={async () => {
+                                  setActionLoading(o.id);
+                                  try { await apiFetch(`/orders/${o.id}/status`,{ method:'PATCH', body:JSON.stringify({status:'on_the_way'})}, auth.token); loadData(); }
+                                  catch(e) { setActionMsg(e.message); } finally { setActionLoading(null); }
+                                }}>En camino</button>
+                              <button className="btn-sm"
+                                style={{ background:o.status==='on_the_way'?'var(--success)':'', color:o.status==='on_the_way'?'#fff':'' }}
+                                disabled={actionLoading===o.id || o.status!=='on_the_way'}
+                                onClick={async () => {
+                                  setActionLoading(o.id);
+                                  try { await apiFetch(`/orders/${o.id}/status`,{ method:'PATCH', body:JSON.stringify({status:'delivered'})}, auth.token); loadData(); }
+                                  catch(e) { setActionMsg(e.message); } finally { setActionLoading(null); }
+                                }}>Entregado</button>
+                            </div>
+                            {!['on_the_way','delivered','cancelled'].includes(o.status) && (
+                              releasingId===o.id ? (
+                                <div style={{ display:'flex', gap:'0.3rem', alignItems:'center', flexWrap:'wrap' }}>
+                                  <input value={releaseNote} onChange={e=>setReleaseNote(e.target.value)}
+                                    placeholder="Motivo…" style={{ flex:1, fontSize:'0.78rem', minWidth:100 }} />
+                                  <button className="btn-sm" style={{ background:'var(--danger)', color:'#fff', borderColor:'var(--danger)', fontSize:'0.75rem' }}
+                                    disabled={actionLoading===o.id} onClick={() => releaseOrder(o.id)}>
+                                    {actionLoading===o.id ? '…' : 'Confirmar'}
+                                  </button>
+                                  <button className="btn-sm" style={{ fontSize:'0.75rem' }}
+                                    onClick={() => { setReleasingId(null); setReleaseNote(''); }}>Cancelar</button>
+                                </div>
+                              ) : (
+                                <button className="btn-sm" style={{ fontSize:'0.75rem', color:'var(--danger)', borderColor:'var(--danger)' }}
+                                  onClick={() => setReleasingId(o.id)}>Liberar</button>
+                              )
+                            )}
+                          </div>
                         )}
                       </div>
-                    )}
-                    </div>
                     )}
                   </li>
                 );

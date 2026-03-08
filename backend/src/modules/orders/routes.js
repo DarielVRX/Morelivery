@@ -11,7 +11,7 @@ import { logEvent } from '../../utils/logger.js';
 import { validate } from '../../middlewares/validate.js';
 import { createOrderSchema, suggestionResponseSchema, suggestionSchema, updateOrderStatusSchema } from './schemas.js';
 import { AppError } from '../../utils/errors.js';
-import { offerNextDrivers, expireTimedOutOffers } from './assignment/index.js';
+import { offerNextDrivers, expireTimedOutOffers, serializedOffer, getPendingAssignmentOrders } from './assignment/index.js';
 import { sseHub } from '../events/hub.js';
 
 const router = Router();
@@ -76,35 +76,11 @@ async function getOrderItems(orderIds = []) {
 
 /* ── POST / ── */
 
-/* ── GET /orders/pending-assignment — pedidos buscando conductor (para drivers) ── */
+/* ── GET /orders/pending-assignment — pedidos en cola para drivers (con cooldown info) ── */
 router.get('/pending-assignment', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
-    // Pedidos sin conductor asignado, en estados donde se busca driver,
-    // excluyendo los que ya tienen una oferta PENDING activa para ESTE driver
-    // (esos ya aparecen como pendingOffer en DriverHome, no en esta lista)
-    let result;
-    try {
-      result = await query(
-        `SELECT o.id, o.status, o.total_cents, o.service_fee_cents, o.delivery_fee_cents, o.restaurant_fee_cents, o.tip_cents, o.delivered_tip_cents, o.payment_method, o.created_at,
-                r.name AS restaurant_name, r.address AS restaurant_address,
-                o.delivery_address AS customer_address
-         FROM orders o
-         JOIN restaurants r ON r.id = o.restaurant_id
-         WHERE o.driver_id IS NULL
-           AND o.status IN ('created','pending_driver','preparing','ready')
-           AND NOT EXISTS (
-             SELECT 1 FROM order_driver_offers od
-             WHERE od.order_id = o.id AND od.driver_id = $1 AND od.status = 'pending'
-           )
-         ORDER BY o.created_at ASC
-         LIMIT 20`,
-        [req.user.userId]
-      );
-    } catch (e) {
-      if (!isMissingRelationError(e)) throw e;
-      result = { rows: [] };
-    }
-    return res.json({ orders: result.rows });
+    const orders = await getPendingAssignmentOrders(req.user.userId);
+    return res.json({ orders });
   } catch (error) { return next(error); }
 });
 

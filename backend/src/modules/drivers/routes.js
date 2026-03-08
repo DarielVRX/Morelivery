@@ -70,17 +70,17 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
     let result;
     try {
       result = await query(
-        `SELECT o.id, o.total_cents, o.status, o.delivery_address AS customer_address,
+        `SELECT o.id, o.total_cents, o.service_fee_cents, o.delivery_fee_cents,
+                o.tip_cents, o.payment_method, o.status,
+                o.delivery_address AS customer_address,
                 r.name AS restaurant_name, r.address AS restaurant_address,
-                split_part(c.full_name,'_',1) AS customer_first_name,
-                GREATEST(0, EXTRACT(EPOCH FROM (od.created_at + ($2::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
+                GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + (60::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
          FROM order_driver_offers od
          JOIN orders o ON o.id = od.order_id
          JOIN restaurants r ON r.id = o.restaurant_id
-         JOIN users c ON c.id = o.customer_id
          WHERE od.driver_id=$1 AND od.status='pending' AND o.driver_id IS NULL
          ORDER BY od.created_at ASC`,
-        [req.user.userId, 60]
+        [req.user.userId]
       );
     } catch (e) {
       if (!isMissingColumnError(e) && !isMissingRelationError(e)) throw e;
