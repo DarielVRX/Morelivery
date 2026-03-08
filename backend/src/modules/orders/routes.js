@@ -383,7 +383,7 @@ router.patch('/:id/tip', authenticate, authorize(['customer']), async (req, res,
     // En historial (delivered/cancelled) solo se puede agregar, no restar
     const isPast = ['delivered', 'cancelled'].includes(o.status);
     if (isPast && tipCents < (o.tip_cents || 0)) return next(new AppError(400, 'En el historial el agradecimiento solo puede aumentar'));
-    await query('UPDATE orders SET tip_cents=$1, updated_at=NOW() WHERE id=$2', [tip_cents, req.params.id]);
+    await query('UPDATE orders SET tip_cents=$1, updated_at=NOW() WHERE id=$2', [tipCents, req.params.id]);
     res.json({ tip_cents: tipCents });
   } catch (e) { next(e); }
 });
