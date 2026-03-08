@@ -1,126 +1,105 @@
 // backend/src/modules/orders/assignment/core.js
-// ─────────────────────────────────────────────────────────────────────────────
-// Núcleo del motor de asignación: offerNextDrivers.
 //
-// Esta función contiene la máquina de estados central:
-//   1. Verificar que el pedido sigue sin driver.
-//   2. Verificar que no hay oferta pending activa.
-//   3. Diagnosticar drivers disponibles (logging).
-//   4. Calcular ronda y batchSize.
-//   5. Buscar candidatos.
-//   6. Si no hay candidatos → intentar reducción de cooldown.
-//   7. Si hay candidatos → enviar ofertas (upsertOffer por cada uno).
+// Lógica central del motor de asignación.
 //
-// REGLA CRÍTICA:
-//   Esta función NO debe llamarse directamente desde fuera del módulo.
-//   Todos los callers externos deben usar serializedOffer() de queue.js.
-//   Esto garantiza que para un orderId dado solo hay una ejecución activa.
-// ─────────────────────────────────────────────────────────────────────────────
+// RONDAS Y BATCH:
+//   Ronda 1-5:  batch=1  (drivers de 1 en 1)
+//   Ronda 6:    batch=5
+//   Ronda 7+:   batch=10
+//
+// WRAPAROUND: los drivers elegibles se ordenan por driver_number.
+// Si en la ronda N ya se ofertó a K drivers, se saltan los primeros K
+// y se toman los siguientes batchSize (con wraparound circular).
+//
+// RONDAS SIMULTÁNEAS (batch>1):
+//   - Los drivers con oferta pending NO se cuentan en el batch (skip, no vuelven a cola).
+//   - Los advisory locks evitan asignaciones duplicadas.
+//   - Si hay menos drivers disponibles que batchSize, se usan todos los disponibles.
+//
+// DRIVERS CON OFERTA PENDING (inactivos): se saltan sin incrementar ronda.
 
-import { MAX_ACTIVE_ORDERS_PER_DRIVER, ACTIVE_STATUSES, log, logWarn } from './constants.js';
+import { OFFER_TIMEOUT_SECONDS, log, logWarn } from './constants.js';
 import {
-  getOpenOrder, getPendingOffer, getDriverDiagnostics, getOfferRoundCount,
-  queryCandidates, anyDriverAvailable, markPendingDriver,
+  getOpenOrder, getPendingOffer, getOfferRound, markPendingDriver,
+  getEligibleDrivers, getEligibleIdleDrivers,
 } from './queries.js';
-import { applyOrderCooldownReduction, ensureCooldownFlagSet, resetCooldownFlag } from './cooldown.js';
 import { upsertOffer } from './offer.js';
 
 /**
  * Intenta enviar oferta(s) para el pedido dado.
- * Solo debe llamarse desde serializedOffer() — nunca directamente.
- *
- * @param {string}        orderId
- * @param {Function|null} onOffer  Callback SSE
- * @returns {number}  Cantidad de ofertas enviadas (0 si no se envió ninguna)
+ * Solo debe llamarse desde serializedOffer().
  */
 export async function offerNextDrivers(orderId, onOffer) {
-  log(orderId, 'offerNextDrivers: inicio');
+  log(`order=${orderId}`, 'offerNextDrivers: inicio');
 
-  // ── 1. Verificar pedido ───────────────────────────────────────────────────
+  // ── 1. Verificar que el pedido sigue abierto ──────────────────────────────
   const orderRow = await getOpenOrder(orderId);
   if (!orderRow) {
-    log(orderId, 'pedido no encontrado o ya asignado — abort');
-    return 0;
-  }
-  const cooldownTriggered = orderRow.offer_cooldown_triggered;
-
-  // ── 2. Verificar oferta pending ───────────────────────────────────────────
-  const existingOffer = await getPendingOffer(orderId);
-  if (existingOffer) {
-    log(orderId, 'ya tiene oferta pending — abort', { driver_id: existingOffer.driver_id });
+    log(`order=${orderId}`, 'pedido no encontrado o ya asignado — abort');
     return 0;
   }
 
-  // ── 3. Diagnóstico de drivers ─────────────────────────────────────────────
-  const allDrivers = await getDriverDiagnostics(orderId);
-  log(orderId, `drivers disponibles: ${allDrivers.length}`);
-  for (const d of allDrivers) {
-    log(orderId, `  driver=${d.user_id}`, {
-      activos:         `${d.active_count}/${MAX_ACTIVE_ORDERS_PER_DRIVER}`,
-      has_pending:     d.has_pending_offer,
-      estado_oferta:   d.offer_status_for_order ?? 'ninguna',
-      cooldown_secs:   d.cooldown_secs_remaining ?? 0,
-    });
+  // ── 2. Verificar que no hay oferta pending activa ─────────────────────────
+  const existing = await getPendingOffer(orderId);
+  if (existing) {
+    log(`order=${orderId}`, `ya tiene oferta pending driver=${existing.driver_id} — abort`);
+    return 0;
   }
 
-  // ── 4. Ronda y batchSize ──────────────────────────────────────────────────
-  const pastOffers = await getOfferRoundCount(orderId);
-  const round      = pastOffers + 1;
-  const batchSize  = round <= 5 ? 1 : round <= 10 ? 5 : 10;
-  log(orderId, `ronda=${round} batchSize=${batchSize} cooldownTriggered=${cooldownTriggered}`);
+  // ── 3. Calcular ronda y batchSize ─────────────────────────────────────────
+  const pastCount = await getOfferRound(orderId);
+  const round     = pastCount + 1;
+  const batchSize = round <= 5 ? 1 : round === 6 ? 5 : 10;
+  log(`order=${orderId}`, `ronda=${round} batch=${batchSize}`);
 
-  // ── 5. Buscar candidatos ──────────────────────────────────────────────────
-  let candidates = await queryCandidates(orderId, batchSize);
-  log(orderId, `candidatos: ${candidates.length}`, { drivers: candidates.map(r => r.user_id) });
+  // ── 4. Obtener drivers elegibles (sin cooldown, sin haber aceptado) ────────
+  // Para batch=1 solo queremos drivers IDLE (sin pending en otro pedido).
+  // Para batch>1 tomamos todos los elegibles — los que tengan pending serán
+  // descartados por el advisory lock en upsertOffer (sin contar como ronda).
+  const eligible = batchSize === 1
+    ? await getEligibleIdleDrivers(orderId)
+    : await getEligibleDrivers(orderId);
 
-  // ── 6. Sin candidatos ─────────────────────────────────────────────────────
-  if (candidates.length === 0) {
-    const hasDrivers = await anyDriverAvailable();
-    if (!hasDrivers) {
-      logWarn(orderId, 'sin drivers disponibles en el sistema → pending_driver');
-      await markPendingDriver(orderId);
-      return 0;
-    }
+  log(`order=${orderId}`, `elegibles: ${eligible.length}`, {
+    drivers: eligible.map(d => d.user_id),
+  });
 
-    // Intentar reducción de cooldown
-    log(orderId, 'sin candidatos → intentando reducción de cooldown');
-    const reduced = await applyOrderCooldownReduction(orderId);
-
-    if (!reduced) {
-      // Todos los drivers disponibles tienen pending offer en otro pedido.
-      // El pedido quedará huérfano hasta el próximo reject/expire.
-      logWarn(orderId, 'sin cooldown que reducir — pedido huérfano, esperando wake-up (reject/expire de otro pedido)');
-      await markPendingDriver(orderId);
-      return 0;
-    }
-
-    // Marcar el flag la primera vez
-    await ensureCooldownFlagSet(orderId, cooldownTriggered);
-
-    if (reduced.newWaitSecs < 1) {
-      // El driver quedó elegible de inmediato → reintentar candidatos
-      candidates = await queryCandidates(orderId, 1);
-      log(orderId, `candidatos tras reducción inmediata: ${candidates.length}`, { drivers: candidates.map(r => r.user_id) });
-      if (candidates.length === 0) {
-        log(orderId, 'sin candidatos tras reducción inmediata → pending_driver');
-        await markPendingDriver(orderId);
-        return 0;
-      }
-      // Hay candidatos → continuar al bloque de envío abajo
-    } else {
-      log(orderId, `cooldown reducido a ${Math.round(reduced.newWaitSecs)}s — reintento en el próximo expire tick`);
-      await markPendingDriver(orderId);
-      return 0;
-    }
+  if (eligible.length === 0) {
+    log(`order=${orderId}`, 'sin candidatos elegibles → pending_driver');
+    await markPendingDriver(orderId);
+    return 0;
   }
 
-  // ── 7. Resetear flag y enviar ofertas ─────────────────────────────────────
-  await resetCooldownFlag(orderId, cooldownTriggered);
-
-  for (const row of candidates) {
-    log(orderId, `enviando oferta a driver=${row.user_id}`);
-    await upsertOffer(orderId, row.user_id, onOffer);
+  // ── 5. Wraparound circular ────────────────────────────────────────────────
+  // Cuántos drivers hemos "visitado" ya en rondas anteriores.
+  // Determinamos el offset como pastCount % eligible.length.
+  const offset    = eligible.length > 0 ? pastCount % eligible.length : 0;
+  const totalElg  = eligible.length;
+  // Tomar batchSize drivers empezando en offset (circular)
+  const realBatch = Math.min(batchSize, totalElg);
+  const batch     = [];
+  for (let i = 0; i < realBatch; i++) {
+    batch.push(eligible[(offset + i) % totalElg]);
   }
 
-  return candidates.length;
+  log(`order=${orderId}`, `batch final: ${batch.length}`, {
+    drivers: batch.map(d => d.user_id),
+    offset,
+    realBatch,
+  });
+
+  // ── 6. Enviar ofertas ─────────────────────────────────────────────────────
+  let sent = 0;
+  for (const row of batch) {
+    const ok = await upsertOffer(orderId, row.user_id, onOffer);
+    if (ok) sent++;
+  }
+
+  if (sent === 0) {
+    // Todos los drivers del batch tenían pending offer (advisory lock los saltó)
+    log(`order=${orderId}`, 'batch completo en pending — pending_driver');
+    await markPendingDriver(orderId);
+  }
+
+  return sent;
 }

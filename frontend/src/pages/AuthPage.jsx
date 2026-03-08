@@ -1,23 +1,50 @@
 // frontend/src/pages/AuthPage.jsx
-import { useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+// Inputs no controlados (useRef) para cero re-renders al tipear.
+// Lee localStorage directamente para el redirect — sin consumir AuthContext
+// en el ciclo de render, lo que elimina el jank causado por re-renders del árbol.
+import { useCallback, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../api/client';
 
+const STORAGE_KEY = 'morelivery_auth_v1';
+
+function getStoredUser() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}').user || null; }
+  catch { return null; }
+}
+
 export default function AuthPage({ mode = 'login' }) {
-  const { auth, login } = useAuth();
-  const navigate = useNavigate();
-  const [username,    setUsername]    = useState('');
-  const [password,    setPassword]    = useState('');
-  const [role,        setRole]        = useState('customer');
-  const [address,     setAddress]     = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [message,     setMessage]     = useState('');
+  // Redirect: leer localStorage directo, sin suscribirse al context
+  const storedUser = getStoredUser();
+  const navigate   = useNavigate();
+  if (storedUser) { navigate(`/${storedUser.role}`, { replace: true }); return null; }
+
+  return <AuthForm mode={mode} />;
+}
+
+// AuthForm es un componente separado que sí puede usar context y state
+// sin arrastrar el redirect al ciclo de re-render.
+function AuthForm({ mode }) {
+  const { login } = useAuth();
+  const navigate  = useNavigate();
+
+  const usernameRef    = useRef(null);
+  const passwordRef    = useRef(null);
+  const displayNameRef = useRef(null);
+  const addressRef     = useRef(null);
+
+  const [role,    setRole]    = useState('customer');
+  const [message, setMessage] = useState('');
 
   const isLogin = mode === 'login';
-  if (auth.user) return <Navigate to={`/${auth.user.role}`} replace />;
 
-  async function submit() {
+  const submit = useCallback(async () => {
+    const username    = usernameRef.current?.value?.trim()    || '';
+    const password    = passwordRef.current?.value            || '';
+    const displayName = displayNameRef.current?.value?.trim() || '';
+    const address     = addressRef.current?.value?.trim()     || '';
+
     try {
       if (!isLogin) {
         await apiFetch('/auth/register', {
@@ -25,7 +52,7 @@ export default function AuthPage({ mode = 'login' }) {
           body: JSON.stringify({
             username, password, role,
             displayName: displayName || undefined,
-            address: ['customer','restaurant'].includes(role) ? address : undefined
+            address: ['customer','restaurant'].includes(role) ? address : undefined,
           })
         });
         setMessage('Registro exitoso. Ya puedes iniciar sesión.');
@@ -40,7 +67,9 @@ export default function AuthPage({ mode = 'login' }) {
     } catch (error) {
       setMessage(error.message);
     }
-  }
+  }, [isLogin, role, login, navigate]);
+
+  function handleKey(e) { if (e.key === 'Enter') submit(); }
 
   return (
     <section className="auth-card">
@@ -48,8 +77,14 @@ export default function AuthPage({ mode = 'login' }) {
       <p>{isLogin ? 'Ingresa con tu usuario y contraseña.' : 'Completa los datos para registrarte.'}</p>
 
       <div className="row">
-        <label>Usuario<input placeholder="Tu nombre de usuario" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" /></label>
-        <label>Contraseña<input type="password" placeholder="Tu contraseña" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" /></label>
+        <label>Usuario
+          <input ref={usernameRef} defaultValue="" placeholder="Tu nombre de usuario"
+            autoComplete="username" onKeyDown={handleKey} />
+        </label>
+        <label>Contraseña
+          <input ref={passwordRef} defaultValue="" type="password" placeholder="Tu contraseña"
+            autoComplete="current-password" onKeyDown={handleKey} />
+        </label>
         {!isLogin && (
           <label>Tipo de cuenta
             <select value={role} onChange={e => setRole(e.target.value)}>
@@ -63,12 +98,16 @@ export default function AuthPage({ mode = 'login' }) {
 
       {!isLogin && role === 'restaurant' && (
         <div className="row">
-          <label>Nombre de la tienda<input placeholder="Ej: Tacos El Güero" value={displayName} onChange={e => setDisplayName(e.target.value)} /></label>
+          <label>Nombre de la tienda
+            <input ref={displayNameRef} defaultValue="" placeholder="Ej: Tacos El Güero" onKeyDown={handleKey} />
+          </label>
         </div>
       )}
       {!isLogin && ['customer','restaurant'].includes(role) && (
         <div className="row">
-          <label>Dirección<input placeholder="Ej: Av. Revolución 1234, Col. Centro" value={address} onChange={e => setAddress(e.target.value)} /></label>
+          <label>Dirección
+            <input ref={addressRef} defaultValue="" placeholder="Ej: Av. Revolución 1234, Col. Centro" onKeyDown={handleKey} />
+          </label>
         </div>
       )}
 
@@ -82,7 +121,11 @@ export default function AuthPage({ mode = 'login' }) {
         }
       </div>
 
-      {message && <p className={`flash ${message.startsWith('Registro') ? 'flash-ok' : 'flash-error'}`}>{message}</p>}
+      {message && (
+        <p className={`flash ${message.startsWith('Registro') ? 'flash-ok' : 'flash-error'}`}>
+          {message}
+        </p>
+      )}
     </section>
   );
 }

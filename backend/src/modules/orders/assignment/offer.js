@@ -1,79 +1,60 @@
 // backend/src/modules/orders/assignment/offer.js
-// ─────────────────────────────────────────────────────────────────────────────
-// Envío de una oferta a un driver específico.
-//
-// Responsabilidades:
-//   1. Advisory lock por driver — evita que dos pedidos compitan por el
-//      mismo driver en paralelo dentro de una transacción.
-//   2. Post-lock double-check — el driver puede haber recibido oferta en la
-//      ventana entre la decisión de enviarle y la adquisición del lock.
-//   3. Upsert en DB.
-//   4. Disparo del SSE al driver.
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Envía una oferta a un driver con advisory lock para evitar duplicados.
 import { query } from '../../../config/db.js';
 import { log, logWarn } from './constants.js';
 import { upsertPendingOffer, driverHasPendingOffer, getOfferPayload } from './queries.js';
 
-/**
- * Envía (o re-envía) una oferta al driver para el pedido dado.
- * Debe llamarse desde dentro de la cola serializada (serializedOffer).
- *
- * @param {string}   orderId
- * @param {string}   driverId
- * @param {Function|null} onOffer  Callback SSE (driverId, orderId, payload) => void
- */
 export async function upsertOffer(orderId, driverId, onOffer) {
-  // ── 1. Advisory lock por driver ───────────────────────────────────────────
-  // Convierte los primeros 8 bytes del UUID (sin guiones) en un bigint.
-  // pg_try_advisory_xact_lock es por transacción → se libera automáticamente.
+  // Advisory lock por driver (transaccional) — evita race condition entre pedidos
   const lockKey = Buffer.from(driverId.replace(/-/g, '')).readBigUInt64BE(0);
-
   const lockResult = await query(
     `SELECT pg_try_advisory_xact_lock($1::bigint) AS acquired`,
     [lockKey.toString()]
   );
-
   if (!lockResult.rows[0].acquired) {
-    log(orderId, `upsertOffer: advisory lock ocupado driver=${driverId} — skip`);
-    return;
+    log(`order=${orderId}`, `advisory lock ocupado driver=${driverId} — skip`);
+    return false;
   }
 
-  // ── 2. Post-lock double-check ─────────────────────────────────────────────
-  const alreadyPending = await driverHasPendingOffer(driverId);
-  if (alreadyPending) {
-    log(orderId, `upsertOffer: driver=${driverId} ya tiene pending (post-lock) — skip`);
-    return;
+  // Double-check post-lock
+  if (await driverHasPendingOffer(driverId)) {
+    log(`order=${orderId}`, `driver=${driverId} ya tiene pending (post-lock) — skip`);
+    return false;
   }
 
-  // ── 3. Upsert en DB ───────────────────────────────────────────────────────
   await upsertPendingOffer(orderId, driverId);
-  log(orderId, `upsertOffer: oferta guardada driver=${driverId}`);
+  log(`order=${orderId}`, `oferta guardada driver=${driverId}`);
 
-  // ── 4. SSE ────────────────────────────────────────────────────────────────
   if (!onOffer) {
-    logWarn(orderId, `upsertOffer: sin callback onOffer — SSE NO disparado driver=${driverId}`);
-    return;
+    logWarn(`order=${orderId}`, `sin onOffer callback — SSE no disparado driver=${driverId}`);
+    return true;
   }
 
   try {
     const row = await getOfferPayload(orderId, driverId);
     if (!row) {
-      logWarn(orderId, `upsertOffer: getOfferPayload sin resultado driver=${driverId}`);
-      return;
+      logWarn(`order=${orderId}`, `payload vacío driver=${driverId}`);
+      return true;
     }
-
-    log(orderId, `upsertOffer: SSE disparado driver=${driverId} secondsLeft=${row.seconds_left}`);
+    const svc = row.service_fee_cents  || 0;
+    const del = row.delivery_fee_cents || 0;
+    const tip = row.tip_cents          || 0;
     onOffer(driverId, orderId, {
       orderId,
-      driverName:        row.driver_name,
       restaurantName:    row.restaurant_name,
       restaurantAddress: row.restaurant_address,
       customerAddress:   row.customer_address,
       totalCents:        row.total_cents,
+      serviceFee:        svc,
+      deliveryFee:       del,
+      tipCents:          tip,
+      driverEarning:     del + Math.round(svc * 0.5) + tip,
+      paymentMethod:     row.payment_method,
       secondsLeft:       row.seconds_left,
     });
+    log(`order=${orderId}`, `SSE disparado driver=${driverId} secs=${row.seconds_left}`);
   } catch (e) {
-    logWarn(orderId, `upsertOffer: SSE callback lanzó error driver=${driverId}`, { error: e.message });
+    logWarn(`order=${orderId}`, `SSE error driver=${driverId}`, { error: e.message });
   }
+  return true;
 }
