@@ -195,14 +195,15 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
 
 export default function DriverHome() {
   const { auth } = useAuth();
-  const [activeOrder,   setActiveOrder]   = useState(null);
-  const [availability,  setAvailability]  = useState(false);
-  const [pendingOffer,  setPendingOffer]  = useState(null); // UNA sola oferta a la vez
-  const [loadingOffer,  setLoadingOffer]  = useState(false);
-  const [loadingStatus, setLoadingStatus] = useState('');
-  const [releaseNote,   setReleaseNote]   = useState('');
-  const [showRelease,   setShowRelease]   = useState(false);
-  const [showOrderDetail, setShowOrderDetail] = useState(false);
+  const [activeOrder,     setActiveOrder]     = useState(null);
+  const [availability,    setAvailability]    = useState(false);
+  const [pendingOffer,    setPendingOffer]    = useState(null);
+  const [offerMinimized,  setOfferMinimized]  = useState(false);
+  const [loadingOffer,    setLoadingOffer]    = useState(false);
+  const [loadingStatus,   setLoadingStatus]   = useState('');
+  const [releaseNote,     setReleaseNote]     = useState('');
+  const [showRelease,     setShowRelease]     = useState(false);
+  const [orderExpanded,   setOrderExpanded]   = useState(false);
   const [customPin,    setCustomPin]     = useState(null);   // { lat, lng }
   const [pinAddress,   setPinAddress]    = useState(null);   // string | null
   const [loadingPin,   setLoadingPin]    = useState(false);
@@ -240,14 +241,19 @@ export default function DriverHome() {
         apiFetch('/orders/my', {}, auth.token),
         apiFetch('/drivers/offers', {}, auth.token),
       ]);
-      // Pedido más antiguo activo
+      // Pedido aceptado con mayor antigüedad (accepted_at más viejo)
       const active = (od.orders || [])
         .filter(o => !['delivered','cancelled'].includes(o.status))
-        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0] || null;
+        .sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at))[0] || null;
       setActiveOrder(active);
       // Una sola oferta a la vez
       const offers = off.offers || [];
-      setPendingOffer(offers.length > 0 ? offers[0] : null);
+      const newOffer = offers.length > 0 ? offers[0] : null;
+      setPendingOffer(prev => {
+        // Si es una oferta diferente, resetear el minimizado
+        if (newOffer?.id !== prev?.id) setOfferMinimized(false);
+        return newOffer;
+      });
     } catch (_) {}
   }, [auth.token]);
 
@@ -293,7 +299,7 @@ export default function DriverHome() {
     setLoadingOffer(true);
     try {
       await apiFetch(`/drivers/offers/${pendingOffer.id}/accept`, { method:'POST' }, auth.token);
-      setPendingOffer(null);
+      setPendingOffer(null); setOfferMinimized(false); setOrderExpanded(false);
       loadData();
     } catch (e) { setMsg(e.message); }
     finally { setLoadingOffer(false); }
@@ -405,95 +411,205 @@ export default function DriverHome() {
 
       </div>
 
-      {/* ── Oferta entrante (SOBRE el pedido activo) ────────────────── */}
+      {/* ── Panel de oferta (zIndex:20, encima del pedido activo) ──────── */}
       {pendingOffer && (
-        <div style={{ flexShrink:0, background:'#fff', borderTop:'3px solid var(--brand)', padding:'0.75rem 1rem', boxShadow:'0 -4px 16px #0002', zIndex:20 }}>
-          <div style={{ fontSize:'0.72rem', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', color:'var(--brand)', marginBottom:'0.4rem' }}>
-            Nueva oferta
-          </div>
-          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.25rem' }}>
-            <span style={{ fontWeight:700 }}>{pendingOffer.restaurant_name}</span>
-            <span style={{ fontWeight:700 }}>{fmt(pendingOffer.total_cents)}</span>
-          </div>
-          <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>
-            {pendingOffer.restaurant_address && <div>Retiro: {pendingOffer.restaurant_address}</div>}
-            {pendingOffer.customer_address   && <div>Entrega: {pendingOffer.customer_address}</div>}
-          </div>
-          {(pendingOffer.items||[]).length > 0 && (
-            <ul style={{ fontSize:'0.78rem', margin:'0 0 0.35rem 1rem', color:'var(--gray-600)' }}>
-              {pendingOffer.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
-            </ul>
-          )}
-          <OfferCountdown
-            key={pendingOffer.id}
-            secondsLeft={pendingOffer.seconds_left ?? 60}
-            onExpired={() => { setPendingOffer(null); loadData(); }}
-          />
-          <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.5rem' }}>
-            <button className="btn-primary btn-sm" style={{ flex:1 }} disabled={loadingOffer} onClick={acceptOffer}>
-              {loadingOffer ? 'Aceptando…' : 'Aceptar'}
+        <div style={{
+          flexShrink:0, background:'#fff',
+          borderTop:'3px solid var(--brand)',
+          boxShadow:'0 -4px 16px #0003', zIndex:20, position:'relative',
+          overflow:'hidden',
+          maxHeight: offerMinimized ? 44 : 400,
+          transition:'max-height 0.3s ease',
+        }}>
+          {/* Cabecera siempre visible + botón minimizar */}
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+            padding:'0.5rem 1rem 0', gap:8 }}>
+            <span style={{ fontSize:'0.7rem', fontWeight:800, letterSpacing:'0.5px',
+              textTransform:'uppercase', color:'var(--brand)' }}>
+              Nueva oferta
+            </span>
+            <button
+              onClick={() => setOfferMinimized(m => !m)}
+              style={{ border:'none', background:'none', cursor:'pointer',
+                color:'var(--gray-400)', padding:'0.1rem 0.3rem', display:'flex',
+                alignItems:'center', justifyContent:'center' }}
+              aria-label={offerMinimized ? 'Expandir oferta' : 'Minimizar oferta'}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <polyline points={offerMinimized ? '9 18 15 12 9 6' : '18 15 12 9 6 15'} />
+              </svg>
             </button>
-            <button className="btn-sm" disabled={loadingOffer} onClick={rejectOffer}>Rechazar</button>
+          </div>
+
+          {/* Contenido colapsable */}
+          <div style={{ padding:'0.25rem 1rem 0.75rem', overflowY:'auto' }}>
+            {/* Tienda y cliente */}
+            <div style={{ fontSize:'0.82rem', color:'var(--gray-700)', marginBottom:'0.3rem' }}>
+              {pendingOffer.restaurantAddress && (
+                <div><span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Tienda: </span>
+                  <strong>{pendingOffer.restaurantAddress}</strong></div>
+              )}
+              {pendingOffer.customerAddress && (
+                <div><span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Cliente: </span>
+                  <strong>{pendingOffer.customerAddress}</strong></div>
+              )}
+            </div>
+            {/* Ganancia */}
+            {pendingOffer.driverEarning != null && (
+              <div style={{ fontSize:'0.85rem', fontWeight:800, color:'var(--success)',
+                marginBottom:'0.35rem' }}>
+                Tu ganancia: {fmt(pendingOffer.driverEarning)}
+              </div>
+            )}
+            <OfferCountdown
+              key={pendingOffer.id}
+              secondsLeft={pendingOffer.seconds_left ?? pendingOffer.secondsLeft ?? 60}
+              onExpired={() => { setPendingOffer(null); loadData(); }}
+            />
+            <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.45rem' }}>
+              <button className="btn-primary btn-sm" style={{ flex:1 }}
+                disabled={loadingOffer} onClick={acceptOffer}>
+                {loadingOffer ? 'Aceptando…' : 'Aceptar'}
+              </button>
+              <button className="btn-sm" disabled={loadingOffer} onClick={rejectOffer}>
+                Rechazar
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* ── Pedido activo ────────────────────────────────────────────── */}
-      {activeOrder && (
-        <div style={{ flexShrink:0, background:'#fff', borderTop:'2px solid var(--success)', padding:'0.75rem 1rem', zIndex:10 }}>
-          <div style={{ fontSize:'0.72rem', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', color:'var(--success)', marginBottom:'0.25rem' }}>
-            Pedido en curso
-          </div>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.25rem' }}>
-            <span style={{ fontWeight:700, fontSize:'0.9rem' }}>{STATUS_LABELS[activeOrder.status]}</span>
-            <button onClick={() => setShowOrderDetail(s => !s)}
-              style={{ background:'none', border:'none', cursor:'pointer', fontSize:'0.78rem', color:'var(--brand)', fontWeight:600, padding:0 }}>
-              {showOrderDetail ? 'Ocultar' : 'Ver detalle'}
-            </button>
-          </div>
-          <div style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginBottom:'0.3rem' }}>
-            <strong>{activeOrder.restaurant_name}</strong> → {activeOrder.customer_address || activeOrder.delivery_address || '—'}
-          </div>
-          {showOrderDetail && (
-            <div style={{ marginBottom:'0.4rem' }}>
-              {activeOrder.payment_method && (
-                <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.2rem' }}>
-                  Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[activeOrder.payment_method]||activeOrder.payment_method}</strong>
+      {/* ── Panel de pedido activo (zIndex:10) ──────────────────────────── */}
+      {activeOrder && (() => {
+        const isOnTheWay = activeOrder.status === 'on_the_way';
+        const isCash     = (activeOrder.payment_method || 'cash') === 'cash';
+        const grandTotal = (activeOrder.total_cents||0)+(activeOrder.service_fee_cents||0)
+                          +(activeOrder.delivery_fee_cents||0)+(activeOrder.tip_cents||0);
+        const driverEarn = (activeOrder.delivery_fee_cents||0)
+                          + Math.round((activeOrder.service_fee_cents||0)*0.5)
+                          + (activeOrder.tip_cents||0);
+        // Estados del driver (separados de estados de tienda)
+        const DRIVER_STATUS = {
+          assigned:'Asignado — ve a recoger', on_the_way:'En camino al cliente',
+          preparing:'Esperando en tienda', ready:'Listo para retiro',
+          accepted:'Aceptado', created:'Nuevo pedido',
+        };
+        return (
+          <div style={{ flexShrink:0, background:'#fff',
+            borderTop:'2px solid var(--success)', zIndex:10, position:'relative',
+            display:'flex', flexDirection:'column',
+            maxHeight: orderExpanded ? 'min(72vh, 520px)' : 120,
+            transition:'max-height 0.3s ease', overflow:'hidden' }}>
+
+            {/* Vista compacta — siempre visible */}
+            <div style={{ padding:'0.55rem 1rem 0', flexShrink:0 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <span style={{ fontSize:'0.7rem', fontWeight:800, textTransform:'uppercase',
+                  letterSpacing:'0.5px', color:'var(--success)' }}>
+                  {DRIVER_STATUS[activeOrder.status] || activeOrder.status}
+                </span>
+                <button onClick={() => setOrderExpanded(e => !e)}
+                  style={{ border:'none', background:'none', cursor:'pointer',
+                    color:'var(--gray-400)', padding:'0.1rem 0.3rem', fontSize:'0.78rem',
+                    display:'flex', alignItems:'center', gap:2 }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <polyline points={orderExpanded ? '18 15 12 9 6 15' : '6 9 12 15 18 9'} />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Info contextual según estado */}
+              {!isOnTheWay ? (
+                <div style={{ fontSize:'0.82rem', marginTop:'0.15rem' }}>
+                  <strong>{activeOrder.restaurant_name}</strong>
+                  {activeOrder.restaurant_address && (
+                    <div style={{ color:'var(--gray-500)', fontSize:'0.77rem' }}>
+                      {activeOrder.restaurant_address}
+                    </div>
+                  )}
+                  {isCash
+                    ? <div style={{ fontWeight:700, color:'var(--brand)', fontSize:'0.8rem', marginTop:'0.1rem' }}>
+                        Cobrar al llegar: {fmt(grandTotal)}
+                      </div>
+                    : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
+                        {activeOrder.payment_method==='card' ? '💳 Pago con tarjeta — no cobrar' : '🏦 Pago SPEI — no cobrar'}
+                      </div>
+                  }
+                </div>
+              ) : (
+                <div style={{ fontSize:'0.82rem', marginTop:'0.15rem' }}>
+                  <strong>{activeOrder.customer_name || 'Cliente'}</strong>
+                  {(activeOrder.customer_address || activeOrder.delivery_address) && (
+                    <div style={{ color:'var(--gray-500)', fontSize:'0.77rem' }}>
+                      {activeOrder.customer_address || activeOrder.delivery_address}
+                    </div>
+                  )}
+                  {isCash
+                    ? <div style={{ fontWeight:700, color:'var(--brand)', fontSize:'0.8rem', marginTop:'0.1rem' }}>
+                        Cobrar: {fmt(grandTotal)}
+                      </div>
+                    : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
+                        {activeOrder.payment_method==='card' ? '💳 Ya pagó con tarjeta' : '🏦 Ya pagó SPEI'}
+                      </div>
+                  }
                 </div>
               )}
-              {(activeOrder.items || []).length > 0 && (
-                <ul style={{ fontSize:'0.82rem', margin:'0 0 0.25rem 1rem', color:'var(--gray-700)' }}>
-                  {activeOrder.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
-                </ul>
-              )}
-              <FeeBreakdown order={activeOrder} />
             </div>
-          )}
-          <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
-            <button className="btn-sm"
-              style={{ background: activeOrder.status==='ready' ? 'var(--brand)':'', color: activeOrder.status==='ready' ? '#fff':'' }}
-              disabled={loadingStatus==='on_the_way' || activeOrder.status!=='ready'}
-              onClick={() => changeStatus(activeOrder.id,'on_the_way')}>En camino</button>
-            <button className="btn-sm"
-              style={{ background: activeOrder.status==='on_the_way' ? 'var(--success)':'', color: activeOrder.status==='on_the_way' ? '#fff':'' }}
-              disabled={loadingStatus==='delivered' || activeOrder.status!=='on_the_way'}
-              onClick={() => changeStatus(activeOrder.id,'delivered')}>Entregado</button>
-            {!['on_the_way','delivered','cancelled'].includes(activeOrder.status) && (
-              <button className="btn-sm btn-danger" onClick={() => setShowRelease(s=>!s)}>Liberar</button>
+
+            {/* Detalle expandible (scroll interno) */}
+            {orderExpanded && (
+              <div style={{ flex:1, overflowY:'auto', padding:'0.4rem 1rem 0.6rem',
+                borderTop:'1px solid var(--gray-100)', marginTop:'0.35rem' }}>
+                {(activeOrder.items||[]).length > 0 && (
+                  <ul style={{ fontSize:'0.8rem', margin:'0 0 0.3rem 1rem', color:'var(--gray-700)' }}>
+                    {activeOrder.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
+                  </ul>
+                )}
+                <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.3rem' }}>
+                  <span>Ganancia estimada: </span>
+                  <strong style={{ color:'var(--success)' }}>{fmt(driverEarn)}</strong>
+                </div>
+                {/* Controles de estado */}
+                <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginBottom:'0.4rem' }}>
+                  <button className="btn-sm"
+                    style={{ background: activeOrder.status==='ready' ? 'var(--brand)':'',
+                      color: activeOrder.status==='ready' ? '#fff':'' }}
+                    disabled={loadingStatus==='on_the_way' || activeOrder.status!=='ready'}
+                    onClick={() => changeStatus(activeOrder.id,'on_the_way')}>
+                    En camino
+                  </button>
+                  <button className="btn-sm"
+                    style={{ background: activeOrder.status==='on_the_way' ? 'var(--success)':'',
+                      color: activeOrder.status==='on_the_way' ? '#fff':'' }}
+                    disabled={loadingStatus==='delivered' || activeOrder.status!=='on_the_way'}
+                    onClick={() => changeStatus(activeOrder.id,'delivered')}>
+                    Entregado
+                  </button>
+                  {!['on_the_way','delivered','cancelled'].includes(activeOrder.status) && (
+                    <button className="btn-sm btn-danger"
+                      onClick={() => setShowRelease(s => !s)}>
+                      Liberar
+                    </button>
+                  )}
+                </div>
+                {showRelease && (
+                  <div>
+                    <textarea value={releaseNote} onChange={e => setReleaseNote(e.target.value)}
+                      placeholder="Motivo (obligatorio)" rows={2}
+                      style={{ width:'100%', boxSizing:'border-box', marginBottom:'0.3rem', fontSize:'0.82rem' }} />
+                    <div style={{ display:'flex', gap:'0.3rem' }}>
+                      <button className="btn-sm btn-danger" onClick={doRelease}>Confirmar</button>
+                      <button className="btn-sm" onClick={() => { setShowRelease(false); setReleaseNote(''); }}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
-          {showRelease && (
-            <div style={{ marginTop:'0.5rem' }}>
-              <textarea value={releaseNote} onChange={e=>setReleaseNote(e.target.value)}
-                placeholder="Motivo (obligatorio)" rows={2} style={{ width:'100%', boxSizing:'border-box', marginBottom:'0.4rem' }} />
-              <div style={{ display:'flex', gap:'0.4rem' }}>
-                <button className="btn-sm btn-danger" onClick={doRelease}>Confirmar</button>
-                <button className="btn-sm" onClick={() => { setShowRelease(false); setReleaseNote(''); }}>Cancelar</button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+        );
+      })()}
 
       {/* Espacio para nav móvil — el padding-bottom del page-content no aplica aquí */}
       <div style={{ height:'var(--nav-h-mobile)', flexShrink:0, background:'transparent' }} />

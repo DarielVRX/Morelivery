@@ -145,6 +145,14 @@ export default function RestaurantMenu() {
     finally { setSavingImg(false); }
   }
 
+  async function deleteProduct(productId) {
+    if (!confirm('¿Eliminar este producto? Esta acción no se puede deshacer.')) return;
+    try {
+      await apiFetch(`/restaurants/menu-items/${productId}`, { method:'DELETE' }, auth.token);
+      load();
+    } catch (e) { setMsg(e.message); }
+  }
+
   return (
     <div style={{ backgroundColor: '#fff9f8', minHeight:'100vh', padding:'1rem' }}>
       {/* ── Encabezado Gestión de menú ─────────────────────────────────── */}
@@ -242,6 +250,10 @@ export default function RestaurantMenu() {
                         clear();
                       }}>
                         {product.image_url ? 'Cambiar imagen' : 'Agregar imagen'}
+                      </button>
+                      <button className="btn-sm" onClick={() => deleteProduct(product.id)}
+                        style={{ color:'var(--danger)', borderColor:'var(--danger)' }}>
+                        Eliminar
                       </button>
                     </div>
 
