@@ -142,6 +142,17 @@ a:hover { text-decoration: underline; }
   margin: 0 auto;
 }
 
+/* Split layout — ocupa todo el ancho disponible */
+.page-content:has(.split-layout) {
+  max-width: none;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 /* ── Barra nav inferior móvil ──────────────────────────────────────────────── */
 .nav-mobile {
   position: fixed;
@@ -348,6 +359,7 @@ tr:last-child td { border-bottom: none; }
   .nav-mobile { display: none; }
   .nav-desktop { display: flex; }
   .page-content { padding-bottom: 1.5rem; padding-top: 1.25rem; }
+  .page-content:has(.split-layout) { padding: 0; }
 }
 
 @media (max-width: 767px) {

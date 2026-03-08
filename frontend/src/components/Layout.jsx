@@ -14,17 +14,14 @@ function IconMenuTab()  { return <svg viewBox="0 0 24 24" fill="none" stroke="cu
 
 function getNavItems(role) {
   if (role === 'customer')   return [
-    { to:'/customer',         label:'Inicio',   Icon:IconHome    },
-    { to:'/customer/pedidos', label:'Pedidos',  Icon:IconOrders  },
+    { to:'/customer', label:'Inicio', Icon:IconHome },
   ];
   if (role === 'restaurant') return [
-    { to:'/restaurant/pedidos', label:'Pedidos', Icon:IconOrders   },
-    { to:'/restaurant',         label:'Menú',    Icon:IconMenuTab  },
+    { to:'/restaurant',         label:'Inicio',  Icon:IconHome     },
     { to:'/restaurant/horario', label:'Horario', Icon:IconSchedule },
   ];
   if (role === 'driver')     return [
     { to:'/driver',           label:'Inicio',    Icon:IconHome  },
-    { to:'/driver/pedidos',   label:'Pedidos',   Icon:IconOrders},
     { to:'/driver/ganancias', label:'Ganancias', Icon:IconClock },
   ];
   return [];
@@ -44,7 +41,7 @@ export default function Layout({ children }) {
 
   const role  = auth.user?.role;
   const items = getNavItems(role);
-  const displayName = auth.user?.alias || auth.user?.display_name || auth.user?.full_name || '';
+  const displayName = auth.user?.display_name || auth.user?.username || '';
 
   const shouldAskAddress = Boolean(
     auth.user &&

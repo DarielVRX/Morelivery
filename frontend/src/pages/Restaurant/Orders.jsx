@@ -22,6 +22,24 @@ function FeeBreakdown({ order }) {
       <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--success)', marginTop:'0.2rem' }}>
         <span>Tu ganancia</span><span>{fmt(neto)}</span>
       </div>
+      {/* Footer sticky: toggle historial/activos */}
+      <div style={{
+        position:'sticky', bottom:0, background:'#fff',
+        borderTop:'1px solid var(--gray-200)', padding:'0.6rem 0',
+        display:'flex', justifyContent:'center', zIndex:10
+      }}>
+        <button
+          onClick={() => setTab(t => t==='active' ? 'past' : 'active')}
+          style={{
+            background: tab==='active' ? 'var(--gray-100)' : 'var(--brand)',
+            color:       tab==='active' ? 'var(--gray-700)' : '#fff',
+            border:'none', borderRadius:20, padding:'0.4rem 1.5rem',
+            fontWeight:700, fontSize:'0.82rem', cursor:'pointer',
+            transition:'background 0.2s, color 0.2s'
+          }}>
+          {tab==='active' ? 'Ver historial →' : '← Ver activos'}
+        </button>
+      </div>
     </div>
   );
 }

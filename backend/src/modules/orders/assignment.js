@@ -265,6 +265,12 @@ export async function offerNextDrivers(orderId, _onOffer) {
     }
   }
 
+  // Resetear el flag para la próxima ronda sin candidatos
+  if (cooldownTriggered) {
+    await query(`UPDATE orders SET offer_cooldown_triggered=false, updated_at=NOW() WHERE id=$1`, [orderId]);
+    log(orderId, `offer_cooldown_triggered reset to false — nueva oferta en progreso`);
+  }
+
   for (const row of candidates.rows) {
     log(orderId, `sending offer to driver=${row.user_id}`);
     await upsertOffer(orderId, row.user_id, _onOffer);
@@ -443,6 +449,28 @@ export async function offerOrdersToDriver(driverId, _onOffer) {
 
 // ─── Helper: upsert offer + SSE ──────────────────────────────────────────────
 async function upsertOffer(orderId, driverId, onOffer) {
+  // Advisory lock por driver: evita que dos cadenas paralelas ofrezcan al mismo
+  // driver simultáneamente. Si el lock no está disponible, la segunda cadena aborta.
+  const lockKey = Buffer.from(driverId.replace(/-/g,'')).readBigUInt64BE(0);
+  const lockResult = await query(
+    `SELECT pg_try_advisory_xact_lock($1::bigint) AS acquired`,
+    [lockKey.toString()]
+  );
+  if (!lockResult.rows[0].acquired) {
+    log(orderId, `upsertOffer: advisory lock busy for driver=${driverId} — skip (otro pedido lo está ofreciendo)`);
+    return;
+  }
+
+  // Segunda verificación post-lock: el driver puede haber recibido oferta en la ventana
+  const alreadyPending = await query(
+    `SELECT 1 FROM order_driver_offers WHERE driver_id=$1 AND status='pending' LIMIT 1`,
+    [driverId]
+  );
+  if (alreadyPending.rowCount > 0) {
+    log(orderId, `upsertOffer: driver=${driverId} ya tiene pending offer (post-lock check) — skip`);
+    return;
+  }
+
   await query(
     `INSERT INTO order_driver_offers(order_id, driver_id, status, wait_until)
     VALUES($1,$2,'pending',NULL)
@@ -460,7 +488,7 @@ async function upsertOffer(orderId, driverId, onOffer) {
     const info = await query(
       `SELECT o.total_cents, r.name AS restaurant_name, r.address AS restaurant_address,
       o.delivery_address AS customer_address,
-      split_part(d.full_name,'_',1) AS driver_name,
+      COALESCE(d.alias, d.full_name) AS driver_name,
                              -- Esto garantiza que el tiempo sea relativo a la DB
                              GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + ($3::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
                              FROM orders o
