@@ -22,24 +22,6 @@ function FeeBreakdown({ order }) {
       <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'var(--success)', marginTop:'0.2rem' }}>
         <span>Tu ganancia</span><span>{fmt(neto)}</span>
       </div>
-      {/* Footer sticky: toggle historial/activos */}
-      <div style={{
-        position:'sticky', bottom:0, background:'#fff',
-        borderTop:'1px solid var(--gray-200)', padding:'0.6rem 0',
-        display:'flex', justifyContent:'center', zIndex:10
-      }}>
-        <button
-          onClick={() => setTab(t => t==='active' ? 'past' : 'active')}
-          style={{
-            background: tab==='active' ? 'var(--gray-100)' : 'var(--brand)',
-            color:       tab==='active' ? 'var(--gray-700)' : '#fff',
-            border:'none', borderRadius:20, padding:'0.4rem 1.5rem',
-            fontWeight:700, fontSize:'0.82rem', cursor:'pointer',
-            transition:'background 0.2s, color 0.2s'
-          }}>
-          {tab==='active' ? 'Ver historial →' : '← Ver activos'}
-        </button>
-      </div>
     </div>
   );
 }
@@ -174,12 +156,9 @@ export default function RestaurantOrders() {
       <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1rem' }}>Pedidos</h2>
 
       <div style={{ display:'flex', gap:'0.4rem', marginBottom:'1rem' }}>
-        <button style={tabStyle('active')} onClick={() => setTab('active')}>
-          Activos ({active.length})
-        </button>
-        <button style={tabStyle('past')} onClick={() => setTab('past')}>
-          Historial ({past.length})
-        </button>
+        <span style={{ fontSize:'0.82rem', color:'var(--gray-500)', fontWeight:600 }}>
+          {tab === 'active' ? `Activos (${active.length})` : `Historial (${past.length})`}
+        </span>
       </div>
 
       {msg && <p className="flash flash-error">{msg}</p>}
@@ -189,7 +168,7 @@ export default function RestaurantOrders() {
         active.length === 0
           ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin pedidos activos.</p>
           : (
-            <ul style={{ listStyle:'none', padding:0 }}>
+            <ul className="orders-tab-panel" style={{ listStyle:'none', padding:0 }}>
               {active.map(order => {
                 const color = STATUS_COLOR[order.status] || '#9ca3af';
                 const isExp = expanded === order.id;
@@ -328,7 +307,7 @@ export default function RestaurantOrders() {
         past.length === 0
           ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
           : (
-            <ul style={{ listStyle:'none', padding:0 }}>
+            <ul className="orders-tab-panel reverse" style={{ listStyle:'none', padding:0 }}>
               {past.slice(0, 50).map(o => {
                 const color   = STATUS_COLOR[o.status] || '#9ca3af';
                 const isPastExp = expanded === ('h_'+o.id);
@@ -384,6 +363,30 @@ export default function RestaurantOrders() {
             </ul>
           )
       )}
+
+      {/* ── Footer: toggle historial con slide ──────────────────── */}
+      <div style={{
+        position:'sticky', bottom:0, background:'#fff',
+        borderTop:'1px solid var(--gray-200)', padding:'0.55rem 1rem',
+        display:'flex', justifyContent:'center', zIndex:50, flexShrink:0
+      }}>
+        <button
+          onClick={() => setTab(t => t === 'active' ? 'past' : 'active')}
+          style={{
+            display:'flex', alignItems:'center', gap:'0.4rem',
+            background:'var(--brand)', color:'#fff',
+            border:'none', borderRadius:20, padding:'0.35rem 1.25rem',
+            fontWeight:700, fontSize:'0.8rem', cursor:'pointer'
+          }}>
+          {tab === 'active' ? (
+            <><span>Historial</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg></>
+          ) : (
+            <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+            <span>Activos</span></>
+          )}
+        </button>
+      </div>
     </div>
   );
 }
