@@ -308,6 +308,7 @@ export default function DriverHome() {
             </ul>
           )}
           <OfferCountdown
+            key={pendingOffer.id}
             secondsLeft={pendingOffer.seconds_left ?? 60}
             onExpired={() => { setPendingOffer(null); loadData(); }}
           />

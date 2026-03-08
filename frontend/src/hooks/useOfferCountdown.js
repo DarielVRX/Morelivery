@@ -2,12 +2,10 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * Cuenta regresiva basada en secondsLeft calculado por el SERVIDOR.
- * - No depende del reloj del cliente para el valor inicial.
- * - Al recargar, el SSE o el endpoint devuelven un secondsLeft fresco del servidor.
- * - Cada segundo hace -1 localmente (interpolación suave).
- *
- * @param {number} initialSecondsLeft  segundos restantes según el servidor (número entero ≥ 0)
+ * Cuenta regresiva basada en secondsLeft del SERVIDOR.
+ * El intervalo corre solo cuando secondsLeft > 0.
+ * El componente que lo usa DEBE recibir key={offer.id} para que
+ * se desmonte/monte en cada oferta nueva → reset automático.
  */
 export function useOfferCountdown(initialSecondsLeft) {
   const parse = (v) => {
@@ -15,29 +13,31 @@ export function useOfferCountdown(initialSecondsLeft) {
     return isNaN(n) || n < 0 ? 0 : n;
   };
 
-  const [secondsLeft, setSecondsLeft] = useState(() => parse(initialSecondsLeft));
-  const ref = useRef(parse(initialSecondsLeft));
+  const initial       = parse(initialSecondsLeft);
+  const [secs, setSecs] = useState(initial);
+  const ref           = useRef(initial);
 
-  // Resincronizar cuando llega un valor nuevo del servidor (SSE push o recarga)
+  // Si el mismo componente recibe un nuevo initialSecondsLeft (resync desde SSE)
   useEffect(() => {
     const parsed = parse(initialSecondsLeft);
-    ref.current = parsed;
-    setSecondsLeft(parsed);
+    ref.current  = parsed;
+    setSecs(parsed);
   }, [initialSecondsLeft]);
 
-  // Intervalo estable — solo se monta una vez
+  // Intervalo estable — se limpia al desmontar (key change fuerza un nuevo mount)
   useEffect(() => {
+    if (ref.current <= 0) return;
     const id = setInterval(() => {
-      if (ref.current <= 0) return;
+      if (ref.current <= 0) { clearInterval(id); return; }
       ref.current -= 1;
-      setSecondsLeft(ref.current);
+      setSecs(ref.current);
     }, 1000);
     return () => clearInterval(id);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
-    secondsLeft,
-    urgent:  secondsLeft > 0 && secondsLeft <= 15,
-    expired: secondsLeft <= 0,
+    secondsLeft: secs,
+    urgent:  secs > 0 && secs <= 15,
+    expired: secs <= 0,
   };
 }

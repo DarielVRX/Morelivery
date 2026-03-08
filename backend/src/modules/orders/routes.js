@@ -85,7 +85,7 @@ router.get('/pending-assignment', authenticate, authorize(['driver']), async (re
     let result;
     try {
       result = await query(
-        `SELECT o.id, o.status, o.total_cents, o.service_fee_cents, o.delivery_fee_cents, o.restaurant_fee_cents, o.tip_cents, o.payment_method, o.created_at,
+        `SELECT o.id, o.status, o.total_cents, o.service_fee_cents, o.delivery_fee_cents, o.restaurant_fee_cents, o.tip_cents, o.delivered_tip_cents, o.payment_method, o.created_at,
                 r.name AS restaurant_name, r.address AS restaurant_address,
                 o.delivery_address AS customer_address
          FROM orders o
@@ -222,7 +222,7 @@ router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admi
     const tsClause = tsCol ? `, ${tsCol} = NOW()` : '';
 
     const result = await query(
-      `UPDATE orders SET status=$1, driver_note=$2, restaurant_note=$3, updated_at=NOW()${tsClause} WHERE id=$4 RETURNING *`,
+      `UPDATE orders SET status=$1, driver_note=$2, restaurant_note=$3, updated_at=NOW()${tsClause}${nextStatus==='delivered'?', delivered_tip_cents=tip_cents':''} WHERE id=$4 RETURNING *`,
       [nextStatus, driverNote, restaurantNote, req.params.id]
     );
     const updated = result.rows[0];
@@ -376,13 +376,14 @@ router.patch('/:id/tip', authenticate, authorize(['customer']), async (req, res,
   const tipCents = Number(req.body.tip_cents);
   if (!Number.isFinite(tipCents) || tipCents < 0) return next(new AppError(400, 'Monto inválido'));
   try {
-    const ord = await query('SELECT tip_cents, status, customer_id FROM orders WHERE id=$1', [req.params.id]);
+    const ord = await query('SELECT tip_cents, delivered_tip_cents, status, customer_id FROM orders WHERE id=$1', [req.params.id]);
     if (ord.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
     const o = ord.rows[0];
     if (o.customer_id !== req.user.userId) return next(new AppError(403, 'Sin permiso'));
     // En historial (delivered/cancelled) solo se puede agregar, no restar
     const isPast = ['delivered', 'cancelled'].includes(o.status);
-    if (isPast && tipCents < (o.tip_cents || 0)) return next(new AppError(400, 'En el historial el agradecimiento solo puede aumentar'));
+    const minTip = isPast ? (o.delivered_tip_cents || o.tip_cents || 0) : 0;
+    if (isPast && tipCents < minTip) return next(new AppError(400, `El agradecimiento no puede ser menor a ${minTip}`));
     await query('UPDATE orders SET tip_cents=$1, updated_at=NOW() WHERE id=$2', [tipCents, req.params.id]);
     res.json({ tip_cents: tipCents });
   } catch (e) { next(e); }
@@ -427,8 +428,9 @@ router.get('/my', authenticate, async (req, res, next) => {
       service_fee_cents:  Number(row.service_fee_cents  || 0),
       delivery_fee_cents: Number(row.delivery_fee_cents || 0),
       tip_cents:           Number(row.tip_cents           || 0),
-      restaurant_fee_cents: Number(row.restaurant_fee_cents || 0),
-      payment_method:       row.payment_method || 'cash',
+      restaurant_fee_cents:  Number(row.restaurant_fee_cents  || 0),
+      delivered_tip_cents:   Number(row.delivered_tip_cents  || 0),
+      payment_method:        row.payment_method || 'cash',
       suggestion_items: parseSuggestionItems(row.suggestion_text),
       suggestion_note: parseSuggestionNote(row.suggestion_text),
     }));

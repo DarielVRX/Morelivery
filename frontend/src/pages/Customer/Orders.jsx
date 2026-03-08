@@ -192,9 +192,9 @@ export default function CustomerOrders() {
     } catch (e) { setMsg(e.message); }
   }
 
-  async function saveTip(orderId, cents, isPast, currentTip) {
-    const val = Math.max(0, Math.round(Number(cents) * 100));
-    if (isPast && val < currentTip) return; // en historial no se puede restar
+  async function saveTip(orderId, newCents, isPast, minCents) {
+    const val = Math.max(0, Math.round(Number(newCents)));
+    if (isPast && val < minCents) return; // backend también lo valida
     try {
       await apiFetch(`/orders/${orderId}/tip`, { method:'PATCH', body: JSON.stringify({ tip_cents: val }) }, auth.token);
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, tip_cents: val } : o));
@@ -345,7 +345,7 @@ export default function CustomerOrders() {
                           <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap' }}>
                             {[0,1000,2000,5000].map(v => (
                               <button key={v}
-                                onClick={() => { setTipDraft(d => ({...d, [order.id]:v})); saveTip(order.id, v/100, false, order.tip_cents||0); }}
+                                onClick={() => { setTipDraft(d => ({...d, [order.id]:v})); saveTip(order.id, v, false, 0); }}
                                 style={{ padding:'0.2rem 0.45rem', cursor:'pointer',
                                   border:`1px solid ${(tipDraft[order.id]??order.tip_cents)===v?'var(--success)':'var(--gray-200)'}`,
                                   borderRadius:6, background:(tipDraft[order.id]??order.tip_cents)===v?'#f0fdf4':'#fff',
@@ -359,9 +359,10 @@ export default function CustomerOrders() {
                             inputMode="numeric"
                             pattern="[0-9]*"
                             placeholder="$ otro"
-                            onChange={e => {
-                              const val = e.target.value.replace(/\D/g, ''); // Solo permite números
-                              setTipCents(Math.round(Number(val || 0) * 100));
+                            onBlur={e => {
+                              const val = e.target.value.replace(/\D/g, '');
+                              const cents = Math.round(Number(val||0) * 100);
+                              if (cents > 0) { setTipDraft(d => ({...d, [order.id]:cents})); saveTip(order.id, cents, false, 0); }
                             }}
                             style={{ width: 62, fontSize: '0.75rem', padding: '0.2rem 0.4rem', border: '1px solid var(--gray-200)', borderRadius: 6 }}
                             />
@@ -442,38 +443,49 @@ export default function CustomerOrders() {
                             {o.items.map(i=><li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
                           </ul>
                         )}
-                        {/* Agradecimiento — historial solo suma */}
-                        <div style={{ marginTop:'0.35rem', display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-                          <span style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>Agregar agradecimiento:</span>
-                          <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap' }}>
-                            {[1000,2000,5000].map(v => (
-                              <button key={v}
-                                onClick={() => saveTip(o.id, (o.tip_cents||0)/100 + v/100, true, o.tip_cents||0)}
-                                style={{ padding:'0.2rem 0.45rem', cursor:'pointer',
-                                  border:'1px solid var(--success)', borderRadius:6,
-                                  background:'#f0fdf4', color:'var(--success)',
-                                  fontSize:'0.75rem', fontWeight:600 }}>
-                                +{fmt(v)}
-                              </button>
-                            ))}
-                            <input
-                            type="text"
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            placeholder="$ otro"
-                            onChange={e => {
-                              const val = e.target.value.replace(/\D/g, ''); // Solo permite números
-                              setTipCents(Math.round(Number(val || 0) * 100));
-                            }}
-                            style={{ width: 62, fontSize: '0.75rem', padding: '0.2rem 0.4rem', border: '1px solid var(--gray-200)', borderRadius: 6 }}
-                            />
+                        {/* Agradecimiento — editable, mínimo = valor al momento de entregar */}
+                        {(() => {
+                          const minTip = o.delivered_tip_cents || 0;
+                          return (
+                            <div style={{ marginTop:'0.35rem' }}>
+                              <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+                                <span style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>Agradecimiento:</span>
+                                <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', alignItems:'center' }}>
+                                  {[0,1000,2000,5000].filter(v => v === 0 || v >= minTip).map(v => (
+                                    <button key={v}
+                                      onClick={() => saveTip(o.id, v === 0 ? minTip : v, true, minTip)}
+                                      disabled={v > 0 && v < minTip}
+                                      style={{ padding:'0.2rem 0.45rem', cursor: v > 0 && v < minTip ? 'default' : 'pointer',
+                                        border:`1px solid ${(o.tip_cents)===(v===0?minTip:v)?'var(--success)':'var(--gray-200)'}`,
+                                        borderRadius:6,
+                                        background:(o.tip_cents)===(v===0?minTip:v)?'#f0fdf4':'#fff',
+                                        color:(o.tip_cents)===(v===0?minTip:v)?'var(--success)':'var(--gray-600)',
+                                        fontSize:'0.75rem', fontWeight:(o.tip_cents)===(v===0?minTip:v)?700:400,
+                                        opacity: v > 0 && v < minTip ? 0.4 : 1 }}>
+                                      {v === 0 ? (minTip > 0 ? fmt(minTip) : '—') : fmt(v)}
+                                    </button>
+                                  ))}
+                                  <input
+                                    type="text" inputMode="numeric" pattern="[0-9]*"
+                                    placeholder="$ otro"
+                                    onBlur={e => {
+                                      const val = e.target.value.replace(/\D/g,'');
+                                      const cents = Math.round(Number(val||0)*100);
+                                      if (cents >= minTip) saveTip(o.id, cents, true, minTip);
+                                      e.target.value = '';
+                                    }}
+                                    style={{ width:62, fontSize:'0.75rem', padding:'0.2rem 0.4rem', border:'1px solid var(--gray-200)', borderRadius:6 }}
+                                  />
+                                </div>
+                              </div>
+                              {minTip > 0 && (
+                                <div style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.15rem' }}>
+                                  Mínimo: {fmt(minTip)}
+                                </div>
+                              )}
                             </div>
-                          {(o.tip_cents||0) > 0 && (
-                            <span style={{ fontSize:'0.78rem', color:'var(--success)', fontWeight:700 }}>
-                              Total: {fmt(o.tip_cents)}
-                            </span>
-                          )}
-                        </div>
+                          );
+                        })()}
                         {reportingId===o.id ? (
                           <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginTop:'0.3rem' }}>
                             <textarea value={reportText} onChange={e=>setReportText(e.target.value)}
