@@ -2,37 +2,27 @@ self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', () => {});
 
-// Mostrar notificación desde el SW (para móvil: barra de estado + pantalla de bloqueo)
-self.addEventListener('push', (event) => {
-  if (!event.data) return;
-  try {
-    const data = event.data.json();
-    event.waitUntil(
-      self.registration.showNotification(data.title || '🛵 Nueva oferta', {
-        body:             data.body,
-        icon:             '/logo.svg',
-        badge:            '/logo.svg',
-        tag:              data.tag || 'offer',
-        renotify:         true,
-        requireInteraction: true,
-        vibrate:          [200, 100, 200],
-        data:             data.data || {},
-      })
-    );
-  } catch (_) {}
-});
-
-// Click en notificación → enfocar o abrir la app
+// Click en notificación → abrir/enfocar la app en /driver
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url)
+    ? event.notification.data.url
+    : 'https://morelivery.vercel.app/driver';
+
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // Si ya hay una ventana abierta, enfocarla
-      for (const client of clientList) {
-        if ('focus' in client) return client.focus();
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      // Buscar ventana ya abierta con esa URL
+      for (const client of clients) {
+        if (client.url.includes('/driver') && 'focus' in client) {
+          return client.focus();
+        }
       }
-      // Si no, abrir una nueva
-      if (self.clients.openWindow) return self.clients.openWindow('/');
+      // Buscar cualquier ventana abierta y navegar
+      for (const client of clients) {
+        if ('navigate' in client) return client.navigate(targetUrl).then(c => c?.focus());
+      }
+      // Abrir nueva ventana
+      return self.clients.openWindow(targetUrl);
     })
   );
 });

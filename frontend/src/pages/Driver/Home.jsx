@@ -118,7 +118,29 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
         }).addTo(map);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        // Marcador GPS del driver (azul) — solo si hay posición real
+        // Pin fijo permanente — referencia de ubicación visible siempre
+        const fixedIcon = L.divIcon({
+          html: `<div style="
+            width:28px;height:34px;position:relative;
+          ">
+            <div style="
+              width:28px;height:28px;border-radius:50% 50% 50% 0;
+              background:#e53e3e;border:3px solid #fff;
+              box-shadow:0 3px 10px rgba(0,0,0,0.4);
+              transform:rotate(-45deg);
+            "></div>
+            <div style="
+              position:absolute;top:5px;left:5px;
+              width:14px;height:14px;border-radius:50%;
+              background:#fff;opacity:0.9;
+              transform:rotate(0deg);
+            "></div>
+          </div>`,
+          iconSize: [28, 34], iconAnchor: [14, 34], className: '',
+        });
+        L.marker([19.755228329961394, -101.137419232067], {
+          icon: fixedIcon, interactive: false, keyboard: false,
+        }).addTo(map);
         let driverMarker = null;
         if (driverPos) {
           driverMarker = L.circleMarker([driverPos.lat, driverPos.lng], {
@@ -242,42 +264,37 @@ export default function DriverHome() {
     }
   }, []);
 
-  // Disparar notificación push (web + móvil vía Service Worker si disponible)
+  // Notificación push: barra de estado + pantalla de bloqueo vía SW (móvil), fallback web
   function notifyNewOffer(data) {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    const earn = (data.delivery_fee_cents||data.deliveryFee||0)
-      + Math.round((data.service_fee_cents||data.serviceFee||0)*0.5)
-      + (data.tip_cents||data.tipCents||0)
+    const earn = (data.delivery_fee_cents || data.deliveryFee || 0)
+      + Math.round((data.service_fee_cents || data.serviceFee || 0) * 0.5)
+      + (data.tip_cents || data.tipCents || 0)
       || data.driverEarning || 0;
-    const earnStr = earn > 0 ? ` · $${(earn/100).toFixed(2)}` : '';
     const restaurant = data.restaurantName || data.restaurant_name || 'Pedido nuevo';
     const body = [
       data.restaurantAddress || data.restaurant_address,
       `Entrega: ${data.customerAddress || data.customer_address || '—'}`,
-      earn > 0 ? `Ganancia: $${(earn/100).toFixed(2)}` : null,
-      `${data.secondsLeft ?? data.seconds_left ?? 60}s para responder`,
+      earn > 0 ? `Tu ganancia: $${(earn / 100).toFixed(2)}` : null,
+      `⏱ ${data.secondsLeft ?? data.seconds_left ?? 60}s para responder`,
     ].filter(Boolean).join('\n');
-
+    const title = `🛵 Nueva oferta${earn > 0 ? ` · $${(earn / 100).toFixed(2)}` : ''} — ${restaurant}`;
     const opts = {
-      body,
-      icon: '/logo.svg',
-      badge: '/logo.svg',
-      tag: `offer-${data.orderId}`,
-      renotify: true,
-      requireInteraction: true,
-      silent: false,
+      body, icon: '/logo.svg', badge: '/logo.svg',
+      tag: `offer-${data.orderId}`, renotify: true,
+      requireInteraction: true, silent: false,
       vibrate: [200, 100, 200],
-      data: { orderId: data.orderId },
+      data: { url: 'https://morelivery.vercel.app/driver' },
     };
-
     if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-      navigator.serviceWorker.ready.then(reg => {
-        reg.showNotification(`🛵 Nueva oferta${earnStr} — ${restaurant}`, opts);
-      }).catch(() => new Notification(`🛵 Nueva oferta${earnStr} — ${restaurant}`, opts));
+      navigator.serviceWorker.ready
+        .then(reg => reg.showNotification(title, opts))
+        .catch(() => new Notification(title, opts));
     } else {
-      new Notification(`🛵 Nueva oferta${earnStr} — ${restaurant}`, opts);
+      new Notification(title, opts);
     }
   }
+
   // GPS activo si disponible O tiene pedido activo
   const hasActiveOrder = Boolean(activeOrder && !['delivered','cancelled'].includes(activeOrder.status));
 
@@ -375,11 +392,10 @@ export default function DriverHome() {
     console.log(`[DriverHome] handleNewOffer orderId=${data.orderId} secondsLeft=${data.secondsLeft}`);
     setPendingOffer(prev => {
       if (prev) return prev; // Ya hay una oferta activa
-      // Disparar notificación push
       notifyNewOffer(data);
       return { id: data.orderId, ...data, seconds_left: data.secondsLeft ?? 60 };
     });
-    // Recargar inmediatamente para datos completos (items)
+    // Cargar datos completos (items) inmediatamente sin delay
     loadDataRef.current?.();
   }, []);
 
@@ -599,7 +615,12 @@ export default function DriverHome() {
             <OfferCountdown
               key={pendingOffer.id}
               secondsLeft={pendingOffer.seconds_left ?? pendingOffer.secondsLeft ?? 60}
-              onExpired={() => { setPendingOffer(null); loadData(); }}
+              onExpired={() => {
+                setPendingOffer(null);
+                setOfferMinimized(false);
+                // No llamar loadData() — evita parpadeo por oferta aún pending en DB.
+                // El ticker del server la expirará en ≤10s y enviará la siguiente vía SSE.
+              }}
             />
             <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.45rem' }}>
               <button className="btn-primary btn-sm" style={{ flex:1 }}
