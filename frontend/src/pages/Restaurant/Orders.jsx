@@ -5,6 +5,16 @@ import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
+function shortAddr(full) {
+  if (!full || full === 'address-pending') return '';
+  const parts = full.split(',').map(s => s.trim());
+  const streetAndNum = parts[0] || '';
+  const second = parts[1] || '';
+  const colonia = second.startsWith('Int.') ? (parts[2] || '') : second;
+  if (colonia && streetAndNum) return `${colonia} · ${streetAndNum}`;
+  return streetAndNum || colonia || full;
+}
+
 // Desglose para Tienda — lo que recibe neto
 function FeeBreakdown({ order }) {
   const sub     = order.total_cents           || 0;
@@ -216,7 +226,7 @@ export default function RestaurantOrders() {
                     {isExp && (
                     <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
                     <div style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>
-                      {order.customer_address && <div>Dirección: <strong>{order.customer_address}</strong></div>}
+                      {order.customer_address && <div>Dirección: <strong>{shortAddr(order.customer_address)}</strong></div>}
                       Conductor: <strong>{order.driver_first_name || 'Pendiente'}</strong>
                     </div>
                     {(order.items || []).length > 0 && (

@@ -58,7 +58,7 @@ async function computeIsOpen(restaurantId) {
 /* ── GET / — lista pública con is_open calculado en tiempo real ── */
 router.get('/', async (_req, res, next) => {
   try {
-    const result = await query('SELECT id, name, category, is_open, address, profile_photo FROM restaurants WHERE is_active = true ORDER BY name');
+    const result = await query('SELECT id, name, category, is_open, address, profile_photo, lat, lng FROM restaurants WHERE is_active = true ORDER BY name');
     const restaurants = await Promise.all(result.rows.map(async r => ({ ...r, is_open: await computeIsOpen(r.id) })));
     return res.json({ restaurants });
   } catch (error) {
@@ -261,13 +261,10 @@ router.delete('/menu-items/:id', authenticate, authorize(['restaurant']), async 
     );
     if (check.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
 
-    // Intentar desreferenciar en historial; si la columna tiene NOT NULL, eliminar en cascada
+    // Preservar historial: limpiar referencia en order_items antes de borrar
     try {
       await query(`UPDATE order_items SET menu_item_id = NULL WHERE menu_item_id = $1`, [req.params.id]);
-    } catch (_) {
-      // Columna NOT NULL: eliminar los order_items huérfanos antes de borrar el producto
-      try { await query(`DELETE FROM order_items WHERE menu_item_id = $1`, [req.params.id]); } catch (__) {}
-    }
+    } catch (_) {}
     await query(`DELETE FROM menu_items WHERE id = $1`, [req.params.id]);
     return res.json({ ok: true });
   } catch (error) { return next(error); }

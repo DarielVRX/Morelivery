@@ -21,7 +21,7 @@ const offerCb = makeOfferCallback();
 // Rate-limit del listener: evitar que el mismo driver dispare offerOrdersToDriver
 // más de una vez cada 10s (el SSE se reconecta seguido y el frontend llama /listener)
 const listenerLastCall = new Map(); // driverId → timestamp
-const LISTENER_MIN_INTERVAL_MS = 10_000;
+const LISTENER_MIN_INTERVAL_MS = 2_000; // sincronizado con cron de 1s del frontend
 
 function isMissingColumnError(e)   { return e?.code === '42703'; }
 function isMissingRelationError(e) { return e?.code === '42P01'; }
@@ -74,10 +74,13 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
                 o.tip_cents, o.payment_method, o.status,
                 o.delivery_address AS customer_address,
                 r.name AS restaurant_name, r.address AS restaurant_address,
+                r.lat AS restaurant_lat, r.lng AS restaurant_lng,
+                c.lat AS customer_lat, c.lng AS customer_lng,
                 GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + (60::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
          FROM order_driver_offers od
          JOIN orders o ON o.id = od.order_id
          JOIN restaurants r ON r.id = o.restaurant_id
+         JOIN users c ON c.id = o.customer_id
          WHERE od.driver_id=$1 AND od.status='pending' AND o.driver_id IS NULL
          ORDER BY od.created_at ASC`,
         [req.user.userId]
