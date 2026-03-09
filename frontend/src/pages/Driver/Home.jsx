@@ -181,16 +181,25 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
     });
   }, [customPin?.lat, customPin?.lng, hasActiveOrder]);
 
-  if (!driverPos) return (
-    <div style={{ height:'100%', display:'flex', alignItems:'center', justifyContent:'center', background:'#f3f4f6' }}>
-      <div style={{ textAlign:'center', color:'var(--gray-400)', fontSize:'0.85rem' }}>
-        <div style={{ fontSize:'2rem', marginBottom:'0.5rem' }}>📍</div>
-        Esperando señal GPS…
-      </div>
+  // SIEMPRE renderizamos el div del mapa — el containerRef nunca se desmonta.
+  // El mensaje GPS se superpone como overlay cuando no hay posición.
+  return (
+    <div style={{ height:'100%', width:'100%', position:'relative' }}>
+      <div ref={containerRef} style={{ height:'100%', width:'100%' }} />
+      {!driverPos && (
+        <div style={{
+          position:'absolute', inset:0,
+          display:'flex', alignItems:'center', justifyContent:'center',
+          background:'#f3f4f6', zIndex:2
+        }}>
+          <div style={{ textAlign:'center', color:'var(--gray-400)', fontSize:'0.85rem' }}>
+            <div style={{ fontSize:'2rem', marginBottom:'0.5rem' }}>📍</div>
+            Esperando señal GPS…
+          </div>
+        </div>
+      )}
     </div>
   );
-
-  return <div ref={containerRef} style={{ height:'100%', width:'100%' }} />;
 }
 
 export default function DriverHome() {

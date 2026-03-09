@@ -7,19 +7,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../api/client';
 
-const STORAGE_KEY = 'morelivery_auth_v1';
-
-function getStoredUser() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}').user || null; }
-  catch { return null; }
-}
-
 export default function AuthPage({ mode = 'login' }) {
-  // Redirect: leer localStorage directo, sin suscribirse al context
-  const storedUser = getStoredUser();
-  const navigate   = useNavigate();
-  if (storedUser) { navigate(`/${storedUser.role}`, { replace: true }); return null; }
-
   return <AuthForm mode={mode} />;
 }
 

@@ -55,6 +55,61 @@ export async function getQueuedOrders(driverId = null) {
   return r.rows; // [{id, created_at, has_candidates}]
 }
 
+
+/**
+ * El primer pedido disponible para un driver específico.
+ * "Disponible" = 
+ *   - Pedido sin driver asignado
+ *   - Sin oferta pending activa (ni para este driver ni de otro — libre para ofrecer)
+ *   - El driver no tiene cooldown para este pedido
+ *   - El driver no lo ha aceptado ya
+ *   - El driver no tiene ya una pending offer activa en ningún pedido
+ *
+ * Prioridad: pedidos con has_candidates=true primero (los más "urgentes"),
+ *            luego por created_at ASC.
+ */
+export async function getFirstAvailableOrderForDriver(driverId) {
+  const r = await query(
+    `SELECT o.id, o.created_at,
+            NOT EXISTS (
+              SELECT 1 FROM order_driver_offers od
+              WHERE od.order_id=o.id AND od.status IN ('rejected','released','expired')
+                AND od.wait_until > NOW()
+            ) AS has_candidates
+     FROM orders o
+     WHERE o.driver_id IS NULL
+       AND o.status NOT IN ('delivered','cancelled')
+       -- Sin oferta pending activa para ningún driver (el pedido está libre)
+       AND NOT EXISTS (
+         SELECT 1 FROM order_driver_offers od
+         WHERE od.order_id=o.id AND od.status='pending')
+       -- El driver no tiene cooldown para este pedido
+       AND NOT EXISTS (
+         SELECT 1 FROM order_driver_offers od
+         WHERE od.order_id=o.id AND od.driver_id=$1
+           AND od.status IN ('rejected','released','expired')
+           AND od.wait_until > NOW())
+       -- El driver no lo aceptó ya
+       AND NOT EXISTS (
+         SELECT 1 FROM order_driver_offers od
+         WHERE od.order_id=o.id AND od.driver_id=$1 AND od.status='accepted')
+       -- El driver no tiene ya una pending offer activa en otro pedido
+       AND NOT EXISTS (
+         SELECT 1 FROM order_driver_offers od
+         WHERE od.driver_id=$1 AND od.status='pending')
+       -- El driver está bajo el límite de capacidad
+       AND (SELECT COUNT(*) FROM orders oo
+            WHERE oo.driver_id=$1 AND oo.status=ANY($2::text[])
+           ) < $3
+     ORDER BY
+       -- Pedidos sin ningún cooldown activo (más urgentes) primero
+       has_candidates DESC,
+       o.created_at ASC
+     LIMIT 1`,
+    [driverId, ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
+  );
+  return r.rows[0] ?? null;
+}
 /** Marca el pedido como pending_driver si sigue sin driver */
 export async function markPendingDriver(orderId) {
   await query(
