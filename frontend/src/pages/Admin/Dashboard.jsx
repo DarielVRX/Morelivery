@@ -106,33 +106,40 @@ function DriversPanel({ drivers, orderId }) {
   const tick = useTick();
 
   // Clasificar drivers según el pedido
+  const MAX_ACTIVE = 4; // debe coincidir con assignment/constants.js
   const classified = drivers.map(d => {
-    const isActive  = d.active_orders > 0;
-    const hasPending = d.pending_offer_order_id != null;
-    const cooldown  = (d.cooldowns || []).find(cd => cd.order_id === orderId);
-    const otherCooldown = (d.cooldowns || []).find(cd => cd.order_id !== orderId);
-    const isOfferingThisOrder = d.pending_offer_order_id === orderId;
+    const isActive           = d.active_orders > 0;
+    const hasPending         = d.pending_offer_order_id != null;
+    const cooldownHere       = (d.cooldowns || []).find(cd => cd.order_id === orderId);
+    const hasCapacity        = d.active_orders < MAX_ACTIVE;
+    const isOfferingThisOrder= d.pending_offer_order_id === orderId;
+    const availableForOrder  = d.is_available && hasCapacity && !cooldownHere && !isOfferingThisOrder;
 
     let priority;
-    if (isActive && !d.is_available)   priority = 0; // activo sin disponibilidad
-    else if (isActive)                 priority = 1; // activo disponible
-    else if (d.is_available && !cooldown && !hasPending) priority = 2; // disponible libre
-    else if (hasPending && !isOfferingThisOrder)         priority = 3; // ocupado en otro pedido
-    else if (cooldown)                                   priority = 4; // cooldown en este pedido
-    else if (!d.is_available)                            priority = 5; // no disponible
-    else                                                 priority = 6;
+    // 1. Tiene oferta activa de ESTE pedido
+    if (isOfferingThisOrder)                           priority = 0;
+    // 2. Disponible para recibir este pedido (activo/disponible con espacio, sin cooldown aqui)
+    else if (availableForOrder && !hasPending)         priority = 1;
+    else if (availableForOrder && hasPending)          priority = 2; // disponible pero con otra oferta
+    // 3. Tiene pending offer en OTRO pedido (ocupado en oferta diferente)
+    else if (hasPending && !isOfferingThisOrder && !cooldownHere) priority = 3;
+    // 4. Tiene cooldown para ESTE pedido
+    else if (cooldownHere)                             priority = 4;
+    // 5. Sin disponibilidad (offline)
+    else                                               priority = 5;
 
-    return { ...d, isActive, hasPending, cooldown, isOfferingThisOrder, priority };
+    return { ...d, isActive, hasPending, cooldownHere, isOfferingThisOrder, hasCapacity, priority };
   }).sort((a, b) => a.priority - b.priority);
 
   return (
     <div style={{ marginTop:'0.5rem' }}>
       <button
         onClick={() => setOpen(o => !o)}
-        style={{ fontSize:'0.75rem', color:'var(--brand)', background:'none', border:'none', cursor:'pointer',
-          padding:'0.15rem 0', fontWeight:600, display:'flex', alignItems:'center', gap:'0.3rem' }}>
-        <span>{open ? '▲' : '▼'}</span>
-        {open ? 'Ocultar' : 'Ver estado de drivers'} ({classified.length})
+        style={{ fontSize:'0.75rem', background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:6,
+          cursor:'pointer', padding:'0.25rem 0.65rem', fontWeight:600, display:'flex',
+          alignItems:'center', gap:'0.35rem', marginTop:'0.25rem', color:'#374151' }}>
+        <span style={{ fontSize:'0.6rem' }}>{open ? '▲' : '▼'}</span>
+        {open ? 'Ocultar drivers' : `👥 Drivers — ${classified.filter(d=>d.priority===0).length} con oferta, ${classified.filter(d=>d.priority<=2).length} elegibles`}
       </button>
       {open && (
         <div style={{ marginTop:'0.4rem', border:'1px solid #e5e7eb', borderRadius:8, overflow:'hidden' }}>
@@ -149,40 +156,40 @@ function DriversPanel({ drivers, orderId }) {
             </thead>
             <tbody>
               {classified.map(d => {
-                const secsR = d.cooldown ? Math.max(0, Math.round((new Date(d.cooldown.wait_until) - Date.now()) / 1000)) : null;
-                let sitLabel, sitColor;
+                const secsR = d.cooldownHere ? Math.max(0, Math.round((new Date(d.cooldownHere.wait_until) - Date.now()) / 1000)) : null;
+                let sitLabel, sitColor, rowBg;
                 if (d.isOfferingThisOrder) {
-                  sitLabel = '📤 Oferta enviada'; sitColor = '#3b82f6';
-                } else if (d.isActive && !d.is_available) {
-                  sitLabel = '🚴 En entrega (no disponible)'; sitColor = '#6b7280';
-                } else if (d.isActive) {
-                  sitLabel = '🚴 En entrega (disponible)'; sitColor = '#8b5cf6';
-                } else if (d.is_available && !d.cooldown && !d.hasPending) {
-                  sitLabel = '✅ Disponible y libre'; sitColor = '#16a34a';
-                } else if (d.hasPending && !d.isOfferingThisOrder) {
-                  sitLabel = '⏸ Con oferta en otro pedido'; sitColor = '#f59e0b';
-                } else if (d.cooldown) {
-                  sitLabel = `🕐 Cooldown ${fmtSecs(secsR)}`; sitColor = '#dc2626';
+                  sitLabel = '📤 Oferta activa'; sitColor = '#2563eb'; rowBg = '#eff6ff';
+                } else if (d.priority === 1) {
+                  sitLabel = `✅ Disponible (${d.active_orders}/${MAX_ACTIVE})`; sitColor = '#16a34a'; rowBg = '#f0fdf4';
+                } else if (d.priority === 2) {
+                  sitLabel = `⚡ Disponible + otra oferta`; sitColor = '#0d9488'; rowBg = '#f0fdfa';
+                } else if (d.hasPending && !d.isOfferingThisOrder && !d.cooldownHere) {
+                  sitLabel = '⏸ Oferta en otro pedido'; sitColor = '#f59e0b'; rowBg = undefined;
+                } else if (d.cooldownHere) {
+                  sitLabel = `🕐 Cooldown ${fmtSecs(secsR)}`; sitColor = '#dc2626'; rowBg = '#fff7f7';
                 } else if (!d.is_available) {
-                  sitLabel = '🔴 No disponible'; sitColor = '#9ca3af';
+                  sitLabel = '🔴 Offline'; sitColor = '#9ca3af'; rowBg = undefined;
+                } else if (!d.hasCapacity) {
+                  sitLabel = `🚴 Saturado (${d.active_orders}/${MAX_ACTIVE})`; sitColor = '#6b7280'; rowBg = undefined;
                 } else {
-                  sitLabel = '—'; sitColor = '#9ca3af';
+                  sitLabel = '—'; sitColor = '#9ca3af'; rowBg = undefined;
                 }
                 return (
-                  <tr key={d.id} style={{ background: d.isOfferingThisOrder ? '#eff6ff' : undefined }}>
+                  <tr key={d.id} style={{ background: rowBg }}>
                     <Td>{d.driver_number || '—'}</Td>
-                    <Td><span style={{ fontWeight: d.isOfferingThisOrder ? 700 : 400 }}>{d.full_name?.split('_')[0] || '—'}</span></Td>
+                    <Td><span style={{ fontWeight: d.priority <= 1 ? 700 : 400 }}>{d.full_name?.split('_')[0] || '—'}</span></Td>
                     <Td>
                       {d.is_available
-                        ? <span style={{ color:'#16a34a', fontWeight:600, fontSize:'0.72rem' }}>● Disponible</span>
-                        : <span style={{ color:'#9ca3af', fontSize:'0.72rem' }}>○ No disp.</span>
+                        ? <span style={{ color:'#16a34a', fontWeight:600, fontSize:'0.72rem' }}>● Disp.</span>
+                        : <span style={{ color:'#9ca3af', fontSize:'0.72rem' }}>○ No</span>
                       }
                     </Td>
-                    <Td>{d.active_orders > 0 ? <span style={{ fontWeight:700, color:'#8b5cf6' }}>{d.active_orders}</span> : '0'}</Td>
+                    <Td style={{ textAlign:'center' }}>{d.active_orders}</Td>
                     <Td>{(d.last_lat && d.last_lng) ? <span style={{ color:'#16a34a', fontSize:'0.7rem' }}>✓</span> : <span style={{ color:'#9ca3af', fontSize:'0.7rem' }}>—</span>}</Td>
-                    <Td style={{ color:sitColor, fontWeight:d.isOfferingThisOrder?700:400 }}>
+                    <Td style={{ color:sitColor, fontWeight: d.priority<=1 ? 700 : 400 }}>
                       {sitLabel}
-                      {d.cooldown && <CooldownBadge waitUntil={d.cooldown.wait_until} />}
+                      {d.cooldownHere && <CooldownBadge waitUntil={d.cooldownHere.wait_until} />}
                     </Td>
                   </tr>
                 );
@@ -232,20 +239,6 @@ function OrderRow({ order, drivers }) {
           <span style={{ fontSize:'0.75rem' }}>{fmtTs(order.created_at)}</span>
           <span style={{ fontSize:'0.68rem', color:'#9ca3af', marginLeft:4 }}>({ageMin}m)</span>
         </Td>
-        <Td>
-          {order.driver_id
-            ? <span style={{ fontWeight:600, fontSize:'0.8rem' }}>{order.driver_name?.split('_')[0]}</span>
-            : order.pending_driver_name
-              ? <span style={{ color:'#3b82f6', fontSize:'0.8rem' }}>📤 {order.pending_driver_name?.split('_')[0]}</span>
-              : <span style={{ color:'#9ca3af', fontSize:'0.75rem' }}>—</span>
-          }
-        </Td>
-        <Td>
-          {order.offer_started_at && !order.driver_id
-            ? <OfferBar startedAt={order.offer_started_at} total={60} />
-            : '—'
-          }
-        </Td>
         <Td>{fmt(order.total_cents)}</Td>
         <Td>
           <span style={{ fontSize:'0.72rem', color:'#6b7280' }}>{expanded ? '▲' : '▼'}</span>
@@ -253,7 +246,7 @@ function OrderRow({ order, drivers }) {
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={9} style={{ padding:'0.75rem 1rem', background:'#f8fafc', borderBottom:'2px solid #e5e7eb' }}>
+          <td colSpan={7} style={{ padding:'0.75rem 1rem', background:'#f8fafc', borderBottom:'2px solid #e5e7eb' }}>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:'0.5rem', marginBottom:'0.75rem' }}>
               <Detail label="Hora de creación"     value={fmtDate(order.created_at)} />
               <Detail label="Última actualización" value={fmtDate(order.updated_at)} />
@@ -442,16 +435,14 @@ export default function AdminDashboard() {
                     <Th>ID</Th>
                     <Th>Estado</Th>
                     <Th>Tienda</Th>
-                    <Th>Tienda</Th>
+                    <Th>Abierta</Th>
                     <Th>Hora</Th>
-                    <Th>Driver</Th>
-                    <Th>Contador oferta</Th>
                     <Th>Total</Th>
                     <Th></Th>
                   </tr>
                 </thead>
                 <tbody>
-                  {liveData.orders.map(order => (
+                  {liveData.orders.filter(o => !o.driver_id).map(order => (
                     <OrderRow key={order.id} order={order} drivers={liveData.drivers} />
                   ))}
                 </tbody>

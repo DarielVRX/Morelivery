@@ -261,6 +261,10 @@ router.delete('/menu-items/:id', authenticate, authorize(['restaurant']), async 
     );
     if (check.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
 
+    // Preservar historial: limpiar referencia en order_items antes de borrar
+    try {
+      await query(`UPDATE order_items SET menu_item_id = NULL WHERE menu_item_id = $1`, [req.params.id]);
+    } catch (_) {}
     await query(`DELETE FROM menu_items WHERE id = $1`, [req.params.id]);
     return res.json({ ok: true });
   } catch (error) { return next(error); }

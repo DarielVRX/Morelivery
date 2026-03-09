@@ -255,80 +255,7 @@ export default function CustomerOrders() {
       {/* ── Contenido scrolleable ─────────────────────────────────── */}
       <div style={{ flex:1, overflowY:'auto', padding:'0.75rem 1rem', paddingBottom:'calc(var(--nav-h-mobile) + 2.5rem)' }}>
 
-      {/* ── Sugerencias flotantes ─────────────────────────────────────── */}
-      {pendingSuggestions.map(order => (
-        <div key={`sug-${order.id}`} style={{
-          background:'#fffbeb', border:'2px solid #f59e0b', borderRadius:10,
-          padding:'0.875rem', marginBottom:'0.75rem', position:'relative',
-        }}>
-          {/* Botón cerrar grande para móvil */}
-          <button
-            onClick={() => setSuggestionFor('')}
-            style={{ position:'absolute', top:8, right:8, width:36, height:36, borderRadius:'50%', border:'none', background:'#f3f4f6', cursor:'pointer', fontSize:'1.1rem', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700 }}
-          >✕</button>
 
-          <p style={{ fontWeight:700, fontSize:'0.875rem', color:'#92400e', marginBottom:'0.5rem', paddingRight:'2.5rem' }}>
-            {order.restaurant_name} propone un cambio
-          </p>
-
-          {suggestionFor === order.id ? (
-            <>
-              <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginBottom:'0.65rem' }}>
-                {(restaurantMenus[order.restaurant_id] || order.suggestion_items || []).map(item => {
-                  const id  = item.id || item.menuItemId;
-                  const qty = (suggDrafts[order.id]||{})[id] ?? (order.suggestion_items||[]).find(s=>s.menuItemId===id)?.quantity ?? 0;
-                  return (
-                    <div key={id} style={{
-                      display:'flex', alignItems:'center', gap:'0.5rem',
-                      background: qty>0 ? 'var(--brand-light)':'#fff',
-                      border:`1px solid ${qty>0 ? '#bfdbfe':'var(--gray-200)'}`,
-                      borderRadius:6, padding:'0.4rem 0.75rem',
-                    }}>
-                      <span style={{ flex:1, fontSize:'0.875rem', fontWeight: qty>0 ? 600:400 }}>{item.name}</span>
-                      <span style={{ fontSize:'0.75rem', color:'var(--gray-400)' }}>${((item.price_cents||item.unitPriceCents||0)/100).toFixed(2)}</span>
-                      <div className="qty-control">
-                        <button className="qty-btn" disabled={qty===0} onClick={()=>adjustSugg(order.id,id,-1)}>−</button>
-                        <span className="qty-num">{qty}</span>
-                        <button className="qty-btn add" onClick={()=>adjustSugg(order.id,id,1)}>+</button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {order.suggestion_note && (
-                <p style={{ fontSize:'0.82rem', color:'#92400e', marginBottom:'0.5rem', fontStyle:'italic' }}>
-                  Nota: {order.suggestion_note}
-                </p>
-              )}
-              {/* Total en tiempo real basado en cantidades del cliente */}
-              {(() => {
-                const draft = suggDrafts[order.id] || {};
-                const allItems = restaurantMenus[order.restaurant_id] || order.suggestion_items || [];
-                const total = allItems.reduce((s, item) => {
-                  const id = item.id || item.menuItemId;
-                  const pc = item.price_cents || item.unitPriceCents || 0;
-                  return s + (Number(draft[id]) || 0) * pc;
-                }, 0);
-                return total > 0 ? (
-                  <div style={{ fontWeight:700, fontSize:'0.9rem', color:'var(--brand)', marginBottom:'0.4rem', textAlign:'right' }}>
-                    Total: {fmt(total)}
-                  </div>
-                ) : null;
-              })()}
-              <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
-                <button className="btn-primary btn-sm" onClick={()=>respondSuggestion(order.id,true)}>Aceptar</button>
-                <button className="btn-sm btn-danger" onClick={()=>respondSuggestion(order.id,false)}>Rechazar</button>
-                <button className="btn-sm" onClick={()=>cancelOrder(order.id)}>Cancelar pedido</button>
-              </div>
-            </>
-          ) : (
-            <button onClick={()=>openSuggestion(order)}
-              style={{ background:'#f59e0b', color:'#fff', border:'none', borderRadius:6, padding:'0.45rem 1rem', fontWeight:700, cursor:'pointer', fontSize:'0.875rem' }}>
-              Ver propuesta
-            </button>
-          )}
-        </div>
-      ))}
 
       {msg && <p className={`flash ${msg.includes('enviado')||msg.includes('actualiz') ? 'flash-ok':'flash-error'}`} style={{ marginBottom:'0.5rem' }}>{msg}</p>}
 
@@ -396,11 +323,10 @@ export default function CustomerOrders() {
                             })()}
                             <input
                               type="text" inputMode="numeric" pattern="[0-9]*" placeholder="$ otro"
-                              onBlur={e => {
+                              onChange={e => {
                                 const val = e.target.value.replace(/\D/g,'');
                                 const cents = Math.round(Number(val||0)*100);
-                                if (cents > 0) setTipDraft(d => ({...d, [order.id]: cents}));
-                                e.target.value = '';
+                                setTipDraft(d => ({...d, [order.id]: cents > 0 ? cents : undefined}));
                               }}
                               style={{ width:62, fontSize:'0.75rem', padding:'0.2rem 0.4rem', border:'1px solid var(--gray-200)', borderRadius:6 }}
                             />
@@ -411,7 +337,7 @@ export default function CustomerOrders() {
                             <button
                               onClick={() => saveTip(order.id, tipDraft[order.id], false, 0)}
                               style={{ marginTop:'0.3rem', padding:'0.25rem 0.9rem', background:'var(--success)', color:'#fff', border:'none', borderRadius:6, fontWeight:700, fontSize:'0.78rem', cursor:'pointer' }}>
-                              Confirmar agradecimiento
+                              Confirmar
                             </button>
                           )}
                         {order.customer_address && (
@@ -541,7 +467,7 @@ export default function CustomerOrders() {
                                     onClick={() => { if (canSave) saveTip(o.id, draft, true, minTip); }}
                                     disabled={!canSave}
                                     style={{ padding:'0.25rem 0.9rem', background: canSave?'var(--success)':'var(--gray-300)', color:'#fff', border:'none', borderRadius:6, fontWeight:700, fontSize:'0.78rem', cursor: canSave?'pointer':'default' }}>
-                                    Confirmar agradecimiento
+                                    Confirmar
                                   </button>
                                   {!canSave && (
                                     <span style={{ fontSize:'0.72rem', color:'var(--danger)' }}>Mínimo: {fmt(minTip)}</span>

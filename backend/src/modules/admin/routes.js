@@ -11,8 +11,9 @@ const router = Router();
 router.get('/orders', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
     const { status, limit = 200, offset = 0 } = req.query;
-    const where = status ? `WHERE o.status = $3` : '';
+    const whereClause = status ? `WHERE o.status = $3` : '';
     const params = status ? [Number(limit), Number(offset), status] : [Number(limit), Number(offset)];
+    const where = whereClause; // alias para mantener compatibilidad
 
     const result = await query(`
       SELECT
@@ -53,7 +54,7 @@ router.get('/orders', authenticate, authorize(['admin']), async (req, res, next)
     }
 
     const orders = result.rows.map(o => ({ ...o, items: itemsByOrder.get(o.id) || [] }));
-    const countResult = await query(`SELECT COUNT(*)::int AS n FROM orders ${where}`, status ? [status] : []);
+    const countResult = await query(`SELECT COUNT(*)::int AS n FROM orders ${status ? 'WHERE status = $1' : ''}`, status ? [status] : []);
     return res.json({ orders, total: countResult.rows[0].n });
   } catch (error) { return next(error); }
 });
