@@ -113,8 +113,7 @@ export default function RestaurantMenu() {
     setDesc(product.description || '');
     setPrice((product.price_cents / 100).toFixed(2));
     setMsg('');
-    setFormOpen(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // No abrir el form colapsado — ahora el form es inline en la lista
   }
 
   function resetForm() {
@@ -230,7 +229,28 @@ export default function RestaurantMenu() {
         : (
           <ul style={{ listStyle:'none', padding:0, marginBottom:'1rem' }}>
             {products.map(product => (
-              <li key={product.id} className="card" style={{ marginBottom:'0.5rem', padding:'0.75rem' }}>
+              <li key={product.id} className="card" style={{ marginBottom:'0.5rem', padding:'0.75rem',
+                border: editingId===product.id ? '2px solid #e3aaaa' : '1px solid var(--gray-200)' }}>
+                {/* ── Modo edición inline ── */}
+                {editingId === product.id ? (
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:'0.82rem', color:'var(--brand)', marginBottom:'0.6rem' }}>
+                      ✏️ Editando: <span style={{ color:'var(--gray-700)' }}>{product.name}</span>
+                    </div>
+                    <div className="row">
+                      <label>Nombre<input value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre del producto" /></label>
+                      <label>Descripción<input value={description} onChange={e=>setDesc(e.target.value)} placeholder="Descripción (opcional)" /></label>
+                      <label>Precio (MXN)<input type="number" value={price} onChange={e=>setPrice(e.target.value)} step="0.01" min="0" placeholder="0.00" /></label>
+                    </div>
+                    <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
+                      <button className="btn-primary btn-sm" onClick={save} disabled={!name.trim()||!price}>
+                        Guardar cambios
+                      </button>
+                      <button className="btn-sm" onClick={resetForm}>Cancelar</button>
+                    </div>
+                    {msg && <p className="flash flash-error" style={{ marginTop:'0.4rem' }}>{msg}</p>}
+                  </div>
+                ) : (
                 <div style={{ display:'flex', gap:'0.75rem', alignItems:'flex-start' }}>
                   <ProductImage src={product.image_url} size={68} />
                   <div style={{ flex:1, minWidth:0 }}>
@@ -314,6 +334,7 @@ export default function RestaurantMenu() {
                     {product.is_available ? 'Activo':'Inactivo'}
                   </span>
                 </div>
+                )}{/* fin ternario edición */}
               </li>
             ))}
           </ul>

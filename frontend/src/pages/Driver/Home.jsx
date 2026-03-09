@@ -87,11 +87,15 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
   const mapRef        = useRef(null); // { map, driverMarker, customMarker }
 
   // Inicializar una vez cuando hay posición
+  // Posición default para inicializar el mapa cuando no hay GPS
+  const DEFAULT_POS = { lat: 20.659699, lng: -103.349609 }; // Guadalajara
+
   useEffect(() => {
-    if (!containerRef.current || !driverPos) return;
+    if (!containerRef.current) return;
     if (mapRef.current) return;
 
     ensureLeafletCSS();
+    const initPos = driverPos || DEFAULT_POS;
 
     const t = setTimeout(() => {
       import('leaflet').then(L => {
@@ -106,31 +110,35 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
 
         const map = L.map(containerRef.current, {
           zoomControl: false, attributionControl: false,
-        }).setView([driverPos.lat, driverPos.lng], 15);
+          tap: true, tapTolerance: 15,
+        }).setView([initPos.lat, initPos.lng], driverPos ? 15 : 13);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          keepBuffer: 1, updateWhenIdle: true,
+          keepBuffer: 2, updateWhenIdle: false, detectRetina: true,
         }).addTo(map);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        // Marcador GPS del driver (azul)
-        const driverMarker = L.circleMarker([driverPos.lat, driverPos.lng], {
-          radius: 9, fillColor: '#2563eb', fillOpacity: 1, color: '#fff', weight: 2,
-        }).addTo(map);
+        // Marcador GPS del driver (azul) — solo si hay posición real
+        let driverMarker = null;
+        if (driverPos) {
+          driverMarker = L.circleMarker([driverPos.lat, driverPos.lng], {
+            radius: 9, fillColor: '#2563eb', fillOpacity: 1, color: '#fff', weight: 2,
+          }).addTo(map);
+        }
 
-        // Click en mapa → pin personalizado (solo sin pedido activo)
+        // Click en mapa → pin personalizado (funciona con o sin GPS)
         map.on('click', (e) => {
           if (hasActiveOrder) return;
           onCustomPin?.({ lat: e.latlng.lat, lng: e.latlng.lng });
         });
 
         mapRef.current = { map, driverMarker, customMarker: null };
-        setTimeout(() => map.invalidateSize(), 200);
+        setTimeout(() => map.invalidateSize(), 300);
       }).catch(() => {});
     }, 50);
 
     return () => clearTimeout(t);
-  }, [Boolean(driverPos)]);
+  }, []); // Solo una vez al montar
 
   // Destruir al desmontar
   useEffect(() => {
@@ -142,11 +150,21 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
     };
   }, []);
 
-  // Actualizar posición GPS
+  // Actualizar posición GPS — crear el marcador si aún no existe
   useEffect(() => {
     if (!mapRef.current || !driverPos) return;
-    mapRef.current.driverMarker.setLatLng([driverPos.lat, driverPos.lng]);
-    mapRef.current.map.panTo([driverPos.lat, driverPos.lng], { animate: true, duration: 0.5 });
+    import('leaflet').then(L => {
+      if (!mapRef.current) return;
+      const { map } = mapRef.current;
+      if (mapRef.current.driverMarker) {
+        mapRef.current.driverMarker.setLatLng([driverPos.lat, driverPos.lng]);
+      } else {
+        mapRef.current.driverMarker = L.circleMarker([driverPos.lat, driverPos.lng], {
+          radius: 9, fillColor: '#2563eb', fillOpacity: 1, color: '#fff', weight: 2,
+        }).addTo(map);
+      }
+      map.panTo([driverPos.lat, driverPos.lng], { animate: true, duration: 0.5 });
+    }).catch(() => {});
   }, [driverPos?.lat, driverPos?.lng]);
 
   // Sincronizar hasActiveOrder en el listener del mapa
@@ -188,14 +206,12 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
       <div ref={containerRef} style={{ height:'100%', width:'100%' }} />
       {!driverPos && (
         <div style={{
-          position:'absolute', inset:0,
-          display:'flex', alignItems:'center', justifyContent:'center',
-          background:'#f3f4f6', zIndex:2
+          position:'absolute', top:8, left:'50%', transform:'translateX(-50%)',
+          background:'rgba(0,0,0,0.5)', color:'#fff', borderRadius:20,
+          padding:'0.2rem 0.75rem', fontSize:'0.72rem', zIndex:5,
+          pointerEvents:'none', whiteSpace:'nowrap',
         }}>
-          <div style={{ textAlign:'center', color:'var(--gray-400)', fontSize:'0.85rem' }}>
-            <div style={{ fontSize:'2rem', marginBottom:'0.5rem' }}>📍</div>
-            Esperando señal GPS…
-          </div>
+          📍 Sin GPS — toca el mapa para marcar posición
         </div>
       )}
     </div>
@@ -458,38 +474,36 @@ export default function DriverHome() {
       {/* ── Panel de oferta — overlay sobre el pedido activo ───────────── */}
       {pendingOffer && (
         <div style={{
-          position:'absolute', bottom: hasActiveOrder ? 0 : 0, left:0, right:0,
+          position:'absolute', bottom:0, left:0, right:0,
           background:'#fff',
           borderTop:'3px solid var(--brand)',
           boxShadow:'0 -4px 20px rgba(0,0,0,0.18)',
           zIndex:30,
           overflow:'hidden',
-          maxHeight: offerMinimized ? 46 : 360,
           transition:'max-height 0.3s ease',
+          maxHeight: offerMinimized ? 0 : 360,
         }}>
-          {/* Cabecera siempre visible + botón minimizar */}
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-            padding:'0.5rem 1rem 0', gap:8 }}>
-            <span style={{ fontSize:'0.7rem', fontWeight:800, letterSpacing:'0.5px',
-              textTransform:'uppercase', color:'var(--brand)' }}>
-              Nueva oferta
-            </span>
-            <button
-              onClick={() => setOfferMinimized(m => !m)}
-              style={{ border:'none', background:'none', cursor:'pointer',
-                color:'var(--gray-400)', padding:'0.1rem 0.3rem', display:'flex',
-                alignItems:'center', justifyContent:'center' }}
-              aria-label={offerMinimized ? 'Expandir oferta' : 'Minimizar oferta'}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                <polyline points={offerMinimized ? '9 18 15 12 9 6' : '18 15 12 9 6 15'} />
-              </svg>
-            </button>
-          </div>
+          {/* Botón colapsar — "oreja" centrada en el borde superior, siempre visible */}
+          <button
+            onClick={() => setOfferMinimized(m => !m)}
+            style={{
+              position:'absolute', top:-18, left:'50%', transform:'translateX(-50%)',
+              background:'var(--brand)', color:'#fff', border:'none', borderRadius:'8px 8px 0 0',
+              padding:'0.15rem 1rem', cursor:'pointer', fontSize:'0.68rem', fontWeight:700,
+              letterSpacing:'0.5px', textTransform:'uppercase', boxShadow:'0 -2px 8px #0002',
+              zIndex:31, whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:4,
+            }}
+            aria-label={offerMinimized ? 'Expandir oferta' : 'Minimizar oferta'}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <polyline points={offerMinimized ? '6 15 12 9 18 15' : '18 9 12 15 6 9'} />
+            </svg>
+            Nueva oferta
+          </button>
 
-          {/* Contenido colapsable */}
-          <div style={{ padding:'0.25rem 1rem 0.75rem', overflowY:'auto' }}>
+          {/* Contenido */}
+          <div style={{ padding:'0.6rem 1rem 0.75rem', overflowY:'auto' }}>
             {/* Tienda, cliente y ganancia */}
             <div style={{ fontSize:'0.82rem', color:'var(--gray-700)', marginBottom:'0.3rem' }}>
               {(pendingOffer.restaurant_name || pendingOffer.restaurantAddress) && (
