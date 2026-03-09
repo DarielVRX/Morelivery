@@ -491,7 +491,7 @@ export default function DriverHome() {
               background:'var(--brand)', color:'#fff', border:'none', borderRadius:'8px 8px 0 0',
               padding:'0.15rem 1rem', cursor:'pointer', fontSize:'0.68rem', fontWeight:700,
               letterSpacing:'0.5px', textTransform:'uppercase', boxShadow:'0 -2px 8px #0002',
-              zIndex:50, whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:4,
+              zIndex:999, whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:4,
             }}
             aria-label={offerMinimized ? 'Expandir oferta' : 'Minimizar oferta'}
           >
