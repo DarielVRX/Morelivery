@@ -37,7 +37,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
 
     const url = `${API_BASE}/events?token=${encodeURIComponent(token)}`;
-    console.log(`[SSE] connecting (attempt ${retryCount.current + 1})`);
+    console.log(`📡 [SSE] conectando (intento ${retryCount.current + 1})`);
     const es = new EventSource(url);
     esRef.current = es;
 
@@ -62,7 +62,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
     });
     es.addEventListener('connected', () => {
       retryCount.current = 0;
-      console.log('[SSE] connected');
+      console.log('📡 [SSE] conexión establecida');
       clearTimeout(reconnectTimer.current);
     });
 
@@ -74,7 +74,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
       // Backoff exponencial: 4s, 8s, 16s… máximo 30s
       const delay = Math.min(4000 * Math.pow(2, retryCount.current), 30000);
       retryCount.current++;
-      console.warn(`[SSE] error — retrying in ${delay / 1000}s (attempt ${retryCount.current})`);
+      console.warn(`📡 [SSE] error — reintentando en ${delay / 1000}s (intento ${retryCount.current})`);
       reconnectTimer.current = setTimeout(connect, delay);
     };
   }, [token]); // SOLO token como dependencia — no los callbacks

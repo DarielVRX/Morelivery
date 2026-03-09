@@ -130,6 +130,12 @@ export default function CustomerOrders() {
 
   useEffect(() => { loadDataRef.current = loadData; });
   useEffect(() => { loadData(); }, [auth.token]);
+  // Polling 5s: fallback si el SSE pierde eventos
+  useEffect(() => {
+    if (!auth.token) return;
+    const id = setInterval(() => loadDataRef.current?.(), 5000);
+    return () => clearInterval(id);
+  }, [auth.token]);
   useRealtimeOrders(
     auth.token,
     () => loadDataRef.current?.(),

@@ -394,6 +394,17 @@ export default function DriverHome() {
 
       {/* ── Mapa (ocupa el espacio restante) ───────────────────────── */}
       <div style={{ flex:1, minHeight:0, position:'relative', overflow:'hidden', zIndex:0 }}>
+        {/* Hint: toca el mapa para colocar marcador */}
+        {!customPin && !hasActiveOrder && availability && (
+          <div style={{
+            position:'absolute', top:8, left:'50%', transform:'translateX(-50%)',
+            background:'rgba(0,0,0,0.55)', color:'#fff', borderRadius:20,
+            padding:'0.25rem 0.75rem', fontSize:'0.72rem', zIndex:5,
+            pointerEvents:'none', whiteSpace:'nowrap',
+          }}>
+            📍 Toca el mapa para marcar tu posición
+          </div>
+        )}
         <DriverMap
           driverPos={myPosition}
           customPin={customPin}
@@ -418,7 +429,7 @@ export default function DriverHome() {
                     {pinAddress}
                   </span>
               }
-              <span style={{ fontSize:'0.7rem', color:'var(--gray-400)' }}>Toca de nuevo para mover</span>
+              <span style={{ fontSize:'0.7rem', color:'var(--gray-400)' }}>Toca el mapa para mover el marcador</span>
             </div>
             <button
               onClick={() => { setCustomPin(null); setPinAddress(null); }}

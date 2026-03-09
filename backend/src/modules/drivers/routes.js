@@ -35,13 +35,13 @@ router.post('/listener', authenticate, authorize(['driver']), async (req, res, n
 
     if (now - last < LISTENER_MIN_INTERVAL_MS) {
       // Demasiado frecuente — solo expirar ofertas, no re-encolear pedidos
-      console.log(`[drivers] /listener driver=${driverId} rate-limited (${Math.round((now-last)/1000)}s since last)`);
+      console.log(`🛵 [driver.ping] driver=${driverId.slice(0,8)} → rate-limit (${Math.round((now-last)/1000)}s desde último ping)`);
       await expireTimedOutOffers(offerCb);
       return res.json({ ok: true, rateLimited: true });
     }
 
     listenerLastCall.set(driverId, now);
-    console.log(`[drivers] /listener driver=${driverId} — running offerOrdersToDriver`);
+    console.log(`🛵 [driver.ping] driver=${driverId.slice(0,8)} → buscando pedidos disponibles`);
     await expireTimedOutOffers(offerCb);
     await offerOrdersToDriver(driverId, offerCb);
     return res.json({ ok: true });

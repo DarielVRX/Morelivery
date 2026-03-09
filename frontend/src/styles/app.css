@@ -412,3 +412,29 @@ button:focus:not(:focus-visible), a:focus:not(:focus-visible) {
   from { opacity: 0; transform: translateX(-18px); }
   to   { opacity: 1; transform: translateX(0); }
 }
+
+/* ── Performance móvil ───────────────────────────────────────────────────── */
+/* Reduce el trabajo de layout en listas largas */
+.order-card, .product-card, li[data-order] {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 80px;
+}
+/* Prepara las animaciones del mapa en GPU */
+.leaflet-container {
+  will-change: transform;
+  -webkit-overflow-scrolling: touch;
+}
+/* Reduce repaints en los botones de acción */
+.btn-primary, .btn-sm {
+  will-change: transform;
+  -webkit-tap-highlight-color: transparent;
+}
+/* Scroll suave pero respetando preferencias de accesibilidad */
+@media (prefers-reduced-motion: no-preference) {
+  * { scroll-behavior: smooth; }
+}
+/* Touch targets mínimos para mobile (WCAG 2.5.5) */
+button, a, [role="button"] {
+  min-height: 44px;
+  touch-action: manipulation;
+}

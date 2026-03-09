@@ -529,7 +529,7 @@ export default function AdminDashboard() {
                           </Td>
                           <Td>
                             {(d.last_lat && d.last_lng)
-                              ? <span style={{ color:'#16a34a', fontSize:'0.75rem', fontWeight:600 }}>✓ {d.last_lat?.toFixed(3)},{d.last_lng?.toFixed(3)}</span>
+                              ? <span style={{ color:'#16a34a', fontSize:'0.75rem', fontWeight:600 }}>✓ {Number(d.last_lat).toFixed(3)},{Number(d.last_lng).toFixed(3)}</span>
                               : <span style={{ color:'#9ca3af', fontSize:'0.72rem' }}>Sin GPS</span>
                             }
                           </Td>

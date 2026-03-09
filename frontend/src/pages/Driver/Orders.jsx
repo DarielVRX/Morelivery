@@ -87,6 +87,12 @@ export default function DriverOrders() {
 
   useEffect(() => { loadDataRef.current = loadData; });
   useEffect(() => { loadData(); }, [auth.token]);
+  // Polling 5s fallback
+  useEffect(() => {
+    if (!auth.token) return;
+    const id = setInterval(() => loadDataRef.current?.(), 5000);
+    return () => clearInterval(id);
+  }, [auth.token]);
   useRealtimeOrders(auth.token, () => loadDataRef.current?.(), () => {});
 
   const active = useMemo(() => orders.filter(o => !['delivered','cancelled'].includes(o.status)), [orders]);

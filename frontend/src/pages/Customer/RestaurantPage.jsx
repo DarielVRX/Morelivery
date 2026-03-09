@@ -142,16 +142,16 @@ export default function RestaurantPage() {
         )}
         <span style={{
           fontSize:'0.75rem', fontWeight:700,
-          color: isClosed ? 'var(--gray-400)' : 'var(--success)',
-          background: isClosed ? 'var(--gray-100)' : '#f0fdf4',
-          border: `1px solid ${isClosed ? 'var(--gray-200)' : '#bbf7d0'}`,
+          color: isClosed ? 'rgba(255,255,255,0.6)' : '#fff',
+          background: isClosed ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.2)',
+          border: `1px solid ${isClosed ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.5)'}`,
           borderRadius:10, padding:'0.15rem 0.55rem',
         }}>
-          {isClosed ? 'Cerrado' : 'Abierto'}
+          {isClosed ? '● Cerrado' : '● Abierto'}
         </span>
         {isClosed && (
-          <p style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginTop:'0.5rem' }}>
-            Esta tienda está cerrada. Puedes explorar el menú pero los pedidos están deshabilitados.
+          <p style={{ fontSize:'0.82rem', color:'rgba(255,255,255,0.8)', marginTop:'0.5rem' }}>
+            Cerrada · puedes ver el menú pero no hacer pedidos.
           </p>
         )}
         </div>{/* fin contenido */}
