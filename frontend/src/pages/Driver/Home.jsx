@@ -240,7 +240,12 @@ export default function DriverHome() {
   // Anunciar presencia al backend — solo al montar, no en cada loadData
   const announceListener = useCallback(async () => {
     if (!auth.token) return;
-    try { await apiFetch('/drivers/listener', { method:'POST' }, auth.token); } catch (_) {}
+    try {
+      await apiFetch('/drivers/listener', { method:'POST' }, auth.token);
+      // Recargar datos para mostrar oferta si el backend envió una por SSE
+      // o si el poll directo generó una nueva oferta
+      loadDataRef.current?.();
+    } catch (_) {}
   }, [auth.token]);
 
   const loadData = useCallback(async () => {
@@ -267,11 +272,30 @@ export default function DriverHome() {
   }, [auth.token]);
 
   useEffect(() => { loadDataRef.current = loadData; });
+
+  // Cargar datos al montar
   useEffect(() => {
     setAvailability(Boolean(auth.user?.driver?.is_available));
-    // Anunciar presencia y cargar datos al montar
-    announceListener().then(() => loadData());
+    loadData();
   }, [auth.token]);
+
+  // ── Polling activo: mientras disponible y sin oferta/pedido activo,
+  //    llamar al listener cada 3s para "jalar" el primer pedido disponible.
+  //    Se detiene cuando: no disponible, ya hay oferta pending, o hay pedido activo.
+  useEffect(() => {
+    if (!availability) return;           // driver no disponible → nada
+    if (pendingOffer)  return;           // ya hay oferta → no interrumpir
+    if (hasActiveOrder) return;          // ya tiene pedido → no saturar
+
+    // Primera llamada inmediata
+    announceListener();
+
+    const id = setInterval(() => {
+      announceListener();
+    }, 3000);
+
+    return () => clearInterval(id);
+  }, [availability, Boolean(pendingOffer), hasActiveOrder, announceListener]);
 
   // SSE: recibir ofertas push sin esperar poll
   const handleNewOffer = useCallback((data) => {
@@ -348,7 +372,7 @@ export default function DriverHome() {
     <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
 
       {/* ── Encabezado FIJO ─────────────────────────────────────────── */}
-      <div style={{ flexShrink:0, background:'linear-gradient(135deg,var(--brand) 0%,#7c1d35 100%)', padding:'0.65rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, zIndex:10 }}>
+      <div style={{ flexShrink:0, background:'linear-gradient(135deg,var(--brand) 0%,#c0546a 100%)', padding:'0.65rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, zIndex:10 }}>
         <div>
           <div style={{ fontWeight:700, fontSize:'0.875rem', color:'#fff' }}>
             {availability ? '● Disponible' : '○ No disponible'}
