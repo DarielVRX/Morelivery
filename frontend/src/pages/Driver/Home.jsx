@@ -479,7 +479,7 @@ export default function DriverHome() {
           borderTop:'3px solid var(--brand)',
           boxShadow:'0 -4px 20px rgba(0,0,0,0.18)',
           zIndex:30,
-          overflow:'hidden',
+          overflow:'auto',
           transition:'max-height 0.3s ease',
           maxHeight: offerMinimized ? 0 : 360,
         }}>
@@ -487,7 +487,7 @@ export default function DriverHome() {
           <button
             onClick={() => setOfferMinimized(m => !m)}
             style={{
-              position:'absolute', top:0, left:'50%', transform:'translateX(-50%)' 'scale (0.5)',
+              position:'absolute', top:0, left:'50%', transform:'translateX(-50%)', 'scale (0.5)',
               background:'var(--brand)', color:'#fff', border:'none', borderRadius:'8px 8px 0 0',
               padding:'0.15rem 1rem', cursor:'pointer', fontSize:'0.68rem', fontWeight:700,
               letterSpacing:'0.5px', textTransform:'uppercase', boxShadow:'0 -2px 8px #0002',
