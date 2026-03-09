@@ -37,8 +37,8 @@ export default function RestaurantPage() {
   const [loading, setLoading]       = useState(true);
   const [msg, setMsg]               = useState('');
   const [ordering, setOrdering]     = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' por defecto
-  const [tipCents, setTipCents]           = useState(0);      // Propina por defecto
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [tipCents, setTipCents]           = useState(0);
 
   const isCustomer  = auth.user?.role === 'customer';
   const hasAddress  = Boolean(auth.user?.address && auth.user.address !== 'address-pending');
@@ -60,32 +60,16 @@ export default function RestaurantPage() {
     load();
   }, [id]);
 
-  const subtotal     = Object.entries(selectedItems).reduce((sum, [menuItemId, qty]) => {
+  const subtotal    = Object.entries(selectedItems).reduce((sum, [menuItemId, qty]) => {
     const item = menu.find(i => i.id === menuItemId);
     return sum + (item ? item.price_cents * Number(qty) : 0);
   }, 0);
-  const serviceFee   = Math.round(subtotal * 0.05);
-  const deliveryFee  = Math.round(subtotal * 0.10);
-  const total        = subtotal + serviceFee + deliveryFee + tipCents; // lo que paga el cliente
+  const serviceFee  = Math.round(subtotal * 0.05);
+  const deliveryFee = Math.round(subtotal * 0.10);
+  const total       = subtotal + serviceFee + deliveryFee + tipCents;
 
   function adjust(itemId, delta) {
     setSelectedItems(p => ({ ...p, [itemId]: Math.max(0, (Number(p[itemId]) || 0) + delta) }));
-  }
-
-  async function sendProposal() {
-    if (!activeOrder) return;
-    if (!proposalNote.trim()) { setMsg('Escribe tu propuesta'); return; }
-    try {
-      // El cliente envía su propia nota — se guarda como restaurant_note para que el restaurante la vea
-      // No requiere confirmación: es solo comunicación directa
-      await apiFetch(`/orders/${activeOrder.id}/messages`, {
-        method:'POST',
-        body: JSON.stringify({ text: `[PROPUESTA CLIENTE] ${proposalNote.trim()}` })
-      }, auth.token);
-      setProposalNote(''); setShowProposal(false);
-      setMsg('Propuesta enviada al restaurante');
-      setTimeout(()=>setMsg(''),4000);
-    } catch (e) { setMsg(e.message); }
   }
 
   async function createOrder() {
@@ -118,52 +102,55 @@ export default function RestaurantPage() {
       {/* Volver */}
       <button
         onClick={() => navigate(-1)}
-        style={{ background:'none', border:'none', color:'var(--brand)', cursor:'pointer', padding:0, fontSize:'0.875rem', marginBottom:'1rem', fontWeight:600 }}
+        style={{ background:'none', border:'none', color:'var(--brand)', cursor:'pointer', padding:0, fontSize:'0.875rem', marginBottom:'0.75rem', fontWeight:600 }}
       >
         ← Volver
       </button>
 
-      {/* Cabecera restaurante — fondo rosado suave para contraste */}
-      <div style={{ margin:'0 -1rem 0', padding:'1rem 1rem 1.1rem',
-        background:'var(--brand-light)', borderBottom:'2px solid #e3aaaa',
-        marginBottom:'1.25rem' }}>
-      <div style={{ display:'flex', gap:'0.875rem', alignItems:'flex-start' }}>
-        {/* Foto de perfil de la tienda */}
-        {restaurant?.profile_photo
-          ? <img src={restaurant.profile_photo} alt={restaurant?.name}
-              style={{ width:60, height:60, borderRadius:'50%', objectFit:'cover', border:'2px solid var(--gray-200)', flexShrink:0 }} />
-          : <div style={{ width:60, height:60, borderRadius:'50%', background:'var(--gray-100)', border:'2px solid var(--gray-200)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="1.5"><circle cx="12" cy="12" r="9"/><path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/><circle cx="12" cy="10" r="2"/></svg>
+      {/* ── Encabezado tienda ──────────────────────────────────────────── */}
+      <div style={{
+        margin: '0 -1rem 1.25rem',
+        padding: '0.85rem 1rem',
+        background: 'linear-gradient(135deg,var(--brand) 0%,var(--brand-dark,#b5254e) 100%)',
+        color: '#fff',
+      }}>
+        <div style={{ display:'flex', gap:'0.875rem', alignItems:'flex-start' }}>
+          {/* Foto de perfil */}
+          {restaurant?.profile_photo
+            ? <img src={restaurant.profile_photo} alt={restaurant?.name}
+                style={{ width:52, height:52, borderRadius:'50%', objectFit:'cover', border:'2px solid rgba(255,255,255,0.4)', flexShrink:0 }} />
+            : <div style={{ width:52, height:52, borderRadius:'50%', background:'rgba(255,255,255,0.15)', border:'2px solid rgba(255,255,255,0.3)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="1.5"><circle cx="12" cy="12" r="9"/><path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/><circle cx="12" cy="10" r="2"/></svg>
+              </div>
+          }
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontWeight:800, fontSize:'1.1rem', letterSpacing:'-0.01em' }}>{restaurant?.name}</div>
+            {restaurant?.address && (
+              <div style={{ fontSize:'0.8rem', opacity:0.85, marginTop:'0.15rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{restaurant.address}</div>
+            )}
+            <div style={{ marginTop:'0.35rem' }}>
+              <span style={{
+                fontSize:'0.72rem', fontWeight:700,
+                background: isClosed ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.2)',
+                border: '1px solid rgba(255,255,255,0.3)',
+                borderRadius:10, padding:'0.15rem 0.55rem',
+              }}>
+                {isClosed ? '● Cerrado' : '● Abierto'}
+              </span>
             </div>
-        }
-        <div style={{ flex:1 }}>
-        <h2 style={{ fontSize:'1.2rem', fontWeight:800, margin:'0 0 0.2rem' }}>{restaurant?.name}</h2>
-        {restaurant?.address && (
-          <p style={{ color:'var(--gray-600)', fontSize:'0.85rem', margin:'0 0 0.35rem' }}>{restaurant.address}</p>
-        )}
-        <span style={{
-          fontSize:'0.75rem', fontWeight:700,
-          color: isClosed ? 'var(--gray-400)' : 'var(--success)',
-          background: isClosed ? 'var(--gray-100)' : '#f0fdf4',
-          border: `1px solid ${isClosed ? 'var(--gray-200)' : '#bbf7d0'}`,
-          borderRadius:10, padding:'0.15rem 0.55rem',
-        }}>
-          {isClosed ? 'Cerrado' : 'Abierto'}
-        </span>
-        {isClosed && (
-          <p style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginTop:'0.5rem' }}>
-            Esta tienda está cerrada. Puedes explorar el menú pero los pedidos están deshabilitados.
-          </p>
-        )}
-        </div>{/* fin contenido */}
-      </div>{/* fin flex */}
-      </div>{/* fin fondo rosado */}
+            {isClosed && (
+              <p style={{ fontSize:'0.78rem', opacity:0.85, marginTop:'0.4rem', marginBottom:0 }}>
+                Puedes explorar el menú, pero los pedidos están desactivados.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
 
       {msg && <p className="flash flash-error" style={{ marginBottom:'0.75rem' }}>{msg}</p>}
 
       {/* Menú */}
-      <h3 style={{ fontSize:'0.95rem', fontWeight:800, color:'var(--gray-700)',
-        margin:'0 0 0.75rem', letterSpacing:'0.01em' }}>Menú</h3>
+      <h3 style={{ fontSize:'0.95rem', fontWeight:800, color:'var(--gray-700)', margin:'0 0 0.75rem', letterSpacing:'0.01em' }}>Menú</h3>
       {menu.length === 0 ? (
         <p style={{ color:'var(--gray-600)' }}>Sin productos disponibles.</p>
       ) : (
@@ -181,7 +168,6 @@ export default function RestaurantPage() {
                   {item.description && <div style={{ color:'var(--gray-600)', fontSize:'0.82rem', margin:'0.1rem 0' }}>{item.description}</div>}
                   <div style={{ fontWeight:700, marginTop:'0.2rem' }}>{fmt(item.price_cents)}</div>
                 </div>
-                {/* Controles +/- solo si puede pedir */}
                 {isCustomer && !isClosed && (
                   <div className="qty-control" style={{ flexShrink:0 }}>
                     <button className="qty-btn" disabled={qty === 0} onClick={() => adjust(item.id, -1)}>−</button>
@@ -198,10 +184,9 @@ export default function RestaurantPage() {
         </ul>
       )}
 
-      {/* Desglose — debajo del menú, como contenido normal */}
+      {/* Desglose */}
       {isCustomer && total > 0 && !isClosed && (
         <div style={{ marginTop:'1rem', padding:'0.875rem', background:'var(--gray-50,#f9fafb)', borderRadius:10, border:'1px solid var(--gray-100)' }}>
-          {/* Método de pago */}
           <p style={{ fontSize:'0.75rem', fontWeight:700, color:'var(--gray-500)', marginBottom:'0.35rem', textTransform:'uppercase', letterSpacing:'0.04em' }}>Método de pago</p>
           <div style={{ display:'flex', gap:'0.4rem', marginBottom:'0.75rem' }}>
             {[['cash','Efectivo'],['card','Tarjeta'],['spei','SPEI']].map(([val,label]) => (
@@ -214,7 +199,6 @@ export default function RestaurantPage() {
               </button>
             ))}
           </div>
-          {/* Agradecimiento */}
           <p style={{ fontSize:'0.75rem', fontWeight:700, color:'var(--gray-500)', marginBottom:'0.35rem', textTransform:'uppercase', letterSpacing:'0.04em' }}>Agradecimiento al conductor</p>
           <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', marginBottom:'0.75rem', alignItems:'center' }}>
             {[{pct:0,label:'—'},{pct:5,label:'5%'},{pct:10,label:'10%'},{pct:20,label:'20%'}].map(({pct,label}) => {
@@ -242,7 +226,6 @@ export default function RestaurantPage() {
               style={{ width:62, fontSize:'0.75rem', padding:'0.25rem 0.4rem', border:'1px solid var(--gray-200)', borderRadius:6 }}
             />
           </div>
-          {/* Desglose de tarifas */}
           <div style={{ fontSize:'0.8rem', color:'var(--gray-500)', borderTop:'1px solid var(--gray-100)', paddingTop:'0.5rem' }}>
             <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.15rem' }}><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
             <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.15rem' }}><span>Tarifa de servicio (5%)</span><span>{fmt(serviceFee)}</span></div>
@@ -273,7 +256,6 @@ export default function RestaurantPage() {
         </div>
       )}
 
-      {/* Si no es cliente */}
       {!isCustomer && auth.user && (
         <p style={{ color:'var(--gray-400)', fontSize:'0.85rem', marginTop:'1rem' }}>
           Solo los clientes pueden hacer pedidos.
