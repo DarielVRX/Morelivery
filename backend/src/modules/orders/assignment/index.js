@@ -5,4 +5,4 @@ export { acceptOffer, rejectOffer, releaseOrder, expireTimedOutOffers }         
 export { offerOrdersToDriver }                                                     from './listener.js';
 export { offerNextDrivers }                                                        from './core.js';
 export { serializedOffer, hasActiveChain, queueSize }                             from './queue.js';
-export { getPendingAssignmentOrders }                                              from './queries.js';
+export { getPendingAssignmentOrders, getFirstAvailableOrderForDriver }            from './queries.js';

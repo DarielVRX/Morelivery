@@ -52,6 +52,7 @@ export default function RestaurantMenu() {
   const [editingImg, setEditingImg] = useState(null);
   const [imgUrl, setImgUrl]         = useState('');
   const [savingImg, setSavingImg]   = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const { preview, dataUrl, pick, clear } = useLocalImage();
   const fileRef = useRef(null);
 
@@ -146,9 +147,10 @@ export default function RestaurantMenu() {
   }
 
   async function deleteProduct(productId) {
-    if (!confirm('¿Eliminar este producto? Esta acción no se puede deshacer.')) return;
     try {
       await apiFetch(`/restaurants/menu-items/${productId}`, { method:'DELETE' }, auth.token);
+      setMsg('');
+      setConfirmDelete(null);
       load();
     } catch (e) { setMsg(e.message); }
   }
@@ -251,10 +253,22 @@ export default function RestaurantMenu() {
                       }}>
                         {product.image_url ? 'Cambiar imagen' : 'Agregar imagen'}
                       </button>
-                      <button className="btn-sm" onClick={() => deleteProduct(product.id)}
-                        style={{ color:'var(--danger)', borderColor:'var(--danger)' }}>
-                        Eliminar
-                      </button>
+                      {confirmDelete === product.id ? (
+                        <div style={{ display:'flex', gap:'0.3rem', alignItems:'center' }}>
+                          <span style={{ fontSize:'0.72rem', color:'var(--danger)', fontWeight:700 }}>¿Eliminar?</span>
+                          <button className="btn-sm" onClick={() => deleteProduct(product.id)}
+                            style={{ background:'var(--danger)', color:'#fff', borderColor:'var(--danger)', fontSize:'0.72rem' }}>
+                            Sí
+                          </button>
+                          <button className="btn-sm" onClick={() => setConfirmDelete(null)}
+                            style={{ fontSize:'0.72rem' }}>No</button>
+                        </div>
+                      ) : (
+                        <button className="btn-sm" onClick={() => setConfirmDelete(product.id)}
+                          style={{ color:'var(--danger)', borderColor:'var(--danger)' }}>
+                          Eliminar
+                        </button>
+                      )}
                     </div>
 
                     {/* Editor de imagen */}

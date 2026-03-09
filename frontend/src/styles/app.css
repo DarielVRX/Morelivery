@@ -34,7 +34,8 @@ a:hover { text-decoration: underline; }
 .app-shell {
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
+  height: 100dvh;         /* altura fija — permite que split-root herede altura */
+  overflow: hidden;
 }
 
 /* Header */
@@ -135,6 +136,9 @@ a:hover { text-decoration: underline; }
 /* ── Contenido principal ───────────────────────────────────────────────────── */
 .page-content {
   flex: 1;
+  min-height: 0;          /* necesario para que flex:1 funcione con height heredado */
+  overflow-y: auto;       /* scrollea el contenido normal */
+  overflow-x: hidden;
   padding: 1rem 1.25rem;
   padding-bottom: calc(var(--nav-h-mobile) + 1rem); /* espacio para nav móvil */
   max-width: 760px;
@@ -143,16 +147,23 @@ a:hover { text-decoration: underline; }
 }
 
 /* Split layout — ocupa todo el ancho disponible */
+/* Cuando hay SplitLayout: quitar padding, ocupar toda la altura disponible */
 .page-content:has(.split-root) {
   max-width: none;
   padding: 0;
   margin: 0;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-/* split-root se autogestiona su layout desde SplitLayout.jsx */
+/* split-root llena el espacio que le da page-content */
 .split-root {
+  flex: 1;
+  min-height: 0;
   display: flex;
   width: 100%;
+  overflow: hidden;
 }
 
 /* ── Barra nav inferior móvil ──────────────────────────────────────────────── */

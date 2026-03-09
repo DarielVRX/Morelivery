@@ -248,4 +248,21 @@ router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), async (
   } catch (error) { return next(error); }
 });
 
+
+/* ── DELETE /menu-items/:id — eliminar producto ── */
+router.delete('/menu-items/:id', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    // Verificar que el item pertenece a este restaurante
+    const check = await query(
+      `SELECT mi.id FROM menu_items mi
+       JOIN restaurants r ON r.id = mi.restaurant_id
+       WHERE mi.id = $1 AND r.owner_user_id = $2`,
+      [req.params.id, req.user.userId]
+    );
+    if (check.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
+
+    await query(`DELETE FROM menu_items WHERE id = $1`, [req.params.id]);
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
 export default router;
