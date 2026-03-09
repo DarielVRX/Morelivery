@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
-import { offerOrdersToDriver, expireTimedOutOffers, acceptOffer, rejectOffer, releaseOrder } from '../orders/assignment/index.js';
+import { offerOrdersToDriver, expireTimedOutOffers, acceptOffer, rejectOffer, releaseOrder, serializedOffer } from '../orders/assignment/index.js';
 import { sseHub } from '../events/hub.js';
 import { AppError } from '../../utils/errors.js';
 
@@ -133,6 +133,73 @@ router.post('/offers/:orderId/accept', authenticate, authorize(['driver']), asyn
       sseHub.sendToUser(ord.restaurant_owner_id, 'order_update', payload);
       sseHub.sendToRole('admin', 'order_update', payload);
     }
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+
+/* ── POST /drivers/orders/:orderId/claim — aceptar pedido sin oferta previa ── */
+// Usado desde "En espera": crea la oferta y la acepta en un paso si el pedido sigue libre
+router.post('/orders/:orderId/claim', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const driverId = req.user.userId;
+    const orderId  = req.params.orderId;
+
+    // 1. Verificar que el pedido existe, sigue sin driver, y este driver es elegible
+    const orderCheck = await query(
+      `SELECT o.id FROM orders o
+       WHERE o.id=$1 AND o.driver_id IS NULL
+         AND o.status IN ('created','pending_driver')
+         AND NOT EXISTS (
+           SELECT 1 FROM order_driver_offers od
+           WHERE od.order_id=$1 AND od.driver_id=$2
+             AND od.status IN ('rejected','released','expired')
+             AND od.wait_until > NOW()
+         )`,
+      [orderId, driverId]
+    );
+    if (orderCheck.rowCount === 0) return next(new AppError(409, 'Pedido no disponible o en cooldown'));
+
+    // 2. Verificar que el driver tiene espacio (< MAX_ACTIVE_ORDERS)
+    const MAX_ACTIVE = 4;
+    const activeCount = await query(
+      `SELECT COUNT(*)::int AS n FROM orders
+       WHERE driver_id=$1 AND status IN ('assigned','accepted','preparing','ready','on_the_way')`,
+      [driverId]
+    );
+    if ((activeCount.rows[0]?.n || 0) >= MAX_ACTIVE) return next(new AppError(409, 'No tienes espacio para más pedidos'));
+
+    // 3. Crear oferta y aceptar atómicamente usando el módulo de asignación
+    const assigned = await serializedOffer(orderId, async () => {
+      // Dentro del lock serial, crear la oferta directamente
+      await query(
+        `INSERT INTO order_driver_offers (order_id, driver_id, status, created_at, updated_at)
+         VALUES ($1, $2, 'pending', NOW(), NOW())
+         ON CONFLICT (order_id, driver_id) DO UPDATE
+         SET status='pending', updated_at=NOW()
+         WHERE order_driver_offers.status NOT IN ('pending')`,
+        [orderId, driverId]
+      );
+      return acceptOffer(orderId, driverId);
+    });
+
+    if (!assigned) return next(new AppError(409, 'El pedido ya fue tomado por otro driver'));
+
+    // 4. Notificar vía SSE
+    try {
+      const orderInfo = await query(
+        `SELECT o.customer_id, r.owner_user_id AS restaurant_owner_id
+         FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
+        [orderId]
+      );
+      if (orderInfo.rowCount > 0) {
+        const ord = orderInfo.rows[0];
+        const payload = { orderId, status:'assigned', driverId };
+        sseHub.sendToUser(ord.customer_id, 'order_update', payload);
+        sseHub.sendToUser(ord.restaurant_owner_id, 'order_update', payload);
+        sseHub.sendToRole('admin', 'order_update', payload);
+      }
+    } catch (_) {}
+
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });

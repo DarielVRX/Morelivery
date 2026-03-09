@@ -253,16 +253,18 @@ export default function DriverHome() {
   }, [customPin?.lat, customPin?.lng]);
   const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, availability, hasActiveOrder);
 
-  // Anunciar presencia al backend — solo al montar, no en cada loadData
+  // Ref para el token — evita que el polling sea invalidado al cambiar auth
+  const tokenRef = useRef(auth.token);
+  useEffect(() => { tokenRef.current = auth.token; }, [auth.token]);
+
+  // Anunciar presencia al backend — usa ref para no invalidar el intervalo del polling
   const announceListener = useCallback(async () => {
-    if (!auth.token) return;
+    if (!tokenRef.current) return;
     try {
-      await apiFetch('/drivers/listener', { method:'POST' }, auth.token);
-      // Recargar datos para mostrar oferta si el backend envió una por SSE
-      // o si el poll directo generó una nueva oferta
+      await apiFetch('/drivers/listener', { method:'POST' }, tokenRef.current);
       loadDataRef.current?.();
     } catch (_) {}
-  }, [auth.token]);
+  }, []); // sin deps — usa refs internamente
 
   const loadData = useCallback(async () => {
     if (!auth.token) return;
@@ -298,20 +300,32 @@ export default function DriverHome() {
   // ── Polling activo: mientras disponible y sin oferta/pedido activo,
   //    llamar al listener cada 3s para "jalar" el primer pedido disponible.
   //    Se detiene cuando: no disponible, ya hay oferta pending, o hay pedido activo.
+  // Refs para las condiciones del polling — evita cancelar/recrear el interval
+  const availabilityRef  = useRef(availability);
+  const pendingOfferRef  = useRef(pendingOffer);
+  const hasActiveOrderRef = useRef(hasActiveOrder);
+  useEffect(() => { availabilityRef.current  = availability;   }, [availability]);
+  useEffect(() => { pendingOfferRef.current  = pendingOffer;   }, [pendingOffer]);
+  useEffect(() => { hasActiveOrderRef.current = hasActiveOrder; }, [hasActiveOrder]);
+
+  // Polling permanente cada 4s — condiciones evaluadas en runtime con refs
   useEffect(() => {
-    if (!availability) return;           // driver no disponible → nada
-    if (pendingOffer)  return;           // ya hay oferta → no interrumpir
-    if (hasActiveOrder) return;          // ya tiene pedido → no saturar
-
-    // Primera llamada inmediata
-    announceListener();
-
     const id = setInterval(() => {
+      if (!availabilityRef.current) return;   // no disponible
+      if (pendingOfferRef.current)  return;   // ya tiene oferta
+      if (hasActiveOrderRef.current) return;  // ya tiene pedido activo
       announceListener();
-    }, 3000);
+    }, 4000);
+
+    // Primera llamada inmediata al montar
+    setTimeout(() => {
+      if (availabilityRef.current && !pendingOfferRef.current && !hasActiveOrderRef.current) {
+        announceListener();
+      }
+    }, 500);
 
     return () => clearInterval(id);
-  }, [availability, Boolean(pendingOffer), hasActiveOrder, announceListener]);
+  }, [announceListener]); // solo al montar, announceListener es estable
 
   // SSE: recibir ofertas push sin esperar poll
   const handleNewOffer = useCallback((data) => {
@@ -475,34 +489,38 @@ export default function DriverHome() {
       {pendingOffer && (
         <div style={{
           position:'absolute', bottom:0, left:0, right:0,
-          background:'#fff',
-          borderTop:'3px solid var(--brand)',
-          boxShadow:'0 -4px 20px rgba(0,0,0,0.18)',
           zIndex:30,
-          overflow:'auto',
-          transition:'max-height 0.3s ease',
-          maxHeight: offerMinimized ? 0 : 360,
         }}>
+          {/* Botón oreja — FUERA del div con overflow:hidden para que no se oculte */}
           {/* Botón colapsar — "oreja" centrada en el borde superior, siempre visible */}
           <button
             onClick={() => setOfferMinimized(m => !m)}
             style={{
-              position:'absolute', top:-50, left:'50%', transform:'translateX(-50%)',
-              background:'var(--brand)', color:'#fff', border:'none', borderRadius:'8px 8px 0 0',
-              padding:'0.15rem 1rem', cursor:'pointer', fontSize:'0.68rem', fontWeight:700,
-              letterSpacing:'0.5px', textTransform:'uppercase', boxShadow:'0 -2px 8px #0002',
-              zIndex:999, whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:4,
+              position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)',
+              background:'#f3e8ed', color:'var(--brand)', border:'1px solid #e8c8d4',
+              borderBottom:'none', borderRadius:'6px 6px 0 0',
+              padding:'0.1rem 0.5rem', cursor:'pointer', fontSize:'0.62rem', fontWeight:700,
+              boxShadow:'0 -2px 6px rgba(0,0,0,0.06)',
+              zIndex:31, whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:3,
             }}
             aria-label={offerMinimized ? 'Expandir oferta' : 'Minimizar oferta'}
           >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <polyline points={offerMinimized ? '6 15 12 9 18 15' : '18 9 12 15 6 9'} />
             </svg>
-            Nueva oferta
+            {offerMinimized ? 'Oferta' : '—'}
           </button>
 
-          {/* Contenido */}
+          {/* Panel con overflow:hidden — el botón queda fuera de este */}
+          <div style={{
+            background:'#fff',
+            borderTop:'3px solid var(--brand)',
+            boxShadow:'0 -4px 20px rgba(0,0,0,0.14)',
+            overflow:'hidden',
+            transition:'max-height 0.3s ease',
+            maxHeight: offerMinimized ? 0 : 340,
+          }}>
           <div style={{ padding:'0.6rem 1rem 0.75rem', overflowY:'auto' }}>
             {/* Tienda, cliente y ganancia */}
             <div style={{ fontSize:'0.82rem', color:'var(--gray-700)', marginBottom:'0.3rem' }}>
@@ -553,6 +571,7 @@ export default function DriverHome() {
               </button>
             </div>
           </div>
+          </div>{/* fin panel con overflow */}
         </div>
       )}
 
@@ -607,7 +626,7 @@ export default function DriverHome() {
                   )}
                   {isCash
                     ? <div style={{ fontWeight:700, color:'var(--brand)', fontSize:'0.8rem', marginTop:'0.1rem' }}>
-                        Cobrar al llegar: {fmt(grandTotal)}
+                        Pagar a tienda: {fmt(activeOrder.total_cents||0)}
                       </div>
                     : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
                         {activeOrder.payment_method==='card' ? '💳 Pago con tarjeta — no cobrar' : '🏦 Pago SPEI — no cobrar'}
@@ -623,8 +642,8 @@ export default function DriverHome() {
                     </div>
                   )}
                   {isCash
-                    ? <div style={{ fontWeight:700, color:'var(--brand)', fontSize:'0.8rem', marginTop:'0.1rem' }}>
-                        Cobrar: {fmt(grandTotal)}
+                    ? <div style={{ fontWeight:700, color:'var(--success)', fontSize:'0.8rem', marginTop:'0.1rem' }}>
+                        Cobrar a cliente: {fmt(grandTotal)}
                       </div>
                     : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
                         {activeOrder.payment_method==='card' ? '💳 Ya pagó con tarjeta' : '🏦 Ya pagó SPEI'}
