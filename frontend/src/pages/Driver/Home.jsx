@@ -479,7 +479,7 @@ export default function DriverHome() {
           borderTop:'3px solid var(--brand)',
           boxShadow:'0 -4px 20px rgba(0,0,0,0.18)',
           zIndex:30,
-          overflow:'hidden',
+          overflow:'auto',
           transition:'max-height 0.3s ease',
           maxHeight: offerMinimized ? 0 : 360,
         }}>
@@ -487,15 +487,15 @@ export default function DriverHome() {
           <button
             onClick={() => setOfferMinimized(m => !m)}
             style={{
-              position:'absolute', top:-50, left:'50%', transform:'translateX(-50%)',
+              position:'absolute', top:-25, left:'50%', transform:'translateX(-50%)' 'scale (0.5)',
               background:'var(--brand)', color:'#fff', border:'none', borderRadius:'8px 8px 0 0',
               padding:'0.15rem 1rem', cursor:'pointer', fontSize:'0.68rem', fontWeight:700,
               letterSpacing:'0.5px', textTransform:'uppercase', boxShadow:'0 -2px 8px #0002',
-              zIndex:31, whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:4,
+              zIndex:50, whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:4,
             }}
             aria-label={offerMinimized ? 'Expandir oferta' : 'Minimizar oferta'}
           >
-            <svg width="11" height="3" viewBox="0 0 12 24" fill="none"
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <polyline points={offerMinimized ? '6 15 12 9 18 15' : '18 9 12 15 6 9'} />
             </svg>
