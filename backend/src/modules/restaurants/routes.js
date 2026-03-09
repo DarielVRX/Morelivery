@@ -261,10 +261,13 @@ router.delete('/menu-items/:id', authenticate, authorize(['restaurant']), async 
     );
     if (check.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
 
-    // Preservar historial: limpiar referencia en order_items antes de borrar
+    // Intentar desreferenciar en historial; si la columna tiene NOT NULL, eliminar en cascada
     try {
       await query(`UPDATE order_items SET menu_item_id = NULL WHERE menu_item_id = $1`, [req.params.id]);
-    } catch (_) {}
+    } catch (_) {
+      // Columna NOT NULL: eliminar los order_items huérfanos antes de borrar el producto
+      try { await query(`DELETE FROM order_items WHERE menu_item_id = $1`, [req.params.id]); } catch (__) {}
+    }
     await query(`DELETE FROM menu_items WHERE id = $1`, [req.params.id]);
     return res.json({ ok: true });
   } catch (error) { return next(error); }

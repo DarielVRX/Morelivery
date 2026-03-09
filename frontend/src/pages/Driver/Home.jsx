@@ -118,6 +118,13 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
         }).addTo(map);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
+        // Pin permanente fijo (referencia local)
+        const fixedIcon = L.divIcon({
+          html: `<div style="width:26px;height:26px;border-radius:50% 50% 50% 0;background:#e53e3e;border:2px solid #fff;box-shadow:0 2px 8px #0005;transform:rotate(-45deg)"></div>`,
+          iconSize: [26, 26], iconAnchor: [13, 26], className: ''
+        });
+        L.marker([19.755228329961394, -101.137419232067], { icon: fixedIcon, interactive: false }).addTo(map);
+
         // Marcador GPS del driver (azul) — solo si hay posición real
         let driverMarker = null;
         if (driverPos) {
@@ -491,25 +498,23 @@ export default function DriverHome() {
           position:'absolute', bottom:0, left:0, right:0,
           zIndex:30,
         }}>
-          {/* Botón oreja — FUERA del div con overflow:hidden para que no se oculte */}
           {/* Botón colapsar — "oreja" centrada en el borde superior, siempre visible */}
           <button
             onClick={() => setOfferMinimized(m => !m)}
             style={{
-              position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)',
+              position:'absolute', top:-18, left:'50%', transform:'translateX(-50%)',
               background:'#f3e8ed', color:'var(--brand)', border:'1px solid #e8c8d4',
               borderBottom:'none', borderRadius:'6px 6px 0 0',
-              padding:'0.1rem 0.5rem', cursor:'pointer', fontSize:'0.62rem', fontWeight:700,
+              padding:'0.15rem 0.75rem', cursor:'pointer',
               boxShadow:'0 -2px 6px rgba(0,0,0,0.06)',
-              zIndex:31, whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:3,
+              zIndex:31, display:'flex', alignItems:'center', justifyContent:'center',
             }}
             aria-label={offerMinimized ? 'Expandir oferta' : 'Minimizar oferta'}
           >
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none"
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <polyline points={offerMinimized ? '6 15 12 9 18 15' : '18 9 12 15 6 9'} />
+              <polyline points={offerMinimized ? '6 15 12 9 18 15' : '6 15 12 9 18 15'} />
             </svg>
-            {offerMinimized ? 'Oferta' : '—'}
           </button>
 
           {/* Panel con overflow:hidden — el botón queda fuera de este */}
@@ -559,7 +564,16 @@ export default function DriverHome() {
             <OfferCountdown
               key={pendingOffer.id}
               secondsLeft={pendingOffer.seconds_left ?? pendingOffer.secondsLeft ?? 60}
-              onExpired={() => { setPendingOffer(null); loadData(); }}
+              onExpired={() => {
+                setPendingOffer(null);
+                setOfferMinimized(false);
+                // Disparar listener inmediatamente para capturar la siguiente oferta disponible
+                setTimeout(() => {
+                  if (availabilityRef.current && !hasActiveOrderRef.current) {
+                    announceListener();
+                  }
+                }, 300);
+              }}
             />
             <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.45rem' }}>
               <button className="btn-primary btn-sm" style={{ flex:1 }}
@@ -629,7 +643,7 @@ export default function DriverHome() {
                         Pagar a tienda: {fmt(activeOrder.total_cents||0)}
                       </div>
                     : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
-                        {activeOrder.payment_method==='card' ? '💳 Pago con tarjeta — no cobrar' : '🏦 Pago SPEI — no cobrar'}
+                        {activeOrder.payment_method==='card' ? '💳 Cobro realizado con tarjeta' : '🏦 Cobro realizado con SPEI'}
                       </div>
                   }
                 </div>
@@ -646,7 +660,7 @@ export default function DriverHome() {
                         Cobrar a cliente: {fmt(grandTotal)}
                       </div>
                     : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
-                        {activeOrder.payment_method==='card' ? '💳 Ya pagó con tarjeta' : '🏦 Ya pagó SPEI'}
+                        {activeOrder.payment_method==='card' ? '💳 El cliente pagó con tarjeta' : '🏦 El cliente pagó con SPEI'}
                       </div>
                   }
                 </div>
@@ -706,8 +720,7 @@ export default function DriverHome() {
         );
       })()}
 
-      {/* Espacio para nav móvil — el padding-bottom del page-content no aplica aquí */}
-      <div style={{ height:'var(--nav-h-mobile)', flexShrink:0, background:'transparent' }} />
+
     </div>
   );
 }

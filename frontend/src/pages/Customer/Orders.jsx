@@ -109,7 +109,6 @@ function toDraft(items=[]) {
 // Componente local para el input custom de propina — evita re-renders de la lista completa
 function TipInput({ onValidAmount }) {
   const [val, setVal] = useState('');
-  const showBtn = val.trim() !== '' && Number(val.replace(/\D/g,'')) > 0;
   return (
     <div style={{ display:'flex', alignItems:'center', gap:'0.3rem', flexWrap:'wrap' }}>
       <input
@@ -118,20 +117,11 @@ function TipInput({ onValidAmount }) {
         onChange={e => {
           const raw = e.target.value.replace(/[^0-9]/g,'');
           setVal(raw);
+          const cents = Math.round(Number(raw) * 100);
+          if (cents > 0) onValidAmount(cents);
         }}
         style={{ width:62, fontSize:'0.75rem', padding:'0.2rem 0.4rem', border:'1px solid var(--gray-200)', borderRadius:6 }}
       />
-      {showBtn && (
-        <button
-          onClick={() => {
-            const cents = Math.round(Number(val) * 100);
-            if (cents > 0) { onValidAmount(cents); setVal(''); }
-          }}
-          style={{ padding:'0.2rem 0.5rem', background:'var(--success)', color:'#fff', border:'none',
-            borderRadius:6, fontWeight:700, fontSize:'0.72rem', cursor:'pointer' }}>
-          Confirmar
-        </button>
-      )}
     </div>
   );
 }

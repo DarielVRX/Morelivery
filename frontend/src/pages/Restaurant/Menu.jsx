@@ -148,6 +148,7 @@ export default function RestaurantMenu() {
   async function deleteProduct(productId) {
     try {
       await apiFetch(`/restaurants/menu-items/${productId}`, { method:'DELETE' }, auth.token);
+
       setMsg('');
       setConfirmDelete(null);
       load();
