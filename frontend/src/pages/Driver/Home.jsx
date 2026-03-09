@@ -118,13 +118,6 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
         }).addTo(map);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        // Pin permanente fijo (referencia local)
-        const fixedIcon = L.divIcon({
-          html: `<div style="width:26px;height:26px;border-radius:50% 50% 50% 0;background:#e53e3e;border:2px solid #fff;box-shadow:0 2px 8px #0005;transform:rotate(-45deg)"></div>`,
-          iconSize: [26, 26], iconAnchor: [13, 26], className: ''
-        });
-        L.marker([19.755228329961394, -101.137419232067], { icon: fixedIcon, interactive: false }).addTo(map);
-
         // Marcador GPS del driver (azul) — solo si hay posición real
         let driverMarker = null;
         if (driverPos) {
@@ -242,6 +235,49 @@ export default function DriverHome() {
   const [msg, setMsg] = useState('');
   const loadDataRef   = useRef(null);
 
+  // Solicitar permiso de notificaciones al montar
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  // Disparar notificación push (web + móvil vía Service Worker si disponible)
+  function notifyNewOffer(data) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const earn = (data.delivery_fee_cents||data.deliveryFee||0)
+      + Math.round((data.service_fee_cents||data.serviceFee||0)*0.5)
+      + (data.tip_cents||data.tipCents||0)
+      || data.driverEarning || 0;
+    const earnStr = earn > 0 ? ` · $${(earn/100).toFixed(2)}` : '';
+    const restaurant = data.restaurantName || data.restaurant_name || 'Pedido nuevo';
+    const body = [
+      data.restaurantAddress || data.restaurant_address,
+      `Entrega: ${data.customerAddress || data.customer_address || '—'}`,
+      earn > 0 ? `Ganancia: $${(earn/100).toFixed(2)}` : null,
+      `${data.secondsLeft ?? data.seconds_left ?? 60}s para responder`,
+    ].filter(Boolean).join('\n');
+
+    const opts = {
+      body,
+      icon: '/logo.svg',
+      badge: '/logo.svg',
+      tag: `offer-${data.orderId}`,
+      renotify: true,
+      requireInteraction: true,
+      silent: false,
+      vibrate: [200, 100, 200],
+      data: { orderId: data.orderId },
+    };
+
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.ready.then(reg => {
+        reg.showNotification(`🛵 Nueva oferta${earnStr} — ${restaurant}`, opts);
+      }).catch(() => new Notification(`🛵 Nueva oferta${earnStr} — ${restaurant}`, opts));
+    } else {
+      new Notification(`🛵 Nueva oferta${earnStr} — ${restaurant}`, opts);
+    }
+  }
   // GPS activo si disponible O tiene pedido activo
   const hasActiveOrder = Boolean(activeOrder && !['delivered','cancelled'].includes(activeOrder.status));
 
@@ -339,13 +375,12 @@ export default function DriverHome() {
     console.log(`[DriverHome] handleNewOffer orderId=${data.orderId} secondsLeft=${data.secondsLeft}`);
     setPendingOffer(prev => {
       if (prev) return prev; // Ya hay una oferta activa
+      // Disparar notificación push
+      notifyNewOffer(data);
       return { id: data.orderId, ...data, seconds_left: data.secondsLeft ?? 60 };
     });
-    // Recargar para datos completos (items), pero sin llamar al listener de nuevo
-    setTimeout(() => {
-      apiFetch('/drivers/offers', {}, data._token || '').catch(() => {});
-      loadDataRef.current?.();
-    }, 400);
+    // Recargar inmediatamente para datos completos (items)
+    loadDataRef.current?.();
   }, []);
 
   useRealtimeOrders(
@@ -498,11 +533,11 @@ export default function DriverHome() {
           position:'absolute', bottom:0, left:0, right:0,
           zIndex:30,
         }}>
-          {/* Botón colapsar — "oreja" centrada en el borde superior, siempre visible */}
+          {/* Botón colapsar — bottom del botón alineado con top del panel */}
           <button
             onClick={() => setOfferMinimized(m => !m)}
             style={{
-              position:'absolute', top:-18, left:'50%', transform:'translateX(-50%)',
+              position:'absolute', bottom:'100%', left:'50%', transform:'translateX(-50%)',
               background:'#f3e8ed', color:'var(--brand)', border:'1px solid #e8c8d4',
               borderBottom:'none', borderRadius:'6px 6px 0 0',
               padding:'0.15rem 0.75rem', cursor:'pointer',
@@ -513,7 +548,7 @@ export default function DriverHome() {
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <polyline points={offerMinimized ? '6 15 12 9 18 15' : '6 15 12 9 18 15'} />
+              <polyline points="6 15 12 9 18 15" />
             </svg>
           </button>
 
@@ -564,16 +599,7 @@ export default function DriverHome() {
             <OfferCountdown
               key={pendingOffer.id}
               secondsLeft={pendingOffer.seconds_left ?? pendingOffer.secondsLeft ?? 60}
-              onExpired={() => {
-                setPendingOffer(null);
-                setOfferMinimized(false);
-                // Disparar listener inmediatamente para capturar la siguiente oferta disponible
-                setTimeout(() => {
-                  if (availabilityRef.current && !hasActiveOrderRef.current) {
-                    announceListener();
-                  }
-                }, 300);
-              }}
+              onExpired={() => { setPendingOffer(null); loadData(); }}
             />
             <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.45rem' }}>
               <button className="btn-primary btn-sm" style={{ flex:1 }}
@@ -643,7 +669,7 @@ export default function DriverHome() {
                         Pagar a tienda: {fmt(activeOrder.total_cents||0)}
                       </div>
                     : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
-                        {activeOrder.payment_method==='card' ? '💳 Cobro realizado con tarjeta' : '🏦 Cobro realizado con SPEI'}
+                        {activeOrder.payment_method==='card' ? '💳 Pago con tarjeta — no cobrar' : '🏦 Pago SPEI — no cobrar'}
                       </div>
                   }
                 </div>
@@ -660,7 +686,7 @@ export default function DriverHome() {
                         Cobrar a cliente: {fmt(grandTotal)}
                       </div>
                     : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
-                        {activeOrder.payment_method==='card' ? '💳 El cliente pagó con tarjeta' : '🏦 El cliente pagó con SPEI'}
+                        {activeOrder.payment_method==='card' ? '💳 Ya pagó con tarjeta' : '🏦 Ya pagó SPEI'}
                       </div>
                   }
                 </div>
@@ -720,7 +746,8 @@ export default function DriverHome() {
         );
       })()}
 
-
+      {/* Espacio para nav móvil — el padding-bottom del page-content no aplica aquí */}
+      <div style={{ height:'var(--nav-h-mobile)', flexShrink:0, background:'transparent' }} />
     </div>
   );
 }
