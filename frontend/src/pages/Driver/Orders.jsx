@@ -107,7 +107,8 @@ export default function DriverOrders() {
 
   // Pedidos sin ofertar: excluir los que ya son activos de este driver
   const activeIds = useMemo(() => new Set(active.map(o => o.id)), [active]);
-  const unoffered = useMemo(() => waitingOrders.filter(o => !activeIds.has(o.id)), [waitingOrders, activeIds]);
+  // Excluir: activos de este driver Y pedidos con oferta activa para cualquier driver
+  const unoffered = useMemo(() => waitingOrders.filter(o => !activeIds.has(o.id) && !o.has_pending_offer), [waitingOrders, activeIds]);
 
   const [actionMsg, setActionMsg] = useState('');
   const [actionLoading, setActionLoading] = useState(null);
@@ -118,11 +119,11 @@ export default function DriverOrders() {
   async function acceptDirectly(orderId) {
     setActionLoading(orderId);
     try {
-      await apiFetch(`/drivers/offers/${orderId}/accept`, { method:'POST' }, auth.token);
-      setActionMsg('Pedido aceptado');
+      await apiFetch(`/drivers/orders/${orderId}/claim`, { method:'POST' }, auth.token);
+      setActionMsg('Pedido aceptado ✓');
       loadData();
       setTimeout(() => setActionMsg(''), 3000);
-    } catch (e) { setActionMsg(e.message); }
+    } catch (e) { setActionMsg(e.message || 'Error al aceptar'); }
     finally { setActionLoading(null); }
   }
 

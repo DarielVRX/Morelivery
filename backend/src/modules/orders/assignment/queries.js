@@ -356,6 +356,11 @@ export async function getPendingAssignmentOrders(driverId) {
             o.tip_cents, o.payment_method, o.created_at,
             r.name AS restaurant_name, r.address AS restaurant_address,
             o.delivery_address AS customer_address,
+            -- si hay oferta activa para CUALQUIER driver (no solo este)
+            EXISTS (
+              SELECT 1 FROM order_driver_offers od2
+              WHERE od2.order_id=o.id AND od2.status='pending'
+            ) AS has_pending_offer,
             -- segundos de cooldown restante para este driver en este pedido
             GREATEST(0, EXTRACT(EPOCH FROM (
               od.wait_until - NOW()

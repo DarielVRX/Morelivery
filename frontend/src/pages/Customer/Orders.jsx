@@ -106,6 +106,36 @@ function toDraft(items=[]) {
   return d;
 }
 
+// Componente local para el input custom de propina — evita re-renders de la lista completa
+function TipInput({ onValidAmount }) {
+  const [val, setVal] = useState('');
+  const showBtn = val.trim() !== '' && Number(val.replace(/\D/g,'')) > 0;
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:'0.3rem', flexWrap:'wrap' }}>
+      <input
+        type="text" inputMode="numeric" pattern="[0-9]*" placeholder="$ otro"
+        value={val}
+        onChange={e => {
+          const raw = e.target.value.replace(/[^0-9]/g,'');
+          setVal(raw);
+        }}
+        style={{ width:62, fontSize:'0.75rem', padding:'0.2rem 0.4rem', border:'1px solid var(--gray-200)', borderRadius:6 }}
+      />
+      {showBtn && (
+        <button
+          onClick={() => {
+            const cents = Math.round(Number(val) * 100);
+            if (cents > 0) { onValidAmount(cents); setVal(''); }
+          }}
+          style={{ padding:'0.2rem 0.5rem', background:'var(--success)', color:'#fff', border:'none',
+            borderRadius:6, fontWeight:700, fontSize:'0.72rem', cursor:'pointer' }}>
+          Confirmar
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function CustomerOrders() {
   const { auth } = useAuth();
   const [orders, setOrders]               = useState([]);
@@ -321,15 +351,7 @@ export default function CustomerOrders() {
                                 );
                               });
                             })()}
-                            <input
-                              type="text" inputMode="numeric" pattern="[0-9]*" placeholder="$ otro"
-                              onChange={e => {
-                                const val = e.target.value.replace(/\D/g,'');
-                                const cents = Math.round(Number(val||0)*100);
-                                setTipDraft(d => ({...d, [order.id]: cents > 0 ? cents : undefined}));
-                              }}
-                              style={{ width:62, fontSize:'0.75rem', padding:'0.2rem 0.4rem', border:'1px solid var(--gray-200)', borderRadius:6 }}
-                            />
+                            <TipInput onValidAmount={cents => setTipDraft(d => ({...d, [order.id]: cents}))} />
                             </div>
                           </div>
                           {/* Botón confirmar tip activos */}
@@ -337,7 +359,7 @@ export default function CustomerOrders() {
                             <button
                               onClick={() => saveTip(order.id, tipDraft[order.id], false, 0)}
                               style={{ marginTop:'0.3rem', padding:'0.25rem 0.9rem', background:'var(--success)', color:'#fff', border:'none', borderRadius:6, fontWeight:700, fontSize:'0.78rem', cursor:'pointer' }}>
-                              Confirmar
+                              Confirmar propina
                             </button>
                           )}
                         {order.customer_address && (
@@ -443,17 +465,7 @@ export default function CustomerOrders() {
                                       </button>
                                     );
                                   })}
-                                  <input
-                                    type="text" inputMode="numeric" pattern="[0-9]*"
-                                    placeholder="$ otro"
-                                    onBlur={e => {
-                                      const val = e.target.value.replace(/\D/g,'');
-                                      const cents = Math.round(Number(val||0)*100);
-                                      if (cents > 0) setTipDraft(d => ({...d, [o.id]: cents}));
-                                      e.target.value = '';
-                                    }}
-                                    style={{ width:62, fontSize:'0.75rem', padding:'0.2rem 0.4rem', border:'1px solid var(--gray-200)', borderRadius:6 }}
-                                  />
+                                  <TipInput onValidAmount={cents => setTipDraft(d => ({...d, [o.id]: cents}))} />
                                 </div>
                               </div>
                               {minTip > 0 && (

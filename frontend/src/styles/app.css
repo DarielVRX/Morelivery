@@ -140,7 +140,7 @@ a:hover { text-decoration: underline; }
   overflow-y: auto;       /* scrollea el contenido normal */
   overflow-x: hidden;
   padding: 1rem 1.25rem;
-  padding-bottom: calc(var(--nav-h-mobile) + 1rem); /* espacio para nav móvil */
+  padding-bottom: 1rem; /* nav-mobile es footer real — no necesita espacio extra */
   max-width: 760px;
   width: 100%;
   margin: 0 auto;
@@ -168,10 +168,8 @@ a:hover { text-decoration: underline; }
 
 /* ── Barra nav inferior móvil ──────────────────────────────────────────────── */
 .nav-mobile {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  /* Footer real dentro del flex column — no flota sobre el contenido */
+  flex-shrink: 0;
   height: var(--nav-h-mobile);
   background: #fff;
   border-top: 1px solid var(--gray-200);
@@ -377,7 +375,7 @@ tr:last-child td { border-bottom: none; }
 
 @media (max-width: 767px) {
   .app-header { padding: 0 0.875rem; }
-  .page-content { padding: 0.75rem 0.875rem calc(var(--nav-h-mobile) + 1rem); }
+  .page-content { padding: 0.75rem 0.875rem 1rem; }
   .auth-card { margin: 1rem; padding: 1.25rem; }
   .brand-block h1 { font-size: 1rem; }
 }
