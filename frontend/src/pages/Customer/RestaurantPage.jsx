@@ -114,13 +114,18 @@ export default function RestaurantPage() {
   const canOrder = isCustomer && hasAddress && !isClosed;
 
   return (
-    <div>
+    <div style={{ backgroundColor:'#fff9f8', minHeight:'100vh', padding:'1rem' }}>
       {/* Volver */}
       <button
         onClick={() => navigate(-1)}
-        style={{ background:'none', border:'none', color:'var(--brand)', cursor:'pointer', padding:0, fontSize:'0.875rem', marginBottom:'1rem', fontWeight:600 }}
+        style={{ background:'none', border:'none', color:'var(--brand)', cursor:'pointer',
+          padding:0, fontSize:'0.875rem', marginBottom:'1rem', fontWeight:600,
+          display:'flex', alignItems:'center', gap:'0.3rem' }}
       >
-        ← Volver
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        Volver
       </button>
 
       {/* Cabecera restaurante */}
@@ -166,13 +171,15 @@ export default function RestaurantPage() {
       {menu.length === 0 ? (
         <p style={{ color:'var(--gray-600)' }}>Sin productos disponibles.</p>
       ) : (
-        <ul style={{ listStyle:'none', padding:0 }}>
+        <ul style={{ listStyle:'none', padding:0, margin:0 }}>
           {menu.map(item => {
             const qty = Number(selectedItems[item.id]) || 0;
             return (
               <li key={item.id} style={{
-                display:'flex', gap:'0.75rem', padding:'0.875rem 0',
-                borderBottom:'1px solid var(--gray-100)', alignItems:'center'
+                display:'flex', gap:'0.75rem', padding:'0.75rem',
+                border:'1px solid var(--gray-200)', borderRadius:'var(--radius)',
+                marginBottom:'0.5rem', background:'#fff', alignItems:'center',
+                opacity: isClosed ? 0.7 : 1,
               }}>
                 <ProductImage src={item.image_url} name={item.name} />
                 <div style={{ flex:1, minWidth:0 }}>

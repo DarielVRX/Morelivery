@@ -369,7 +369,7 @@ export default function DriverHome() {
   }
 
   return (
-    <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
+    <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden', position:'relative' }}>
 
       {/* ── Encabezado FIJO ─────────────────────────────────────────── */}
       <div style={{ flexShrink:0, background:'linear-gradient(135deg,var(--brand) 0%,#c0546a 100%)', padding:'0.65rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, zIndex:10 }}>
@@ -455,14 +455,16 @@ export default function DriverHome() {
 
       </div>
 
-      {/* ── Panel de oferta (zIndex:20, encima del pedido activo) ──────── */}
+      {/* ── Panel de oferta — overlay sobre el pedido activo ───────────── */}
       {pendingOffer && (
         <div style={{
-          flexShrink:0, background:'#fff',
+          position:'absolute', bottom: hasActiveOrder ? 0 : 0, left:0, right:0,
+          background:'#fff',
           borderTop:'3px solid var(--brand)',
-          boxShadow:'0 -4px 16px #0003', zIndex:20, position:'relative',
+          boxShadow:'0 -4px 20px rgba(0,0,0,0.18)',
+          zIndex:30,
           overflow:'hidden',
-          maxHeight: offerMinimized ? 44 : 400,
+          maxHeight: offerMinimized ? 46 : 360,
           transition:'max-height 0.3s ease',
         }}>
           {/* Cabecera siempre visible + botón minimizar */}
@@ -488,24 +490,40 @@ export default function DriverHome() {
 
           {/* Contenido colapsable */}
           <div style={{ padding:'0.25rem 1rem 0.75rem', overflowY:'auto' }}>
-            {/* Tienda y cliente */}
+            {/* Tienda, cliente y ganancia */}
             <div style={{ fontSize:'0.82rem', color:'var(--gray-700)', marginBottom:'0.3rem' }}>
-              {pendingOffer.restaurantAddress && (
-                <div><span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Tienda: </span>
-                  <strong>{pendingOffer.restaurantAddress}</strong></div>
+              {(pendingOffer.restaurant_name || pendingOffer.restaurantAddress) && (
+                <div style={{ marginBottom:'0.1rem' }}>
+                  <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Tienda: </span>
+                  <strong>{pendingOffer.restaurant_name || pendingOffer.restaurantAddress}</strong>
+                </div>
               )}
-              {pendingOffer.customerAddress && (
-                <div><span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Cliente: </span>
-                  <strong>{pendingOffer.customerAddress}</strong></div>
+              {(pendingOffer.restaurant_address || pendingOffer.restaurantAddress) && (
+                <div style={{ marginBottom:'0.1rem' }}>
+                  <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Dirección tienda: </span>
+                  <strong>{pendingOffer.restaurant_address || pendingOffer.restaurantAddress}</strong>
+                </div>
+              )}
+              {(pendingOffer.customer_address || pendingOffer.customerAddress || pendingOffer.delivery_address) && (
+                <div style={{ marginBottom:'0.1rem' }}>
+                  <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Entrega: </span>
+                  <strong>{pendingOffer.customer_address || pendingOffer.customerAddress || pendingOffer.delivery_address}</strong>
+                </div>
               )}
             </div>
-            {/* Ganancia */}
-            {pendingOffer.driverEarning != null && (
-              <div style={{ fontSize:'0.85rem', fontWeight:800, color:'var(--success)',
-                marginBottom:'0.35rem' }}>
-                Tu ganancia: {fmt(pendingOffer.driverEarning)}
-              </div>
-            )}
+            {/* Ganancia calculada desde los campos del backend */}
+            {(() => {
+              const earn = (pendingOffer.delivery_fee_cents||0)
+                + Math.round((pendingOffer.service_fee_cents||0)*0.5)
+                + (pendingOffer.tip_cents||0)
+                || pendingOffer.driverEarning || 0;
+              return earn > 0 ? (
+                <div style={{ fontSize:'0.9rem', fontWeight:800, color:'var(--success)',
+                  marginBottom:'0.35rem' }}>
+                  Tu ganancia: {fmt(earn)}
+                </div>
+              ) : null;
+            })()}
             <OfferCountdown
               key={pendingOffer.id}
               secondsLeft={pendingOffer.seconds_left ?? pendingOffer.secondsLeft ?? 60}
