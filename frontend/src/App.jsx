@@ -23,32 +23,12 @@ const Spinner = () => (
   <div style={{ padding:'2rem', textAlign:'center', color:'var(--gray-400)' }}>Cargando…</div>
 );
 
-// ─── Config de apps públicas ──────────────────────────────────────────────────
-// Admin no aparece en la landing — acceso directo por URL /admin/login
 const ADMIN_APP = { key:'admin', label:'Administrador', home:'/admin', icon:null, description:'' };
 
 const APPS = [
-  {
-    key: 'customer',
-    label: 'Cliente',
-    description: 'Pide donde quieras',
-    icon: '🛍️',
-    home: '/customer',
-  },
-  {
-    key: 'restaurant',
-    label: 'Tienda',
-    description: 'Gestiona tu negocio',
-    icon: '🏪',
-    home: '/restaurant',
-  },
-  {
-    key: 'driver',
-    label: 'Conductor',
-    description: 'Reparte y gana',
-    icon: '🛵',
-    home: '/driver',
-  },
+  { key: 'customer',   label: 'Cliente',    description: 'Pide donde quieras',    icon: '🛍️', home: '/customer'   },
+  { key: 'restaurant', label: 'Tienda',     description: 'Gestiona tu negocio',   icon: '🏪', home: '/restaurant' },
+  { key: 'driver',     label: 'Conductor',  description: 'Reparte y gana',        icon: '🛵', home: '/driver'     },
 ];
 
 function findApp(roleOrKey) {
@@ -68,34 +48,58 @@ function ProtectedAny({ children }) {
   return children;
 }
 
-// ─── Pantalla de inicio ───────────────────────────────────────────────────────
+// ─── Landing ──────────────────────────────────────────────────────────────────
 function LandingScreen() {
   const { auth } = useAuth();
-
-  // Si ya está logueado, redirigir a su home
   if (auth.user) {
     const app = findApp(auth.user.role);
     return <Navigate to={app?.home || '/'} replace />;
   }
 
   return (
-    <div style={landingStyles.wrap}>
-      <div style={landingStyles.inner}>
-        {/* Marca */}
-        <div style={landingStyles.brand}>
-          <img src="/logo.svg" alt="Morelivery" style={landingStyles.logo} />
-          <h1 style={landingStyles.title}>Morelivery</h1>
-          <p style={landingStyles.sub}>¿Cómo quieres acceder?</p>
-        </div>
+    <div style={{
+      minHeight: '100dvh',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: '#fff',
+      padding: '1.5rem 1rem',
+    }}>
+      <div style={{
+        width: '100%',
+        maxWidth: '400px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '0.5rem',
+      }}>
+        {/* Brand */}
+        <img src="/logo.svg" alt="Morelivery" style={{ width: 56, height: 56, marginBottom: '0.25rem' }} />
+        <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#1a1a1a', margin: 0 }}>Morelivery</h1>
+        <p style={{ fontSize: '0.9rem', color: '#6b7280', margin: '0 0 1.25rem' }}>¿Cómo quieres acceder?</p>
 
-        {/* Tarjetas de acceso */}
-        <div style={landingStyles.grid}>
+        {/* Vertical stacked buttons */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', width: '100%' }}>
           {APPS.map(app => (
-            <Link key={app.key} to={`/${app.key}/login`} style={{ textDecoration:'none' }}>
-              <div style={landingStyles.card} className="landing-card">
-                <div style={landingStyles.cardIcon}>{app.icon}</div>
-                <span style={landingStyles.cardLabel}>{app.label}</span>
-                <span style={landingStyles.cardDesc}>{app.description}</span>
+            <Link key={app.key} to={`/${app.key}/login`} style={{ textDecoration: 'none' }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '1rem',
+                background: 'var(--brand, #e03a6e)',
+                color: '#fff',
+                borderRadius: '12px',
+                padding: '0.875rem 1.25rem',
+                cursor: 'pointer',
+                transition: 'transform 0.15s, box-shadow 0.15s',
+                boxShadow: '0 2px 8px rgba(224,58,110,0.25)',
+              }} className="landing-btn">
+                <span style={{ fontSize: '1.6rem', lineHeight: 1 }}>{app.icon}</span>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontWeight: 700, fontSize: '1rem' }}>{app.label}</span>
+                  <span style={{ fontSize: '0.78rem', opacity: 0.85 }}>{app.description}</span>
+                </div>
               </div>
             </Link>
           ))}
@@ -103,69 +107,18 @@ function LandingScreen() {
       </div>
 
       <style>{`
-        .landing-card {
-          transition: transform 0.18s ease, box-shadow 0.18s ease;
+        .landing-btn:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 6px 20px rgba(224,58,110,0.35) !important;
         }
-        .landing-card:hover {
-          transform: translateY(-3px);
-          box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-        }
+        .landing-btn:active { transform: translateY(0); }
       `}</style>
     </div>
   );
 }
 
-const landingStyles = {
-  wrap: {
-    minHeight: '100dvh',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'var(--brand-light)',
-    padding: '2rem 1rem',
-  },
-  inner: {
-    width: '100%',
-    maxWidth: '520px',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '2rem',
-  },
-  brand: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '0.35rem',
-  },
-  logo: { width: '64px', height: '64px' },
-  title: { fontSize: '1.75rem', fontWeight: 800, color: 'var(--gray-800)', margin: 0 },
-  sub: { fontSize: '1rem', color: 'var(--gray-600)', margin: 0 },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
-    gap: '1rem',
-    width: '100%',
-  },
-  card: {
-    background: '#fff',
-    borderRadius: '14px',
-    padding: '1.5rem 1rem',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '0.4rem',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.07)',
-    border: '1.5px solid var(--gray-200)',
-    cursor: 'pointer',
-  },
-  cardIcon: { fontSize: '2rem', lineHeight: 1 },
-  cardLabel: { fontWeight: 700, fontSize: '0.95rem', color: 'var(--gray-800)' },
-  cardDesc: { fontSize: '0.78rem', color: 'var(--gray-600)', textAlign: 'center' },
-};
-
-// ─── Pantalla de login / registro ─────────────────────────────────────────────
-// AuthScreen es memo puro — sus inputs son uncontrolled (refs) para cero re-renders.
+// ─── Auth Screen ──────────────────────────────────────────────────────────────
+// Inputs are uncontrolled (useRef) — zero re-renders while typing
 const AuthScreen = memo(function AuthScreen({ mode = 'login' }) {
   const { appKey } = useParams();
   const app        = findApp(appKey);
@@ -177,46 +130,60 @@ const AuthScreen = memo(function AuthScreen({ mode = 'login' }) {
   const displayNameRef = useRef(null);
   const addressRef     = useRef(null);
 
-  const [role,    setRole]    = useState(appKey || 'customer');
   const [message, setMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const isLogin = mode === 'login';
 
-  // Si ya está logueado con este mismo rol, redirigir
+  // If already logged in with the SAME role → redirect to home
   if (auth.user && auth.user.role === appKey) {
     return <Navigate to={app?.home || `/${appKey}`} replace />;
   }
-  // App no encontrada (URL inválida)
+  // If logged in with a DIFFERENT role → redirect to their own home (role mismatch guard)
+  if (auth.user && auth.user.role !== appKey) {
+    return <Navigate to={findApp(auth.user.role)?.home || '/'} replace />;
+  }
+  // Unknown app key
   if (!app) return <Navigate to="/" replace />;
 
   const submit = async () => {
+    if (submitting) return;
     const username    = usernameRef.current?.value?.trim() || '';
     const password    = passwordRef.current?.value         || '';
     const displayName = displayNameRef.current?.value?.trim() || '';
     const address     = addressRef.current?.value?.trim()  || '';
     setMessage('');
+    setSubmitting(true);
     try {
       if (!isLogin) {
         await apiFetch('/auth/register', {
           method: 'POST',
           body: JSON.stringify({
             username, password,
-            role: role || appKey,
+            role: appKey,
             displayName: displayName || undefined,
-            address: ['customer','restaurant'].includes(role || appKey) ? address : undefined,
+            address: ['customer','restaurant'].includes(appKey) ? address : undefined,
           }),
         });
         setMessage('Registro exitoso. Ya puedes iniciar sesión.');
         return;
       }
+      // Login — backend validates role; we also validate client-side
       const data = await apiFetch('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ username, password, role: appKey }),
       });
+      // Extra safety: if server returns a different role, block it
+      if (data.user?.role && data.user.role !== appKey) {
+        setMessage(`Esta cuenta es de tipo "${data.user.role}". Usa el acceso correcto.`);
+        return;
+      }
       login({ token: data.token, user: data.user });
       navigate(app.home);
     } catch (error) {
       setMessage(error.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -226,7 +193,6 @@ const AuthScreen = memo(function AuthScreen({ mode = 'login' }) {
 
   return (
     <div style={authStyles.wrap}>
-      {/* Header mínimo con botón atrás */}
       <header style={authStyles.header}>
         <Link to="/" style={authStyles.back}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -278,8 +244,8 @@ const AuthScreen = memo(function AuthScreen({ mode = 'login' }) {
         )}
 
         <div className="row">
-          <button className="btn-primary" onClick={submit}>
-            {isLogin ? 'Iniciar sesión' : 'Registrarse'}
+          <button className="btn-primary" onClick={submit} disabled={submitting}>
+            {submitting ? 'Procesando…' : (isLogin ? 'Iniciar sesión' : 'Registrarse')}
           </button>
           {isLogin
             ? <Link to={`/${appKey}/register`} style={{ fontSize:'0.875rem', textAlign:'center' }}>
@@ -302,7 +268,7 @@ const AuthScreen = memo(function AuthScreen({ mode = 'login' }) {
 const authStyles = {
   wrap: {
     minHeight: '100dvh',
-    background: 'var(--brand-light)',
+    background: '#fff',
     display: 'flex',
     flexDirection: 'column',
   },
@@ -331,23 +297,20 @@ const authStyles = {
   },
 };
 
-// ─── Rutas protegidas (dentro de Layout) ──────────────────────────────────────
+// ─── Protected routes (inside Layout) ────────────────────────────────────────
 function AppRoutes() {
   return (
     <Layout>
       <Suspense fallback={<Spinner />}>
         <Routes>
-          {/* Perfil */}
           <Route path="/profile" element={<ProtectedAny><ProfilePage /></ProtectedAny>} />
 
-          {/* Tienda pública — con panel de pedidos del cliente */}
           <Route path="/restaurant/:id" element={
             <ProtectedAny>
               <SplitLayout homeContent={<RestaurantPage />} ordersContent={<CustomerOrders />} />
             </ProtectedAny>
           } />
 
-          {/* Cliente */}
           <Route path="/customer" element={
             <ProtectedRole role="customer">
               <SplitLayout homeContent={<CustomerHome />} ordersContent={<CustomerOrders />} />
@@ -355,7 +318,6 @@ function AppRoutes() {
           } />
           <Route path="/customer/pedidos" element={<Navigate to="/customer" replace />} />
 
-          {/* Restaurante */}
           <Route path="/restaurant" element={
             <ProtectedRole role="restaurant">
               <SplitLayout homeContent={<RestaurantMenu />} ordersContent={<RestaurantOrders />} />
@@ -368,7 +330,6 @@ function AppRoutes() {
             </ProtectedRole>
           } />
 
-          {/* Conductor */}
           <Route path="/driver" element={
             <ProtectedRole role="driver">
               <SplitLayout homeContent={<DriverHome />} ordersContent={<DriverOrders />} />
@@ -381,9 +342,7 @@ function AppRoutes() {
             </ProtectedRole>
           } />
 
-          {/* Admin */}
           <Route path="/admin" element={<ProtectedRole role="admin"><AdminDashboard /></ProtectedRole>} />
-
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
@@ -391,18 +350,12 @@ function AppRoutes() {
   );
 }
 
-// ─── Root ─────────────────────────────────────────────────────────────────────
 function RootRouter() {
   return (
     <Routes>
-      {/* Landing — pantalla de inicio pública */}
       <Route path="/"                    element={<LandingScreen />} />
-
-      {/* Login / registro por rol */}
       <Route path="/:appKey/login"       element={<AuthScreen mode="login" />} />
       <Route path="/:appKey/register"    element={<AuthScreen mode="register" />} />
-
-      {/* Rutas protegidas dentro de Layout */}
       <Route path="/*"                   element={<AppRoutes />} />
     </Routes>
   );

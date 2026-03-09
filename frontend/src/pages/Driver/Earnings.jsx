@@ -25,7 +25,6 @@ export default function DriverEarnings() {
     load();
   }, [auth.token]);
 
-  // Calcular totales
   const totalEarnings = orders.reduce((s, o) => {
     const del = o.delivery_fee_cents || 0;
     const svc = o.service_fee_cents  || 0;
@@ -37,10 +36,15 @@ export default function DriverEarnings() {
 
   return (
     <div>
-      {/* ── Encabezado Ganancias ────────────────────────────────────────── */}
-      <div style={{ margin:'0 -1rem 1rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg,#16a34a 0%,#14532d 100%)', color:'#fff' }}>
-        <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>💰 Ganancias</div>
-        <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Historial de entregas y comisiones</div>
+      {/* ── Encabezado ─────────────────────────────────────────────────── */}
+      <div style={{
+        margin: '0 -1rem 1rem',
+        padding: '0.75rem 1rem 0.65rem',
+        background: 'linear-gradient(135deg,#16a34a 0%,#14532d 100%)',
+        color: '#fff',
+      }}>
+        <div style={{ fontWeight: 800, fontSize: '1.05rem', letterSpacing: '-0.01em' }}>💰 Ganancias</div>
+        <div style={{ fontSize: '0.75rem', opacity: 0.85, marginTop: '0.1rem' }}>Historial de entregas y comisiones</div>
       </div>
 
       {/* Resumen */}
