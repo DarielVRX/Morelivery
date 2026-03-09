@@ -384,8 +384,10 @@ router.get('/my', authenticate, async (req, res, next) => {
     try {
       result = await query(
         `SELECT o.*, r.name AS restaurant_name, r.address AS restaurant_address,
+                r.lat AS restaurant_lat, r.lng AS restaurant_lng,
                 COALESCE(c.alias, c.full_name) AS customer_first_name, c.full_name AS customer_display_name,
-                COALESCE(d.alias, d.full_name) AS driver_first_name, c.address AS customer_address
+                COALESCE(d.alias, d.full_name) AS driver_first_name, c.address AS customer_address,
+                c.lat AS customer_lat, c.lng AS customer_lng
          FROM orders o
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id
