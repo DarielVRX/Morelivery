@@ -479,7 +479,7 @@ export default function DriverHome() {
           borderTop:'3px solid var(--brand)',
           boxShadow:'0 -4px 20px rgba(0,0,0,0.18)',
           zIndex:30,
-          overflow:'auto',
+          overflow:'hidden',
           transition:'max-height 0.3s ease',
           maxHeight: offerMinimized ? 0 : 360,
         }}>
