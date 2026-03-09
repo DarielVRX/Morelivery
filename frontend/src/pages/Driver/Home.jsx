@@ -118,29 +118,17 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
         }).addTo(map);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        // Pin fijo permanente — referencia de ubicación visible siempre
+        // Pin fijo permanente — referencia de ubicación
         const fixedIcon = L.divIcon({
-          html: `<div style="
-            width:28px;height:34px;position:relative;
-          ">
-            <div style="
-              width:28px;height:28px;border-radius:50% 50% 50% 0;
-              background:#e53e3e;border:3px solid #fff;
-              box-shadow:0 3px 10px rgba(0,0,0,0.4);
-              transform:rotate(-45deg);
-            "></div>
-            <div style="
-              position:absolute;top:5px;left:5px;
-              width:14px;height:14px;border-radius:50%;
-              background:#fff;opacity:0.9;
-              transform:rotate(0deg);
-            "></div>
+          html: `<div style="width:28px;height:34px;position:relative;">
+            <div style="width:28px;height:28px;border-radius:50% 50% 50% 0;background:#e53e3e;border:3px solid #fff;box-shadow:0 3px 10px rgba(0,0,0,0.4);transform:rotate(-45deg);"></div>
+            <div style="position:absolute;top:5px;left:5px;width:14px;height:14px;border-radius:50%;background:#fff;opacity:0.9;"></div>
           </div>`,
           iconSize: [28, 34], iconAnchor: [14, 34], className: '',
         });
-        L.marker([19.755228329961394, -101.137419232067], {
-          icon: fixedIcon, interactive: false, keyboard: false,
-        }).addTo(map);
+        L.marker([19.755228329961394, -101.137419232067], { icon: fixedIcon, interactive: false, keyboard: false }).addTo(map);
+
+        // Marcador GPS del driver (azul) — solo si hay posición real
         let driverMarker = null;
         if (driverPos) {
           driverMarker = L.circleMarker([driverPos.lat, driverPos.lng], {
@@ -257,14 +245,13 @@ export default function DriverHome() {
   const [msg, setMsg] = useState('');
   const loadDataRef   = useRef(null);
 
-  // Solicitar permiso de notificaciones al montar
+  // Permiso de notificaciones al montar
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
   }, []);
 
-  // Notificación push: barra de estado + pantalla de bloqueo vía SW (móvil), fallback web
   function notifyNewOffer(data) {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     const earn = (data.delivery_fee_cents || data.deliveryFee || 0)
@@ -294,7 +281,6 @@ export default function DriverHome() {
       new Notification(title, opts);
     }
   }
-
   // GPS activo si disponible O tiene pedido activo
   const hasActiveOrder = Boolean(activeOrder && !['delivered','cancelled'].includes(activeOrder.status));
 
@@ -326,6 +312,19 @@ export default function DriverHome() {
     } catch (_) {}
   }, []); // sin deps — usa refs internamente
 
+  // loadOrders: solo carga pedido activo — no toca pendingOffer (SSE es source of truth)
+  const loadOrders = useCallback(async () => {
+    if (!auth.token) return;
+    try {
+      const od = await apiFetch('/orders/my', {}, auth.token);
+      const active = (od.orders || [])
+        .filter(o => !['delivered','cancelled'].includes(o.status))
+        .sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at))[0] || null;
+      setActiveOrder(active);
+    } catch (_) {}
+  }, [auth.token]);
+
+  // loadData: sincronización completa (al montar o después de aceptar/rechazar)
   const loadData = useCallback(async () => {
     if (!auth.token) return;
     try {
@@ -333,23 +332,20 @@ export default function DriverHome() {
         apiFetch('/orders/my', {}, auth.token),
         apiFetch('/drivers/offers', {}, auth.token),
       ]);
-      // Pedido aceptado con mayor antigüedad (accepted_at más viejo)
       const active = (od.orders || [])
         .filter(o => !['delivered','cancelled'].includes(o.status))
         .sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at))[0] || null;
       setActiveOrder(active);
-      // Una sola oferta a la vez
       const offers = off.offers || [];
       const newOffer = offers.length > 0 ? offers[0] : null;
       setPendingOffer(prev => {
-        // Si es una oferta diferente, resetear el minimizado
         if (newOffer?.id !== prev?.id) setOfferMinimized(false);
         return newOffer;
       });
     } catch (_) {}
   }, [auth.token]);
 
-  useEffect(() => { loadDataRef.current = loadData; });
+  useEffect(() => { loadDataRef.current = loadOrders; });
 
   // Cargar datos al montar
   useEffect(() => {
@@ -360,43 +356,55 @@ export default function DriverHome() {
   // ── Polling activo: mientras disponible y sin oferta/pedido activo,
   //    llamar al listener cada 3s para "jalar" el primer pedido disponible.
   //    Se detiene cuando: no disponible, ya hay oferta pending, o hay pedido activo.
-  // Refs para las condiciones del polling — evita cancelar/recrear el interval
-  const availabilityRef  = useRef(availability);
-  const pendingOfferRef  = useRef(pendingOffer);
+  // Refs para condiciones del cron — evita recrear intervalos
+  const availabilityRef   = useRef(availability);
+  const pendingOfferRef   = useRef(pendingOffer);
   const hasActiveOrderRef = useRef(hasActiveOrder);
-  useEffect(() => { availabilityRef.current  = availability;   }, [availability]);
-  useEffect(() => { pendingOfferRef.current  = pendingOffer;   }, [pendingOffer]);
+  useEffect(() => { availabilityRef.current   = availability;   }, [availability]);
+  useEffect(() => { pendingOfferRef.current   = pendingOffer;   }, [pendingOffer]);
   useEffect(() => { hasActiveOrderRef.current = hasActiveOrder; }, [hasActiveOrder]);
 
-  // Polling permanente cada 4s — condiciones evaluadas en runtime con refs
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (!availabilityRef.current) return;   // no disponible
-      if (pendingOfferRef.current)  return;   // ya tiene oferta
-      if (hasActiveOrderRef.current) return;  // ya tiene pedido activo
-      announceListener();
-    }, 4000);
+  // Cron activo: corre cada 1s, se activa solo cuando las 3 condiciones se cumplen
+  // (disponible + sin oferta + sin pedido activo). Se reactiva automáticamente
+  // cuando cualquier condición que lo bloqueaba se libera.
+  const cronActiveRef = useRef(false);
 
-    // Primera llamada inmediata al montar
-    setTimeout(() => {
-      if (availabilityRef.current && !pendingOfferRef.current && !hasActiveOrderRef.current) {
-        announceListener();
+  useEffect(() => {
+    const shouldRun = () =>
+      availabilityRef.current &&
+      !pendingOfferRef.current &&
+      !hasActiveOrderRef.current;
+
+    const id = setInterval(() => {
+      if (!shouldRun()) {
+        cronActiveRef.current = false;
+        return;
       }
-    }, 500);
+      cronActiveRef.current = true;
+      announceListener();
+    }, 1000);
+
+    // Primera llamada inmediata si las condiciones ya se cumplen
+    if (shouldRun()) setTimeout(announceListener, 300);
 
     return () => clearInterval(id);
-  }, [announceListener]); // solo al montar, announceListener es estable
+  }, [announceListener]);
 
-  // SSE: recibir ofertas push sin esperar poll
+  // Disparador reactivo: cuando se libera una condición bloqueante, forzar ping inmediato
+  useEffect(() => {
+    if (!cronActiveRef.current && availability && !pendingOffer && !hasActiveOrder) {
+      announceListener();
+    }
+  }, [availability, pendingOffer, hasActiveOrder]);
+
+  // SSE: recibir oferta push — fuente de verdad, sin esperar poll
   const handleNewOffer = useCallback((data) => {
     console.log(`[DriverHome] handleNewOffer orderId=${data.orderId} secondsLeft=${data.secondsLeft}`);
     setPendingOffer(prev => {
-      if (prev) return prev; // Ya hay una oferta activa
+      if (prev) return prev;
       notifyNewOffer(data);
       return { id: data.orderId, ...data, seconds_left: data.secondsLeft ?? 60 };
     });
-    // Cargar datos completos (items) inmediatamente sin delay
-    loadDataRef.current?.();
   }, []);
 
   useRealtimeOrders(
@@ -615,12 +623,7 @@ export default function DriverHome() {
             <OfferCountdown
               key={pendingOffer.id}
               secondsLeft={pendingOffer.seconds_left ?? pendingOffer.secondsLeft ?? 60}
-              onExpired={() => {
-                setPendingOffer(null);
-                setOfferMinimized(false);
-                // No llamar loadData() — evita parpadeo por oferta aún pending en DB.
-                // El ticker del server la expirará en ≤10s y enviará la siguiente vía SSE.
-              }}
+              onExpired={() => { setPendingOffer(null); setOfferMinimized(false); }}
             />
             <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.45rem' }}>
               <button className="btn-primary btn-sm" style={{ flex:1 }}

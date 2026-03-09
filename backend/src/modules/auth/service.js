@@ -111,7 +111,7 @@ export async function loginUser(payload) {
   return { token, user: { id: user.id, username, role: user.role, ...profile } };
 }
 
-export async function updateProfileAddress(userId, role, address, displayName) {
+export async function updateProfileAddress(userId, role, address, displayName, lat, lng) {
   if (role === 'restaurant') {
     if (address !== undefined && address !== null) {
       try { await query('UPDATE restaurants SET address=$1 WHERE owner_user_id=$2', [address, userId]); }
@@ -141,6 +141,8 @@ export async function updateProfileAddress(userId, role, address, displayName) {
       updates.push(`alias=$${i++}`); vals.push(displayName.trim());
     }
     if (address !== undefined && address !== null)         { updates.push(`address=$${i++}`);    vals.push(address); }
+    if (lat !== undefined && lat !== null)                 { updates.push(`lat=$${i++}`);         vals.push(lat); }
+    if (lng !== undefined && lng !== null)                 { updates.push(`lng=$${i++}`);         vals.push(lng); }
     if (updates.length > 0) {
       vals.push(userId);
       try {
@@ -164,13 +166,15 @@ export async function updateProfileAddress(userId, role, address, displayName) {
 
   // Leer valores confirmados desde la DB para devolver al cliente
   const confirmed = await query(
-    'SELECT full_name, alias, address FROM users WHERE id=$1', [userId]
+    'SELECT full_name, alias, address, lat, lng FROM users WHERE id=$1', [userId]
   );
   const row = confirmed.rows[0] || {};
   return {
     address:     row.address ?? address ?? null,
     displayName: row.alias  ?? row.full_name ?? displayName ?? null,
     alias:       row.alias  ?? row.full_name ?? displayName ?? null,
+    lat:         row.lat ?? null,
+    lng:         row.lng ?? null,
   };
 }
 
