@@ -71,6 +71,12 @@ export default function RestaurantOrders() {
 
   useEffect(() => { loadDataRef.current = loadData; });
   useEffect(() => { loadData(); }, [auth.token]);
+  // Polling 5s: fallback si SSE pierde eventos
+  useEffect(() => {
+    if (!auth.token) return;
+    const id = setInterval(() => loadDataRef.current?.(), 5000);
+    return () => clearInterval(id);
+  }, [auth.token]);
   useRealtimeOrders(auth.token, () => loadDataRef.current?.(), () => {});
 
   useEffect(() => {

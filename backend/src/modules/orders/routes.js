@@ -86,7 +86,7 @@ router.get('/pending-assignment', authenticate, authorize(['driver']), async (re
 
 router.post('/', authenticate, authorize(['customer']), validate(createOrderSchema), async (req, res, next) => {
   const { restaurantId, items, payment_method, tip_cents } = req.validatedBody;
-  console.log(`[order.create] userId=${req.user?.userId} payment_method=${payment_method} tip_cents=${tip_cents} items=${items?.length}`);
+  console.log(`📦 [pedido.nuevo] cliente=${req.user?.userId?.slice(0,8)} pago=${payment_method} propina=${tip_cents} productos=${items?.length}`);
   try {
     let deliveryAddress = 'address-pending';
     try {
@@ -114,6 +114,7 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress]
     );
     const order = orderResult.rows[0];
+    console.log(`📦 [pedido.creado] id=${order.id.slice(0,8)} total=${order.total_cents} rest=${restaurantId.slice(0,8)}`);
 
     for (const item of items) {
       const m = await query('SELECT price_cents FROM menu_items WHERE id=$1', [item.menuItemId]);
@@ -133,6 +134,7 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       if (restInfo.rowCount > 0) sseHub.sendToUser(restInfo.rows[0].owner_user_id, 'order_update', { orderId: order.id, status: 'created', action: 'new_order' });
     } catch (_) {}
 
+    console.log(`📦 [pedido.listo] id=${order.id.slice(0,8)} → notificando tienda y buscando driver`);
     logEvent('order.created', { orderId: order.id, customerId: req.user.userId });
     return res.status(201).json({ order: updated.rows[0] });
   } catch (error) { return next(error); }
@@ -205,6 +207,8 @@ router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admi
     const updated = result.rows[0];
     orderEvents.emitOrderUpdate(updated.id, updated.status);
     await notifyOrderParties(updated.id, 'order_update', { orderId: updated.id, status: updated.status });
+    const STATUS_ES_LOG = { created:'Recibido', pending_driver:'Sin conductor', assigned:'Asignado', accepted:'Aceptado', preparing:'En preparación', ready:'Listo para retiro', on_the_way:'En camino', delivered:'Entregado', cancelled:'Cancelado' };
+    console.log(`🔄 [pedido.estado] id=${updated.id.slice(0,8)} → "${STATUS_ES_LOG[updated.status] || updated.status}" por rol=${req.user.role} actor=${req.user.userId.slice(0,8)}`);
     logEvent('order.status_changed', { orderId: updated.id, status: updated.status, actor: req.user.userId });
     return res.json({ order: updated });
   } catch (error) { return next(error); }

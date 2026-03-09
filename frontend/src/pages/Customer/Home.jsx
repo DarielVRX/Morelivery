@@ -102,7 +102,7 @@ export default function CustomerHome() {
   );
 
   return (
-    <div>
+    <div style={{ backgroundColor:'#fff9f8', minHeight:'100vh', padding:'1rem' }}>
       {/* ── Sugerencias flotantes ─────────────────────────────────────── */}
       {visible.map(order => (
         <div key={`sug-${order.id}`} style={{
