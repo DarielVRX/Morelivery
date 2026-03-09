@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -12,23 +12,6 @@ function toDraft(items=[]) {
   return d;
 }
 
-// ── Shared page header (matches RestaurantMenu style) ──────────────────────
-function PageHeader({ gradient, emoji, title, subtitle }) {
-  return (
-    <div style={{
-      margin: '0 -1rem 1rem',
-      padding: '0.75rem 1rem 0.65rem',
-      background: gradient,
-      color: '#fff',
-    }}>
-      <div style={{ fontWeight: 800, fontSize: '1.05rem', letterSpacing: '-0.01em' }}>
-        {emoji} {title}
-      </div>
-      <div style={{ fontSize: '0.75rem', opacity: 0.85, marginTop: '0.1rem' }}>{subtitle}</div>
-    </div>
-  );
-}
-
 export default function CustomerHome() {
   const { auth } = useAuth();
   const navigate = useNavigate();
@@ -36,12 +19,13 @@ export default function CustomerHome() {
   const [restaurants, setRestaurants] = useState([]);
   const [loading, setLoading]         = useState(true);
 
-  const [pendingSugg, setPendingSugg]     = useState([]);
-  const [suggFor, setSuggFor]             = useState('');
-  const [suggDrafts, setSuggDrafts]       = useState({});
+  // Sugerencias pendientes — cargadas desde /orders/my
+  const [pendingSugg, setPendingSugg]   = useState([]);
+  const [suggFor, setSuggFor]           = useState('');
+  const [suggDrafts, setSuggDrafts]     = useState({});
   const [dismissedSugg, setDismissedSugg] = useState(new Set());
-  const [msg, setMsg]                     = useState('');
-  const loadSuggRef                       = useRef(null);
+  const [msg, setMsg] = useState('');
+  const loadSuggRef = useRef(null);
 
   async function loadSuggestions() {
     if (!auth.token) return;
@@ -56,6 +40,7 @@ export default function CustomerHome() {
 
   useEffect(() => { loadSuggRef.current = loadSuggestions; });
 
+  // Cargar restaurantes — solo al montar
   useEffect(() => {
     apiFetch('/restaurants')
       .then(d => setRestaurants(d.restaurants||[]))
@@ -64,6 +49,7 @@ export default function CustomerHome() {
     if (auth.token) loadSuggestions();
   }, [auth.token]);
 
+  // SSE solo para sugerencias nuevas — sin hook pesado en Home
   useRealtimeOrders(
     auth.token,
     (data) => { if (data.action==='suggestion_received') loadSuggRef.current?.(); },
@@ -99,6 +85,7 @@ export default function CustomerHome() {
     } catch (e) { setMsg(e.message); }
   }
 
+  // Menú completo de la tienda para cada sugerencia (para que el cliente pueda editar)
   const [restaurantMenus, setRestaurantMenus] = useState({});
   async function loadMenu(restaurantId) {
     if (restaurantMenus[restaurantId]) return;
@@ -122,6 +109,7 @@ export default function CustomerHome() {
           background:'#fffbeb', border:'2px solid #f59e0b', borderRadius:10,
           padding:'0.875rem', marginBottom:'0.75rem', position:'relative',
         }}>
+          {/* Botón cerrar grande */}
           <button
             onClick={() => setDismissedSugg(s => new Set([...s, order.id]))}
             style={{ position:'absolute', top:8, right:8, width:38, height:38, borderRadius:'50%', border:'none', background:'#f3f4f6', cursor:'pointer', fontSize:'1.2rem', display:'flex', alignItems:'center', justifyContent:'center' }}
@@ -176,13 +164,11 @@ export default function CustomerHome() {
 
       {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
 
-      {/* ── Encabezado ─────────────────────────────────────────────────── */}
-      <PageHeader
-        gradient="linear-gradient(135deg,var(--brand) 0%,var(--brand-dark,#b5254e) 100%)"
-        emoji="🛍"
-        title="Tiendas"
-        subtitle="Elige dónde quieres pedir"
-      />
+      {/* ── Encabezado Tiendas ─────────────────────────────────────────── */}
+      <div style={{ margin:'-1rem -1rem 1rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg,var(--brand) 0%,var(--brand-dark,#c0546a) 100%)', color:'#fff' }}>
+        <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>🛍 Tiendas</div>
+        <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Elige dónde quieres pedir</div>
+      </div>
 
       {restaurants.length===0 ? (
         <p style={{ color:'var(--gray-600)' }}>No hay restaurantes disponibles.</p>
@@ -200,6 +186,7 @@ export default function CustomerHome() {
               onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 10px rgba(0,0,0,0.07)'}
               onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}
             >
+              {/* Foto de perfil de la tienda */}
               {r.profile_photo
                 ? <img src={r.profile_photo} alt={r.name}
                     style={{ width:42, height:42, borderRadius:'50%', objectFit:'cover', border:'1px solid var(--gray-200)', flexShrink:0 }} />

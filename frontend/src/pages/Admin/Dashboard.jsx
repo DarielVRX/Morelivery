@@ -1,25 +1,39 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// frontend/src/pages/Admin/Dashboard.jsx
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 
-/* ── helpers ─────────────────────────────────────────────────────────────── */
-function fmt(cents) { return cents != null ? `$${(cents/100).toFixed(2)}` : '—'; }
-function fmtDate(iso) { return iso ? new Date(iso).toLocaleString('es',{dateStyle:'short',timeStyle:'short'}) : '—'; }
-function fmtTime(iso) { return iso ? new Date(iso).toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—'; }
-function fmtMin(m) { return m != null ? `${m}m` : '—'; }
-function elapsed(a, b) {
-  if (!a || !b) return null;
-  return Math.round((new Date(b) - new Date(a)) / 60000);
+/* ── helpers ── */
+function fmt(cents)  { return cents != null ? `$${(cents/100).toFixed(2)}` : '—'; }
+function fmtTs(iso)  {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 }
-function elapsedSec(a, b) {
-  if (!a || !b) return null;
-  return Math.round((new Date(b) - new Date(a)) / 1000);
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('es-MX', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+}
+function secsSince(iso) {
+  if (!iso) return null;
+  return Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000));
+}
+function secsLeft(iso, total = 60) {
+  if (!iso) return null;
+  const elapsed = secsSince(iso);
+  return Math.max(0, total - elapsed);
+}
+function fmtSecs(s) {
+  if (s == null) return '—';
+  if (s >= 60) return `${Math.floor(s/60)}m ${s%60}s`;
+  return `${s}s`;
 }
 
-const STATUS_LABELS = {
+const STATUS_LABEL = {
   created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
-  preparing:'Preparando', ready:'Listo', on_the_way:'En camino',
+  preparing:'Preparando', ready:'Listo p/ retiro', on_the_way:'En camino',
   delivered:'Entregado', cancelled:'Cancelado', pending_driver:'Sin driver',
 };
 const STATUS_COLOR = {
@@ -28,740 +42,681 @@ const STATUS_COLOR = {
   delivered:'#16a34a', cancelled:'#dc2626', pending_driver:'#ef4444',
 };
 
-function Badge({ status }) {
+function Badge({ status, label }) {
   const c = STATUS_COLOR[status] || '#9ca3af';
   return (
     <span style={{ background:`${c}22`, color:c, border:`1px solid ${c}55`,
-      borderRadius:12, padding:'0.1rem 0.55rem', fontSize:'0.72rem', fontWeight:700, whiteSpace:'nowrap' }}>
-      {STATUS_LABELS[status] || status}
+      borderRadius:10, padding:'0.1rem 0.5rem', fontSize:'0.72rem', fontWeight:700, whiteSpace:'nowrap' }}>
+      {label || STATUS_LABEL[status] || status}
     </span>
-  );
-}
-
-function Card({ label, value, sub, color='#2563eb' }) {
-  return (
-    <div style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'0.7rem 1rem', flex:'1 1 110px', minWidth:110 }}>
-      <div style={{ fontSize:'0.75rem', color:'#6b7280' }}>{label}</div>
-      <div style={{ fontSize:'1.35rem', fontWeight:800, color, lineHeight:1.2 }}>{value ?? '—'}</div>
-      {sub && <div style={{ fontSize:'0.72rem', color:'#9ca3af' }}>{sub}</div>}
-    </div>
-  );
-}
-
-function Collapsible({ title, defaultOpen=true, children }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div style={{ border:'1px solid #e5e7eb', borderRadius:8, overflow:'hidden', marginBottom:'1rem' }}>
-      <div onClick={() => setOpen(o=>!o)} style={{ padding:'0.65rem 1rem', background:'#f9fafb',
-        cursor:'pointer', display:'flex', justifyContent:'space-between', fontWeight:700, fontSize:'0.9rem' }}>
-        {title} <span>{open?'▲':'▼'}</span>
-      </div>
-      {open && <div style={{ padding:'1rem', overflowX:'auto' }}>{children}</div>}
-    </div>
   );
 }
 
 function Th({ children }) {
-  return <th style={{ padding:'0.4rem 0.65rem', textAlign:'left', whiteSpace:'nowrap', fontWeight:700, borderBottom:'2px solid #e5e7eb', background:'#f9fafb', fontSize:'0.78rem' }}>{children}</th>;
+  return <th style={{ padding:'0.4rem 0.65rem', textAlign:'left', whiteSpace:'nowrap', fontWeight:700,
+    borderBottom:'2px solid #e5e7eb', background:'#f9fafb', fontSize:'0.75rem', color:'#374151' }}>{children}</th>;
 }
-function Td({ children, style }) {
-  return <td style={{ padding:'0.4rem 0.65rem', borderBottom:'1px solid #f3f4f6', fontSize:'0.8rem', ...style }}>{children}</td>;
+function Td({ children, style={} }) {
+  return <td style={{ padding:'0.4rem 0.65rem', borderBottom:'1px solid #f3f4f6', fontSize:'0.8rem', verticalAlign:'middle', ...style }}>{children}</td>;
 }
 
-// ── Live countdown display ────────────────────────────────────────────────────
-function LiveElapsed({ since }) {
-  const [secs, setSecs] = useState(() => since ? elapsedSec(since, new Date().toISOString()) : null);
+// ── Tiempo real: ticker que re-renderiza cada segundo ─────────────────────────
+function useTick(interval = 1000) {
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    if (!since) return;
-    const t = setInterval(() => setSecs(elapsedSec(since, new Date().toISOString())), 1000);
-    return () => clearInterval(t);
-  }, [since]);
-  if (secs == null) return <span style={{ color:'#9ca3af' }}>—</span>;
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  const color = secs > 600 ? '#dc2626' : secs > 300 ? '#f59e0b' : '#16a34a';
-  return <span style={{ color, fontWeight:700, fontVariantNumeric:'tabular-nums' }}>{m}m {s.toString().padStart(2,'0')}s</span>;
+    const id = setInterval(() => setTick(t => t + 1), interval);
+    return () => clearInterval(id);
+  }, [interval]);
+  return tick;
 }
 
-// ── Driver state badge in per-order detail ───────────────────────────────────
-function DriverStateBadge({ driver, offerCooldownSecs }) {
-  const [remaining, setRemaining] = useState(offerCooldownSecs ?? 0);
-
-  useEffect(() => {
-    if (!offerCooldownSecs || offerCooldownSecs <= 0) { setRemaining(0); return; }
-    setRemaining(offerCooldownSecs);
-    const t = setInterval(() => setRemaining(r => Math.max(0, r - 1)), 1000);
-    return () => clearInterval(t);
-  }, [offerCooldownSecs]);
-
-  const isPendingOffer = driver.offer_status === 'pending';
-  const hasCooldown    = remaining > 0;
-  const isActive       = driver.is_available && driver.user_status === 'active';
-
-  let label, bg, color;
-  if (isPendingOffer) {
-    label = `⏳ Oferta activa (${remaining}s)`;
-    bg = '#fef3c7'; color = '#92400e';
-  } else if (hasCooldown) {
-    label = `🔒 Cooldown ${remaining}s`;
-    bg = '#fee2e2'; color = '#b91c1c';
-  } else if (isActive) {
-    label = '● Disponible';
-    bg = '#dcfce7'; color = '#15803d';
-  } else if (driver.is_available === false) {
-    label = '○ No disponible';
-    bg = '#f3f4f6'; color = '#6b7280';
-  } else {
-    label = '✕ Suspendido';
-    bg = '#fee2e2'; color = '#dc2626';
-  }
-
+// ── Barra de progreso de oferta ───────────────────────────────────────────────
+function OfferBar({ startedAt, total = 60 }) {
+  const tick = useTick();
+  if (!startedAt) return null;
+  const left = secsLeft(startedAt, total);
+  const pct  = (left / total) * 100;
+  const color = pct > 50 ? '#16a34a' : pct > 25 ? '#f59e0b' : '#dc2626';
   return (
-    <span style={{ background:bg, color, borderRadius:6, padding:'0.15rem 0.5rem', fontSize:'0.72rem', fontWeight:700 }}>
-      {label}
+    <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', minWidth:120 }}>
+      <div style={{ flex:1, height:6, background:'#e5e7eb', borderRadius:3, overflow:'hidden' }}>
+        <div style={{ width:`${pct}%`, height:'100%', background:color, borderRadius:3, transition:'width 1s linear' }} />
+      </div>
+      <span style={{ fontSize:'0.72rem', fontWeight:700, color, minWidth:28, textAlign:'right' }}>{left}s</span>
+    </div>
+  );
+}
+
+// ── Cooldown countdown ────────────────────────────────────────────────────────
+function CooldownBadge({ waitUntil }) {
+  const tick = useTick();
+  const secsR = Math.max(0, Math.round((new Date(waitUntil) - Date.now()) / 1000));
+  const color = secsR > 60 ? '#dc2626' : secsR > 20 ? '#f59e0b' : '#9ca3af';
+  return (
+    <span style={{ background:`${color}22`, color, border:`1px solid ${color}55`,
+      borderRadius:10, padding:'0.1rem 0.5rem', fontSize:'0.72rem', fontWeight:700 }}>
+      ⏳ {fmtSecs(secsR)}
     </span>
   );
 }
 
-// ── Per-order detail panel (collapsible, with driver breakdown) ───────────────
-function OrderDetail({ order, allDrivers, token }) {
+// ── Panel de drivers colapsable por pedido ────────────────────────────────────
+function DriversPanel({ drivers, orderId }) {
   const [open, setOpen] = useState(false);
-  const [drivers, setDrivers] = useState(null);
-  const [loadingDrivers, setLoadingDrivers] = useState(false);
+  const tick = useTick();
 
-  async function loadDriverDetail() {
-    if (drivers) return; // already loaded
-    setLoadingDrivers(true);
-    try {
-      const d = await apiFetch(`/admin/order-drivers/${order.id}`, {}, token);
-      setDrivers(d.drivers || []);
-    } catch (_) {
-      // fallback: use allDrivers with basic info
-      setDrivers(allDrivers || []);
-    } finally {
-      setLoadingDrivers(false);
-    }
-  }
+  // Clasificar drivers según el pedido
+  const classified = drivers.map(d => {
+    const isActive  = d.active_orders > 0;
+    const hasPending = d.pending_offer_order_id != null;
+    const cooldown  = (d.cooldowns || []).find(cd => cd.order_id === orderId);
+    const otherCooldown = (d.cooldowns || []).find(cd => cd.order_id !== orderId);
+    const isOfferingThisOrder = d.pending_offer_order_id === orderId;
 
-  function handleToggle() {
-    const next = !open;
-    setOpen(next);
-    if (next) loadDriverDetail();
-  }
+    let priority;
+    if (isActive && !d.is_available)   priority = 0; // activo sin disponibilidad
+    else if (isActive)                 priority = 1; // activo disponible
+    else if (d.is_available && !cooldown && !hasPending) priority = 2; // disponible libre
+    else if (hasPending && !isOfferingThisOrder)         priority = 3; // ocupado en otro pedido
+    else if (cooldown)                                   priority = 4; // cooldown en este pedido
+    else if (!d.is_available)                            priority = 5; // no disponible
+    else                                                 priority = 6;
 
-  // Sort drivers: active+available > available > pending_offer no-cooldown > cooldown
-  const sortedDrivers = useMemo(() => {
-    if (!drivers) return [];
-    return [...drivers].sort((a, b) => {
-      const rank = (d) => {
-        if (d.offer_status === 'pending') return 1;
-        if (d.is_available && d.user_status === 'active' && !(d.cooldown_secs > 0)) return 0;
-        if (d.is_available && !(d.cooldown_secs > 0)) return 2;
-        if (d.cooldown_secs > 0) return 3;
-        return 4;
-      };
-      return rank(a) - rank(b);
-    });
-  }, [drivers]);
-
-  const now = new Date().toISOString();
+    return { ...d, isActive, hasPending, cooldown, isOfferingThisOrder, priority };
+  }).sort((a, b) => a.priority - b.priority);
 
   return (
-    <div style={{ border:'1px solid #e5e7eb', borderRadius:8, marginBottom:'0.65rem', overflow:'hidden' }}>
-      {/* ── Order summary row ── */}
-      <div
-        onClick={handleToggle}
-        style={{
-          padding:'0.65rem 0.85rem', cursor:'pointer', background:'#fff',
-          display:'grid', gridTemplateColumns:'auto 1fr auto auto auto', gap:'0.5rem',
-          alignItems:'center',
-        }}
-      >
-        {/* Created elapsed */}
-        <div style={{ fontSize:'0.72rem', color:'#9ca3af', fontVariantNumeric:'tabular-nums', minWidth:56 }}>
-          <LiveElapsed since={order.created_at} />
-        </div>
-
-        {/* Restaurant + status */}
-        <div style={{ minWidth:0 }}>
-          <div style={{ fontWeight:700, fontSize:'0.88rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-            {order.restaurant_name}
-          </div>
-          <div style={{ fontSize:'0.72rem', color:'#6b7280', marginTop:'0.1rem' }}>
-            {fmtTime(order.created_at)} · {order.customer_name}
-          </div>
-        </div>
-
-        {/* Offer stats */}
-        <div style={{ fontSize:'0.72rem', textAlign:'center', whiteSpace:'nowrap' }}>
-          <span title="pendientes" style={{color:'#f59e0b'}}>⏳{order.pending_offers} </span>
-          <span title="rechazos"   style={{color:'#dc2626'}}>✗{order.rejected_offers} </span>
-          <span title="expiradas"  style={{color:'#9ca3af'}}>⌛{order.expired_offers}</span>
-        </div>
-
-        {/* Order status badge */}
-        <Badge status={order.status} />
-
-        {/* Expand toggle */}
-        <span style={{ color:'#9ca3af', fontSize:'0.8rem' }}>{open ? '▲' : '▼'}</span>
-      </div>
-
-      {/* ── Expanded detail ── */}
+    <div style={{ marginTop:'0.5rem' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{ fontSize:'0.75rem', color:'var(--brand)', background:'none', border:'none', cursor:'pointer',
+          padding:'0.15rem 0', fontWeight:600, display:'flex', alignItems:'center', gap:'0.3rem' }}>
+        <span>{open ? '▲' : '▼'}</span>
+        {open ? 'Ocultar' : 'Ver estado de drivers'} ({classified.length})
+      </button>
       {open && (
-        <div style={{ background:'#f9fafb', borderTop:'1px solid #e5e7eb', padding:'0.85rem' }}>
-          {/* Timeline */}
-          <div style={{ display:'flex', flexWrap:'wrap', gap:'0.4rem', marginBottom:'0.85rem' }}>
-            {[
-              { label:'Creado',    ts: order.created_at },
-              { label:'Aceptado',  ts: order.accepted_at },
-              { label:'Preparando',ts: order.preparing_at },
-              { label:'Listo',     ts: order.ready_at },
-              { label:'Recogido',  ts: order.picked_up_at },
-              { label:'Entregado', ts: order.delivered_at },
-              { label:'Cancelado', ts: order.cancelled_at },
-            ].map(({ label, ts }) => ts ? (
-              <div key={label} style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:6, padding:'0.25rem 0.6rem', fontSize:'0.72rem' }}>
-                <span style={{ color:'#6b7280' }}>{label}: </span>
-                <span style={{ fontWeight:600 }}>{fmtTime(ts)}</span>
-              </div>
-            ) : null)}
-          </div>
-
-          {/* Key params */}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))', gap:'0.4rem', marginBottom:'0.85rem' }}>
-            <div style={{ fontSize:'0.78rem' }}><span style={{ color:'#6b7280' }}>Tienda: </span><strong>{order.restaurant_name}</strong></div>
-            <div style={{ fontSize:'0.78rem' }}><span style={{ color:'#6b7280' }}>Estado: </span><Badge status={order.status}/></div>
-            <div style={{ fontSize:'0.78rem' }}><span style={{ color:'#6b7280' }}>Cliente: </span><strong>{order.customer_name}</strong></div>
-            <div style={{ fontSize:'0.78rem' }}><span style={{ color:'#6b7280' }}>Total: </span><strong>{fmt(order.total_cents)}</strong></div>
-            <div style={{ fontSize:'0.78rem' }}><span style={{ color:'#6b7280' }}>Pago: </span><strong style={{ textTransform:'capitalize' }}>{order.payment_method || '—'}</strong></div>
-            <div style={{ fontSize:'0.78rem' }}>
-              <span style={{ color:'#6b7280' }}>Driver: </span>
-              <strong>{order.driver_name || <span style={{ color:'#f59e0b' }}>Sin asignar</span>}</strong>
-              {order.driver_available != null && (
-                <span style={{ marginLeft:'0.3rem', color: order.driver_available ? '#16a34a' : '#9ca3af', fontSize:'0.68rem' }}>
-                  ({order.driver_available ? 'disponible' : 'no disp.'})
-                </span>
-              )}
-            </div>
-            <div style={{ fontSize:'0.78rem' }}>
-              <span style={{ color:'#6b7280' }}>Ronda: </span>
-              <strong>{(order.rejected_offers || 0) + (order.expired_offers || 0) + 1}</strong>
-            </div>
-            {order.driver_note && (
-              <div style={{ fontSize:'0.78rem', gridColumn:'1/-1' }}>
-                <span style={{ color:'#6b7280' }}>Nota driver: </span>{order.driver_note}
-              </div>
-            )}
-            {order.restaurant_note && (
-              <div style={{ fontSize:'0.78rem', gridColumn:'1/-1' }}>
-                <span style={{ color:'#6b7280' }}>Nota tienda: </span>{order.restaurant_note}
-              </div>
-            )}
-          </div>
-
-          {/* Driver breakdown */}
-          <div>
-            <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#374151', marginBottom:'0.4rem' }}>
-              Estado de todos los drivers
-            </div>
-            {loadingDrivers ? (
-              <div style={{ fontSize:'0.78rem', color:'#9ca3af' }}>Cargando drivers…</div>
-            ) : sortedDrivers.length === 0 ? (
-              <div style={{ fontSize:'0.78rem', color:'#9ca3af' }}>Sin drivers registrados</div>
-            ) : (
-              <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem' }}>
-                {sortedDrivers.map(d => (
-                  <div key={d.user_id} style={{
-                    display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap',
-                    padding:'0.35rem 0.6rem', background:'#fff', borderRadius:6,
-                    border:'1px solid #e5e7eb', fontSize:'0.78rem',
-                  }}>
-                    <span style={{ fontWeight:600, minWidth:80 }}>#{d.driver_number ?? '—'} {d.name}</span>
-                    <DriverStateBadge driver={d} offerCooldownSecs={d.cooldown_secs ?? 0} />
-                    {d.vehicle_type && (
-                      <span style={{ color:'#9ca3af' }}>{d.vehicle_type}</span>
-                    )}
-                    {d.active_orders > 0 && (
-                      <span style={{ color:'#6b7280' }}>{d.active_orders} pedido{d.active_orders > 1 ? 's':''} activo{d.active_orders > 1 ? 's':''}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        <div style={{ marginTop:'0.4rem', border:'1px solid #e5e7eb', borderRadius:8, overflow:'hidden' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'auto' }}>
+            <thead>
+              <tr>
+                <Th>#</Th>
+                <Th>Driver</Th>
+                <Th>Estado</Th>
+                <Th>Activos</Th>
+                <Th>GPS</Th>
+                <Th>Situación</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {classified.map(d => {
+                const secsR = d.cooldown ? Math.max(0, Math.round((new Date(d.cooldown.wait_until) - Date.now()) / 1000)) : null;
+                let sitLabel, sitColor;
+                if (d.isOfferingThisOrder) {
+                  sitLabel = '📤 Oferta enviada'; sitColor = '#3b82f6';
+                } else if (d.isActive && !d.is_available) {
+                  sitLabel = '🚴 En entrega (no disponible)'; sitColor = '#6b7280';
+                } else if (d.isActive) {
+                  sitLabel = '🚴 En entrega (disponible)'; sitColor = '#8b5cf6';
+                } else if (d.is_available && !d.cooldown && !d.hasPending) {
+                  sitLabel = '✅ Disponible y libre'; sitColor = '#16a34a';
+                } else if (d.hasPending && !d.isOfferingThisOrder) {
+                  sitLabel = '⏸ Con oferta en otro pedido'; sitColor = '#f59e0b';
+                } else if (d.cooldown) {
+                  sitLabel = `🕐 Cooldown ${fmtSecs(secsR)}`; sitColor = '#dc2626';
+                } else if (!d.is_available) {
+                  sitLabel = '🔴 No disponible'; sitColor = '#9ca3af';
+                } else {
+                  sitLabel = '—'; sitColor = '#9ca3af';
+                }
+                return (
+                  <tr key={d.id} style={{ background: d.isOfferingThisOrder ? '#eff6ff' : undefined }}>
+                    <Td>{d.driver_number || '—'}</Td>
+                    <Td><span style={{ fontWeight: d.isOfferingThisOrder ? 700 : 400 }}>{d.full_name?.split('_')[0] || '—'}</span></Td>
+                    <Td>
+                      {d.is_available
+                        ? <span style={{ color:'#16a34a', fontWeight:600, fontSize:'0.72rem' }}>● Disponible</span>
+                        : <span style={{ color:'#9ca3af', fontSize:'0.72rem' }}>○ No disp.</span>
+                      }
+                    </Td>
+                    <Td>{d.active_orders > 0 ? <span style={{ fontWeight:700, color:'#8b5cf6' }}>{d.active_orders}</span> : '0'}</Td>
+                    <Td>{(d.last_lat && d.last_lng) ? <span style={{ color:'#16a34a', fontSize:'0.7rem' }}>✓</span> : <span style={{ color:'#9ca3af', fontSize:'0.7rem' }}>—</span>}</Td>
+                    <Td style={{ color:sitColor, fontWeight:d.isOfferingThisOrder?700:400 }}>
+                      {sitLabel}
+                      {d.cooldown && <CooldownBadge waitUntil={d.cooldown.wait_until} />}
+                    </Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
   );
 }
 
-// ── Main Dashboard ────────────────────────────────────────────────────────────
+// ── Fila de pedido en la tabla de asignación ──────────────────────────────────
+function OrderRow({ order, drivers }) {
+  const tick = useTick();
+  const [expanded, setExpanded] = useState(false);
+
+  const offerSecsLeft = order.offer_started_at ? secsLeft(order.offer_started_at, 60) : null;
+  const ageMin = Math.floor(secsSince(order.created_at) / 60);
+
+  return (
+    <>
+      <tr
+        style={{ cursor:'pointer', background: expanded ? '#f0f9ff' : undefined }}
+        onClick={() => setExpanded(e => !e)}
+      >
+        <Td>
+          <span style={{ fontFamily:'monospace', fontSize:'0.72rem', color:'#6b7280' }}>
+            {order.id.slice(0,8)}
+          </span>
+        </Td>
+        <Td>
+          <Badge status={order.status} />
+          {order.status === 'pending_driver' && (
+            <span style={{ fontSize:'0.68rem', color:'#dc2626', marginLeft:4 }}>
+              (ronda {order.round})
+            </span>
+          )}
+        </Td>
+        <Td>{order.restaurant_name}</Td>
+        <Td>
+          <span style={{ fontSize:'0.72rem', color: order.restaurant_open ? '#16a34a' : '#dc2626', fontWeight:600 }}>
+            {order.restaurant_open ? '● Abierta' : '○ Cerrada'}
+          </span>
+        </Td>
+        <Td>
+          <span style={{ fontSize:'0.75rem' }}>{fmtTs(order.created_at)}</span>
+          <span style={{ fontSize:'0.68rem', color:'#9ca3af', marginLeft:4 }}>({ageMin}m)</span>
+        </Td>
+        <Td>
+          {order.driver_id
+            ? <span style={{ fontWeight:600, fontSize:'0.8rem' }}>{order.driver_name?.split('_')[0]}</span>
+            : order.pending_driver_name
+              ? <span style={{ color:'#3b82f6', fontSize:'0.8rem' }}>📤 {order.pending_driver_name?.split('_')[0]}</span>
+              : <span style={{ color:'#9ca3af', fontSize:'0.75rem' }}>—</span>
+          }
+        </Td>
+        <Td>
+          {order.offer_started_at && !order.driver_id
+            ? <OfferBar startedAt={order.offer_started_at} total={60} />
+            : '—'
+          }
+        </Td>
+        <Td>{fmt(order.total_cents)}</Td>
+        <Td>
+          <span style={{ fontSize:'0.72rem', color:'#6b7280' }}>{expanded ? '▲' : '▼'}</span>
+        </Td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={9} style={{ padding:'0.75rem 1rem', background:'#f8fafc', borderBottom:'2px solid #e5e7eb' }}>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:'0.5rem', marginBottom:'0.75rem' }}>
+              <Detail label="Hora de creación"     value={fmtDate(order.created_at)} />
+              <Detail label="Última actualización" value={fmtDate(order.updated_at)} />
+              <Detail label="Cliente"              value={order.customer_name} />
+              <Detail label="Tienda"               value={order.restaurant_name} />
+              <Detail label="Estado pedido"        value={STATUS_LABEL[order.status] || order.status} />
+              <Detail label="Tienda abierta"       value={order.restaurant_open ? 'Sí' : 'No'} color={order.restaurant_open ? '#16a34a' : '#dc2626'} />
+              <Detail label="Driver asignado"      value={order.driver_name?.split('_')[0] || '—'} />
+              <Detail label="Driver disponible"    value={order.driver_id ? (order.driver_available ? 'Sí' : 'No') : '—'} />
+              <Detail label="Vehículo"             value={order.vehicle_type || '—'} />
+              <Detail label="Ofertando a"          value={order.pending_driver_name?.split('_')[0] || '—'} color="#3b82f6" />
+              <Detail label="Oferta iniciada"      value={order.offer_started_at ? fmtTs(order.offer_started_at) : '—'} />
+              <Detail label="Ronda"                value={order.driver_id ? '—' : String(order.round)} />
+              <Detail label="Rechazos"             value={String(order.rejected_count)} color={order.rejected_count > 0 ? '#dc2626' : undefined} />
+              <Detail label="Expiradas"            value={String(order.expired_count)} color={order.expired_count > 0 ? '#f59e0b' : undefined} />
+              <Detail label="Total"                value={fmt(order.total_cents)} />
+              <Detail label="Pago"                 value={order.payment_method || 'cash'} />
+              <Detail label="Servicio (tienda)"    value={fmt(order.service_fee_cents)} />
+              <Detail label="Envío"                value={fmt(order.delivery_fee_cents)} />
+              <Detail label="Propina"              value={fmt(order.tip_cents)} />
+            </div>
+            {/* Estado de drivers para este pedido */}
+            <DriversPanel drivers={drivers} orderId={order.id} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function Detail({ label, value, color }) {
+  return (
+    <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:7, padding:'0.4rem 0.6rem' }}>
+      <div style={{ fontSize:'0.68rem', color:'#9ca3af', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.03em' }}>{label}</div>
+      <div style={{ fontSize:'0.82rem', fontWeight:700, color: color || '#1f2937', marginTop:'0.1rem' }}>{value || '—'}</div>
+    </div>
+  );
+}
+
+// ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 export default function AdminDashboard() {
   const { auth } = useAuth();
-  const [liveOffers, setLiveOffers]   = useState([]);
-  const [orderLog, setOrderLog]       = useState([]);
-  const [offerStats, setOfferStats]   = useState([]);
-  const [allUsers, setAllUsers]       = useState([]);   // for driver breakdown
-  const [tab, setTab]                 = useState('orders');
-  const [orders, setOrders]           = useState([]);
-  const [metrics, setMetrics]         = useState(null);
-  const [users, setUsers]             = useState([]);
+  const [tab, setTab]           = useState('assignment');
+  const [orders, setOrders]     = useState([]);
+  const [metrics, setMetrics]   = useState(null);
+  const [users, setUsers]       = useState([]);
+  const [liveData, setLiveData] = useState({ orders:[], drivers:[] });
+  const [offerStats, setOfferStats] = useState([]);
   const [statusFilter, setStatusFilter] = useState('');
-  const [metricDays, setMetricDays]   = useState(7);
-  const [loading, setLoading]         = useState(false);
-  const [msg, setMsg]                 = useState('');
-  const [newUser, setNewUser]         = useState({ username:'', password:'', displayName:'' });
+  const [metricDays, setMetricDays]     = useState(7);
+  const [loading, setLoading]   = useState(false);
+  const [msg, setMsg]           = useState('');
+  const [liveOffers, setLiveOffers] = useState([]);
+  const [orderLog, setOrderLog]     = useState([]);
+
+  // Registro nuevo admin
+  const [newUser, setNewUser] = useState({ username:'', password:'', displayName:'' });
 
   const load = useCallback(async () => {
     if (!auth.token) return;
     setLoading(true); setMsg('');
     try {
       if (tab === 'assignment') {
-        const [statsData, usersData] = await Promise.all([
-          apiFetch('/admin/offer-stats', {}, auth.token).catch(() => ({ stats:[] })),
-          apiFetch('/admin/users', {}, auth.token).catch(() => ({ users:[] })),
-        ]);
-        setOfferStats(statsData.stats || []);
-        setAllUsers((usersData.users || []).filter(u => u.role === 'driver'));
+        const d = await apiFetch('/admin/assignment-live', {}, auth.token);
+        setLiveData({ orders: d.orders || [], drivers: d.drivers || [] });
       } else if (tab === 'orders') {
         const qs = statusFilter ? `?status=${statusFilter}&limit=200` : '?limit=200';
-        const d  = await apiFetch(`/admin/orders${qs}`, {}, auth.token);
-        setOrders(d.orders);
+        const d = await apiFetch(`/admin/orders${qs}`, {}, auth.token);
+        setOrders(d.orders || []);
       } else if (tab === 'metrics') {
         const d = await apiFetch(`/admin/metrics?days=${metricDays}`, {}, auth.token);
         setMetrics(d);
       } else if (tab === 'users') {
         const d = await apiFetch('/admin/users', {}, auth.token);
-        setUsers(d.users);
+        setUsers(d.users || []);
       }
-    } catch(e) { setMsg(e.message); }
-    finally { setLoading(false); }
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setLoading(false);
+    }
   }, [auth.token, tab, statusFilter, metricDays]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Auto-refresh assignment tab every 5s
+  // Auto-refresh del panel de asignación cada 5s
   useEffect(() => {
     if (tab !== 'assignment') return;
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
+    const id = setInterval(() => load(), 5000);
+    return () => clearInterval(id);
   }, [tab, load]);
 
+  // SSE: recibir eventos de ofertas y pedidos en tiempo real
   useRealtimeOrders(
     auth.token,
     (data) => {
-      load();
-      setOrderLog(prev => [{
-        id:    Date.now(),
-        type:  data.action || data.status || 'update',
-        orderId: (data.orderId||'').slice(0,8) || '—',
-        extra: data.driverId ? `driver:${data.driverId.slice(0,8)}` : (data.status || ''),
-        ts:    new Date().toISOString(),
-      }, ...prev].slice(0,50));
+      const entry = { ts: Date.now(), type:'order', orderId: data.orderId?.slice(0,8), extra: data.status || data.action || '' };
+      setOrderLog(prev => [entry, ...prev].slice(0, 50));
+      if (tab === 'assignment') load();
     },
     () => {},
     (data) => {
-      setLiveOffers(prev => [{
-        id:            Date.now(),
-        driverName:    data.driverName || '—',
-        orderId:       (data.orderId||'').slice(0,8),
-        restaurantName:data.restaurantName || '—',
-        totalCents:    data.totalCents,
-        ts:            new Date().toISOString(),
-      }, ...prev].slice(0,50));
-      setOrderLog(prev => [{
-        id:    Date.now(),
-        type:  'oferta_enviada',
-        orderId: (data.orderId||'').slice(0,8),
-        extra: `→ ${data.driverName||'driver'}`,
-        ts:    new Date().toISOString(),
-      }, ...prev].slice(0,50));
-    }
+      const entry = { ts: Date.now(), type:'offer', orderId: data.orderId?.slice(0,8), extra: `driver:${(data.driverId||'').slice(0,8)}` };
+      setLiveOffers(prev => [entry, ...prev].slice(0, 50));
+    },
   );
 
-  async function toggleUserStatus(userId, current) {
-    const next = current === 'active' ? 'suspended' : 'active';
-    try { await apiFetch(`/admin/users/${userId}/status`, { method:'PATCH', body:JSON.stringify({status:next}) }, auth.token); load(); }
-    catch(e) { setMsg(e.message); }
-  }
-
-  async function overrideStatus(orderId, status) {
-    const note = window.prompt('Nota del admin (opcional):') || null;
-    try { await apiFetch(`/admin/orders/${orderId}/status`, { method:'PATCH', body:JSON.stringify({status,note}) }, auth.token); load(); }
-    catch(e) { setMsg(e.message); }
-  }
-
-  async function registerAdmin() {
-    if (!newUser.username || !newUser.password) return setMsg('Usuario y contraseña requeridos');
+  // ── Admin user registration ──────────────────────────────────────────────
+  async function createAdmin() {
+    if (!newUser.username || !newUser.password) { setMsg('Username y password requeridos'); return; }
     try {
-      await apiFetch('/admin/register', { method:'POST', body:JSON.stringify({ ...newUser, role:'admin' }) }, auth.token);
-      setMsg(`✅ Admin "${newUser.username}" creado`);
+      await apiFetch('/auth/register', {
+        method:'POST',
+        body: JSON.stringify({ username: newUser.username, password: newUser.password, role:'admin', displayName: newUser.displayName || undefined }),
+      });
+      setMsg('Admin creado');
       setNewUser({ username:'', password:'', displayName:'' });
-    } catch(e) { setMsg(e.message); }
+    } catch (e) { setMsg(e.message); }
   }
 
-  const activeOrders = useMemo(() => orders.filter(o => !['delivered','cancelled'].includes(o.status)), [orders]);
-
-  const tabBtn = (t, label) => (
-    <button key={t} onClick={() => setTab(t)} style={{ padding:'0.45rem 0.9rem', borderRadius:6, border:'none', cursor:'pointer', fontWeight:600, fontSize:'0.82rem',
-      background: tab===t ? '#2563eb' : '#f3f4f6', color: tab===t ? '#fff' : '#374151' }}>
+  // ── Tabs UI ──────────────────────────────────────────────────────────────
+  const tabBtn = (key, label) => (
+    <button
+      key={key}
+      onClick={() => setTab(key)}
+      style={{
+        padding:'0.4rem 0.875rem', border:'none', cursor:'pointer', borderRadius:8,
+        fontWeight: tab===key ? 700 : 400, fontSize:'0.85rem',
+        background: tab===key ? 'var(--brand)' : 'transparent',
+        color: tab===key ? '#fff' : 'var(--gray-600)',
+      }}>
       {label}
     </button>
   );
 
   return (
-    <section className="role-panel">
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'0.5rem', marginBottom:'1rem' }}>
-        <h2 style={{ margin:0 }}>Panel de administración</h2>
-        <button onClick={load} style={{ fontSize:'0.82rem' }}>🔄 Actualizar</button>
+    <div style={{ padding:'1rem', maxWidth:1200, margin:'0 auto' }}>
+      {/* Encabezado */}
+      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg,#374151 0%,#1f2937 100%)', color:'#fff' }}>
+        <div style={{ fontWeight:800, fontSize:'1.05rem' }}>🛠 Panel de administración</div>
+        <div style={{ fontSize:'0.75rem', opacity:0.8, marginTop:'0.1rem' }}>Vista completa del sistema</div>
       </div>
 
-      <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginBottom:'1.25rem' }}>
-        {tabBtn('orders',     `📋 Pedidos${activeOrders.length ? ` (${activeOrders.length} activos)` : ''}`)}
-        {tabBtn('assignment', `🛵 Asignaciones${liveOffers.length ? ` (${liveOffers.length})` : ''}`)}
-        {tabBtn('metrics',    '📊 Métricas')}
-        {tabBtn('users',      '👥 Usuarios')}
-        {tabBtn('register',   '➕ Nuevo admin')}
+      {/* Tabs */}
+      <div style={{ display:'flex', gap:'0.25rem', marginBottom:'1.25rem', borderBottom:'1px solid var(--gray-200)', paddingBottom:'0.5rem', flexWrap:'wrap' }}>
+        {tabBtn('assignment', `🛵 Asignaciones${liveData.orders.filter(o=>!o.driver_id).length ? ` (${liveData.orders.filter(o=>!o.driver_id).length})` : ''}`)}
+        {tabBtn('orders', '📦 Pedidos')}
+        {tabBtn('metrics', '📊 Métricas')}
+        {tabBtn('users', '👥 Usuarios')}
+        {tabBtn('feed', `📡 Feed${liveOffers.length + orderLog.length > 0 ? ` (${liveOffers.length + orderLog.length})` : ''}`)}
+        <button onClick={load} style={{ marginLeft:'auto', padding:'0.4rem 0.75rem', border:'1px solid var(--gray-200)', borderRadius:8, cursor:'pointer', fontSize:'0.8rem', background:'#fff' }}>
+          ↻ Actualizar
+        </button>
       </div>
 
-      {msg  && <p style={{ color: msg.startsWith('✅') ? '#16a34a' : '#dc2626', marginBottom:'0.75rem', fontSize:'0.875rem' }}>{msg}</p>}
-      {loading && <p style={{ color:'#9ca3af', fontSize:'0.875rem' }}>Cargando…</p>}
+      {msg && <p className="flash flash-error" style={{ marginBottom:'0.75rem' }}>{msg}</p>}
+      {loading && <div style={{ color:'var(--gray-400)', fontSize:'0.85rem', marginBottom:'0.5rem' }}>Cargando…</div>}
 
-      {/* ════ ASIGNACIONES ════ */}
+      {/* ── TAB: ASIGNACIONES ─────────────────────────────────────────── */}
       {tab === 'assignment' && (
         <div>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.75rem' }}>
-            <div style={{ fontWeight:700, fontSize:'0.9rem' }}>
-              Pedidos sin driver asignado — detalle en tiempo real
-            </div>
-            <div style={{ fontSize:'0.72rem', color:'#9ca3af' }}>
-              Auto-actualiza cada 5s
-            </div>
+          {/* Resumen rápido */}
+          <div style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap', marginBottom:'1.25rem' }}>
+            {[
+              { label:'Pedidos activos', value:liveData.orders.length, color:'#3b82f6' },
+              { label:'Sin driver', value:liveData.orders.filter(o=>!o.driver_id).length, color:'#ef4444' },
+              { label:'Con oferta', value:liveData.orders.filter(o=>o.pending_driver_id&&!o.driver_id).length, color:'#f59e0b' },
+              { label:'Drivers disponibles', value:liveData.drivers.filter(d=>d.is_available).length, color:'#16a34a' },
+              { label:'Drivers en entrega', value:liveData.drivers.filter(d=>d.active_orders>0).length, color:'#8b5cf6' },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'0.6rem 1rem', flex:'1 1 130px', minWidth:130 }}>
+                <div style={{ fontSize:'0.72rem', color:'#6b7280' }}>{label}</div>
+                <div style={{ fontSize:'1.5rem', fontWeight:800, color, lineHeight:1.2 }}>{value}</div>
+              </div>
+            ))}
           </div>
 
-          {offerStats.length === 0 ? (
-            <div style={{ textAlign:'center', padding:'2rem', color:'#9ca3af', background:'#f9fafb', borderRadius:8, marginBottom:'1rem' }}>
-              Sin pedidos sin asignar actualmente.
-            </div>
+          {/* Tabla de pedidos activos */}
+          {liveData.orders.length === 0 ? (
+            <div style={{ textAlign:'center', padding:'3rem', color:'var(--gray-400)' }}>No hay pedidos activos.</div>
           ) : (
-            <div style={{ marginBottom:'1.5rem' }}>
-              {offerStats.map(s => {
-                // Find full order from orders (if loaded) or construct minimal from stats
-                const fullOrder = {
-                  id: s.order_id,
-                  status: s.status,
-                  created_at: s.created_at,
-                  restaurant_name: s.restaurant_name,
-                  pending_offers: s.pending,
-                  rejected_offers: s.rejected,
-                  expired_offers: s.expired,
-                  driver_name: s.current_driver,
-                  driver_available: null,
-                  customer_name: s.customer_name || '—',
-                  total_cents: s.total_cents,
-                  payment_method: s.payment_method,
-                  accepted_at: s.accepted_at,
-                  preparing_at: s.preparing_at,
-                  ready_at: s.ready_at,
-                  picked_up_at: s.picked_up_at,
-                  delivered_at: null,
-                  cancelled_at: null,
-                  driver_note: null,
-                  restaurant_note: null,
-                };
-                return (
-                  <OrderDetail
-                    key={s.order_id}
-                    order={fullOrder}
-                    allDrivers={allUsers}
-                    token={auth.token}
-                  />
-                );
-              })}
+            <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:10 }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', minWidth:800 }}>
+                <thead>
+                  <tr>
+                    <Th>ID</Th>
+                    <Th>Estado</Th>
+                    <Th>Tienda</Th>
+                    <Th>Tienda</Th>
+                    <Th>Hora</Th>
+                    <Th>Driver</Th>
+                    <Th>Contador oferta</Th>
+                    <Th>Total</Th>
+                    <Th></Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {liveData.orders.map(order => (
+                    <OrderRow key={order.id} order={order} drivers={liveData.drivers} />
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
 
-          {/* Feed en tiempo real */}
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.4rem' }}>
-            <div style={{ fontWeight:700, fontSize:'0.875rem' }}>Feed en tiempo real</div>
-            <button className="btn-sm" style={{ fontSize:'0.75rem' }} onClick={() => { setLiveOffers([]); setOrderLog([]); }}>Limpiar</button>
-          </div>
-          <div style={{ background:'#fff', border:'1px solid var(--gray-200)', borderRadius:'var(--radius)', overflow:'hidden', maxHeight:360, overflowY:'auto' }}>
-            {[...liveOffers.map(e=>({...e,_type:'offer'})), ...orderLog.map(e=>({...e,_type:'log'}))]
-              .sort((a,b)=>new Date(b.ts)-new Date(a.ts))
-              .slice(0,60)
-              .map(ev => (
-              <div key={ev.id} style={{
-                padding:'0.45rem 0.75rem', borderBottom:'1px solid var(--gray-100)',
-                display:'flex', justifyContent:'space-between', alignItems:'flex-start',
-                background: ev._type==='offer' ? '#fff8f0' : '#fff',
-                fontSize:'0.81rem',
-              }}>
-                <div style={{ display:'flex', gap:'0.5rem', alignItems:'center', flexWrap:'wrap', minWidth:0 }}>
-                  <span style={{
-                    fontSize:'0.7rem', fontWeight:700, padding:'0.1rem 0.4rem',
-                    borderRadius:4, flexShrink:0,
-                    background: ev._type==='offer' ? '#fef3c7' : '#eff6ff',
-                    color:      ev._type==='offer' ? '#92400e' : '#1e40af',
-                  }}>
-                    {ev._type==='offer' ? 'OFERTA' : ev.type?.toUpperCase().replace('_',' ')}
-                  </span>
-                  <span style={{ fontFamily:'monospace', fontSize:'0.76rem', color:'var(--gray-600)', flexShrink:0 }}>#{ev.orderId}</span>
-                  <span style={{ fontWeight:600 }}>
-                    {ev._type==='offer'
-                      ? <>{ev.restaurantName} <span style={{color:'var(--brand)'}}>→ {ev.driverName}</span></>
-                      : ev.extra}
-                  </span>
-                  {ev.totalCents && <span style={{ color:'var(--gray-600)' }}>${(ev.totalCents/100).toFixed(2)}</span>}
-                </div>
-                <span style={{ color:'var(--gray-400)', fontSize:'0.72rem', flexShrink:0, marginLeft:'0.5rem' }}>
-                  {new Date(ev.ts).toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
-                </span>
-              </div>
-            ))}
-            {liveOffers.length===0 && orderLog.length===0 && (
-              <div style={{ padding:'1.5rem', textAlign:'center', color:'var(--gray-400)', fontSize:'0.85rem' }}>
-                Esperando eventos SSE… (los cambios de estado y ofertas aparecen aquí en tiempo real)
+          {/* Estado global de todos los drivers */}
+          <div style={{ marginTop:'1.5rem', border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
+            <div style={{ padding:'0.65rem 1rem', background:'#f9fafb', fontWeight:700, fontSize:'0.875rem', borderBottom:'1px solid #e5e7eb' }}>
+              👥 Estado de todos los drivers
+            </div>
+            {liveData.drivers.length === 0 ? (
+              <div style={{ padding:'1rem', color:'var(--gray-400)', fontSize:'0.85rem' }}>Sin drivers registrados.</div>
+            ) : (
+              <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                  <thead>
+                    <tr>
+                      <Th>#</Th>
+                      <Th>Driver</Th>
+                      <Th>Disponible</Th>
+                      <Th>Pedidos activos</Th>
+                      <Th>Oferta activa</Th>
+                      <Th>GPS</Th>
+                      <Th>Cooldowns</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...liveData.drivers].sort((a, b) => {
+                      // Orden: activos primero, luego disponibles, luego pending sin cooldown, luego con cooldown
+                      const score = d => {
+                        if (d.active_orders > 0) return 0;
+                        if (d.is_available && !d.pending_offer_order_id && !(d.cooldowns||[]).length) return 1;
+                        if (d.is_available && d.pending_offer_order_id) return 2;
+                        if ((d.cooldowns||[]).length > 0) return 3;
+                        return 4;
+                      };
+                      return score(a) - score(b);
+                    }).map(d => {
+                      const tick = 0; // fuerza re-render desde useTick en padre
+                      const cooldowns = d.cooldowns || [];
+                      return (
+                        <tr key={d.id}>
+                          <Td>{d.driver_number || '—'}</Td>
+                          <Td><span style={{ fontWeight:600 }}>{d.full_name?.split('_')[0] || '—'}</span></Td>
+                          <Td>
+                            {d.is_available
+                              ? <span style={{ color:'#16a34a', fontWeight:700, fontSize:'0.75rem' }}>● Sí</span>
+                              : <span style={{ color:'#9ca3af', fontSize:'0.75rem' }}>○ No</span>
+                            }
+                          </Td>
+                          <Td>
+                            {d.active_orders > 0
+                              ? <Badge status="on_the_way" label={`${d.active_orders} en entrega`} />
+                              : <span style={{ color:'#9ca3af', fontSize:'0.75rem' }}>0</span>
+                            }
+                          </Td>
+                          <Td>
+                            {d.pending_offer_order_id
+                              ? (
+                                <div>
+                                  <span style={{ fontSize:'0.75rem', color:'#3b82f6', fontWeight:600 }}>
+                                    {d.pending_offer_order_id.slice(0,8)}
+                                  </span>
+                                  {d.pending_offer_started_at && (
+                                    <div style={{ marginTop:2 }}>
+                                      <OfferBar startedAt={d.pending_offer_started_at} total={60} />
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                              : <span style={{ color:'#9ca3af', fontSize:'0.75rem' }}>—</span>
+                            }
+                          </Td>
+                          <Td>
+                            {(d.last_lat && d.last_lng)
+                              ? <span style={{ color:'#16a34a', fontSize:'0.75rem', fontWeight:600 }}>✓ {d.last_lat?.toFixed(3)},{d.last_lng?.toFixed(3)}</span>
+                              : <span style={{ color:'#9ca3af', fontSize:'0.72rem' }}>Sin GPS</span>
+                            }
+                          </Td>
+                          <Td>
+                            {cooldowns.length === 0
+                              ? <span style={{ color:'#9ca3af', fontSize:'0.72rem' }}>—</span>
+                              : (
+                                <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+                                  {cooldowns.map((cd, i) => (
+                                    <div key={i} style={{ display:'flex', alignItems:'center', gap:4 }}>
+                                      <span style={{ fontSize:'0.68rem', color:'#6b7280' }}>{cd.order_id.slice(0,6)}</span>
+                                      <CooldownBadge waitUntil={cd.wait_until} />
+                                    </div>
+                                  ))}
+                                </div>
+                              )
+                            }
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* ════ PEDIDOS ════ */}
+      {/* ── TAB: PEDIDOS ─────────────────────────────────────────────── */}
       {tab === 'orders' && (
-        <>
-          <div style={{ display:'flex', gap:'0.5rem', flexWrap:'wrap', marginBottom:'0.75rem', alignItems:'center' }}>
-            <select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}
-              style={{ padding:'0.35rem 0.5rem', borderRadius:6, border:'1px solid #e5e7eb', fontSize:'0.82rem' }}>
-              <option value=''>Todos los estados</option>
-              {Object.entries(STATUS_LABELS).map(([v,l])=><option key={v} value={v}>{l}</option>)}
-            </select>
-            <span style={{ fontSize:'0.8rem', color:'#9ca3af' }}>{orders.length} pedidos</span>
-          </div>
-
-          {orders.length === 0
-            ? <p style={{ color:'#888' }}>Sin pedidos.</p>
-            : (
-              <table style={{ width:'100%', borderCollapse:'collapse' }}>
-                <thead><tr>
-                  <Th>Estado</Th><Th>Restaurante</Th><Th>Cliente</Th>
-                  <Th>Driver</Th><Th>Total</Th><Th>Ofertas</Th>
-                  <Th>Tiempos</Th><Th>Creado</Th><Th>⚙</Th>
-                </tr></thead>
-                <tbody>
-                  {orders.map(o => (
-                    <tr key={o.id}>
-                      <Td><Badge status={o.status}/></Td>
-                      <Td style={{maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{o.restaurant_name}</Td>
-                      <Td style={{maxWidth:110,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{o.customer_name}</Td>
-                      <Td>
-                        {o.driver_name || <span style={{color:'#f59e0b',fontSize:'0.75rem'}}>Sin asignar</span>}
-                        {o.driver_available != null && (
-                          <div style={{ fontSize:'0.68rem', color: o.driver_available?'#16a34a':'#9ca3af' }}>
-                            {o.driver_available?'● disp.':'● no disp.'}
-                          </div>
-                        )}
-                      </Td>
-                      <Td>{fmt(o.total_cents)}</Td>
-                      <Td>
-                        <span title="pendientes" style={{color:'#f59e0b'}}>⏳{o.pending_offers} </span>
-                        <span title="rechazos"   style={{color:'#dc2626'}}>✗{o.rejected_offers} </span>
-                        <span title="expiradas"  style={{color:'#9ca3af'}}>⌛{o.expired_offers}</span>
-                      </Td>
-                      <Td style={{fontSize:'0.72rem',lineHeight:1.6}}>
-                        {elapsed(o.created_at, o.accepted_at)    != null && <div>✔ {elapsed(o.created_at, o.accepted_at)}m aceptar</div>}
-                        {elapsed(o.accepted_at, o.preparing_at)  != null && <div>🍳 {elapsed(o.accepted_at, o.preparing_at)}m preparar</div>}
-                        {elapsed(o.preparing_at, o.ready_at)     != null && <div>✅ {elapsed(o.preparing_at, o.ready_at)}m listo</div>}
-                        {elapsed(o.ready_at, o.picked_up_at)     != null && <div>🛵 {elapsed(o.ready_at, o.picked_up_at)}m retiro</div>}
-                        {elapsed(o.picked_up_at, o.delivered_at) != null && <div>📦 {elapsed(o.picked_up_at, o.delivered_at)}m entrega</div>}
-                        {elapsed(o.created_at, o.delivered_at ?? (o.cancelled_at || null)) != null && (
-                          <div style={{fontWeight:700}}>⏱ {elapsed(o.created_at, o.delivered_at || o.cancelled_at)}m total</div>
-                        )}
-                      </Td>
-                      <Td style={{whiteSpace:'nowrap'}}>{fmtDate(o.created_at)}</Td>
-                      <Td>
-                        <select defaultValue='' onChange={e=>{ if(e.target.value){ overrideStatus(o.id,e.target.value); e.target.value=''; } }}
-                          style={{ fontSize:'0.72rem', padding:'0.15rem 0.3rem', borderRadius:4, border:'1px solid #e5e7eb' }}>
-                          <option value=''>Cambiar</option>
-                          {Object.entries(STATUS_LABELS).map(([v,l])=><option key={v} value={v}>{l}</option>)}
-                        </select>
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )
-          }
-        </>
-      )}
-
-      {/* ════ MÉTRICAS ════ */}
-      {tab === 'metrics' && (
-        <>
-          <div style={{ display:'flex', gap:'0.4rem', alignItems:'center', marginBottom:'1rem', flexWrap:'wrap' }}>
-            <span style={{ fontWeight:600, fontSize:'0.875rem' }}>Período:</span>
-            {[1,7,14,30].map(d=>(
-              <button key={d} onClick={()=>setMetricDays(d)} style={{ padding:'0.3rem 0.7rem', borderRadius:6, border:'1px solid #e5e7eb', cursor:'pointer', fontWeight:600, fontSize:'0.82rem',
-                background:metricDays===d?'#2563eb':'#f9fafb', color:metricDays===d?'#fff':'#374151' }}>{d}d</button>
+        <div>
+          <div style={{ display:'flex', gap:'0.5rem', marginBottom:'1rem', flexWrap:'wrap' }}>
+            {['','created','pending_driver','assigned','accepted','preparing','ready','on_the_way','delivered','cancelled'].map(s => (
+              <button key={s} onClick={() => setStatusFilter(s)}
+                style={{ padding:'0.3rem 0.65rem', border:`1px solid ${statusFilter===s ? 'var(--brand)' : '#e5e7eb'}`,
+                  borderRadius:8, cursor:'pointer', fontSize:'0.78rem',
+                  background: statusFilter===s ? 'var(--brand-light)' : '#fff',
+                  color: statusFilter===s ? 'var(--brand)' : 'var(--gray-600)', fontWeight: statusFilter===s ? 700 : 400 }}>
+                {s || 'Todos'}
+              </button>
             ))}
           </div>
-
-          {metrics && (
-            <>
-              <Collapsible title="📦 Resumen">
-                <div style={{ display:'flex', flexWrap:'wrap', gap:'0.6rem' }}>
-                  <Card label="Pedidos totales"  value={metrics.summary.total_orders}              color="#2563eb"/>
-                  <Card label="Entregados"        value={metrics.summary.delivered}                 color="#16a34a"/>
-                  <Card label="Cancelados"        value={metrics.summary.cancelled}                 color="#dc2626"/>
-                  <Card label="Activos ahora"     value={metrics.summary.active}                    color="#f59e0b"/>
-                  <Card label="Ticket promedio"   value={fmt(metrics.summary.avg_ticket_cents)}     color="#7c3aed"/>
-                  <Card label="Ingresos"          value={fmt(metrics.summary.revenue_cents)}        color="#059669" sub="pedidos entregados"/>
-                </div>
-              </Collapsible>
-
-              <Collapsible title="⏱ Tiempos promedio (pedidos entregados)">
-                <div style={{ display:'flex', flexWrap:'wrap', gap:'0.6rem' }}>
-                  <Card label="Hasta aceptar"  value={fmtMin(metrics.timings.avg_min_to_accept)}   color="#f59e0b"/>
-                  <Card label="Hasta preparar" value={fmtMin(metrics.timings.avg_min_to_prepare)}  color="#f97316"/>
-                  <Card label="Hasta listo"    value={fmtMin(metrics.timings.avg_min_to_ready)}    color="#10b981"/>
-                  <Card label="Hasta retiro"   value={fmtMin(metrics.timings.avg_min_to_pickup)}   color="#06b6d4"/>
-                  <Card label="Hasta entrega"  value={fmtMin(metrics.timings.avg_min_to_deliver)}  color="#8b5cf6"/>
-                  <Card label="Total"          value={fmtMin(metrics.timings.avg_total_min)}       color="#2563eb" sub="creación → entrega"/>
-                </div>
-              </Collapsible>
-
-              <Collapsible title="🍽 Por restaurante">
-                <table style={{ width:'100%', borderCollapse:'collapse' }}>
-                  <thead><tr><Th>Restaurante</Th><Th>Pedidos</Th><Th>Entregados</Th><Th>Cancelados</Th><Th>Ticket prom.</Th><Th>Ingresos</Th><Th>T.total prom.</Th></tr></thead>
-                  <tbody>
-                    {metrics.byRestaurant.map(r=>(
-                      <tr key={r.id}>
-                        <Td style={{fontWeight:600}}>{r.name}</Td>
-                        <Td>{r.total_orders}</Td>
-                        <Td style={{color:'#16a34a'}}>{r.delivered}</Td>
-                        <Td style={{color:'#dc2626'}}>{r.cancelled}</Td>
-                        <Td>{fmt(r.avg_ticket_cents)}</Td>
-                        <Td style={{fontWeight:700}}>{fmt(r.revenue_cents)}</Td>
-                        <Td>{fmtMin(r.avg_total_min)}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Collapsible>
-
-              <Collapsible title="🛵 Por driver">
-                <table style={{ width:'100%', borderCollapse:'collapse' }}>
-                  <thead><tr><Th>Driver</Th><Th>Disponible</Th><Th>Entregados</Th><Th>Cancelados</Th><Th>T.entrega prom.</Th><Th>Rechazos</Th><Th>Expiradas</Th></tr></thead>
-                  <tbody>
-                    {metrics.byDriver.map(d=>(
-                      <tr key={d.id}>
-                        <Td style={{fontWeight:600}}>{d.name}</Td>
-                        <Td><span style={{color:d.is_available?'#16a34a':'#9ca3af',fontSize:'0.75rem'}}>{d.is_available?'● Sí':'● No'}</span></Td>
-                        <Td style={{color:'#16a34a'}}>{d.delivered}</Td>
-                        <Td style={{color:'#dc2626'}}>{d.cancelled}</Td>
-                        <Td>{fmtMin(d.avg_delivery_min)}</Td>
-                        <Td style={{color:'#f59e0b'}}>{d.total_rejections}</Td>
-                        <Td style={{color:'#9ca3af'}}>{d.total_expirations}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Collapsible>
-
-              <Collapsible title="👤 Por cliente (top 50)">
-                <table style={{ width:'100%', borderCollapse:'collapse' }}>
-                  <thead><tr><Th>Cliente</Th><Th>Pedidos</Th><Th>Entregados</Th><Th>Cancelados</Th><Th>Total gastado</Th></tr></thead>
-                  <tbody>
-                    {metrics.byCustomer.map(c=>(
-                      <tr key={c.id}>
-                        <Td style={{fontWeight:600}}>{c.name}</Td>
-                        <Td>{c.total_orders}</Td>
-                        <Td style={{color:'#16a34a'}}>{c.delivered}</Td>
-                        <Td style={{color:'#dc2626'}}>{c.cancelled}</Td>
-                        <Td style={{fontWeight:700}}>{fmt(c.total_spent_cents)}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Collapsible>
-
-              <Collapsible title="⏰ Distribución por hora del día" defaultOpen={false}>
-                <div style={{ display:'flex', alignItems:'flex-end', gap:2, height:80, paddingBottom:4 }}>
-                  {Array.from({length:24},(_,h)=>{
-                    const row = metrics.byHour.find(r=>r.hour===h);
-                    const count = row?.orders || 0;
-                    const max = Math.max(...metrics.byHour.map(r=>r.orders),1);
-                    return (
-                      <div key={h} style={{ display:'flex', flexDirection:'column', alignItems:'center', flex:'0 0 auto', width:22 }}>
-                        <div title={`${h}:00 — ${count} pedidos`}
-                          style={{ width:16, background:'#2563eb', borderRadius:'2px 2px 0 0',
-                            height: count>0 ? Math.max((count/max)*60,3) : 0, transition:'height 0.3s' }}/>
-                        <div style={{ fontSize:'0.58rem', color:'#9ca3af', marginTop:1 }}>{h}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </Collapsible>
-            </>
-          )}
-        </>
-      )}
-
-      {/* ════ USUARIOS ════ */}
-      {tab === 'users' && (
-        <table style={{ width:'100%', borderCollapse:'collapse' }}>
-          <thead><tr>
-            <Th>Nombre</Th><Th>Rol</Th><Th>Estado</Th><Th>Info</Th><Th>Registrado</Th><Th>Acción</Th>
-          </tr></thead>
-          <tbody>
-            {users.map(u=>(
-              <tr key={u.id} style={{ opacity: u.status==='suspended' ? 0.55 : 1 }}>
-                <Td style={{fontWeight:600}}>{u.full_name}</Td>
-                <Td><span style={{ background:'#f3f4f6', borderRadius:4, padding:'0.1rem 0.4rem', fontSize:'0.72rem' }}>{u.role}</span></Td>
-                <Td><span style={{ color: u.status==='active'?'#16a34a':'#dc2626', fontWeight:700, fontSize:'0.75rem' }}>{u.status==='active'?'● Activo':'● Suspendido'}</span></Td>
-                <Td style={{color:'#6b7280',fontSize:'0.75rem'}}>
-                  {u.role==='driver'     && `${u.vehicle_type||'—'} · ${u.is_available?'disponible':'no disp.'}${u.is_verified?' · ✓':''}`}
-                  {u.role==='restaurant' && `${u.restaurant_name||'—'} · ${u.restaurant_is_open?'abierto':'cerrado'}`}
-                </Td>
-                <Td style={{whiteSpace:'nowrap'}}>{fmtDate(u.created_at)}</Td>
-                <Td>
-                  <button onClick={()=>toggleUserStatus(u.id,u.status)} style={{ fontSize:'0.75rem', padding:'0.2rem 0.55rem' }}>
-                    {u.status==='active'?'Suspender':'Reactivar'}
-                  </button>
-                </Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {/* ════ REGISTRAR ADMIN ════ */}
-      {tab === 'register' && (
-        <div style={{ maxWidth:380 }}>
-          <h3 style={{ marginTop:0 }}>Registrar nuevo administrador</h3>
-          <p style={{ color:'#6b7280', fontSize:'0.875rem', marginBottom:'1rem' }}>
-            Solo los administradores actuales pueden crear cuentas de administrador.
-          </p>
-          <div style={{ display:'flex', flexDirection:'column', gap:'0.6rem' }}>
-            <input placeholder="Nombre para mostrar" value={newUser.displayName}
-              onChange={e=>setNewUser(p=>({...p,displayName:e.target.value}))}
-              style={{ padding:'0.5rem 0.75rem', borderRadius:6, border:'1px solid #e5e7eb' }}/>
-            <input placeholder="Nombre de usuario (para login)" value={newUser.username}
-              onChange={e=>setNewUser(p=>({...p,username:e.target.value}))}
-              style={{ padding:'0.5rem 0.75rem', borderRadius:6, border:'1px solid #e5e7eb' }}/>
-            <input type="password" placeholder="Contraseña (mín. 6 caracteres)" value={newUser.password}
-              onChange={e=>setNewUser(p=>({...p,password:e.target.value}))}
-              style={{ padding:'0.5rem 0.75rem', borderRadius:6, border:'1px solid #e5e7eb' }}/>
-            <button onClick={registerAdmin} style={{ padding:'0.6rem', fontWeight:700 }}>
-              Crear administrador
-            </button>
+          <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:10 }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', minWidth:600 }}>
+              <thead>
+                <tr>
+                  <Th>ID</Th><Th>Estado</Th><Th>Tienda</Th><Th>Cliente</Th>
+                  <Th>Driver</Th><Th>Total</Th><Th>Creado</Th>
+                  <Th>Pend.</Th><Th>Rech.</Th><Th>Exp.</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {orders.map(o => (
+                  <tr key={o.id}>
+                    <Td><span style={{ fontFamily:'monospace', fontSize:'0.72rem' }}>{o.id.slice(0,8)}</span></Td>
+                    <Td><Badge status={o.status} /></Td>
+                    <Td>{o.restaurant_name}</Td>
+                    <Td>{o.customer_name?.split('_')[0]}</Td>
+                    <Td>{o.driver_name?.split('_')[0] || '—'}</Td>
+                    <Td>{fmt(o.total_cents)}</Td>
+                    <Td>{fmtDate(o.created_at)}</Td>
+                    <Td>{o.pending_offers > 0 ? <span style={{color:'#f59e0b',fontWeight:700}}>⏳{o.pending_offers}</span> : 0}</Td>
+                    <Td>{o.rejected_offers > 0 ? <span style={{color:'#dc2626'}}>{o.rejected_offers}</span> : 0}</Td>
+                    <Td>{o.expired_offers > 0 ? <span style={{color:'#9ca3af'}}>{o.expired_offers}</span> : 0}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          {msg && (
-            <p style={{ marginTop:'0.5rem', fontSize:'0.875rem', color: msg.startsWith('✅')?'#16a34a':'#dc2626' }}>{msg}</p>
+        </div>
+      )}
+
+      {/* ── TAB: MÉTRICAS ───────────────────────────────────────────── */}
+      {tab === 'metrics' && metrics && (
+        <div>
+          <div style={{ display:'flex', gap:'0.5rem', marginBottom:'1rem' }}>
+            {[7,14,30,90].map(d => (
+              <button key={d} onClick={() => setMetricDays(d)}
+                style={{ padding:'0.3rem 0.65rem', border:`1px solid ${metricDays===d?'var(--brand)':'#e5e7eb'}`,
+                  borderRadius:8, cursor:'pointer', fontSize:'0.78rem', fontWeight:metricDays===d?700:400,
+                  background: metricDays===d ? 'var(--brand-light)' : '#fff',
+                  color: metricDays===d ? 'var(--brand)' : 'var(--gray-600)' }}>
+                {d}d
+              </button>
+            ))}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))', gap:'0.6rem', marginBottom:'1.25rem' }}>
+            {[
+              { label:'Pedidos', value:metrics.summary?.total_orders, color:'#3b82f6' },
+              { label:'Entregados', value:metrics.summary?.delivered, color:'#16a34a' },
+              { label:'Cancelados', value:metrics.summary?.cancelled, color:'#dc2626' },
+              { label:'Activos', value:metrics.summary?.active, color:'#f59e0b' },
+              { label:'Ticket prom.', value:fmt(metrics.summary?.avg_ticket_cents), color:'#8b5cf6' },
+              { label:'Ingresos', value:fmt(metrics.summary?.revenue_cents), color:'#0d9488' },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'0.6rem 1rem' }}>
+                <div style={{ fontSize:'0.72rem', color:'#6b7280' }}>{label}</div>
+                <div style={{ fontSize:'1.3rem', fontWeight:800, color }}>{value ?? '—'}</div>
+              </div>
+            ))}
+          </div>
+          {metrics.timings && (
+            <div style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'0.75rem 1rem', marginBottom:'1rem' }}>
+              <div style={{ fontWeight:700, fontSize:'0.875rem', marginBottom:'0.5rem' }}>⏱ Tiempos promedio</div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))', gap:'0.5rem', fontSize:'0.8rem' }}>
+                {[
+                  ['Asignación', metrics.timings.avg_min_to_accept],
+                  ['Preparación', metrics.timings.avg_min_to_prepare],
+                  ['Listo para retiro', metrics.timings.avg_min_to_ready],
+                  ['Retiro', metrics.timings.avg_min_to_pickup],
+                  ['Entrega', metrics.timings.avg_min_to_deliver],
+                  ['Total', metrics.timings.avg_total_min],
+                ].map(([k, v]) => (
+                  <div key={k}><span style={{ color:'#6b7280' }}>{k}:</span> <strong>{v != null ? `${v}m` : '—'}</strong></div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}
-    </section>
+
+      {/* ── TAB: USUARIOS ───────────────────────────────────────────── */}
+      {tab === 'users' && (
+        <div>
+          <div style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'1rem', marginBottom:'1.25rem', background:'#f9fafb' }}>
+            <div style={{ fontWeight:700, marginBottom:'0.75rem', fontSize:'0.875rem' }}>Crear cuenta admin</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr auto', gap:'0.5rem', alignItems:'end', flexWrap:'wrap' }}>
+              {[['Usuario','username','username'],['Nombre','displayName','text'],['Contraseña','password','password']].map(([label,key,type]) => (
+                <label key={key} style={{ fontSize:'0.8rem' }}>
+                  {label}
+                  <input type={type} value={newUser[key]} onChange={e => setNewUser(p=>({...p,[key]:e.target.value}))}
+                    style={{ display:'block', width:'100%', marginTop:2, padding:'0.4rem 0.6rem', border:'1px solid #e5e7eb', borderRadius:6, fontSize:'0.85rem' }} />
+                </label>
+              ))}
+              <button onClick={createAdmin} style={{ padding:'0.45rem 1rem', background:'var(--brand)', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontWeight:700, fontSize:'0.85rem' }}>Crear</button>
+            </div>
+          </div>
+          <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:10 }}>
+            <table style={{ width:'100%', borderCollapse:'collapse' }}>
+              <thead><tr><Th>Usuario</Th><Th>Nombre</Th><Th>Rol</Th><Th>Estado</Th><Th>Creado</Th></tr></thead>
+              <tbody>
+                {users.map(u => (
+                  <tr key={u.id}>
+                    <Td><span style={{ fontFamily:'monospace', fontSize:'0.78rem' }}>{u.username}</span></Td>
+                    <Td>{u.full_name}</Td>
+                    <Td><Badge status={u.role} label={u.role} /></Td>
+                    <Td><Badge status={u.status==='active'?'ready':'cancelled'} label={u.status} /></Td>
+                    <Td>{fmtDate(u.created_at)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB: FEED EN VIVO ───────────────────────────────────────── */}
+      {tab === 'feed' && (
+        <div>
+          <div style={{ display:'flex', gap:'0.5rem', marginBottom:'0.75rem' }}>
+            <button onClick={() => { setLiveOffers([]); setOrderLog([]); }}
+              style={{ padding:'0.3rem 0.65rem', border:'1px solid #e5e7eb', borderRadius:8, cursor:'pointer', fontSize:'0.78rem', background:'#fff' }}>
+              Limpiar feed
+            </button>
+          </div>
+          <div style={{ border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden', maxHeight:500, overflowY:'auto' }}>
+            {[...liveOffers.map(e=>({...e,_t:'offer'})), ...orderLog.map(e=>({...e,_t:'log'}))]
+              .sort((a,b) => b.ts - a.ts)
+              .map((e, i) => (
+                <div key={i} style={{ padding:'0.4rem 0.875rem', borderBottom:'1px solid #f3f4f6', fontSize:'0.78rem',
+                  background: e._t === 'offer' ? '#eff6ff' : '#f0fdf4', display:'flex', gap:'0.75rem' }}>
+                  <span style={{ color:'#9ca3af', fontFamily:'monospace' }}>{new Date(e.ts).toLocaleTimeString('es-MX')}</span>
+                  <span style={{ color: e._t==='offer'?'#3b82f6':'#16a34a', fontWeight:700 }}>{e._t==='offer'?'📤 OFERTA':'📦 PEDIDO'}</span>
+                  <span style={{ color:'#374151' }}>{e.orderId}</span>
+                  <span style={{ color:'#6b7280' }}>{e.extra}</span>
+                </div>
+              ))
+            }
+            {liveOffers.length + orderLog.length === 0 && (
+              <div style={{ padding:'2rem', textAlign:'center', color:'var(--gray-400)', fontSize:'0.85rem' }}>
+                Esperando eventos SSE…
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

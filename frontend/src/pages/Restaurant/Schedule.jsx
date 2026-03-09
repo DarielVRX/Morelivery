@@ -15,25 +15,18 @@ export default function RestaurantSchedule() {
   }, [auth.token]);
 
   return (
-    <div>
-      {/* ── Encabezado ─────────────────────────────────────────────────── */}
-      <div style={{
-        margin: '0 -1rem 1.25rem',
-        padding: '0.75rem 1rem 0.65rem',
-        background: 'linear-gradient(135deg,#c0546a 0%,#8a3a4e 100%)',
-        color: '#fff',
-      }}>
+    <div style={{ backgroundColor:'#fff9f8', minHeight:'100vh', padding:'1rem' }}>
+      {/* ── Encabezado Horario ─────────────────────────────────────────── */}
+      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg,#c0546a 0%,#8a3a4e 100%)', color:'#fff' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: '1.05rem', letterSpacing: '-0.01em' }}>🕐 Horario de atención</div>
-            <div style={{ fontSize: '0.75rem', opacity: 0.85, marginTop: '0.1rem' }}>Configura cuándo recibes pedidos</div>
+            <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>🕐 Horario de atención</div>
+            <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Configura cuándo recibes pedidos</div>
           </div>
           {isOpen !== null && (
-            <span style={{
-              fontWeight: 700, fontSize: '0.82rem', padding: '0.2rem 0.65rem',
+            <span style={{ fontWeight:700, fontSize:'0.82rem', padding:'0.2rem 0.65rem',
               background: isOpen ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)',
-              borderRadius: 20, border: '1px solid rgba(255,255,255,0.3)',
-            }}>
+              borderRadius:20, border:'1px solid rgba(255,255,255,0.3)' }}>
               {isOpen ? '● Abierto' : '● Cerrado'}
             </span>
           )}

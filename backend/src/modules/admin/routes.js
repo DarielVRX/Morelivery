@@ -222,4 +222,97 @@ router.get('/offer-stats', authenticate, authorize(['admin']), async (req, res, 
   } catch (error) { return next(error); }
 });
 
+
+/* ── GET /admin/assignment-live — estado en vivo de todos los pedidos activos + drivers ── */
+router.get('/assignment-live', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    // ── 1. Todos los pedidos activos (no entregados ni cancelados) ─────────
+    const ordersResult = await query(`
+      SELECT
+        o.id, o.status, o.created_at, o.updated_at,
+        o.total_cents, o.payment_method, o.tip_cents,
+        o.service_fee_cents, o.delivery_fee_cents,
+        r.name    AS restaurant_name,
+        r.is_open AS restaurant_open,
+        r.address AS restaurant_address,
+        c.full_name AS customer_name,
+        -- Driver asignado
+        d.id        AS driver_id,
+        d.full_name AS driver_name,
+        dp.is_available AS driver_available,
+        dp.vehicle_type,
+        -- Ronda
+        (SELECT COUNT(DISTINCT od.driver_id)::int
+           FROM order_driver_offers od
+           WHERE od.order_id=o.id
+             AND od.status IN ('rejected','expired','released')) + 1  AS round,
+        -- Oferta pending ahora mismo
+        (SELECT od2.driver_id
+           FROM order_driver_offers od2
+           WHERE od2.order_id=o.id AND od2.status='pending'
+           LIMIT 1)                                                   AS pending_driver_id,
+        (SELECT u2.full_name
+           FROM order_driver_offers od2
+           JOIN users u2 ON u2.id=od2.driver_id
+           WHERE od2.order_id=o.id AND od2.status='pending'
+           LIMIT 1)                                                   AS pending_driver_name,
+        (SELECT od2.updated_at
+           FROM order_driver_offers od2
+           WHERE od2.order_id=o.id AND od2.status='pending'
+           LIMIT 1)                                                   AS offer_started_at,
+        -- Contadores
+        (SELECT COUNT(*)::int FROM order_driver_offers od WHERE od.order_id=o.id AND od.status='rejected') AS rejected_count,
+        (SELECT COUNT(*)::int FROM order_driver_offers od WHERE od.order_id=o.id AND od.status='expired')  AS expired_count
+      FROM orders o
+      JOIN restaurants r ON r.id=o.restaurant_id
+      JOIN users c ON c.id=o.customer_id
+      LEFT JOIN users d ON d.id=o.driver_id
+      LEFT JOIN driver_profiles dp ON dp.user_id=o.driver_id
+      WHERE o.status NOT IN ('delivered','cancelled')
+      ORDER BY o.created_at ASC
+      LIMIT 100
+    `);
+
+    // ── 2. Estado de todos los drivers ─────────────────────────────────────
+    const driversResult = await query(`
+      SELECT
+        u.id, u.full_name, u.status AS user_status,
+        dp.is_available, dp.vehicle_type, dp.driver_number,
+        dp.last_lat, dp.last_lng,
+        -- Pedidos activos asignados
+        (SELECT COUNT(*)::int FROM orders o
+           WHERE o.driver_id=u.id
+             AND o.status IN ('assigned','accepted','preparing','ready','on_the_way')
+        ) AS active_orders,
+        -- ¿Tiene pending offer ahora mismo?
+        (SELECT od.order_id FROM order_driver_offers od
+           WHERE od.driver_id=u.id AND od.status='pending'
+           ORDER BY od.updated_at DESC LIMIT 1)                    AS pending_offer_order_id,
+        (SELECT od.updated_at FROM order_driver_offers od
+           WHERE od.driver_id=u.id AND od.status='pending'
+           ORDER BY od.updated_at DESC LIMIT 1)                    AS pending_offer_started_at,
+        -- Cooldowns activos — pedidos donde tiene wait_until > NOW()
+        (SELECT json_agg(json_build_object(
+           'order_id', od.order_id,
+           'wait_until', od.wait_until,
+           'secs_left', GREATEST(0, EXTRACT(EPOCH FROM (od.wait_until - NOW()))::int)
+         ))
+           FROM order_driver_offers od
+           WHERE od.driver_id=u.id
+             AND od.status IN ('rejected','released','expired')
+             AND od.wait_until > NOW()
+        )                                                          AS cooldowns
+      FROM users u
+      JOIN driver_profiles dp ON dp.user_id=u.id
+      WHERE u.role='driver'
+      ORDER BY dp.driver_number ASC
+    `);
+
+    return res.json({
+      orders:  ordersResult.rows,
+      drivers: driversResult.rows,
+    });
+  } catch (error) { return next(error); }
+});
+
 export default router;
