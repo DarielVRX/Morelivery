@@ -487,7 +487,7 @@ export default function DriverHome() {
           <button
             onClick={() => setOfferMinimized(m => !m)}
             style={{
-              position:'absolute', top:0, left:'50%', transform:'translateX(-50%)',
+              position:'absolute', top:-50, left:'50%', transform:'translateX(-50%)',
               background:'var(--brand)', color:'#fff', border:'none', borderRadius:'8px 8px 0 0',
               padding:'0.15rem 1rem', cursor:'pointer', fontSize:'0.68rem', fontWeight:700,
               letterSpacing:'0.5px', textTransform:'uppercase', boxShadow:'0 -2px 8px #0002',
@@ -495,7 +495,7 @@ export default function DriverHome() {
             }}
             aria-label={offerMinimized ? 'Expandir oferta' : 'Minimizar oferta'}
           >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+            <svg width="11" height="3" viewBox="0 0 12 24" fill="none"
               stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <polyline points={offerMinimized ? '6 15 12 9 18 15' : '18 9 12 15 6 9'} />
             </svg>
