@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -33,90 +33,151 @@ function Flash({ text, isError }) {
 
 const ROLE_LABELS = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
 
+function PinMap({ initialLat, initialLng, onConfirm }) {
+  const containerRef = useRef(null);
+  const mapRef       = useRef(null);
+  const [pickedPos, setPickedPos] = useState(
+    initialLat && initialLng ? { lat: Number(initialLat), lng: Number(initialLng) } : null
+  );
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+    if (!document.getElementById('leaflet-css')) {
+      const lnk = document.createElement('link');
+      lnk.id = 'leaflet-css'; lnk.rel = 'stylesheet';
+      lnk.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(lnk);
+    }
+    const initPos = pickedPos || { lat: 19.755228, lng: -101.137419 };
+    import('leaflet').then(L => {
+      if (!containerRef.current || mapRef.current) return;
+      delete L.Icon.Default.prototype._getIconUrl;
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+        iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+      });
+      const map = L.map(containerRef.current, { zoomControl:true, attributionControl:false })
+        .setView([initPos.lat, initPos.lng], 15);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { keepBuffer:2 }).addTo(map);
+      let marker = pickedPos ? L.marker([pickedPos.lat, pickedPos.lng]).addTo(map) : null;
+      map.on('click', (e) => {
+        const { lat, lng } = e.latlng;
+        if (marker) marker.setLatLng([lat, lng]);
+        else marker = L.marker([lat, lng]).addTo(map);
+        setPickedPos({ lat, lng });
+      });
+      mapRef.current = { map };
+      setTimeout(() => map.invalidateSize(), 200);
+    }).catch(() => {});
+    return () => { if (mapRef.current?.map) { mapRef.current.map.remove(); mapRef.current = null; } };
+  }, []);
+
+  return (
+    <div>
+      <div ref={containerRef} style={{ height:220, borderRadius:8, border:'1px solid var(--gray-200)', marginBottom:'0.5rem' }} />
+      <p style={{ fontSize:'0.75rem', color:'var(--gray-500)', marginBottom:'0.5rem' }}>
+        Toca el mapa para colocar o mover el pin.
+      </p>
+      <button className="btn-primary btn-sm" disabled={!pickedPos}
+        onClick={() => pickedPos && onConfirm(pickedPos)}
+        style={{ opacity: pickedPos ? 1 : 0.5 }}>
+        Confirmar ubicación
+      </button>
+    </div>
+  );
+}
+
 export default function ProfilePage() {
   const { auth, patchUser, logout } = useAuth();
   const user = auth.user;
 
-  // Datos personales (nombre para mostrar a terceros + dirección)
-  const [alias, setAlias] = useState(user?.alias || user?.display_name || user?.full_name || '');
-  const [address, setAddress]         = useState(user?.address && user.address !== 'address-pending' ? user.address : '');
-  const [profileMsg, setProfileMsg]   = useState('');
-  const [profileErr, setProfileErr]   = useState(false);
+  const [alias,   setAlias]   = useState(user?.alias || user?.display_name || user?.full_name || '');
+  const [street,  setStreet]  = useState('');
+  const [numExt,  setNumExt]  = useState('');
+  const [numInt,  setNumInt]  = useState('');
+  const [colonia, setColonia] = useState('');
+  const [city,    setCity]    = useState('');
+  const [state,   setState]   = useState('');
+  const [pinLat,  setPinLat]  = useState(user?.lat  ?? null);
+  const [pinLng,  setPinLng]  = useState(user?.lng  ?? null);
+  const [showMap, setShowMap] = useState(false);
+  const [profileMsg, setProfileMsg] = useState('');
+  const [profileErr, setProfileErr] = useState(false);
 
-  // Cambiar contraseña + usuario de login (ambos en la misma sección)
-  const [loginUsername, setLoginUsername]   = useState(user?.username || '');
+  const [loginUsername,   setLoginUsername]   = useState(user?.username || '');
   const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword]         = useState('');
+  const [newPassword,     setNewPassword]     = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [pwdMsg, setPwdMsg]   = useState('');
-  const [pwdErr, setPwdErr]   = useState(false);
-
-  // Eliminar cuenta
+  const [pwdMsg, setPwdMsg] = useState('');
+  const [pwdErr, setPwdErr] = useState(false);
   const [deleteMsg, setDeleteMsg] = useState('');
   const [deleteErr, setDeleteErr] = useState(false);
+
+  useEffect(() => {
+    const raw = user?.address && user.address !== 'address-pending' ? user.address : '';
+    if (!raw) return;
+    // Intentar parsear "Calle NúmExt, Col. Colonia, Ciudad, Estado"
+    const parts = raw.split(',').map(s => s.trim());
+    // Separar calle y número del primer segmento
+    const streetPart = parts[0] || '';
+    const numMatch = streetPart.match(/^(.*?)\s+(\d+\w*)?\s*(?:Int\.?\s*(.+))?$/i);
+    setStreet(numMatch?.[1] || streetPart);
+    setNumExt(numMatch?.[2] || '');
+    setNumInt(numMatch?.[3] || '');
+    setColonia(parts[1] || '');
+    setCity(parts[2] || '');
+    setState(parts[3] || '');
+  }, []);
+
+  const buildAddress = () => [
+    [street.trim(), numExt.trim()].filter(Boolean).join(' '),
+    numInt.trim() ? `Int. ${numInt.trim()}` : '',
+    colonia.trim(), city.trim(), state.trim(),
+  ].filter(Boolean).join(', ');
 
   async function saveProfile() {
     if (!alias.trim()) { setProfileMsg('El nombre no puede estar vacío'); setProfileErr(true); return; }
     try {
       const body = { displayName: alias.trim() };
-      if (address.trim()) body.address = address.trim();
+      const addr = buildAddress();
+      if (addr) body.address = addr;
+      if (pinLat !== null && pinLng !== null) { body.lat = pinLat; body.lng = pinLng; }
       const data = await apiFetch('/auth/profile', { method:'PATCH', body: JSON.stringify(body) }, auth.token);
       patchUser({
-        alias:        data.profile.alias ?? data.profile.displayName,
-        full_name:    data.profile.alias ?? data.profile.displayName,
-        address:      data.profile.address,
+        alias: data.profile.alias ?? data.profile.displayName,
+        full_name: data.profile.alias ?? data.profile.displayName,
+        address: data.profile.address,
+        lat: data.profile.lat, lng: data.profile.lng,
       });
-      const newAlias = data.profile.alias ?? data.profile.displayName;
-      if (newAlias) setAlias(newAlias);
-      if (data.profile.address)     setAddress(data.profile.address);
       setProfileMsg('Perfil actualizado'); setProfileErr(false);
     } catch (e) { setProfileMsg(e.message); setProfileErr(true); }
   }
 
   async function changePasswordAndLogin() {
-    // Requiere contraseña actual siempre
     if (!currentPassword) { setPwdMsg('Ingresa tu contraseña actual'); setPwdErr(true); return; }
-
     const changingPwd  = !!newPassword;
     const changingUser = loginUsername.trim() && loginUsername.trim() !== user?.username;
-
-    if (!changingPwd && !changingUser) {
-      setPwdMsg('No hay cambios que guardar'); setPwdErr(false); return;
-    }
+    if (!changingPwd && !changingUser) { setPwdMsg('No hay cambios que guardar'); setPwdErr(false); return; }
     if (changingPwd) {
       if (newPassword !== confirmPassword) { setPwdMsg('Las contraseñas no coinciden'); setPwdErr(true); return; }
       if (newPassword.length < 6) { setPwdMsg('Mínimo 6 caracteres'); setPwdErr(true); return; }
     }
-
     try {
-      // Cambiar contraseña
-      if (changingPwd) {
-        await apiFetch('/auth/password', {
-          method:'PATCH', body: JSON.stringify({ currentPassword, newPassword })
-        }, auth.token);
-      }
-      // Cambiar usuario de login (email interno)
+      if (changingPwd) await apiFetch('/auth/password', { method:'PATCH', body: JSON.stringify({ currentPassword, newPassword }) }, auth.token);
       if (changingUser) {
-        await apiFetch('/auth/login-username', {
-          method:'PATCH', body: JSON.stringify({ currentPassword, newUsername: loginUsername.trim() })
-        }, auth.token);
+        await apiFetch('/auth/login-username', { method:'PATCH', body: JSON.stringify({ currentPassword, newUsername: loginUsername.trim() }) }, auth.token);
         patchUser({ username: loginUsername.trim() });
       }
-      setPwdMsg(changingPwd && changingUser ? 'Contraseña y usuario actualizados'
-        : changingPwd ? 'Contraseña actualizada'
-        : 'Usuario de acceso actualizado');
-      setPwdErr(false);
-      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+      setPwdMsg(changingPwd && changingUser ? 'Contraseña y usuario actualizados' : changingPwd ? 'Contraseña actualizada' : 'Usuario de acceso actualizado');
+      setPwdErr(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
     } catch (e) { setPwdMsg(e.message); setPwdErr(true); }
   }
 
   async function deleteAccount() {
     if (!window.confirm('¿Eliminar tu cuenta permanentemente? Esta acción no se puede deshacer.')) return;
-    try {
-      // Ruta correcta: DELETE /auth/account (no /auth/delete-account)
-      await apiFetch('/auth/account', { method:'DELETE' }, auth.token);
-      logout();
-    } catch (e) { setDeleteMsg(e.message); setDeleteErr(true); }
+    try { await apiFetch('/auth/account', { method:'DELETE' }, auth.token); logout(); }
+    catch (e) { setDeleteMsg(e.message); setDeleteErr(true); }
   }
 
   const avatarLetter = (alias[0] || '?').toUpperCase();
@@ -125,20 +186,16 @@ export default function ProfilePage() {
     <div>
       <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem' }}>Mi perfil</h2>
 
-      {/* Tarjeta de cuenta */}
       <div className="card" style={{ marginBottom:'0.75rem', display:'flex', gap:'0.75rem', alignItems:'center' }}>
         <div style={{ width:44, height:44, borderRadius:'50%', background:'var(--brand-light)', border:'2px solid var(--brand)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
           <span style={{ fontWeight:800, fontSize:'1.1rem', color:'var(--brand)' }}>{avatarLetter}</span>
         </div>
         <div>
           <div style={{ fontWeight:700 }}>{alias}</div>
-          <div style={{ fontSize:'0.8rem', color:'var(--gray-600)' }}>
-            {ROLE_LABELS[user?.role] || user?.role}
-          </div>
+          <div style={{ fontSize:'0.8rem', color:'var(--gray-600)' }}>{ROLE_LABELS[user?.role] || user?.role}</div>
         </div>
       </div>
 
-      {/* Datos personales — cerrado por defecto */}
       <Collapsible title="Datos personales" defaultOpen={false}>
         <p style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.65rem' }}>
           Este nombre se muestra a otros usuarios en la plataforma.
@@ -148,17 +205,69 @@ export default function ProfilePage() {
             Nombre para mostrar
             <input value={alias} onChange={e => setAlias(e.target.value)} placeholder="Ej: Juan García" />
           </label>
+
+          <div style={{ fontWeight:600, fontSize:'0.8rem', color:'var(--gray-600)', marginTop:'0.15rem' }}>Dirección</div>
+
           <label>
-            Dirección
-            <input value={address} onChange={e => setAddress(e.target.value)}
-              placeholder="Ej: Av. Revolución 1234, Col. Centro" />
+            Calle
+            <input value={street} onChange={e => setStreet(e.target.value)} placeholder="Ej: Av. Revolución" />
           </label>
+          <div style={{ display:'flex', gap:'0.5rem' }}>
+            <label style={{ flex:1 }}>
+              Núm. exterior
+              <input value={numExt} onChange={e => setNumExt(e.target.value)} placeholder="1234" />
+            </label>
+            <label style={{ flex:1 }}>
+              Núm. interior
+              <input value={numInt} onChange={e => setNumInt(e.target.value)} placeholder="Opcional" />
+            </label>
+          </div>
+          <label>
+            Colonia
+            <input value={colonia} onChange={e => setColonia(e.target.value)} placeholder="Ej: Col. Centro" />
+          </label>
+          <div style={{ display:'flex', gap:'0.5rem' }}>
+            <label style={{ flex:2 }}>
+              Ciudad / Municipio
+              <input value={city} onChange={e => setCity(e.target.value)} placeholder="Ej: Morelia" />
+            </label>
+            <label style={{ flex:1 }}>
+              Estado
+              <input value={state} onChange={e => setState(e.target.value)} placeholder="Ej: Mich." />
+            </label>
+          </div>
+
+          {/* Pin de ubicación en mapa */}
+          <div style={{ marginTop:'0.15rem' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', marginBottom:'0.35rem', flexWrap:'wrap' }}>
+              <span style={{ fontWeight:600, fontSize:'0.8rem', color:'var(--gray-600)' }}>Ubicación en mapa</span>
+              {pinLat && pinLng && (
+                <span style={{ fontSize:'0.72rem', color:'var(--success)', fontWeight:600 }}>
+                  ✓ guardado
+                </span>
+              )}
+            </div>
+            <button className="btn-sm" onClick={() => setShowMap(m => !m)}
+              style={{ display:'flex', alignItems:'center', gap:'0.35rem' }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+              </svg>
+              {showMap ? 'Ocultar mapa' : pinLat ? 'Cambiar pin' : 'Colocar pin en mapa'}
+            </button>
+            {showMap && (
+              <div style={{ marginTop:'0.5rem' }}>
+                <PinMap
+                  initialLat={pinLat} initialLng={pinLng}
+                  onConfirm={({ lat, lng }) => { setPinLat(lat); setPinLng(lng); setShowMap(false); }}
+                />
+              </div>
+            )}
+          </div>
         </div>
         <button className="btn-primary btn-sm" onClick={saveProfile}>Guardar cambios</button>
         <Flash text={profileMsg} isError={profileErr} />
       </Collapsible>
 
-      {/* Seguridad — contraseña y usuario de acceso */}
       <Collapsible title="Seguridad">
         <p style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.65rem' }}>
           El usuario de acceso es el que usas para iniciar sesión. Es distinto al nombre que ven otros usuarios.
@@ -188,22 +297,16 @@ export default function ProfilePage() {
         <Flash text={pwdMsg} isError={pwdErr} />
       </Collapsible>
 
-      {/* Cerrar sesión */}
-      <button
-        onClick={logout}
-        style={{
-          width:'100%', padding:'0.7rem', background:'var(--gray-100)',
-          border:'1px solid var(--gray-200)', borderRadius:'var(--radius)',
-          fontWeight:700, fontSize:'0.9rem', cursor:'pointer', marginBottom:'0.75rem',
-          color:'var(--gray-800)', transition:'background 0.15s',
-        }}
+      <button onClick={logout}
+        style={{ width:'100%', padding:'0.7rem', background:'var(--gray-100)', border:'1px solid var(--gray-200)',
+          borderRadius:'var(--radius)', fontWeight:700, fontSize:'0.9rem', cursor:'pointer',
+          marginBottom:'0.75rem', color:'var(--gray-800)', transition:'background 0.15s' }}
         onMouseEnter={e => e.currentTarget.style.background='var(--gray-200)'}
         onMouseLeave={e => e.currentTarget.style.background='var(--gray-100)'}
       >
         Cerrar sesión
       </button>
 
-      {/* Administración */}
       <Collapsible title="Administración de cuenta">
         <p style={{ fontSize:'0.85rem', color:'var(--gray-600)', marginBottom:'0.75rem' }}>
           Eliminar tu cuenta es permanente. No podrás recuperarla ni tienes pedidos activos pendientes.

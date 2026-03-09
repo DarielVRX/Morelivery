@@ -29,8 +29,8 @@ router.post('/login', validate(loginSchema), async (req, res, next) => {
 /* ── PATCH /auth/profile ── */
 router.patch('/profile', authenticate, async (req, res, next) => {
   try {
-    const { address, displayName } = req.body || {};
-    const profile = await updateProfileAddress(req.user.userId, req.user.role, address, displayName);
+    const { address, displayName, lat, lng } = req.body || {};
+    const profile = await updateProfileAddress(req.user.userId, req.user.role, address, displayName, lat, lng);
     return res.json({ profile });
   } catch (error) { return next(error); }
 });
