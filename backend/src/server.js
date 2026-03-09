@@ -28,7 +28,7 @@ setInterval(async () => {
   } catch (e) {
     console.error('[ticker] expireTimedOutOffers error:', e.message);
   }
-}, 30_000);
+}, 10_000);
 
 server.listen(env.port, () => {
   console.log(`API running on port ${env.port}`);
