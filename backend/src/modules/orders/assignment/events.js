@@ -16,7 +16,7 @@ import {
   assignDriverToOrder, unassignDriverFromOrder,
   acceptPendingOffer, expireCompetingOffers,
   rejectDriverOffer, releaseDriverOffer,
-  expireAllPendingOffersForDriver,
+  expireAllPendingForDriver,
   expireTimedOutOffersInDB,
   getOpenOrder,
 } from './queries.js';
@@ -61,7 +61,7 @@ export async function rejectOffer(orderId, driverId, onOffer) {
   await rejectDriverOffer(orderId, driverId, COOLDOWN_SECONDS);
 
   // Liberar otros pedidos que el driver tenía bloqueados con pending offer
-  const freedOrderIds = await expireAllPendingOffersForDriver(driverId, orderId);
+  const freedOrderIds = await expireAllPendingForDriver(driverId, orderId);
   for (const freeOrderId of freedOrderIds) {
     if (!hasActiveChain(freeOrderId)) {
       log(freeOrderId, `despertado — driver=${driverId} liberó al rechazar ${orderId}`);
@@ -89,7 +89,7 @@ export async function releaseOrder(orderId, driverId, onOffer) {
   await unassignDriverFromOrder(orderId, driverId);
 
   // Liberar otros pedidos bloqueados por el driver
-  const freedOrderIds = await expireAllPendingOffersForDriver(driverId, null);
+  const freedOrderIds = await expireAllPendingForDriver(driverId, null);
   for (const freeOrderId of freedOrderIds) {
     if (freeOrderId !== orderId && !hasActiveChain(freeOrderId)) {
       log(freeOrderId, `despertado — driver=${driverId} liberó al soltar ${orderId}`);
