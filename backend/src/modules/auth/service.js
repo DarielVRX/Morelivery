@@ -111,49 +111,68 @@ export async function loginUser(payload) {
   return { token, user: { id: user.id, username, role: user.role, ...profile } };
 }
 
-// backend/modules/auth/service.js
-
 export async function updateProfileAddress(userId, role, address, displayName, lat, lng) {
-  // service.js -> dentro de updateProfileAddress
-  const updates = [];
-  const vals = [];
-  let i = 1;
-
-  if (displayName) {
-    updates.push(`full_name=$${i++}::text`); // Forzamos a TEXT
-    updates.push(`alias=$${i++}::text`);
-    vals.push(displayName.trim(), displayName.trim());
+  if (role === 'restaurant') {
+    if (address !== undefined && address !== null) {
+      try { await query('UPDATE restaurants SET address=$1 WHERE owner_user_id=$2', [address, userId]); }
+      catch (e) { if (e?.code !== '42703') throw e; }
+    }
+    if (displayName !== undefined && displayName !== null) {
+      const cleanName = cleanRestaurantName(displayName);
+      try {
+        await query('UPDATE restaurants SET name=$1 WHERE owner_user_id=$2', [cleanName, userId]);
+      } catch (e) { if (e?.code !== '42703') throw e; }
+      try {
+        await query('UPDATE users SET full_name=$1, alias=$1 WHERE id=$2', [displayName.trim(), userId]);
+      } catch (e) {
+        // alias column may not exist yet — retry with only full_name
+        if (e?.code === '42703') {
+          try { await query('UPDATE users SET full_name=$1 WHERE id=$2', [displayName.trim(), userId]); } catch (_) {}
+        } else throw e;
+      }
+    }
+  } else {
+    // customer / driver / admin
+    const updates = [];
+    const vals = [];
+    let i = 1;
+    if (displayName !== undefined && displayName !== null) {
+      updates.push(`full_name=$${i++}`); vals.push(displayName.trim());
+      updates.push(`alias=$${i++}`); vals.push(displayName.trim());
+    }
+    if (address !== undefined && address !== null)         { updates.push(`address=$${i++}`);    vals.push(address); }
+    if (lat     !== undefined && lat     !== null)         { updates.push(`lat=$${i++}`);         vals.push(lat); }
+    if (lng     !== undefined && lng     !== null)         { updates.push(`lng=$${i++}`);         vals.push(lng); }
+    if (updates.length > 0) {
+      vals.push(userId);
+      try {
+        await query(`UPDATE users SET ${updates.join(',')} WHERE id=$${i}`, vals);
+      } catch (e) {
+        if (e?.code === '42703') {
+          const safeUpdates = [];
+          const safeVals    = [];
+          let j = 1;
+          if (address !== undefined && address !== null)     { safeUpdates.push(`address=$${j++}`);   safeVals.push(address); }
+          if (displayName !== undefined && displayName !== null) { safeUpdates.push(`full_name=$${j++}`); safeVals.push(displayName.trim()); }
+          if (safeUpdates.length > 0) {
+            safeVals.push(userId);
+            try { await query(`UPDATE users SET ${safeUpdates.join(',')} WHERE id=$${j}`, safeVals); } catch (_) {}
+          }
+        } else throw e;
+      }
+    }
   }
 
-  if (address) {
-    updates.push(`address=$${i++}::text`);
-    vals.push(address);
-  }
-
-  if (lat != null && lng != null) {
-    updates.push(`lat=$${i++}::numeric`); // Forzamos a NUMERIC
-    updates.push(`lng=$${i++}::numeric`);
-    vals.push(lat, lng);
-  }
-
-  if (updates.length > 0) {
-    vals.push(userId);
-    // El casting en el WHERE id=$i::uuid (o ::int) evita el error 42P08
-    await query(`UPDATE users SET ${updates.join(', ')} WHERE id=$${i}`, vals);
-  }
-  // 5. SELECT de confirmación (asegúrate de que las columnas existan en users)
   const confirmed = await query(
-    'SELECT full_name, alias, address, lat, lng FROM users WHERE id=$1',
-    [userId]
+    'SELECT full_name, alias, address, lat, lng FROM users WHERE id=$1', [userId]
   );
-
   const row = confirmed.rows[0] || {};
   return {
-    address: row.address,
-    displayName: row.alias || row.full_name,
-    alias: row.alias || row.full_name,
-    lat: row.lat,
-    lng: row.lng
+    address:     row.address ?? address ?? null,
+    displayName: row.alias   ?? row.full_name ?? displayName ?? null,
+    alias:       row.alias   ?? row.full_name ?? displayName ?? null,
+    lat:         row.lat  ?? null,
+    lng:         row.lng  ?? null,
   };
 }
 
