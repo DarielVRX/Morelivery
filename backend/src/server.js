@@ -3,6 +3,7 @@ import { Server } from 'socket.io';
 import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { orderEvents } from './events/orderEvents.js';
+import { expireTimedOutOffers } from './modules/orders/assignment/index.js';
 
 const app = createApp();
 const server = http.createServer(app);
@@ -18,6 +19,16 @@ io.on('connection', (socket) => {
 });
 
 orderEvents.setSocket(io);
+
+// Ticker global: expira ofertas sin respuesta cada 30s,
+// independientemente de los pings de los drivers.
+setInterval(async () => {
+  try {
+    await expireTimedOutOffers(() => {});
+  } catch (e) {
+    console.error('[ticker] expireTimedOutOffers error:', e.message);
+  }
+}, 30_000);
 
 server.listen(env.port, () => {
   console.log(`API running on port ${env.port}`);
