@@ -282,7 +282,7 @@ function OrderDetail({ order, allDrivers, token }) {
                       <span style={{ color:'#9ca3af' }}>{d.vehicle_type}</span>
                     )}
                     {d.active_orders > 0 && (
-                      <span style={{ color:'#6b7280' }}>{d.active_orders} pedido{d.active_orders > 1 ? 's':'} activo{d.active_orders > 1 ? 's':''}</span>
+                      <span style={{ color:'#6b7280' }}>{d.active_orders} pedido{d.active_orders > 1 ? 's':''} activo{d.active_orders > 1 ? 's':''}</span>
                     )}
                   </div>
                 ))}
