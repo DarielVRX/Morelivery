@@ -11,7 +11,7 @@ import { logEvent } from '../../utils/logger.js';
 import { validate } from '../../middlewares/validate.js';
 import { createOrderSchema, suggestionResponseSchema, suggestionSchema, updateOrderStatusSchema } from './schemas.js';
 import { AppError } from '../../utils/errors.js';
-import { offerNextDrivers, expireTimedOutOffers, serializedOffer, getPendingAssignmentOrders } from './assignment/index.js';
+import { offerNextDrivers, serializedOffer, getPendingAssignmentOrders } from './assignment/index.js';
 import { offerCb } from '../events/offerCallback.js';
 import { sseHub } from '../events/hub.js';
 
