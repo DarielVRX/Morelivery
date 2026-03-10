@@ -336,12 +336,18 @@ export async function getOfferPayload(orderId, driverId) {
             o.payment_method,
             r.name    AS restaurant_name,
             r.address AS restaurant_address,
-            o.delivery_address AS customer_address,
+            r.lat     AS restaurant_lat,
+            r.lng     AS restaurant_lng,
+            -- Usar dirección fresca del cliente (puede haberse actualizado desde que se creó el pedido)
+            COALESCE(c.address, o.delivery_address) AS customer_address,
+            c.lat     AS customer_lat,
+            c.lng     AS customer_lng,
             GREATEST(0, EXTRACT(EPOCH FROM (
               od.updated_at + ($3::int * INTERVAL '1 second') - NOW()
             )))::int AS seconds_left
      FROM orders o
      JOIN restaurants r ON r.id=o.restaurant_id
+     JOIN users c       ON c.id=o.customer_id
      JOIN order_driver_offers od ON od.order_id=o.id AND od.driver_id=$2
      WHERE o.id=$1`,
     [orderId, driverId, OFFER_TIMEOUT_SECONDS]
@@ -355,18 +361,19 @@ export async function getPendingAssignmentOrders(driverId) {
     `SELECT o.id, o.status, o.total_cents, o.service_fee_cents, o.delivery_fee_cents,
             o.tip_cents, o.payment_method, o.created_at,
             r.name AS restaurant_name, r.address AS restaurant_address,
-            o.delivery_address AS customer_address,
-            -- si hay oferta activa para CUALQUIER driver (no solo este)
+            r.lat AS restaurant_lat, r.lng AS restaurant_lng,
+            COALESCE(c.address, o.delivery_address) AS customer_address,
+            c.lat AS customer_lat, c.lng AS customer_lng,
             EXISTS (
               SELECT 1 FROM order_driver_offers od2
               WHERE od2.order_id=o.id AND od2.status='pending'
             ) AS has_pending_offer,
-            -- segundos de cooldown restante para este driver en este pedido
             GREATEST(0, EXTRACT(EPOCH FROM (
               od.wait_until - NOW()
             )))::int AS cooldown_secs
      FROM orders o
      JOIN restaurants r ON r.id=o.restaurant_id
+     JOIN users c       ON c.id=o.customer_id
      LEFT JOIN order_driver_offers od
        ON od.order_id=o.id AND od.driver_id=$1
           AND od.status IN ('rejected','released','expired')
@@ -381,5 +388,7 @@ export async function getPendingAssignmentOrders(driverId) {
      LIMIT 20`,
     [driverId]
   );
+  return r.rows;
+}
   return r.rows;
 }
