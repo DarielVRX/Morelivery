@@ -280,7 +280,7 @@ export async function releaseDriverOffer(orderId, driverId, cooldownSecs) {
     `UPDATE order_driver_offers
      SET status='released', wait_until=NOW()+($3*INTERVAL '1 second'), updated_at=NOW()
      WHERE order_id=$1 AND driver_id=$2`,
-    [orderId, driverId, cooldownSecs]
+    [cooldownSecs, orderId, driverId]
   );
 }
 
