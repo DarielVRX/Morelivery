@@ -82,15 +82,21 @@ export async function loginUser(payload) {
 
   const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 
-  let profile = { address: user.address || null, alias: user.alias || user.full_name || username, needsAddress: false, lat: null, lng: null };
+  let profile = { address: user.address || null, alias: user.alias || user.full_name || username, needsAddress: false, lat: null, lng: null, home_lat: null, home_lng: null, postal_code: null, colonia: null, estado: null, ciudad: null };
 
   if (user.role === 'restaurant') {
     try {
-      const r = await query('SELECT id, name, address, is_open, lat, lng FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
-      profile.restaurant = r.rows[0] || null;
-      profile.address    = r.rows[0]?.address || null;
-      profile.lat        = r.rows[0]?.lat     ?? null;
-      profile.lng        = r.rows[0]?.lng     ?? null;
+      const r = await query('SELECT id, name, address, is_open, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
+      profile.restaurant   = r.rows[0] || null;
+      profile.address      = r.rows[0]?.address     || null;
+      profile.lat          = r.rows[0]?.lat         ?? null;
+      profile.lng          = r.rows[0]?.lng         ?? null;
+      profile.home_lat     = r.rows[0]?.home_lat    ?? null;
+      profile.home_lng     = r.rows[0]?.home_lng    ?? null;
+      profile.postal_code  = r.rows[0]?.postal_code ?? null;
+      profile.colonia      = r.rows[0]?.colonia     ?? null;
+      profile.estado       = r.rows[0]?.estado      ?? null;
+      profile.ciudad       = r.rows[0]?.ciudad      ?? null;
     } catch (error) {
       if (error?.code === '42703') {
         const r = await query('SELECT id, name, address, is_open FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
@@ -101,9 +107,15 @@ export async function loginUser(payload) {
   } else {
     // customer / driver / admin: lat/lng viven en users
     try {
-      const r = await query('SELECT lat, lng FROM users WHERE id = $1', [user.id]);
-      profile.lat = r.rows[0]?.lat ?? null;
-      profile.lng = r.rows[0]?.lng ?? null;
+      const r = await query('SELECT lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM users WHERE id = $1', [user.id]);
+      profile.lat         = r.rows[0]?.lat         ?? null;
+      profile.lng         = r.rows[0]?.lng         ?? null;
+      profile.home_lat    = r.rows[0]?.home_lat    ?? null;
+      profile.home_lng    = r.rows[0]?.home_lng    ?? null;
+      profile.postal_code = r.rows[0]?.postal_code ?? null;
+      profile.colonia     = r.rows[0]?.colonia     ?? null;
+      profile.estado      = r.rows[0]?.estado      ?? null;
+      profile.ciudad      = r.rows[0]?.ciudad      ?? null;
     } catch (_) {}
   }
 
@@ -124,15 +136,21 @@ export async function loginUser(payload) {
   return { token, user: { id: user.id, username, role: user.role, ...profile } };
 }
 
-export async function updateProfileAddress(userId, role, address, displayName, lat, lng) {
+export async function updateProfileAddress(userId, role, address, displayName, lat, lng, homeLat, homeLng, postalCode, colonia, estado, ciudad) {
   if (role === 'restaurant') {
     // address, lat, lng y name van en restaurants; alias/full_name en users
     const restUpdates = [];
     const restVals    = [];
     let ri = 1;
-    if (address !== undefined && address !== null) { restUpdates.push(`address=$${ri++}`); restVals.push(address); }
-    if (lat     !== undefined && lat     !== null) { restUpdates.push(`lat=$${ri++}`);     restVals.push(lat); }
-    if (lng     !== undefined && lng     !== null) { restUpdates.push(`lng=$${ri++}`);     restVals.push(lng); }
+    if (address    !== undefined && address    !== null) { restUpdates.push(`address=$${ri++}`);     restVals.push(address); }
+    if (lat        !== undefined && lat        !== null) { restUpdates.push(`lat=$${ri++}`);        restVals.push(lat); }
+    if (lng        !== undefined && lng        !== null) { restUpdates.push(`lng=$${ri++}`);        restVals.push(lng); }
+    if (homeLat    !== undefined && homeLat    !== null) { restUpdates.push(`home_lat=$${ri++}`);   restVals.push(homeLat); }
+    if (homeLng    !== undefined && homeLng    !== null) { restUpdates.push(`home_lng=$${ri++}`);   restVals.push(homeLng); }
+    if (postalCode !== undefined && postalCode !== null) { restUpdates.push(`postal_code=$${ri++}`);restVals.push(postalCode); }
+    if (colonia    !== undefined && colonia    !== null) { restUpdates.push(`colonia=$${ri++}`);    restVals.push(colonia); }
+    if (estado     !== undefined && estado     !== null) { restUpdates.push(`estado=$${ri++}`);     restVals.push(estado); }
+    if (ciudad     !== undefined && ciudad     !== null) { restUpdates.push(`ciudad=$${ri++}`);     restVals.push(ciudad); }
     if (restUpdates.length > 0) {
       restVals.push(userId);
       try { await query(`UPDATE restaurants SET ${restUpdates.join(',')} WHERE owner_user_id=$${ri}`, restVals); }
@@ -153,7 +171,7 @@ export async function updateProfileAddress(userId, role, address, displayName, l
     // Leer confirmado desde restaurants (lat/lng viven ahí para tienda)
     let rRow = {};
     try {
-      const rc = await query('SELECT name, address, lat, lng FROM restaurants WHERE owner_user_id=$1', [userId]);
+      const rc = await query('SELECT name, address, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM restaurants WHERE owner_user_id=$1', [userId]);
       rRow = rc.rows[0] || {};
     } catch (_) {}
     let uRow = {};
@@ -162,11 +180,17 @@ export async function updateProfileAddress(userId, role, address, displayName, l
       uRow = uc.rows[0] || {};
     } catch (_) {}
     return {
-      address:     rRow.address     ?? address     ?? null,
-      displayName: uRow.alias       ?? uRow.full_name ?? displayName ?? null,
-      alias:       uRow.alias       ?? uRow.full_name ?? displayName ?? null,
-      lat:         rRow.lat         ?? null,
-      lng:         rRow.lng         ?? null,
+      address:     rRow.address      ?? address     ?? null,
+      displayName: uRow.alias        ?? uRow.full_name ?? displayName ?? null,
+      alias:       uRow.alias        ?? uRow.full_name ?? displayName ?? null,
+      lat:         rRow.lat          ?? null,
+      lng:         rRow.lng          ?? null,
+      home_lat:    rRow.home_lat     ?? null,
+      home_lng:    rRow.home_lng     ?? null,
+      postal_code: rRow.postal_code  ?? null,
+      colonia:     rRow.colonia      ?? null,
+      estado:      rRow.estado       ?? null,
+      ciudad:      rRow.ciudad       ?? null,
     };
   } else {
     // customer / driver / admin: todo va en users
@@ -177,9 +201,15 @@ export async function updateProfileAddress(userId, role, address, displayName, l
       updates.push(`full_name=$${i++}`); vals.push(displayName.trim());
       updates.push(`alias=$${i++}`);     vals.push(displayName.trim());
     }
-    if (address !== undefined && address !== null) { updates.push(`address=$${i++}`); vals.push(address); }
-    if (lat     !== undefined && lat     !== null) { updates.push(`lat=$${i++}`);     vals.push(lat); }
-    if (lng     !== undefined && lng     !== null) { updates.push(`lng=$${i++}`);     vals.push(lng); }
+    if (address    !== undefined && address    !== null) { updates.push(`address=$${i++}`);      vals.push(address); }
+    if (lat        !== undefined && lat        !== null) { updates.push(`lat=$${i++}`);         vals.push(lat); }
+    if (lng        !== undefined && lng        !== null) { updates.push(`lng=$${i++}`);         vals.push(lng); }
+    if (homeLat    !== undefined && homeLat    !== null) { updates.push(`home_lat=$${i++}`);    vals.push(homeLat); }
+    if (homeLng    !== undefined && homeLng    !== null) { updates.push(`home_lng=$${i++}`);    vals.push(homeLng); }
+    if (postalCode !== undefined && postalCode !== null) { updates.push(`postal_code=$${i++}`); vals.push(postalCode); }
+    if (colonia    !== undefined && colonia    !== null) { updates.push(`colonia=$${i++}`);     vals.push(colonia); }
+    if (estado     !== undefined && estado     !== null) { updates.push(`estado=$${i++}`);      vals.push(estado); }
+    if (ciudad     !== undefined && ciudad     !== null) { updates.push(`ciudad=$${i++}`);      vals.push(ciudad); }
     if (updates.length > 0) {
       vals.push(userId);
       try {
@@ -203,7 +233,7 @@ export async function updateProfileAddress(userId, role, address, displayName, l
     }
     let row = {};
     try {
-      const confirmed = await query('SELECT full_name, alias, address, lat, lng FROM users WHERE id=$1', [userId]);
+      const confirmed = await query('SELECT full_name, alias, address, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM users WHERE id=$1', [userId]);
       row = confirmed.rows[0] || {};
     } catch (_) {
       try {
@@ -212,11 +242,17 @@ export async function updateProfileAddress(userId, role, address, displayName, l
       } catch (_2) {}
     }
     return {
-      address:     row.address ?? address     ?? null,
-      displayName: row.alias   ?? row.full_name ?? displayName ?? null,
-      alias:       row.alias   ?? row.full_name ?? displayName ?? null,
-      lat:         row.lat     ?? null,
-      lng:         row.lng     ?? null,
+      address:     row.address      ?? address     ?? null,
+      displayName: row.alias        ?? row.full_name ?? displayName ?? null,
+      alias:       row.alias        ?? row.full_name ?? displayName ?? null,
+      lat:         row.lat          ?? null,
+      lng:         row.lng          ?? null,
+      home_lat:    row.home_lat     ?? null,
+      home_lng:    row.home_lng     ?? null,
+      postal_code: row.postal_code  ?? null,
+      colonia:     row.colonia      ?? null,
+      estado:      row.estado       ?? null,
+      ciudad:      row.ciudad       ?? null,
     };
   }
 }
@@ -235,15 +271,15 @@ export async function changePassword(userId, currentPassword, newPassword) {
 export async function deleteAccount(userId, role) {
   let hasPending = false;
   if (role === 'customer') {
-    const r = await query(`SELECT 1 FROM orders WHERE customer_id=$1::uuid AND status=ANY($2::text[]) LIMIT 1`, [userId, PENDING_STATUSES]);
+    const r = await query(`SELECT 1 FROM orders WHERE customer_id=$1 AND status=ANY($2::text[]) LIMIT 1`, [userId, PENDING_STATUSES]);
     hasPending = r.rowCount > 0;
   } else if (role === 'driver') {
-    const r = await query(`SELECT 1 FROM orders WHERE driver_id=$1::uuid AND status=ANY($2::text[]) LIMIT 1`, [userId, PENDING_STATUSES]);
+    const r = await query(`SELECT 1 FROM orders WHERE driver_id=$1 AND status=ANY($2::text[]) LIMIT 1`, [userId, PENDING_STATUSES]);
     hasPending = r.rowCount > 0;
   } else if (role === 'restaurant') {
     const r = await query(
       `SELECT 1 FROM orders o JOIN restaurants rest ON rest.id=o.restaurant_id
-       WHERE rest.owner_user_id=$1::uuid AND o.status=ANY($2::text[]) LIMIT 1`,
+       WHERE rest.owner_user_id=$1 AND o.status=ANY($2::text[]) LIMIT 1`,
       [userId, PENDING_STATUSES]
     );
     hasPending = r.rowCount > 0;
@@ -260,7 +296,7 @@ export async function updateLoginUsername(userId, role, currentPassword, newUser
   if (r.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
   const matches = await bcrypt.compare(currentPassword, r.rows[0].password_hash);
   if (!matches) throw new AppError(401, 'Contraseña actual incorrecta');
-  const taken = await query('SELECT id FROM users WHERE email=$1 AND role=$2 AND id<>$3::uuid', [newEmail, role, userId]);
+  const taken = await query('SELECT id FROM users WHERE email=$1 AND role=$2 AND id<>$3', [newEmail, role, userId]);
   if (taken.rowCount > 0) throw new AppError(409, 'Ese usuario de acceso ya está en uso');
   await query('UPDATE users SET email=$1 WHERE id=$2', [newEmail, userId]);
   return { username: normalized };

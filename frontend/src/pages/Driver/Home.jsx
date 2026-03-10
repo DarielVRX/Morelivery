@@ -487,6 +487,57 @@ export default function DriverHome() {
     finally { setLoadingStatus(''); }
   }
 
+
+  function openNavigation() {
+    if (!activeOrder) return;
+    const dLat = myPosition?.lat;
+    const dLng = myPosition?.lng;
+    const sLat = activeOrder.restaurant_lat;
+    const sLng = activeOrder.restaurant_lng;
+    const cLat = activeOrder.customer_lat;
+    const cLng = activeOrder.customer_lng;
+
+    const hasStore    = sLat && sLng;
+    const hasCustomer = cLat && cLng;
+    if (!hasStore && !hasCustomer) return;
+
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+    if (isIOS) {
+      // Apple Maps con waypoints
+      let url = 'maps://maps.apple.com/?t=m';
+      if (dLat && dLng) url += `&saddr=${dLat},${dLng}`;
+      if (hasStore && hasCustomer) {
+        // Apple Maps no soporta waypoints intermedios en URL scheme — usar Google Maps web
+        const gmUrl = buildGoogleMapsUrl(dLat, dLng, sLat, sLng, cLat, cLng);
+        window.open(gmUrl, '_blank');
+        return;
+      }
+      const dest = hasCustomer ? `${cLat},${cLng}` : `${sLat},${sLng}`;
+      url += `&daddr=${dest}`;
+      window.open(url, '_blank');
+    } else {
+      const url = buildGoogleMapsUrl(dLat, dLng, sLat, sLng, cLat, cLng);
+      window.open(url, '_blank');
+    }
+  }
+
+  function buildGoogleMapsUrl(dLat, dLng, sLat, sLng, cLat, cLng) {
+    const hasStore    = sLat && sLng;
+    const hasCustomer = cLat && cLng;
+    let url = 'https://www.google.com/maps/dir/?api=1&travelmode=driving';
+    if (dLat && dLng)      url += `&origin=${dLat},${dLng}`;
+    if (hasStore && hasCustomer) {
+      url += `&waypoints=${sLat},${sLng}`;
+      url += `&destination=${cLat},${cLng}`;
+    } else if (hasStore) {
+      url += `&destination=${sLat},${sLng}`;
+    } else if (hasCustomer) {
+      url += `&destination=${cLat},${cLng}`;
+    }
+    return url;
+  }
+
   async function doRelease() {
     if (!activeOrder) return;
     try {
@@ -783,6 +834,14 @@ export default function DriverHome() {
                 </div>
                 {/* Controles de estado */}
                 <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginBottom:'0.4rem' }}>
+                  {(activeOrder.restaurant_lat || activeOrder.customer_lat) && (
+                    <button className="btn-sm"
+                      onClick={openNavigation}
+                      style={{ background:'#1a73e8', color:'#fff', display:'flex', alignItems:'center', gap:'0.3rem' }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                      Navegar
+                    </button>
+                  )}
                   <button className="btn-sm"
                     style={{ background: activeOrder.status==='ready' ? 'var(--brand)':'',
                       color: activeOrder.status==='ready' ? '#fff':'' }}

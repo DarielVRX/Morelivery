@@ -5,14 +5,6 @@ import { useAuth } from '../../contexts/AuthContext';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
-function haversineKm(lat1, lng1, lat2, lng2) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
 function ProductImage({ src, name }) {
   const [err, setErr] = useState(false);
   if (!src || err) {
@@ -49,19 +41,9 @@ export default function RestaurantPage() {
   const [tipCents, setTipCents]           = useState(0);      // Propina por defecto
 
   const isCustomer  = auth.user?.role === 'customer';
-  const hasAddress  = Boolean(auth.user?.address && auth.user.address !== 'address-pending');
-
-  // Radio de 3km: verificar si el pin del cliente está dentro del rango de la tienda
-  const distanceKm = (() => {
-    const uLat = auth.user?.lat ? Number(auth.user.lat) : null;
-    const uLng = auth.user?.lng ? Number(auth.user.lng) : null;
-    const rLat = restaurant?.lat ? Number(restaurant.lat) : null;
-    const rLng = restaurant?.lng ? Number(restaurant.lng) : null;
-    if (!uLat || !uLng || !rLat || !rLng) return null;
-    return haversineKm(uLat, uLng, rLat, rLng);
-  })();
-  const MAX_RADIUS_KM = 3;
-  const outOfRange = distanceKm !== null && distanceKm > MAX_RADIUS_KM;
+  const hasAddress   = Boolean(auth.user?.address && auth.user.address !== 'address-pending');
+  const hasHomePin   = Boolean(auth.user?.home_lat && auth.user?.home_lng);
+  const [useHomePin, setUseHomePin] = useState(false); // usar pin Casa como destino
 
   useEffect(() => {
     async function load() {
@@ -120,7 +102,12 @@ export default function RestaurantPage() {
 
     setOrdering(true);
     try {
-      await apiFetch('/orders', { method:'POST', body: JSON.stringify({ restaurantId: id, items, payment_method: paymentMethod, tip_cents: tipCents }) }, auth.token);
+      const orderBody = { restaurantId: id, items, payment_method: paymentMethod, tip_cents: tipCents };
+      if (useHomePin && hasHomePin) {
+        orderBody.delivery_lat = auth.user.home_lat;
+        orderBody.delivery_lng = auth.user.home_lng;
+      }
+      await apiFetch('/orders', { method:'POST', body: JSON.stringify(orderBody) }, auth.token);
       setMsg('');
       setSelectedItems({});
       setTimeout(() => navigate('/customer/pedidos'), 800);
@@ -131,7 +118,7 @@ export default function RestaurantPage() {
   if (loading) return <div style={{ padding:'2rem', textAlign:'center', color:'var(--gray-400)' }}>Cargando…</div>;
 
   const isClosed = restaurant?.is_open === false;
-  const canOrder = isCustomer && hasAddress && !isClosed && !outOfRange;
+  const canOrder = isCustomer && hasAddress && !isClosed;
 
   return (
     <div style={{ backgroundColor:'#fff9f8', minHeight:'100vh', padding:'1rem' }}>
@@ -293,17 +280,11 @@ export default function RestaurantPage() {
               Guarda tu dirección en Perfil antes de pedir
             </p>
           )}
-          {outOfRange && (
-            <div style={{
-              background:'#fff3cd', border:'1px solid #f0ad4e', borderRadius:8,
-              padding:'0.6rem 0.75rem', marginBottom:'0.4rem',
-              fontSize:'0.82rem', color:'#7a5000', fontWeight:600,
-            }}>
-              📍 Esta tienda está a {distanceKm.toFixed(1)} km — solo se aceptan pedidos dentro de {MAX_RADIUS_KM} km de tu pin de ubicación.
-              <span style={{ display:'block', fontWeight:400, marginTop:'0.2rem', fontSize:'0.78rem' }}>
-                Actualiza tu pin en Perfil si tu domicilio es correcto.
-              </span>
-            </div>
+          {hasHomePin && (
+            <label style={{ display:'flex', alignItems:'center', gap:'0.5rem', fontSize:'0.82rem', cursor:'pointer', marginBottom:'0.5rem', padding:'0.5rem 0.75rem', background:'var(--gray-100)', borderRadius:6 }}>
+              <input type="checkbox" checked={useHomePin} onChange={e => setUseHomePin(e.target.checked)} />
+              <span>🏠 Enviar a mi dirección Casa guardada</span>
+            </label>
           )}
           <button className="btn-primary" style={{ width:'100%' }} disabled={!canOrder || ordering} onClick={createOrder}>
             {ordering ? 'Procesando…' : `Hacer pedido · ${fmt(total)}`}
