@@ -56,33 +56,9 @@ async function computeIsOpen(restaurantId) {
 }
 
 /* ── GET / — lista pública con is_open calculado en tiempo real ── */
-router.get('/', async (req, res, next) => {
+router.get('/', async (_req, res, next) => {
   try {
-    const userLat = parseFloat(req.query.lat);
-    const userLng = parseFloat(req.query.lng);
-    const hasCoords = !isNaN(userLat) && !isNaN(userLng);
-
-    let result;
-    if (hasCoords) {
-      // Filtrar restaurantes a ≤5km del customer (haversine)
-      result = await query(
-        `SELECT id, name, category, is_open, address, profile_photo
-         FROM restaurants
-         WHERE is_active = true
-           AND lat IS NOT NULL AND lng IS NOT NULL
-           AND (
-             6371 * 2 * ASIN(SQRT(
-               POWER(SIN(RADIANS($1 - lat)  / 2), 2) +
-               COS(RADIANS($1)) * COS(RADIANS(lat)) *
-               POWER(SIN(RADIANS($2 - lng) / 2), 2)
-             ))
-           ) <= 5.0
-         ORDER BY name`,
-        [userLat, userLng]
-      );
-    } else {
-      result = await query('SELECT id, name, category, is_open, address, profile_photo FROM restaurants WHERE is_active = true ORDER BY name');
-    }
+    const result = await query('SELECT id, name, category, is_open, address, profile_photo, lat, lng FROM restaurants WHERE is_active = true ORDER BY name');
     const restaurants = await Promise.all(result.rows.map(async r => ({ ...r, is_open: await computeIsOpen(r.id) })));
     return res.json({ restaurants });
   } catch (error) {

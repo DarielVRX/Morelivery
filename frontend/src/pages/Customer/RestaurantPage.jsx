@@ -3,7 +3,100 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 
+
+function ManualPinMap({ initialPos, mapRef, onConfirm, onCancel }) {
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    let pinMarker = null;
+    let map = null;
+
+    import('leaflet').then(L => {
+      if (!containerRef.current) return;
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+
+      delete L.Icon.Default.prototype._getIconUrl;
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+        iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+      });
+
+      const center = initialPos
+        ? [initialPos.lat, initialPos.lng]
+        : [19.706700, -101.194900]; // Morelia por defecto
+
+      map = L.map(containerRef.current, { zoomControl: true }).setView(center, 15);
+      mapRef.current = map;
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap', maxZoom: 19
+      }).addTo(map);
+
+      const icon = L.divIcon({
+        html: `<div style="font-size:28px;line-height:1;filter:drop-shadow(0 2px 4px #0005)">📌</div>`,
+        iconSize: [28, 28], iconAnchor: [14, 28], className: ''
+      });
+
+      pinMarker = L.marker(center, { icon, draggable: true }).addTo(map);
+
+      pinMarker.on('dragend', () => {
+        const ll = pinMarker.getLatLng();
+        pinMarker.setLatLng(ll);
+      });
+
+      map.on('click', (e) => {
+        pinMarker.setLatLng(e.latlng);
+      });
+    });
+
+    return () => {
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+    };
+  }, []); // solo al montar
+
+  function handleConfirm() {
+    if (!mapRef.current) return;
+    const ll = mapRef.current._layers
+      ? Object.values(mapRef.current._layers).find(l => l.getLatLng)?.getLatLng()
+      : null;
+    if (!ll) return;
+    onConfirm({ lat: ll.lat, lng: ll.lng });
+  }
+
+  return (
+    <div style={{ marginTop:'0.5rem', borderRadius:8, overflow:'hidden', border:'1px solid var(--gray-200)' }}>
+      <div ref={containerRef} style={{ height:220, width:'100%' }} />
+      <div style={{ display:'flex', gap:'0.5rem', padding:'0.5rem', background:'#f9fafb' }}>
+        <button
+          type="button"
+          className="btn-primary btn-sm"
+          style={{ flex:1 }}
+          onClick={handleConfirm}>
+          Confirmar ubicación
+        </button>
+        <button
+          type="button"
+          className="btn-sm"
+          style={{ flex:1 }}
+          onClick={onCancel}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 +
+    Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
 
 function ProductImage({ src, name }) {
   const [err, setErr] = useState(false);
@@ -49,6 +142,9 @@ export default function RestaurantPage() {
   const [gpsError,     setGpsError]     = useState('');
   // 'current' = GPS, 'home' = pin Casa
   const [deliveryMode, setDeliveryMode] = useState('current');
+  const [manualPos,    setManualPos]    = useState(null); // { lat, lng } elegido en mapa manual
+  const [showManualMap, setShowManualMap] = useState(false);
+  const manualMapRef = useRef(null); // instancia del mapa Leaflet manual
 
   useEffect(() => {
     if (!isCustomer) return;
@@ -126,13 +222,11 @@ export default function RestaurantPage() {
         orderBody.delivery_lat = currentPos.lat;
         orderBody.delivery_lng = currentPos.lng;
       }
-      // Confirmación de dirección
-      const destLabel = deliveryMode === 'home' && hasHomePin
-        ? `tu dirección Casa: ${auth.user.address || `${auth.user.home_lat?.toFixed(4)}, ${auth.user.home_lng?.toFixed(4)}`}`
-        : currentPos
-          ? `tu ubicación actual`
-          : `tu dirección guardada`;
-      if (!window.confirm(`¿Tu pedido se enviará a ${destLabel}?`)) return;
+      // Usar coords manuales si se eligieron
+      if (deliveryMode === 'manual' && manualPos) {
+        orderBody.delivery_lat = manualPos.lat;
+        orderBody.delivery_lng = manualPos.lng;
+      }
       await apiFetch('/orders', { method:'POST', body: JSON.stringify(orderBody) }, auth.token);
       setMsg('');
       setSelectedItems({});
@@ -143,8 +237,25 @@ export default function RestaurantPage() {
 
   if (loading) return <div style={{ padding:'2rem', textAlign:'center', color:'var(--gray-400)' }}>Cargando…</div>;
 
+  // Coordenadas de entrega activas según modo
+  const activeDeliveryPos =
+    deliveryMode === 'manual'  ? manualPos :
+    deliveryMode === 'home'    ? (hasHomePin ? { lat: auth.user.home_lat, lng: auth.user.home_lng } : null) :
+    currentPos;
+
+  // Distancia customer→restaurant (solo cuando ambos tienen coords)
+  const restLat = restaurant?.lat ? Number(restaurant.lat) : null;
+  const restLng = restaurant?.lng ? Number(restaurant.lng) : null;
+  const distKm = (activeDeliveryPos && restLat && restLng)
+    ? haversineKm(activeDeliveryPos.lat, activeDeliveryPos.lng, restLat, restLng)
+    : null;
+  const tooFar = distKm !== null && distKm > 5;
+  const distanceError = tooFar
+    ? `Esta tienda está a ${distKm.toFixed(1)} km. Solo se aceptan pedidos dentro de 5 km.`
+    : null;
+
   const isClosed = restaurant?.is_open === false;
-  const canOrder = isCustomer && hasAddress && !isClosed;
+  const canOrder = isCustomer && hasAddress && !isClosed && !tooFar;
 
   return (
     <div style={{ backgroundColor:'#fff9f8', minHeight:'100vh', padding:'1rem' }}>
@@ -327,7 +438,7 @@ export default function RestaurantPage() {
               {hasHomePin && (
                 <button
                   type="button"
-                  onClick={() => setDeliveryMode('home')}
+                  onClick={() => { setDeliveryMode('home'); setShowManualMap(false); }}
                   style={{
                     padding:'0.3rem 0.75rem', borderRadius:6, fontSize:'0.78rem', cursor:'pointer',
                     border: `1px solid ${deliveryMode==='home' ? 'var(--brand)' : 'var(--gray-200)'}`,
@@ -338,14 +449,50 @@ export default function RestaurantPage() {
                   🏠 Casa
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => { setDeliveryMode('manual'); setShowManualMap(true); }}
+                style={{
+                  padding:'0.3rem 0.75rem', borderRadius:6, fontSize:'0.78rem', cursor:'pointer',
+                  border: `1px solid ${deliveryMode==='manual' ? 'var(--brand)' : 'var(--gray-200)'}`,
+                  background: deliveryMode==='manual' ? 'var(--brand-light)' : '#fff',
+                  color: deliveryMode==='manual' ? 'var(--brand)' : 'var(--gray-600)',
+                  fontWeight: deliveryMode==='manual' ? 700 : 400,
+                }}>
+                📌 Manual
+              </button>
             </div>
             {deliveryMode === 'home' && auth.user?.address && (
               <div style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.25rem' }}>
                 {auth.user.address}
               </div>
             )}
+            {deliveryMode === 'manual' && manualPos && (
+              <div style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.25rem' }}>
+                📌 {manualPos.lat.toFixed(5)}, {manualPos.lng.toFixed(5)}
+              </div>
+            )}
+            {/* Mini-mapa para ubicación manual */}
+            {deliveryMode === 'manual' && showManualMap && (
+              <ManualPinMap
+                initialPos={currentPos || (hasHomePin ? { lat: auth.user.home_lat, lng: auth.user.home_lng } : null)}
+                mapRef={manualMapRef}
+                onConfirm={(pos) => { setManualPos(pos); setShowManualMap(false); }}
+                onCancel={() => { setShowManualMap(false); if (!manualPos) setDeliveryMode('current'); }}
+              />
+            )}
           </div>
-          <button className="btn-primary" style={{ width:'100%' }} disabled={!canOrder || ordering} onClick={createOrder}>
+          {distanceError && (
+            <p style={{ fontSize:'0.82rem', color:'var(--error,#dc2626)', marginBottom:'0.4rem', fontWeight:600 }}>
+              {distanceError}
+            </p>
+          )}
+          {deliveryMode === 'manual' && !manualPos && (
+            <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem' }}>
+              Confirma tu ubicación en el mapa para continuar
+            </p>
+          )}
+          <button className="btn-primary" style={{ width:'100%' }} disabled={!canOrder || ordering || (deliveryMode==='manual' && !manualPos)} onClick={createOrder}>
             {ordering ? 'Procesando…' : `Hacer pedido · ${fmt(total)}`}
           </button>
         </div>
