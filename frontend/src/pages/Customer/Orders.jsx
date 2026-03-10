@@ -362,7 +362,7 @@ export default function CustomerOrders() {
                             </div>
                           </div>
                           {/* Botón confirmar tip activos */}
-                          {tipDraft[order.id] !== undefined && tipDraft[order.id] !== order.tip_cents && (
+                          {tipDraft[order.id] !== undefined && tipDraft[order.id] !== order.tip_cents && tipDraft[order.id] > 0 && (
                             <button
                               onClick={() => saveTip(order.id, tipDraft[order.id], false, 0)}
                               style={{ marginTop:'0.3rem', padding:'0.25rem 0.9rem', background:'var(--success)', color:'#fff', border:'none', borderRadius:6, fontWeight:700, fontSize:'0.78rem', cursor:'pointer' }}>

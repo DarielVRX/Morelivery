@@ -41,9 +41,24 @@ export default function RestaurantPage() {
   const [tipCents, setTipCents]           = useState(0);      // Propina por defecto
 
   const isCustomer  = auth.user?.role === 'customer';
-  const hasAddress   = Boolean(auth.user?.address && auth.user.address !== 'address-pending');
-  const hasHomePin   = Boolean(auth.user?.home_lat && auth.user?.home_lng);
-  const [useHomePin, setUseHomePin] = useState(false); // usar pin Casa como destino
+  const hasAddress  = Boolean(auth.user?.address && auth.user.address !== 'address-pending');
+  const hasHomePin  = Boolean(auth.user?.home_lat && auth.user?.home_lng);
+
+  // Ubicación actual del customer via GPS
+  const [currentPos,   setCurrentPos]   = useState(null);  // { lat, lng }
+  const [gpsError,     setGpsError]     = useState('');
+  // 'current' = GPS, 'home' = pin Casa
+  const [deliveryMode, setDeliveryMode] = useState('current');
+
+  useEffect(() => {
+    if (!isCustomer) return;
+    if (!navigator.geolocation) { setGpsError('GPS no disponible'); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => setCurrentPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      ()  => setGpsError('No se pudo obtener tu ubicación actual'),
+      { timeout: 8000, maximumAge: 60000 }
+    );
+  }, [isCustomer]);
 
   useEffect(() => {
     async function load() {
@@ -103,10 +118,21 @@ export default function RestaurantPage() {
     setOrdering(true);
     try {
       const orderBody = { restaurantId: id, items, payment_method: paymentMethod, tip_cents: tipCents };
-      if (useHomePin && hasHomePin) {
+      // Elegir coordenadas según modo de entrega
+      if (deliveryMode === 'home' && hasHomePin) {
         orderBody.delivery_lat = auth.user.home_lat;
         orderBody.delivery_lng = auth.user.home_lng;
+      } else if (currentPos) {
+        orderBody.delivery_lat = currentPos.lat;
+        orderBody.delivery_lng = currentPos.lng;
       }
+      // Confirmación de dirección
+      const destLabel = deliveryMode === 'home' && hasHomePin
+        ? `tu dirección Casa: ${auth.user.address || `${auth.user.home_lat?.toFixed(4)}, ${auth.user.home_lng?.toFixed(4)}`}`
+        : currentPos
+          ? `tu ubicación actual`
+          : `tu dirección guardada`;
+      if (!window.confirm(`¿Tu pedido se enviará a ${destLabel}?`)) return;
       await apiFetch('/orders', { method:'POST', body: JSON.stringify(orderBody) }, auth.token);
       setMsg('');
       setSelectedItems({});
@@ -280,12 +306,45 @@ export default function RestaurantPage() {
               Guarda tu dirección en Perfil antes de pedir
             </p>
           )}
-          {hasHomePin && (
-            <label style={{ display:'flex', alignItems:'center', gap:'0.5rem', fontSize:'0.82rem', cursor:'pointer', marginBottom:'0.5rem', padding:'0.5rem 0.75rem', background:'var(--gray-100)', borderRadius:6 }}>
-              <input type="checkbox" checked={useHomePin} onChange={e => setUseHomePin(e.target.checked)} />
-              <span>🏠 Enviar a mi dirección Casa guardada</span>
-            </label>
-          )}
+          {/* Selector de destino de entrega */}
+          <div style={{ marginBottom:'0.5rem' }}>
+            <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.3rem', fontWeight:600 }}>
+              Enviar a:
+            </div>
+            <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setDeliveryMode('current')}
+                style={{
+                  padding:'0.3rem 0.75rem', borderRadius:6, fontSize:'0.78rem', cursor:'pointer',
+                  border: `1px solid ${deliveryMode==='current' ? 'var(--brand)' : 'var(--gray-200)'}`,
+                  background: deliveryMode==='current' ? 'var(--brand-light)' : '#fff',
+                  color: deliveryMode==='current' ? 'var(--brand)' : 'var(--gray-600)',
+                  fontWeight: deliveryMode==='current' ? 700 : 400,
+                }}>
+                📍 Ubicación actual{currentPos ? '' : gpsError ? ' (no disp.)' : ' (buscando…)'}
+              </button>
+              {hasHomePin && (
+                <button
+                  type="button"
+                  onClick={() => setDeliveryMode('home')}
+                  style={{
+                    padding:'0.3rem 0.75rem', borderRadius:6, fontSize:'0.78rem', cursor:'pointer',
+                    border: `1px solid ${deliveryMode==='home' ? 'var(--brand)' : 'var(--gray-200)'}`,
+                    background: deliveryMode==='home' ? 'var(--brand-light)' : '#fff',
+                    color: deliveryMode==='home' ? 'var(--brand)' : 'var(--gray-600)',
+                    fontWeight: deliveryMode==='home' ? 700 : 400,
+                  }}>
+                  🏠 Casa
+                </button>
+              )}
+            </div>
+            {deliveryMode === 'home' && auth.user?.address && (
+              <div style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.25rem' }}>
+                {auth.user.address}
+              </div>
+            )}
+          </div>
           <button className="btn-primary" style={{ width:'100%' }} disabled={!canOrder || ordering} onClick={createOrder}>
             {ordering ? 'Procesando…' : `Hacer pedido · ${fmt(total)}`}
           </button>

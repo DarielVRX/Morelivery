@@ -163,8 +163,6 @@ export async function getEligibleDrivers(orderId) {
     `SELECT dp.user_id, dp.driver_number
      FROM driver_profiles dp
      JOIN users u ON u.id = dp.user_id
-     JOIN orders ord ON ord.id = $3
-     JOIN restaurants rest ON rest.id = ord.restaurant_id
      WHERE dp.is_available = true
        AND u.status = 'active'
        -- Bajo el límite de capacidad
@@ -181,15 +179,6 @@ export async function getEligibleDrivers(orderId) {
          WHERE od.order_id=$3 AND od.driver_id=dp.user_id
            AND od.status IN ('rejected','released','expired')
            AND od.wait_until > NOW())
-       -- Dentro de 5km de la tienda (sin posición registrada → incluir)
-       AND (
-         dp.last_lat IS NULL OR dp.last_lng IS NULL OR rest.lat IS NULL OR rest.lng IS NULL
-         OR (6371 * 2 * ASIN(SQRT(
-               POWER(SIN(RADIANS(dp.last_lat - rest.lat) / 2), 2) +
-               COS(RADIANS(rest.lat)) * COS(RADIANS(dp.last_lat)) *
-               POWER(SIN(RADIANS(dp.last_lng - rest.lng) / 2), 2)
-             ))) <= 5.0
-       )
      ORDER BY dp.driver_number ASC`,
     [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER, orderId]
   );
@@ -205,8 +194,6 @@ export async function getEligibleIdleDrivers(orderId) {
     `SELECT dp.user_id, dp.driver_number
      FROM driver_profiles dp
      JOIN users u ON u.id = dp.user_id
-     JOIN orders ord ON ord.id = $3
-     JOIN restaurants rest ON rest.id = ord.restaurant_id
      WHERE dp.is_available = true
        AND u.status = 'active'
        AND (SELECT COUNT(*) FROM orders o
@@ -224,15 +211,6 @@ export async function getEligibleIdleDrivers(orderId) {
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
          WHERE od.driver_id=dp.user_id AND od.status='pending')
-       -- Dentro de 5km de la tienda (sin posición registrada → incluir)
-       AND (
-         dp.last_lat IS NULL OR dp.last_lng IS NULL OR rest.lat IS NULL OR rest.lng IS NULL
-         OR (6371 * 2 * ASIN(SQRT(
-               POWER(SIN(RADIANS(dp.last_lat - rest.lat) / 2), 2) +
-               COS(RADIANS(rest.lat)) * COS(RADIANS(dp.last_lat)) *
-               POWER(SIN(RADIANS(dp.last_lng - rest.lng) / 2), 2)
-             ))) <= 5.0
-       )
      ORDER BY dp.driver_number ASC`,
     [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER, orderId]
   );

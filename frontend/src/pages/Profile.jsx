@@ -130,18 +130,105 @@ export default function ProfilePage() {
     return () => clearTimeout(cpTimerRef.current);
   }, [postalCode]);
 
-  // Geocodificar dirección → home_lat/home_lng al guardar
-  const geocodeAddress = useCallback(async (fullAddress) => {
+  // Estado para el modal del mapa de pin
+  const [showPinMap,   setShowPinMap]   = useState(false);
+  const [pinMapResult, setPinMapResult] = useState(null); // { lat, lng } encontrado
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError,   setSearchError]   = useState('');
+  const pinMapRef = useRef(null);
+  const pinMapInstance = useRef(null);
+  const pinMarkerRef = useRef(null);
+
+  // Buscar pin por dirección ingresada (Nominatim con countrycodes=mx)
+  async function searchPin() {
+    const parts = [address, colonia, ciudad, estado, postalCode].filter(Boolean);
+    if (parts.length === 0) { setSearchError('Ingresa al menos calle o colonia para buscar'); return; }
+    setSearchLoading(true);
+    setSearchError('');
     try {
-      const q = encodeURIComponent(fullAddress + ', México');
-      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=1`);
+      const q = encodeURIComponent(parts.join(', '));
+      const r = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${q}&countrycodes=mx&limit=5`,
+        { headers: { 'Accept-Language': 'es' } }
+      );
       const data = await r.json();
-      if (data.length > 0) {
-        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      if (data.length === 0) {
+        setSearchError('No se encontró la dirección. Mueve el pin manualmente en el mapa.');
+        // Abrir mapa centrado en ciudad/estado si hay datos, o CDMX por defecto
+        setPinMapResult(null);
+        setShowPinMap(true);
+      } else {
+        const best = data[0];
+        setPinMapResult({ lat: parseFloat(best.lat), lng: parseFloat(best.lon) });
+        setSearchError('');
+        setShowPinMap(true);
       }
-    } catch {}
-    return null;
-  }, []);
+    } catch {
+      setSearchError('Error al buscar. Verifica tu conexión.');
+    } finally {
+      setSearchLoading(false);
+    }
+  }
+
+  // Inicializar mapa Leaflet cuando se abre el modal
+  useEffect(() => {
+    if (!showPinMap || !pinMapRef.current) return;
+    if (typeof window === 'undefined') return;
+
+    // Cargar Leaflet si no está cargado
+    const loadLeaflet = async () => {
+      if (!window.L) {
+        await new Promise(resolve => {
+          const link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+          document.head.appendChild(link);
+          const script = document.createElement('script');
+          script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+          script.onload = resolve;
+          document.head.appendChild(script);
+        });
+      }
+      const L = window.L;
+      if (pinMapInstance.current) {
+        pinMapInstance.current.remove();
+        pinMapInstance.current = null;
+      }
+      // Centro: resultado de búsqueda, o home pin existente, o CDMX
+      const center = pinMapResult
+        ? [pinMapResult.lat, pinMapResult.lng]
+        : (homeLat && homeLng ? [homeLat, homeLng] : [20.6597, -103.3496]);
+
+      const map = L.map(pinMapRef.current, { center, zoom: pinMapResult ? 17 : 13 });
+      pinMapInstance.current = map;
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap'
+      }).addTo(map);
+
+      // Pin draggable
+      const icon = L.divIcon({
+        html: '<div style="width:24px;height:24px;border-radius:50%;background:#dc2626;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4)"></div>',
+        iconSize: [24, 24], iconAnchor: [12, 12], className: ''
+      });
+      const initPos = pinMapResult ? [pinMapResult.lat, pinMapResult.lng] : center;
+      const marker = L.marker(initPos, { icon, draggable: true }).addTo(map);
+      pinMarkerRef.current = marker;
+
+      marker.on('dragend', () => {
+        const p = marker.getLatLng();
+        setPinMapResult({ lat: p.lat, lng: p.lng });
+      });
+      map.on('click', (e) => {
+        marker.setLatLng(e.latlng);
+        setPinMapResult({ lat: e.latlng.lat, lng: e.latlng.lng });
+      });
+    };
+    loadLeaflet();
+    return () => {
+      if (pinMapInstance.current) { pinMapInstance.current.remove(); pinMapInstance.current = null; }
+    };
+  }, [showPinMap]);
 
   async function saveProfile() {
     if (!alias.trim()) { setProfileMsg('El nombre no puede estar vacío'); setProfileErr(true); return; }
@@ -153,14 +240,6 @@ export default function ProfilePage() {
         finalAddress = finalAddress || parts.join(', ');
       }
 
-      // Geocodificar para obtener pin Casa si tenemos dirección
-      let newHomeLat = homeLat;
-      let newHomeLng = homeLng;
-      if (finalAddress && (!homeLat || !homeLng)) {
-        const coords = await geocodeAddress(finalAddress);
-        if (coords) { newHomeLat = coords.lat; newHomeLng = coords.lng; }
-      }
-
       const body = {
         displayName:  alias.trim(),
         address:      finalAddress || undefined,
@@ -168,8 +247,8 @@ export default function ProfilePage() {
         colonia:      colonia      || undefined,
         estado:       estado       || undefined,
         ciudad:       ciudad       || undefined,
-        homeLat:      newHomeLat   ?? undefined,
-        homeLng:      newHomeLng   ?? undefined,
+        homeLat:      homeLat      ?? undefined,
+        homeLng:      homeLng      ?? undefined,
       };
 
       const data = await apiFetch('/auth/profile', { method:'PATCH', body: JSON.stringify(body) }, auth.token);
@@ -323,23 +402,60 @@ export default function ProfilePage() {
               placeholder="Ej: Av. Revolución 1234" />
           </label>
 
-          {/* Pin Casa */}
-          {hasHomePin && (
-            <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', background:'var(--gray-100)', borderRadius:6, padding:'0.5rem 0.75rem', display:'flex', alignItems:'center', gap:'0.4rem' }}>
-              <span>🏠</span>
-              <span>Pin Casa guardado · {homeLat?.toFixed(5)}, {homeLng?.toFixed(5)}</span>
+          {/* Botón Buscar pin */}
+          <div style={{ display:'flex', gap:'0.4rem', alignItems:'center' }}>
+            <button
+              type="button"
+              className="btn-sm btn-primary"
+              onClick={searchPin}
+              disabled={searchLoading}
+              style={{ whiteSpace:'nowrap' }}
+            >
+              {searchLoading ? 'Buscando…' : '📍 Buscar en mapa'}
+            </button>
+            {hasHomePin && (
+              <span style={{ fontSize:'0.75rem', color:'var(--success)', fontWeight:600 }}>
+                🏠 Pin guardado
+              </span>
+            )}
+            {hasHomePin && (
               <button
+                type="button"
                 onClick={() => { setHomeLat(null); setHomeLng(null); }}
-                style={{ marginLeft:'auto', background:'none', border:'none', color:'var(--error)', cursor:'pointer', fontSize:'0.75rem', fontWeight:600 }}
+                style={{ background:'none', border:'none', color:'var(--error)', cursor:'pointer', fontSize:'0.75rem', fontWeight:600, marginLeft:'auto' }}
               >
-                Borrar pin
+                Borrar
               </button>
+            )}
+          </div>
+          {searchError && <span style={{ fontSize:'0.72rem', color:'var(--error)', display:'block' }}>{searchError}</span>}
+
+          {/* Modal mapa pin */}
+          {showPinMap && (
+            <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:9999, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'1rem' }}>
+              <div style={{ background:'#fff', borderRadius:12, width:'100%', maxWidth:480, overflow:'hidden', boxShadow:'0 8px 32px rgba(0,0,0,0.25)' }}>
+                <div style={{ padding:'0.75rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid var(--gray-200)' }}>
+                  <span style={{ fontWeight:700, fontSize:'0.9rem' }}>Confirmar ubicación</span>
+                  <button onClick={() => setShowPinMap(false)} style={{ background:'none', border:'none', cursor:'pointer', fontSize:'1.2rem', color:'var(--gray-400)' }}>✕</button>
+                </div>
+                <p style={{ fontSize:'0.78rem', color:'var(--gray-500)', margin:'0.5rem 1rem 0' }}>
+                  Arrastra el pin o toca el mapa para ajustar la ubicación exacta.
+                </p>
+                <div ref={pinMapRef} style={{ height:320, width:'100%' }} />
+                <div style={{ padding:'0.75rem 1rem', display:'flex', gap:'0.5rem', justifyContent:'flex-end', borderTop:'1px solid var(--gray-200)' }}>
+                  <button className="btn-sm" onClick={() => setShowPinMap(false)}>Cancelar</button>
+                  <button className="btn-sm btn-primary" onClick={() => {
+                    if (pinMapResult) {
+                      setHomeLat(pinMapResult.lat);
+                      setHomeLng(pinMapResult.lng);
+                    }
+                    setShowPinMap(false);
+                  }}>
+                    Confirmar pin
+                  </button>
+                </div>
+              </div>
             </div>
-          )}
-          {!hasHomePin && address && (
-            <p style={{ fontSize:'0.72rem', color:'var(--gray-400)', margin:0 }}>
-              Al guardar se intentará geocodificar tu dirección para el pin Casa.
-            </p>
           )}
         </div>
         <button className="btn-primary btn-sm" onClick={saveProfile}>Guardar cambios</button>
