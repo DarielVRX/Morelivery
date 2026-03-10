@@ -82,7 +82,7 @@ async function reverseGeocode(lat, lng) {
 // customPin: { lat, lng } | null  — marcador manual del driver
 // onCustomPin: (latlng | null) => void
 // hasActiveOrder: boolean — si true, oculta el pin y deshabilita clicks
-function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos }) {
+function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
   const containerRef  = useRef(null);
   const mapRef        = useRef(null); // { map, driverMarker, customMarker }
 
@@ -132,7 +132,7 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
           onCustomPin?.({ lat: e.latlng.lat, lng: e.latlng.lng });
         });
 
-        mapRef.current = { map, driverMarker, customMarker: null, pickupMarker: null, deliveryMarker: null };
+        mapRef.current = { map, driverMarker, customMarker: null };
         setTimeout(() => map.invalidateSize(), 300);
       }).catch(() => {});
     }, 50);
@@ -198,68 +198,6 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
       }
     });
   }, [customPin?.lat, customPin?.lng, hasActiveOrder]);
-
-  // Marcadores de tienda (verde) y cliente (naranja) para pedido activo
-  useEffect(() => {
-    if (!mapRef.current) return;
-    const { map } = mapRef.current;
-    import('leaflet').then(L => {
-      if (!mapRef.current) return;
-      // Quitar marcadores anteriores
-      if (mapRef.current.pickupMarker)   { mapRef.current.pickupMarker.remove();   mapRef.current.pickupMarker = null; }
-      if (mapRef.current.deliveryMarker) { mapRef.current.deliveryMarker.remove(); mapRef.current.deliveryMarker = null; }
-
-      // Inyectar estilos de marcadores si no existen aún
-      if (!document.getElementById('ml-marker-anim')) {
-        const style = document.createElement('style');
-        style.id = 'ml-marker-anim';
-        style.textContent = `
-          .ml-pickup-marker > div, .ml-delivery-marker > div {
-            transition: transform 0.18s ease;
-          }
-          .ml-marker-selected > div {
-            transform: scale(1.2);
-          }
-        `;
-        document.head.appendChild(style);
-      }
-
-      // Desseleccionar al hacer click en cualquier parte del mapa
-      map.off('click.markerDeselect');
-      map.on('click.markerDeselect', () => {
-        document.querySelectorAll('.ml-marker-selected').forEach(el => {
-          el.classList.remove('ml-marker-selected');
-        });
-      });
-
-      if (pickupPos) {
-        const icon = L.divIcon({
-          html: `<div style="width:22px;height:22px;border-radius:50%;background:#16a34a;border:2px solid #fff;box-shadow:0 2px 8px #0005;display:flex;align-items:center;justify-content:center;font-size:12px">🏪</div>`,
-          iconSize: [22, 22], iconAnchor: [11, 11], className: 'ml-pickup-marker'
-        });
-        const m = L.marker([pickupPos.lat, pickupPos.lng], { icon }).addTo(map).bindPopup('Tienda');
-        m.on('click', (e) => {
-          L.DomEvent.stopPropagation(e);
-          document.querySelectorAll('.ml-marker-selected').forEach(el => el.classList.remove('ml-marker-selected'));
-          m.getElement()?.classList.add('ml-marker-selected');
-        });
-        mapRef.current.pickupMarker = m;
-      }
-      if (deliveryPos) {
-        const icon = L.divIcon({
-          html: `<div style="width:22px;height:22px;border-radius:50%;background:#f97316;border:2px solid #fff;box-shadow:0 2px 8px #0005;display:flex;align-items:center;justify-content:center;font-size:12px">📦</div>`,
-          iconSize: [22, 22], iconAnchor: [11, 11], className: 'ml-delivery-marker'
-        });
-        const m = L.marker([deliveryPos.lat, deliveryPos.lng], { icon }).addTo(map).bindPopup('Cliente');
-        m.on('click', (e) => {
-          L.DomEvent.stopPropagation(e);
-          document.querySelectorAll('.ml-marker-selected').forEach(el => el.classList.remove('ml-marker-selected'));
-          m.getElement()?.classList.add('ml-marker-selected');
-        });
-        mapRef.current.deliveryMarker = m;
-      }
-    });
-  }, [pickupPos?.lat, pickupPos?.lng, deliveryPos?.lat, deliveryPos?.lng]);
 
   // SIEMPRE renderizamos el div del mapa — el containerRef nunca se desmonta.
   // El mensaje GPS se superpone como overlay cuando no hay posición.
@@ -353,38 +291,20 @@ export default function DriverHome() {
 
   useEffect(() => { loadDataRef.current = loadData; });
 
-  // Cargar datos al montar + solicitar permiso de notificaciones
+  // Cargar datos al montar
   useEffect(() => {
     setAvailability(Boolean(auth.user?.driver?.is_available));
     loadData();
-    // Solicitar permiso para notificaciones nativas (necesario para segundo plano)
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
   }, [auth.token]);
-
-  // Enviar notificación al SW para que la muestre en segundo plano
-  const notifyDriver = useCallback((title, body) => {
-    if (!('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.ready.then(reg => {
-      if (reg.active) {
-        reg.active.postMessage({ type: 'SHOW_NOTIFICATION', title, body, tag: 'morelivery-offer' });
-      }
-    });
-    // También mostrar en primer plano si el permiso lo permite
-    if ('Notification' in window && Notification.permission === 'granted') {
-      try { new Notification(title, { body, tag: 'morelivery-offer' }); } catch (_) {}
-    }
-  }, []);
 
   // ── Polling activo: mientras disponible y sin oferta/pedido activo,
   //    llamar al listener cada 3s para "jalar" el primer pedido disponible.
   //    Se detiene cuando: no disponible, ya hay oferta pending, o hay pedido activo.
   // Refs para las condiciones del polling — evita cancelar/recrear el interval
-  const availabilityRef  = useRef(availability);
-  const pendingOfferRef  = useRef(pendingOffer);
-  const hasActiveOrderRef = useRef(hasActiveOrder);
-  const consecutiveTimeoutsRef = useRef(0); // 3 timeouts seguidos → no disponible
+  const availabilityRef       = useRef(availability);
+  const pendingOfferRef       = useRef(pendingOffer);
+  const hasActiveOrderRef     = useRef(hasActiveOrder);
+  const consecutiveTimeoutsRef = useRef(0);
   useEffect(() => { availabilityRef.current  = availability;   }, [availability]);
   useEffect(() => { pendingOfferRef.current  = pendingOffer;   }, [pendingOffer]);
   useEffect(() => { hasActiveOrderRef.current = hasActiveOrder; }, [hasActiveOrder]);
@@ -412,37 +332,21 @@ export default function DriverHome() {
   const handleNewOffer = useCallback((data) => {
     console.log(`[DriverHome] handleNewOffer orderId=${data.orderId} secondsLeft=${data.secondsLeft}`);
     setPendingOffer(prev => {
-      // Aceptar nueva oferta si no hay ninguna, o si la anterior ya expiró (secondsLeft<=0)
-      if (prev && (prev.seconds_left ?? 1) > 0) return prev;
+      if (prev) return prev; // Ya hay una oferta activa
       return { id: data.orderId, ...data, seconds_left: data.secondsLeft ?? 60 };
     });
-    // Notificación nativa para segundo plano
-    notifyDriver('🛵 Nuevo pedido disponible', `Tienes ${data.secondsLeft ?? 60}s para aceptar`);
-    // Recargar para datos completos (items)
-    setTimeout(() => loadDataRef.current?.(), 400);
-  }, [notifyDriver]);
-
-  // SSE: manejar offer_cancelled (otro driver tomó la oferta) y recargar en reconexión
-  const handleOrderUpdate = useCallback((data) => {
-    if (data.type === 'offer_cancelled' || data.orderId) {
-      // Si la oferta cancelada es la que tenemos activa, limpiarla
-      setPendingOffer(prev => (prev && prev.id === data.orderId) ? null : prev);
-    }
-    loadDataRef.current?.();
-  }, []);
-
-  const handleReconnect = useCallback(() => {
-    // Al reconectar SSE: re-fetch para no perder ofertas emitidas mientras estaba desconectado
-    loadDataRef.current?.();
+    // Recargar para datos completos (items), pero sin llamar al listener de nuevo
+    setTimeout(() => {
+      apiFetch('/drivers/offers', {}, data._token || '').catch(() => {});
+      loadDataRef.current?.();
+    }, 400);
   }, []);
 
   useRealtimeOrders(
     auth.token,
-    handleOrderUpdate,
+    () => loadDataRef.current?.(),
     () => {},
     handleNewOffer,
-    undefined,
-    handleReconnect,
   );
 
   async function toggleAvailability() {
@@ -456,7 +360,7 @@ export default function DriverHome() {
 
   async function acceptOffer() {
     if (!pendingOffer) return;
-    consecutiveTimeoutsRef.current = 0; // interacción manual — resetear contador
+    consecutiveTimeoutsRef.current = 0;
     setLoadingOffer(true);
     try {
       await apiFetch(`/drivers/offers/${pendingOffer.id}/accept`, { method:'POST' }, auth.token);
@@ -468,7 +372,7 @@ export default function DriverHome() {
 
   async function rejectOffer() {
     if (!pendingOffer) return;
-    consecutiveTimeoutsRef.current = 0; // interacción manual — resetear contador
+    consecutiveTimeoutsRef.current = 0;
     setLoadingOffer(true);
     try {
       await apiFetch(`/drivers/offers/${pendingOffer.id}/reject`, { method:'POST' }, auth.token);
@@ -485,57 +389,6 @@ export default function DriverHome() {
       loadData();
     } catch (e) { setMsg(e.message); }
     finally { setLoadingStatus(''); }
-  }
-
-
-  function openNavigation() {
-    if (!activeOrder) return;
-    const dLat = myPosition?.lat;
-    const dLng = myPosition?.lng;
-    const sLat = activeOrder.restaurant_lat;
-    const sLng = activeOrder.restaurant_lng;
-    const cLat = activeOrder.customer_lat;
-    const cLng = activeOrder.customer_lng;
-
-    const hasStore    = sLat && sLng;
-    const hasCustomer = cLat && cLng;
-    if (!hasStore && !hasCustomer) return;
-
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-
-    if (isIOS) {
-      // Apple Maps con waypoints
-      let url = 'maps://maps.apple.com/?t=m';
-      if (dLat && dLng) url += `&saddr=${dLat},${dLng}`;
-      if (hasStore && hasCustomer) {
-        // Apple Maps no soporta waypoints intermedios en URL scheme — usar Google Maps web
-        const gmUrl = buildGoogleMapsUrl(dLat, dLng, sLat, sLng, cLat, cLng);
-        window.open(gmUrl, '_blank');
-        return;
-      }
-      const dest = hasCustomer ? `${cLat},${cLng}` : `${sLat},${sLng}`;
-      url += `&daddr=${dest}`;
-      window.open(url, '_blank');
-    } else {
-      const url = buildGoogleMapsUrl(dLat, dLng, sLat, sLng, cLat, cLng);
-      window.open(url, '_blank');
-    }
-  }
-
-  function buildGoogleMapsUrl(dLat, dLng, sLat, sLng, cLat, cLng) {
-    const hasStore    = sLat && sLng;
-    const hasCustomer = cLat && cLng;
-    let url = 'https://www.google.com/maps/dir/?api=1&travelmode=driving';
-    if (dLat && dLng)      url += `&origin=${dLat},${dLng}`;
-    if (hasStore && hasCustomer) {
-      url += `&waypoints=${sLat},${sLng}`;
-      url += `&destination=${cLat},${cLng}`;
-    } else if (hasStore) {
-      url += `&destination=${sLat},${sLng}`;
-    } else if (hasCustomer) {
-      url += `&destination=${cLat},${cLng}`;
-    }
-    return url;
   }
 
   async function doRelease() {
@@ -590,10 +443,6 @@ export default function DriverHome() {
           customPin={customPin}
           onCustomPin={setCustomPin}
           hasActiveOrder={hasActiveOrder}
-          pickupPos={activeOrder?.restaurant_lat && activeOrder?.restaurant_lng
-            ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) } : null}
-          deliveryPos={activeOrder?.customer_lat && activeOrder?.customer_lng
-            ? { lat: Number(activeOrder.customer_lat), lng: Number(activeOrder.customer_lng) } : null}
         />
 
         {/* Panel de pin personalizado */}
@@ -716,14 +565,16 @@ export default function DriverHome() {
               onExpired={() => {
                 setPendingOffer(null);
                 loadData();
-                // Contar timeouts consecutivos sin interacción manual
                 consecutiveTimeoutsRef.current += 1;
                 if (consecutiveTimeoutsRef.current >= 3) {
                   consecutiveTimeoutsRef.current = 0;
                   setAvailability(false);
                   apiFetch('/drivers/availability', {
                     method: 'PATCH', body: JSON.stringify({ isAvailable: false })
-                  }, auth.token).catch(() => {});
+                  }, auth.token).catch(() => {
+                    // Si el PATCH falla, revertir el estado local
+                    setAvailability(true);
+                  });
                 }
               }}
             />
@@ -834,14 +685,6 @@ export default function DriverHome() {
                 </div>
                 {/* Controles de estado */}
                 <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginBottom:'0.4rem' }}>
-                  {(activeOrder.restaurant_lat || activeOrder.customer_lat) && (
-                    <button className="btn-sm"
-                      onClick={openNavigation}
-                      style={{ background:'#1a73e8', color:'#fff', display:'flex', alignItems:'center', gap:'0.3rem' }}>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-                      Navegar
-                    </button>
-                  )}
                   <button className="btn-sm"
                     style={{ background: activeOrder.status==='ready' ? 'var(--brand)':'',
                       color: activeOrder.status==='ready' ? '#fff':'' }}

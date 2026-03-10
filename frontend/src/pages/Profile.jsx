@@ -153,9 +153,18 @@ export default function ProfilePage() {
       );
       const data = await r.json();
       if (data.length === 0) {
-        setSearchError('No se encontró la dirección. Mueve el pin manualmente en el mapa.');
-        // Abrir mapa centrado en ciudad/estado si hay datos, o CDMX por defecto
-        setPinMapResult(null);
+        setSearchError('No se encontró la dirección. El pin se colocó en tu ubicación actual.');
+        // Intentar GPS como centro del mapa
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            pos => {
+              setPinMapResult({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+            },
+            () => setPinMapResult(null)
+          );
+        } else {
+          setPinMapResult(null);
+        }
         setShowPinMap(true);
       } else {
         const best = data[0];
