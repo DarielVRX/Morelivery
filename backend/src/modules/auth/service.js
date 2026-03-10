@@ -118,16 +118,14 @@ export async function updateProfileAddress(userId, role, address, displayName, l
     const restUpdates = [];
     const restVals    = [];
     let ri = 1;
-    if (address !== undefined && address !== null) { restUpdates.push(`address=$${ri++}`); restVals.push(address); }
-    if (lat     !== undefined && lat     !== null) { restUpdates.push(`lat=$${ri++}`);     restVals.push(lat); }
-    if (lng     !== undefined && lng     !== null) { restUpdates.push(`lng=$${ri++}`);     restVals.push(lng); }
-
+    if (address     !== undefined && address     !== null) { restUpdates.push(`address=$${ri++}`); restVals.push(address); }
+    if (lat         !== undefined && lat         !== null) { restUpdates.push(`lat=$${ri++}`);     restVals.push(lat); }
+    if (lng         !== undefined && lng         !== null) { restUpdates.push(`lng=$${ri++}`);     restVals.push(lng); }
     if (restUpdates.length > 0) {
       restVals.push(userId);
       try { await query(`UPDATE restaurants SET ${restUpdates.join(',')} WHERE owner_user_id=$${ri}`, restVals); }
       catch (e) { if (e?.code !== '42703') throw e; }
     }
-
     if (displayName !== undefined && displayName !== null) {
       const cleanName = cleanRestaurantName(displayName);
       try { await query('UPDATE restaurants SET name=$1 WHERE owner_user_id=$2', [cleanName, userId]); }
@@ -140,7 +138,6 @@ export async function updateProfileAddress(userId, role, address, displayName, l
         } else throw e;
       }
     }
-
     let rRow = {};
     try {
       const rc = await query('SELECT name, address, lat, lng FROM restaurants WHERE owner_user_id=$1', [userId]);
@@ -155,7 +152,6 @@ export async function updateProfileAddress(userId, role, address, displayName, l
       lng:         rRow.lng         ?? null,
     };
   } else {
-    // FIX: Se agregaron lat y lng a la consulta principal para clientes/drivers
     const updates = [];
     const vals = [];
     let i = 1;
@@ -166,7 +162,6 @@ export async function updateProfileAddress(userId, role, address, displayName, l
     if (address !== undefined && address !== null) { updates.push(`address=$${i++}`); vals.push(address); }
     if (lat     !== undefined && lat     !== null) { updates.push(`lat=$${i++}`);     vals.push(lat); }
     if (lng     !== undefined && lng     !== null) { updates.push(`lng=$${i++}`);     vals.push(lng); }
-
     if (updates.length > 0) {
       vals.push(userId);
       try {
@@ -178,7 +173,6 @@ export async function updateProfileAddress(userId, role, address, displayName, l
           let j = 1;
           if (address     !== undefined && address     !== null) { safeUpdates.push(`address=$${j++}`);   safeVals.push(address); }
           if (displayName !== undefined && displayName !== null) { safeUpdates.push(`full_name=$${j++}`); safeVals.push(displayName.trim()); }
-          // Bloque de compatibilidad mantiene el guardado si las columnas existen
           if (lat         !== undefined && lat         !== null) { safeUpdates.push(`lat=$${j++}`);       safeVals.push(lat); }
           if (lng         !== undefined && lng         !== null) { safeUpdates.push(`lng=$${j++}`);       safeVals.push(lng); }
           if (safeUpdates.length > 0) {
@@ -210,4 +204,51 @@ export async function updateProfileAddress(userId, role, address, displayName, l
 
 export async function changePassword(userId, currentPassword, newPassword) {
   const r = await query('SELECT password_hash FROM users WHERE id = $1', [userId]);
-  if (r.rowCount === 0) throw new App
+  if (r.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
+  if (currentPassword) {
+    const matches = await bcrypt.compare(currentPassword, r.rows[0].password_hash);
+    if (!matches) throw new AppError(401, 'Contraseña actual incorrecta');
+  }
+  const newHash = await bcrypt.hash(newPassword, 12);
+  await query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, userId]);
+}
+
+export async function deleteAccount(userId, role) {
+  let hasPending = false;
+  if (role === 'customer') {
+    const r = await query(`SELECT 1 FROM orders WHERE customer_id=$1 AND status=ANY($2::text[]) LIMIT 1`, [userId, PENDING_STATUSES]);
+    hasPending = r.rowCount > 0;
+  } else if (role === 'driver') {
+    const r = await query(`SELECT 1 FROM orders WHERE driver_id=$1 AND status=ANY($2::text[]) LIMIT 1`, [userId, PENDING_STATUSES]);
+    hasPending = r.rowCount > 0;
+  } else if (role === 'restaurant') {
+    const r = await query(
+      `SELECT 1 FROM orders o JOIN restaurants rest ON rest.id=o.restaurant_id
+      WHERE rest.owner_user_id=$1 AND o.status=ANY($2::text[]) LIMIT 1`,
+                          [userId, PENDING_STATUSES]
+    );
+    hasPending = r.rowCount > 0;
+  }
+  if (hasPending) {
+    throw new AppError(409, 'No puedes eliminar tu cuenta mientras tengas pedidos activos. Completa o cancela tus pedidos primero.');
+  }
+  await query('DELETE FROM users WHERE id = $1', [userId]);
+  return { ok: true };
+}
+
+export async function updateLoginUsername(userId, role, currentPassword, newUsername) {
+  const normalized = normalizeUsername(newUsername);
+  const newEmail   = pseudoEmailFromUsername(normalized);
+  const r = await query('SELECT password_hash FROM users WHERE id=$1', [userId]);
+  if (r.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
+  const matches = await bcrypt.compare(currentPassword, r.rows[0].password_hash);
+  if (!matches) throw new AppError(401, 'Contraseña actual incorrecta');
+  const taken = await query('SELECT id FROM users WHERE email=$1 AND role=$2 AND id<>$3', [newEmail, role, userId]);
+  if (taken.rowCount > 0) throw new AppError(409, 'Ese usuario de acceso ya está en uso');
+  await query('UPDATE users SET email=$1 WHERE id=$2', [newEmail, userId]);
+  return { username: normalized };
+}
+
+export function cleanRestaurantName(name) {
+  return name.trim().replace(/\s+(kitchen|restaurant)$/i, '');
+}
