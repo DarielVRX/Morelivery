@@ -167,7 +167,32 @@ export async function updateProfileAddress(userId, role, address, displayName, l
     if (lng     !== undefined && lng     !== null) { updates.push(`lng=$${i++}`);     vals.push(lng); }
     if (updates.length > 0) {
       vals.push(userId);
-      try {\n        await query(`UPDATE users SET ${updates.join(',')} WHERE id=$${i}`, vals);\n      } catch (e) {\n        if (e?.code === '42703') {\n          // Columnas lat/lng o alias pueden no existir — guardar solo las seguras\n          const safeUpdates = [];\n          const safeVals    = [];\n          let j = 1;\n          if (address     !== undefined && address     !== null) { safeUpdates.push(`address=$${j++}`);   safeVals.push(address); }\n          if (displayName !== undefined && displayName !== null) { safeUpdates.push(`full_name=$${j++}`); safeVals.push(displayName.trim()); }\n          if (lat         !== undefined && lat         !== null) { safeUpdates.push(`lat=$${j++}`);       safeVals.push(lat); }\n          if (lng         !== undefined && lng         !== null) { safeUpdates.push(`lng=$${j++}`);       safeVals.push(lng); }\n          if (safeUpdates.length > 0) {\n            safeVals.push(userId);\n            try { await query(`UPDATE users SET ${safeUpdates.join(',')} WHERE id=$${j}`, safeVals); } catch (_) {}\n          }\n        } else throw e;\n      }
+      try {
+        await query(`UPDATE users SET ${updates.join(',')} WHERE id=$${i}`, vals);
+
+      } catch (e) {
+        if (e?.code === '42703') {
+          // Columnas lat/lng o alias pueden no existir — guardar solo las seguras
+          const safeUpdates = [];
+          const safeVals    = [];
+          let j = 1;
+          if (address     !== undefined && address     !== null) { safeUpdates.push(`address=$${j++}`);   safeVals.push(address); }
+          if (displayName !== undefined && displayName !== null) { safeUpdates.push(`full_name=$${j++}`); safeVals.push(displayName.trim()); }
+          if (lat         !== undefined && lat         !== null) { safeUpdates.push(`lat=$${j++}`);       safeVals.push(lat); }
+          if (lng         !== undefined && lng         !== null) { safeUpdates.push(`lng=$${j++}`);       safeVals.push(lng); }
+          if (safeUpdates.length > 0) {
+            safeVals.push(userId);
+            try { await query(`UPDATE users SET ${safeUpdates.join(',')} WHERE id=$${j}`, safeVals);
+
+            } catch (_) {
+
+            }
+
+          }
+
+        } else throw e;
+
+      }
     }
     let row = {};
     try {
