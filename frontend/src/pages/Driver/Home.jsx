@@ -493,7 +493,6 @@ export default function DriverHome() {
           customPin={customPin}
           onCustomPin={setCustomPin}
           hasActiveOrder={hasActiveOrder}
-          onNavigateTo={openNavigationTo}
           pickupPos={activeOrder?.restaurant_lat && activeOrder?.restaurant_lng
             ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) } : null}
           deliveryPos={activeOrder?.customer_lat && activeOrder?.customer_lng
