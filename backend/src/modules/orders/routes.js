@@ -11,8 +11,7 @@ import { logEvent } from '../../utils/logger.js';
 import { validate } from '../../middlewares/validate.js';
 import { createOrderSchema, suggestionResponseSchema, suggestionSchema, updateOrderStatusSchema } from './schemas.js';
 import { AppError } from '../../utils/errors.js';
-import { offerNextDrivers, serializedOffer, getPendingAssignmentOrders } from './assignment/index.js';
-import { offerCb } from '../events/offerCallback.js';
+import { offerNextDrivers, expireTimedOutOffers, serializedOffer, getPendingAssignmentOrders } from './assignment/index.js';
 import { sseHub } from '../events/hub.js';
 
 const router = Router();
@@ -86,21 +85,13 @@ router.get('/pending-assignment', authenticate, authorize(['driver']), async (re
 });
 
 router.post('/', authenticate, authorize(['customer']), validate(createOrderSchema), async (req, res, next) => {
-  const { restaurantId, items, payment_method, tip_cents, delivery_lat, delivery_lng } = req.validatedBody || req.body;
+  const { restaurantId, items, payment_method, tip_cents } = req.validatedBody;
   console.log(`📦 [pedido.nuevo] cliente=${req.user?.userId?.slice(0,8)} pago=${payment_method} propina=${tip_cents} productos=${items?.length}`);
   try {
     let deliveryAddress = 'address-pending';
-    let finalDeliveryLat  = delivery_lat  ? Number(delivery_lat)  : null;
-    let finalDeliveryLng  = delivery_lng  ? Number(delivery_lng)  : null;
     try {
-      const c = await query('SELECT address, home_lat, home_lng, lat, lng FROM users WHERE id=$1', [req.user.userId]);
-      const u = c.rows[0] || {};
-      deliveryAddress = u.address || 'address-pending';
-      // Si no vienen coords del frontend, usar home_lat/lng del usuario
-      if (!finalDeliveryLat && !finalDeliveryLng) {
-        finalDeliveryLat = u.home_lat ?? u.lat ?? null;
-        finalDeliveryLng = u.home_lng ?? u.lng ?? null;
-      }
+      const c = await query('SELECT address FROM users WHERE id=$1', [req.user.userId]);
+      deliveryAddress = c.rows[0]?.address || 'address-pending';
     } catch (e) { if (!isMissingColumnError(e)) throw e; }
     if (!deliveryAddress || deliveryAddress === 'address-pending') return next(new AppError(400, 'Debes guardar tu dirección antes de hacer un pedido'));
 
@@ -117,22 +108,11 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
     const paymentMethod  = payment_method || 'cash';
     const tipCents = Number(tip_cents) || 0;
 
-    let orderResult;
-    try {
-      orderResult = await query(
-        `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address, delivery_lat, delivery_lng)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-        [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress, finalDeliveryLat, finalDeliveryLng]
-      );
-    } catch (e) {
-      if (!isMissingColumnError(e)) throw e;
-      // Fallback si delivery_lat/lng no existen aún
-      orderResult = await query(
-        `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-        [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress]
-      );
-    }
+    const orderResult = await query(
+      `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress]
+    );
     const order = orderResult.rows[0];
     console.log(`📦 [pedido.creado] id=${order.id.slice(0,8)} total=${order.total_cents} rest=${restaurantId.slice(0,8)}`);
 
@@ -142,7 +122,7 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
         [order.id, item.menuItemId, item.quantity, m.rows[0].price_cents]);
     }
 
-    try { serializedOffer(order.id, offerNextDrivers, offerCb); } catch (e) {
+    try { await offerNextDrivers(order.id); } catch (e) {
       if (!isMissingRelationError(e) && !isMissingColumnError(e)) throw e;
     }
 
@@ -252,32 +232,6 @@ router.patch('/:id/cancel', authenticate, authorize(['customer']), async (req, r
       `UPDATE orders SET status='cancelled', restaurant_note=$3, cancelled_at=NOW(), updated_at=NOW()
        WHERE id=$1 AND customer_id=$2 RETURNING *`,
       [req.params.id, req.user.userId, `[CANCELADO POR CLIENTE] ${note.trim()}`]
-    );
-    await notifyOrderParties(req.params.id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
-    return res.json({ order: result.rows[0] });
-  } catch (error) { return next(error); }
-});
-
-/* ── PATCH /:id/cancel-restaurant ── */
-router.patch('/:id/cancel-restaurant', authenticate, authorize(['restaurant']), async (req, res, next) => {
-  try {
-    const { note } = req.body || {};
-    if (!note?.trim()) return next(new AppError(400, 'El motivo de cancelación es obligatorio'));
-    // Verificar que el pedido pertenece a este restaurante y es cancelable
-    const check = await query(
-      `SELECT o.id, o.status FROM orders o
-       JOIN restaurants r ON r.id = o.restaurant_id
-       WHERE o.id=$1 AND r.owner_user_id=$2`,
-      [req.params.id, req.user.userId]
-    );
-    if (check.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
-    const cancellable = ['created','pending_driver','assigned','accepted','preparing','ready'];
-    if (!cancellable.includes(check.rows[0].status))
-      return next(new AppError(409, 'El pedido ya no puede cancelarse en este estado'));
-    const result = await query(
-      `UPDATE orders SET status='cancelled', restaurant_note=$2, cancelled_at=NOW(), updated_at=NOW()
-       WHERE id=$1 RETURNING *`,
-      [req.params.id, `[CANCELADO POR TIENDA] ${note.trim()}`]
     );
     await notifyOrderParties(req.params.id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
     return res.json({ order: result.rows[0] });
@@ -430,11 +384,10 @@ router.get('/my', authenticate, async (req, res, next) => {
     try {
       result = await query(
         `SELECT o.*, r.name AS restaurant_name, r.address AS restaurant_address,
-                r.lat AS restaurant_lat, r.lng AS restaurant_lng,
                 COALESCE(c.alias, c.full_name) AS customer_first_name, c.full_name AS customer_display_name,
-                COALESCE(d.alias, d.full_name) AS driver_first_name, c.address AS customer_address,
-                COALESCE(o.delivery_lat, c.lat)   AS customer_lat,
-                COALESCE(o.delivery_lng, c.lng)   AS customer_lng
+                COALESCE(d.alias, d.full_name) AS driver_first_name,
+                COALESCE(o.delivery_address, c.address) AS customer_address,
+                o.delivery_lat, o.delivery_lng
          FROM orders o
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id
@@ -447,10 +400,8 @@ router.get('/my', authenticate, async (req, res, next) => {
       if (!isMissingColumnError(error)) throw error;
       result = await query(
         `SELECT o.*, r.name AS restaurant_name, NULL AS restaurant_address,
-                NULL AS restaurant_lat, NULL AS restaurant_lng,
                 COALESCE(c.alias, c.full_name) AS customer_first_name, c.full_name AS customer_display_name,
-                COALESCE(d.alias, d.full_name) AS driver_first_name, o.delivery_address AS customer_address,
-                NULL AS customer_lat, NULL AS customer_lng
+                COALESCE(d.alias, d.full_name) AS driver_first_name, o.delivery_address AS customer_address
          FROM orders o
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id

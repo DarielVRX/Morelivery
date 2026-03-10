@@ -82,9 +82,11 @@ async function reverseGeocode(lat, lng) {
 // customPin: { lat, lng } | null  — marcador manual del driver
 // onCustomPin: (latlng | null) => void
 // hasActiveOrder: boolean — si true, oculta el pin y deshabilita clicks
-function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos, navToRef }) {
+function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos, onNavigateTo }) {
   const containerRef  = useRef(null);
-  const mapRef        = useRef(null); // { map, driverMarker, customMarker }
+  const mapRef        = useRef(null); // { map, driverMarker, customMarker, pickupMarker, deliveryMarker }
+  const navCbRef      = useRef(onNavigateTo);
+  useEffect(() => { navCbRef.current = onNavigateTo; }, [onNavigateTo]);
 
   // Inicializar una vez cuando hay posición
   // Posición default para inicializar el mapa cuando no hay GPS
@@ -238,7 +240,7 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
             btn.onclick = () => {
               const lat = parseFloat(btn.dataset.lat);
               const lng = parseFloat(btn.dataset.lng);
-              navToRef?.current?.(lat, lng);
+              navCbRef.current?.(lat, lng);
               map.closePopup();
             };
           });
@@ -491,7 +493,7 @@ export default function DriverHome() {
           customPin={customPin}
           onCustomPin={setCustomPin}
           hasActiveOrder={hasActiveOrder}
-          navToRef={navToRef}
+          onNavigateTo={openNavigationTo}
           pickupPos={activeOrder?.restaurant_lat && activeOrder?.restaurant_lng
             ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) } : null}
           deliveryPos={activeOrder?.customer_lat && activeOrder?.customer_lng

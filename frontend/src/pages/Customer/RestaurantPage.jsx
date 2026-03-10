@@ -55,13 +55,23 @@ function ManualPinMap({ initialPos, mapRef, onConfirm, onCancel }) {
     };
   }, []); // solo al montar
 
-  function handleConfirm() {
+  async function handleConfirm() {
     if (!mapRef.current) return;
-    const ll = mapRef.current._layers
-      ? Object.values(mapRef.current._layers).find(l => l.getLatLng)?.getLatLng()
-      : null;
+    const ll = Object.values(mapRef.current._layers || {}).find(l => l.getLatLng)?.getLatLng();
     if (!ll) return;
-    onConfirm({ lat: ll.lat, lng: ll.lng });
+    // Geocodificación inversa para obtener dirección aproximada
+    let label = null;
+    try {
+      const r = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${ll.lat}&lon=${ll.lng}&format=json&countrycodes=mx`,
+        { headers: { 'Accept-Language': 'es' } }
+      );
+      const data = await r.json();
+      const a = data.address || {};
+      const parts = [a.road, a.suburb || a.neighbourhood, a.city || a.town || a.municipality].filter(Boolean);
+      label = parts.join(', ') || data.display_name?.split(',').slice(0,3).join(',') || null;
+    } catch (_) {}
+    onConfirm({ lat: ll.lat, lng: ll.lng, label });
   }
 
   return (
@@ -253,6 +263,14 @@ export default function RestaurantPage() {
   const distanceError = tooFar
     ? `Esta tienda está a ${distKm.toFixed(1)} km. Solo se aceptan pedidos dentro de 5 km.`
     : null;
+
+  // Logger de distancia — visible en consola del navegador
+  if (typeof window !== 'undefined') {
+    const tag = '[distancia]';
+    console.log(tag, 'restaurant.lat:', restaurant?.lat, '| restaurant.lng:', restaurant?.lng);
+    console.log(tag, 'activeDeliveryPos:', activeDeliveryPos);
+    console.log(tag, 'distKm:', distKm, '| tooFar:', tooFar);
+  }
 
   const isClosed = restaurant?.is_open === false;
   const canOrder = isCustomer && hasAddress && !isClosed && !tooFar;
@@ -469,7 +487,7 @@ export default function RestaurantPage() {
             )}
             {deliveryMode === 'manual' && manualPos && (
               <div style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.25rem' }}>
-                📌 {manualPos.lat.toFixed(5)}, {manualPos.lng.toFixed(5)}
+                📌 {manualPos.label || `${manualPos.lat.toFixed(5)}, ${manualPos.lng.toFixed(5)}`}
               </div>
             )}
             {/* Mini-mapa para ubicación manual */}
