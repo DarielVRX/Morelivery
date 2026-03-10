@@ -24,6 +24,7 @@ import {
   getEligibleDrivers, getEligibleIdleDrivers,
 } from './queries.js';
 import { upsertOffer } from './offer.js';
+import { applyOrderCooldownReduction } from './cooldown.js';
 
 /**
  * Intenta enviar oferta(s) para el pedido dado.
@@ -65,9 +66,40 @@ export async function offerNextDrivers(orderId, onOffer) {
   });
 
   if (eligible.length === 0) {
-    log(`order=${orderId}`, 'sin candidatos elegibles → pending_driver');
-    await markPendingDriver(orderId);
-    return 0;
+    log(`order=${orderId}`, 'sin candidatos elegibles → intentar reducción de cooldown');
+
+    const reduced = await applyOrderCooldownReduction(orderId, orderRow.offer_cooldown_triggered);
+
+    if (!reduced) {
+      // Sin cooldowns que reducir: todos los drivers están en pending offer
+      // en otro pedido, o sin disponibilidad. Esperar al próximo wake-up.
+      logWarn(`order=${orderId}`, 'sin cooldown que reducir → pending_driver');
+      await markPendingDriver(orderId);
+      return 0;
+    }
+
+    if (reduced.newWaitSecs >= 1) {
+      // Cooldown reducido pero el driver todavía espera — el ticker lo
+      // detectará cuando expire y reencola automáticamente.
+      log(`order=${orderId}`, `cooldown reducido a ${Math.round(reduced.newWaitSecs)}s → pending_driver`);
+      await markPendingDriver(orderId);
+      return 0;
+    }
+
+    // newWaitSecs < 1 → wait_until ya en el pasado → driver elegible ahora mismo.
+    // Re-consultar elegibles con batch=1 para continuar el flujo normalmente.
+    const immediateEligible = batchSize === 1
+      ? await getEligibleIdleDrivers(orderId)
+      : await getEligibleDrivers(orderId);
+
+    if (immediateEligible.length === 0) {
+      log(`order=${orderId}`, 'sin candidatos tras reducción inmediata → pending_driver');
+      await markPendingDriver(orderId);
+      return 0;
+    }
+
+    // Continuar con los candidatos recién liberados
+    eligible.push(...immediateEligible);
   }
 
   // ── 5. Wraparound circular ────────────────────────────────────────────────

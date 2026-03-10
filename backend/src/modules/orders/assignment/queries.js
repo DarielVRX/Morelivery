@@ -8,7 +8,7 @@ import { ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER, OFFER_TIMEOUT_SECONDS } 
 /** Pedido abierto sin driver asignado */
 export async function getOpenOrder(orderId) {
   const r = await query(
-    `SELECT id, created_at FROM orders
+    `SELECT id, created_at, offer_cooldown_triggered FROM orders
      WHERE id=$1 AND driver_id IS NULL
        AND status NOT IN ('delivered','cancelled')`,
     [orderId]
@@ -389,4 +389,64 @@ export async function getPendingAssignmentOrders(driverId) {
     [driverId]
   );
   return r.rows;
+}
+
+// ─── Reducción de cooldown ────────────────────────────────────────────────────
+
+/** Driver con cooldown más próximo a vencer para este pedido (sin pending offer activa). */
+export async function getNearestCooldownDriver(orderId) {
+  const r = await query(
+    `SELECT od.driver_id,
+            EXTRACT(EPOCH FROM (od.wait_until - NOW()))::float AS secs_remaining
+     FROM order_driver_offers od
+     WHERE od.order_id = $1
+       AND od.status IN ('rejected','expired','released')
+       AND od.wait_until > NOW()
+       AND NOT EXISTS (
+         SELECT 1 FROM order_driver_offers od2
+         WHERE od2.driver_id = od.driver_id AND od2.status = 'pending'
+       )
+     ORDER BY od.wait_until ASC
+     LIMIT 1`,
+    [orderId]
+  );
+  return r.rows[0] ?? null; // { driver_id, secs_remaining }
+}
+
+/**
+ * Reduce wait_until del driver al nuevo valor.
+ * Guard de idempotencia: solo actualiza si no fue reducido en el último segundo.
+ * Devuelve true si se aplicó, false si el guard lo bloqueó.
+ */
+export async function reduceCooldown(orderId, driverId, newWaitSecs) {
+  const waitSql    = newWaitSecs < 1
+    ? `NOW() - INTERVAL '2 seconds'`
+    : `NOW() + ($2::float * INTERVAL '1 second')`;
+  const waitParams = newWaitSecs < 1 ? [orderId, driverId] : [orderId, newWaitSecs, driverId];
+  const driverParam = newWaitSecs < 1 ? '$2' : '$3';
+
+  const r = await query(
+    `UPDATE order_driver_offers
+     SET wait_until = ${waitSql}, updated_at = NOW()
+     WHERE order_id  = $1
+       AND driver_id = ${driverParam}
+       AND status    IN ('rejected','expired','released')
+       AND wait_until > NOW()
+       AND updated_at < NOW() - INTERVAL '1 second'`,
+    waitParams
+  );
+  return r.rowCount > 0;
+}
+
+/**
+ * Marca/desmarca el flag offer_cooldown_triggered en el pedido.
+ * Una vez marcado como true, nunca se resetea — el flag es permanente
+ * y sirve solo para diagnóstico (saber que este pedido alguna vez
+ * agotó candidatos y tuvo que reducir cooldowns).
+ */
+export async function setCooldownTriggered(orderId) {
+  await query(
+    `UPDATE orders SET offer_cooldown_triggered = true, updated_at = NOW() WHERE id = $1`,
+    [orderId]
+  );
 }

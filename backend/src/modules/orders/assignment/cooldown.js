@@ -1,17 +1,20 @@
 // backend/src/modules/orders/assignment/cooldown.js
-// ─────────────────────────────────────────────────────────────────────────────
-// Lógica de reducción de cooldown.
 //
-// PROBLEMA QUE RESUELVE:
-//   Cuando no hay candidatos para un pedido (todos los drivers disponibles
-//   están en cooldown para ese pedido específico), en lugar de esperar el
-//   cooldown completo, lo reducimos por COOLDOWN_DIVISOR para que el pedido
-//   se reactive antes.
+// Reducción de cooldown cuando un pedido no tiene candidatos elegibles.
 //
-// GUARD DE IDEMPOTENCIA:
-//   La query SQL tiene AND updated_at < NOW() - INTERVAL '1 second'
-//   para evitar aplicar la reducción dos veces en el mismo tick.
-// ─────────────────────────────────────────────────────────────────────────────
+// CUÁNDO SE ACTIVA:
+//   offerNextDrivers detecta eligible.length === 0, pero hay drivers disponibles
+//   con cooldown activo para este pedido. En ese caso reducimos el cooldown del
+//   driver más próximo a vencer (÷ COOLDOWN_DIVISOR) para acelerar la reasignación.
+//
+// IDEMPOTENCIA:
+//   La query SQL tiene AND updated_at < NOW() - INTERVAL '1 second' para evitar
+//   aplicar la reducción dos veces en el mismo tick del servidor.
+//
+// FLAG PERMANENTE:
+//   offer_cooldown_triggered se marca TRUE la primera vez que se reduce un cooldown
+//   para este pedido. NUNCA se resetea — es un flag de diagnóstico permanente
+//   que indica "este pedido alguna vez agotó candidatos".
 
 import { COOLDOWN_DIVISOR, log, logWarn } from './constants.js';
 import { getNearestCooldownDriver, reduceCooldown, setCooldownTriggered } from './queries.js';
@@ -19,17 +22,14 @@ import { getNearestCooldownDriver, reduceCooldown, setCooldownTriggered } from '
 /**
  * Intenta reducir el cooldown del driver más próximo a vencer para este pedido.
  *
+ * @param {string} orderId
+ * @param {boolean} alreadyTriggered  Si el flag ya está marcado (no marcar dos veces)
  * @returns {{ driver_id: string, newWaitSecs: number } | null}
- *   null si no hay cooldown que reducir (ningún driver en cooldown, o la
- *   reducción fue rechazada por el guard de idempotencia).
  */
-export async function applyOrderCooldownReduction(orderId) {
+export async function applyOrderCooldownReduction(orderId, alreadyTriggered = false) {
   const nearest = await getNearestCooldownDriver(orderId);
 
   if (!nearest) {
-    // No hay drivers en cooldown para este pedido.
-    // Caso típico: todos tienen una oferta pending en OTRO pedido.
-    // El pedido quedará huérfano hasta que un reject/expire lo despierte.
     logWarn(orderId, 'applyOrderCooldownReduction: sin cooldowns activos para reducir');
     return null;
   }
@@ -40,7 +40,7 @@ export async function applyOrderCooldownReduction(orderId) {
   const applied = await reduceCooldown(orderId, driver_id, newWaitSecs);
 
   if (!applied) {
-    log(orderId, 'cooldown reduction: guard de idempotencia activado — ya fue reducido recientemente', { driver_id });
+    log(orderId, 'cooldown reduction: guard de idempotencia — ya fue reducido recientemente', { driver_id });
     return null;
   }
 
@@ -51,27 +51,10 @@ export async function applyOrderCooldownReduction(orderId) {
     immediate:       newWaitSecs < 1,
   });
 
+  // Marcar el flag la primera vez — permanente, no resetear
+  if (!alreadyTriggered) {
+    await setCooldownTriggered(orderId);
+  }
+
   return { driver_id, newWaitSecs };
-}
-
-/**
- * Marca el pedido como "cooldown triggered" la primera vez que se reduce un cooldown.
- * El flag evita que se marque múltiples veces y sirve como signal de diagnóstico.
- *
- * @param {string}  orderId
- * @param {boolean} currentValue  El valor actual del flag en DB
- */
-export async function ensureCooldownFlagSet(orderId, currentValue) {
-  if (currentValue) return; // Ya está marcado
-  await setCooldownTriggered(orderId, true);
-  log(orderId, 'offer_cooldown_triggered = true');
-}
-
-/**
- * Resetea el flag cuando el pedido vuelve a tener candidatos (nueva ronda).
- */
-export async function resetCooldownFlag(orderId, currentValue) {
-  if (!currentValue) return; // Ya está en false
-  await setCooldownTriggered(orderId, false);
-  log(orderId, 'offer_cooldown_triggered reset a false — nueva oferta en progreso');
 }
