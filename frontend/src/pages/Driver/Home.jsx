@@ -82,7 +82,7 @@ async function reverseGeocode(lat, lng) {
 // customPin: { lat, lng } | null  — marcador manual del driver
 // onCustomPin: (latlng | null) => void
 // hasActiveOrder: boolean — si true, oculta el pin y deshabilita clicks
-function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
+function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos, navToRef }) {
   const containerRef  = useRef(null);
   const mapRef        = useRef(null); // { map, driverMarker, customMarker }
 
@@ -132,7 +132,7 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
           onCustomPin?.({ lat: e.latlng.lat, lng: e.latlng.lng });
         });
 
-        mapRef.current = { map, driverMarker, customMarker: null };
+        mapRef.current = { map, driverMarker, customMarker: null, pickupMarker: null, deliveryMarker: null };
         setTimeout(() => map.invalidateSize(), 300);
       }).catch(() => {});
     }, 50);
@@ -198,6 +198,54 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder }) {
       }
     });
   }, [customPin?.lat, customPin?.lng, hasActiveOrder]);
+
+
+  // Marcadores tienda (🏪) y cliente (📦) con popup de navegación
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const { map } = mapRef.current;
+    import('leaflet').then(L => {
+      if (!mapRef.current) return;
+      if (mapRef.current.pickupMarker)   { mapRef.current.pickupMarker.remove();   mapRef.current.pickupMarker = null; }
+      if (mapRef.current.deliveryMarker) { mapRef.current.deliveryMarker.remove(); mapRef.current.deliveryMarker = null; }
+
+      if (!document.getElementById('ml-marker-style')) {
+        const s = document.createElement('style');
+        s.id = 'ml-marker-style';
+        s.textContent = `.ml-nav-btn{background:#2563eb;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer;margin-top:4px;width:100%}`;
+        document.head.appendChild(s);
+      }
+
+      function makeMarker(pos, emoji, color, label) {
+        const icon = L.divIcon({
+          html: `<div style="width:24px;height:24px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 2px 8px #0005;display:flex;align-items:center;justify-content:center;font-size:13px">${emoji}</div>`,
+          iconSize: [24, 24], iconAnchor: [12, 12], className: ''
+        });
+        const m = L.marker([pos.lat, pos.lng], { icon });
+        m.bindPopup(`<div style="text-align:center;min-width:90px"><b style="font-size:0.8rem">${label}</b><br/><button class="ml-nav-btn" data-lat="${pos.lat}" data-lng="${pos.lng}">🗺 Navegar aquí</button></div>`, { closeButton: false });
+        m.addTo(map);
+        return m;
+      }
+
+      if (pickupPos)   mapRef.current.pickupMarker   = makeMarker(pickupPos,   '🏪', '#16a34a', 'Tienda');
+      if (deliveryPos) mapRef.current.deliveryMarker = makeMarker(deliveryPos, '📦', '#f97316', 'Cliente');
+
+      // Click en botón "Navegar aquí" dentro del popup
+      map.off('popupopen.nav');
+      map.on('popupopen.nav', () => {
+        setTimeout(() => {
+          document.querySelectorAll('.ml-nav-btn').forEach(btn => {
+            btn.onclick = () => {
+              const lat = parseFloat(btn.dataset.lat);
+              const lng = parseFloat(btn.dataset.lng);
+              navToRef?.current?.(lat, lng);
+              map.closePopup();
+            };
+          });
+        }, 0);
+      });
+    });
+  }, [pickupPos?.lat, pickupPos?.lng, deliveryPos?.lat, deliveryPos?.lng]);
 
   // SIEMPRE renderizamos el div del mapa — el containerRef nunca se desmonta.
   // El mensaje GPS se superpone como overlay cuando no hay posición.
@@ -443,6 +491,11 @@ export default function DriverHome() {
           customPin={customPin}
           onCustomPin={setCustomPin}
           hasActiveOrder={hasActiveOrder}
+          navToRef={navToRef}
+          pickupPos={activeOrder?.restaurant_lat && activeOrder?.restaurant_lng
+            ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) } : null}
+          deliveryPos={activeOrder?.customer_lat && activeOrder?.customer_lng
+            ? { lat: Number(activeOrder.customer_lat), lng: Number(activeOrder.customer_lng) } : null}
         />
 
         {/* Panel de pin personalizado */}
