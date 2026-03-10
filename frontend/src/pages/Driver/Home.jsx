@@ -309,12 +309,6 @@ export default function DriverHome() {
   const tokenRef = useRef(auth.token);
   useEffect(() => { tokenRef.current = auth.token; }, [auth.token]);
 
-  const announceListener = useCallback(async () => {
-    if (!tokenRef.current) return;
-    try { await apiFetch('/drivers/listener', { method:'POST' }, tokenRef.current); }
-    catch (_) {}
-  }, []);
-
   // loadOrders: solo pedidos activos — no toca pendingOffer (SSE es source of truth)
   const loadOrders = useCallback(async () => {
     if (!auth.token) return;
@@ -348,7 +342,7 @@ export default function DriverHome() {
     } catch (_) {}
   }, [auth.token]);
 
-  // loadDataRef apunta a loadOrders: el loop de polling NO toca pendingOffer
+  // loadDataRef apunta a loadOrders (SSE es source of truth para ofertas)
   useEffect(() => { loadDataRef.current = loadOrders; });
 
   useEffect(() => {
@@ -356,36 +350,7 @@ export default function DriverHome() {
     loadData();
   }, [auth.token]);
 
-  // Refs para condiciones del cron — evita recrear el interval
-  const availabilityRef   = useRef(availability);
-  const pendingOfferRef   = useRef(pendingOffer);
-  const hasActiveOrderRef = useRef(hasActiveOrder);
-  useEffect(() => { availabilityRef.current   = availability;   }, [availability]);
-  useEffect(() => { pendingOfferRef.current   = pendingOffer;   }, [pendingOffer]);
-  useEffect(() => { hasActiveOrderRef.current = hasActiveOrder; }, [hasActiveOrder]);
-
-  // Cron 1s: se activa solo cuando las 3 condiciones se cumplen simultáneamente.
-  // El rate-limit del backend es 2s → no desperdicia recursos.
-  const cronActiveRef = useRef(false);
-  useEffect(() => {
-    const shouldRun = () => availabilityRef.current && !pendingOfferRef.current && !hasActiveOrderRef.current;
-    const id = setInterval(() => {
-      if (!shouldRun()) { cronActiveRef.current = false; return; }
-      cronActiveRef.current = true;
-      announceListener();
-    }, 1000);
-    if (shouldRun()) setTimeout(announceListener, 300);
-    return () => clearInterval(id);
-  }, [announceListener]);
-
-  // Disparo reactivo cuando se libera una condición bloqueante
-  useEffect(() => {
-    if (!cronActiveRef.current && availability && !pendingOffer && !hasActiveOrder) {
-      announceListener();
-    }
-  }, [availability, pendingOffer, hasActiveOrder]);
-
-  // SSE: fuente de verdad para nuevas ofertas — no llama loadData
+  // SSE: fuente de verdad para nuevas ofertas
   const handleNewOffer = useCallback((data) => {
     console.log(`[DriverHome] handleNewOffer orderId=${data.orderId} secs=${data.secondsLeft}`);
     setPendingOffer(prev => {
