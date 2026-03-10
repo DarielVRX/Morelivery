@@ -17,16 +17,16 @@ export async function getOpenOrder(orderId) {
 }
 
 /**
- * Cola de pedidos abiertos sin oferta pending.
- * Prioridad: pedidos con candidatos disponibles primero, luego por antigüedad.
- *
- * IMPORTANTE: pedidos donde TODOS los drivers tienen cooldown activo NO se incluyen
- * aquí — el ticker los reencola automáticamente cuando expira el cooldown via
- * expireTimedOutOffersInDB. Esto evita reducción de cooldown proactiva en el ticker.
+ * Cola de pedidos abiertos, ordenada con prioridad:
+ *   1. Pedidos con candidatos disponibles (sin cooldown para todos)
+ *   2. Pedidos sin candidatos (todos en cooldown)
+ * Dentro de cada grupo: created_at ASC
  */
 export async function getQueuedOrders(driverId = null) {
+  // Todos los pedidos abiertos sin oferta pending activa
   const r = await query(
     `SELECT o.id, o.created_at,
+            -- ¿Tiene al menos un driver disponible sin cooldown para este pedido?
             EXISTS (
               SELECT 1 FROM driver_profiles dp
               JOIN users u ON u.id = dp.user_id
@@ -49,30 +49,10 @@ export async function getQueuedOrders(driverId = null) {
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
          WHERE od.order_id=o.id AND od.status='pending')
-       -- Solo encolair si tiene candidatos disponibles ahora,
-       -- O si nunca ha tenido rechazos (pedido nuevo sin historial de cooldowns)
-       AND (
-         EXISTS (
-           SELECT 1 FROM driver_profiles dp
-           JOIN users u ON u.id = dp.user_id
-           WHERE dp.is_available = true AND u.status = 'active'
-             AND NOT EXISTS (
-               SELECT 1 FROM order_driver_offers od3
-               WHERE od3.order_id=o.id AND od3.driver_id=dp.user_id
-                 AND od3.status IN ('rejected','released','expired')
-                 AND od3.wait_until > NOW())
-         )
-         OR NOT EXISTS (
-           SELECT 1 FROM order_driver_offers od
-           WHERE od.order_id=o.id
-             AND od.status IN ('rejected','released','expired')
-             AND od.wait_until > NOW()
-         )
-       )
      ORDER BY has_candidates DESC, o.created_at ASC`,
     [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
   );
-  return r.rows;
+  return r.rows; // [{id, created_at, has_candidates}]
 }
 
 
@@ -183,9 +163,6 @@ export async function getEligibleDrivers(orderId) {
     `SELECT dp.user_id, dp.driver_number
      FROM driver_profiles dp
      JOIN users u ON u.id = dp.user_id
-     -- Posición de la tienda para filtro de distancia
-     JOIN orders ord ON ord.id = $3
-     JOIN restaurants rest ON rest.id = ord.restaurant_id
      WHERE dp.is_available = true
        AND u.status = 'active'
        -- Bajo el límite de capacidad
@@ -202,17 +179,6 @@ export async function getEligibleDrivers(orderId) {
          WHERE od.order_id=$3 AND od.driver_id=dp.user_id
            AND od.status IN ('rejected','released','expired')
            AND od.wait_until > NOW())
-       -- Dentro de 5km de la tienda (sin posición registrada → incluir)
-       AND (
-         dp.last_lat IS NULL OR dp.last_lng IS NULL OR rest.lat IS NULL OR rest.lng IS NULL
-         OR (
-           6371 * 2 * ASIN(SQRT(
-             POWER(SIN(RADIANS(dp.last_lat - rest.lat) / 2), 2) +
-             COS(RADIANS(rest.lat)) * COS(RADIANS(dp.last_lat)) *
-             POWER(SIN(RADIANS(dp.last_lng - rest.lng) / 2), 2)
-           )) <= 5.0
-         )
-       )
      ORDER BY dp.driver_number ASC`,
     [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER, orderId]
   );
@@ -228,8 +194,6 @@ export async function getEligibleIdleDrivers(orderId) {
     `SELECT dp.user_id, dp.driver_number
      FROM driver_profiles dp
      JOIN users u ON u.id = dp.user_id
-     JOIN orders ord ON ord.id = $3
-     JOIN restaurants rest ON rest.id = ord.restaurant_id
      WHERE dp.is_available = true
        AND u.status = 'active'
        AND (SELECT COUNT(*) FROM orders o
@@ -247,17 +211,6 @@ export async function getEligibleIdleDrivers(orderId) {
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
          WHERE od.driver_id=dp.user_id AND od.status='pending')
-       -- Dentro de 5km de la tienda
-       AND (
-         dp.last_lat IS NULL OR dp.last_lng IS NULL OR rest.lat IS NULL OR rest.lng IS NULL
-         OR (
-           6371 * 2 * ASIN(SQRT(
-             POWER(SIN(RADIANS(dp.last_lat - rest.lat) / 2), 2) +
-             COS(RADIANS(rest.lat)) * COS(RADIANS(dp.last_lat)) *
-             POWER(SIN(RADIANS(dp.last_lng - rest.lng) / 2), 2)
-           )) <= 5.0
-         )
-       )
      ORDER BY dp.driver_number ASC`,
     [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER, orderId]
   );
