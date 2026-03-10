@@ -35,19 +35,20 @@ const ROLE_LABELS = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor
 
 // API de SEPOMEX gratuita (datos.gob.mx) para consulta por CP
 async function fetchColoniasByPostal(cp) {
+  // Primaria: México API (open source, datos 2025, sin key, sin límite)
   try {
-    const r = await fetch(`https://sepomex.icalialabs.com/api/v1/zip_codes?zip_code=${cp}`);
+    const r = await fetch(`https://mexico-api.devaleff.com/api/codigo-postal/${cp}`);
     if (!r.ok) throw new Error('no data');
     const data = await r.json();
-    const zips = data.zip_codes || [];
-    if (zips.length === 0) return null;
+    const items = data.data || [];
+    if (items.length === 0) throw new Error('empty');
     return {
-      estado: zips[0].d_estado,
-      ciudad: zips[0].d_mnpio || zips[0].d_ciudad || '',
-      colonias: zips.map(z => z.d_asenta).filter(Boolean).sort(),
+      estado:   items[0].d_estado,
+      ciudad:   items[0].D_mnpio || items[0].d_ciudad || '',
+      colonias: items.map(z => z.d_asenta).filter(Boolean).sort(),
     };
   } catch {
-    // Fallback: intentar con otra API pública
+    // Fallback: COPOMEX
     try {
       const r2 = await fetch(`https://api.copomex.com/query/info_cp/${cp}?type=colonia&token=pruebas`);
       if (!r2.ok) throw new Error('no data');
@@ -55,8 +56,8 @@ async function fetchColoniasByPostal(cp) {
       const items = Array.isArray(data2) ? data2 : [data2];
       if (!items[0]?.response) return null;
       return {
-        estado: items[0].response.estado,
-        ciudad: items[0].response.municipio || '',
+        estado:   items[0].response.estado,
+        ciudad:   items[0].response.municipio || '',
         colonias: items.map(i => i.response?.asentamiento).filter(Boolean).sort(),
       };
     } catch {
