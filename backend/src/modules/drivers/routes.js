@@ -12,6 +12,8 @@ const router = Router();
 function isMissingColumnError(e)   { return e?.code === '42703'; }
 function isMissingRelationError(e) { return e?.code === '42P01'; }
 
+// POST /drivers/listener — mantenido por compatibilidad con clientes viejos,
+// pero ya no es necesario. El sistema es push puro desde el servidor.
 router.post('/listener', authenticate, authorize(['driver']), async (_req, res) => {
   return res.json({ ok: true, deprecated: true });
 });
@@ -28,12 +30,16 @@ router.patch('/availability', authenticate, authorize(['driver']), async (req, r
     if (result.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
 
     if (isAvailable) {
+      // Push: buscar todos los pedidos abiertos sin driver y disparar assignment.
+      // serializedOffer es idempotente — si ya tiene cadena activa la ignora.
       try {
-        // Al ponerse disponible, disparamos el motor para asignar pedidos en espera
-        offerNextDrivers(offerCb);
-        console.log(`[availability] driver=${driverId.slice(0,8)} disponible → motor de asignación activado`);
+        const openOrders = await getQueuedOrders();
+        for (const ord of openOrders) {
+          serializedOffer(ord.id, offerNextDrivers, offerCb);
+        }
+        console.log(`[availability] driver=${driverId.slice(0,8)} disponible → ${openOrders.length} pedido(s) abierto(s) encolados`);
       } catch (e) {
-        console.error('[availability] error disparando asignación:', e.message);
+        console.error('[availability] error encolando pedidos:', e.message);
       }
     }
 
@@ -41,26 +47,26 @@ router.patch('/availability', authenticate, authorize(['driver']), async (req, r
   } catch (error) { return next(error); }
 });
 
-/* ── GET /drivers/offers ────────────────────────────────────────────────────── */
+/* ── GET /drivers/offers ── ofertas pendientes del driver ───────────────────── */
 router.get('/offers', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     let result;
     try {
       result = await query(
         `SELECT o.id, o.total_cents, o.service_fee_cents, o.delivery_fee_cents,
-        o.tip_cents, o.payment_method, o.status,
-        r.name AS restaurant_name, r.address AS restaurant_address,
-        r.lat AS restaurant_lat, r.lng AS restaurant_lng,
-        COALESCE(c.address, o.delivery_address) AS customer_address,
-                           c.lat AS customer_lat, c.lng AS customer_lng,
-                           GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + (60::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
-                           FROM order_driver_offers od
-                           JOIN orders o ON o.id = od.order_id
-                           JOIN restaurants r ON r.id = o.restaurant_id
-                           JOIN users c       ON c.id = o.customer_id
-                           WHERE od.driver_id=$1 AND od.status='pending' AND o.driver_id IS NULL
-                           ORDER BY od.created_at ASC`,
-                           [req.user.userId]
+                o.tip_cents, o.payment_method, o.status,
+                r.name AS restaurant_name, r.address AS restaurant_address,
+                r.lat AS restaurant_lat, r.lng AS restaurant_lng,
+                COALESCE(c.address, o.delivery_address) AS customer_address,
+                c.lat AS customer_lat, c.lng AS customer_lng,
+                GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + (60::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
+         FROM order_driver_offers od
+         JOIN orders o ON o.id = od.order_id
+         JOIN restaurants r ON r.id = o.restaurant_id
+         JOIN users c       ON c.id = o.customer_id
+         WHERE od.driver_id=$1 AND od.status='pending' AND o.driver_id IS NULL
+         ORDER BY od.created_at ASC`,
+        [req.user.userId]
       );
     } catch (e) {
       if (!isMissingColumnError(e) && !isMissingRelationError(e)) throw e;
@@ -73,10 +79,10 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
       try {
         const items = await query(
           `SELECT oi.order_id, oi.menu_item_id, oi.quantity,
-          COALESCE(mi.name,'Producto') AS name
-          FROM order_items oi LEFT JOIN menu_items mi ON mi.id=oi.menu_item_id
-          WHERE oi.order_id=ANY($1::uuid[])`,
-                                  [orderIds]
+                  COALESCE(mi.name,'Producto') AS name
+           FROM order_items oi LEFT JOIN menu_items mi ON mi.id=oi.menu_item_id
+           WHERE oi.order_id=ANY($1::uuid[])`,
+          [orderIds]
         );
         for (const row of items.rows) {
           if (!itemsByOrder.has(row.order_id)) itemsByOrder.set(row.order_id, []);
@@ -98,12 +104,19 @@ router.post('/offers/:orderId/accept', authenticate, authorize(['driver']), asyn
     );
     if (offer.rowCount === 0) return next(new AppError(404, 'Oferta no encontrada o ya tomada por otro driver'));
 
+    // Obtener competidores ANTES de aceptar (expireCompetingOffers los marca expired)
+    const competitors = await query(
+      `SELECT driver_id FROM order_driver_offers
+       WHERE order_id=$1 AND driver_id<>$2 AND status='pending'`,
+      [req.params.orderId, req.user.userId]
+    );
+
     const assigned = await acceptOffer(req.params.orderId, req.user.userId);
     if (!assigned) return next(new AppError(409, 'El pedido ya fue tomado por otro driver'));
 
     const orderInfo = await query(
       `SELECT o.customer_id, r.owner_user_id AS restaurant_owner_id
-      FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
+       FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
       [req.params.orderId]
     );
     if (orderInfo.rowCount > 0) {
@@ -113,53 +126,62 @@ router.post('/offers/:orderId/accept', authenticate, authorize(['driver']), asyn
       sseHub.sendToUser(ord.restaurant_owner_id, 'order_update', payload);
       sseHub.sendToRole('admin', 'order_update', payload);
     }
+    // Notificar a drivers competidores que su oferta fue cancelada
+    for (const { driver_id } of competitors.rows) {
+      sseHub.sendToUser(driver_id, 'offer_cancelled', { orderId: req.params.orderId });
+    }
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
 
-/* ── POST /drivers/orders/:orderId/claim ────────────────────────────────────── */
+/* ── POST /drivers/orders/:orderId/claim — aceptar pedido sin oferta previa ── */
+// Usado desde "En espera": crea la oferta y la acepta en un paso si el pedido sigue libre
 router.post('/orders/:orderId/claim', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const driverId = req.user.userId;
     const orderId  = req.params.orderId;
 
+    // 1. Verificar que el pedido existe, sigue sin driver, y este driver es elegible
     const orderCheck = await query(
       `SELECT o.id FROM orders o
-      WHERE o.id=$1 AND o.driver_id IS NULL
-      AND o.status IN ('created','pending_driver')
-      AND NOT EXISTS (
-        SELECT 1 FROM order_driver_offers od
-        WHERE od.order_id=$1 AND od.driver_id=$2
-        AND od.status IN ('rejected','released','expired')
-        AND od.wait_until > NOW()
-      )`,
+       WHERE o.id=$1 AND o.driver_id IS NULL
+         AND o.status IN ('created','pending_driver')
+         AND NOT EXISTS (
+           SELECT 1 FROM order_driver_offers od
+           WHERE od.order_id=$1 AND od.driver_id=$2
+             AND od.status IN ('rejected','released','expired')
+             AND od.wait_until > NOW()
+         )`,
       [orderId, driverId]
     );
     if (orderCheck.rowCount === 0) return next(new AppError(409, 'Pedido no disponible o en cooldown'));
 
+    // 2. Verificar que el driver tiene espacio (< MAX_ACTIVE_ORDERS)
     const MAX_ACTIVE = 4;
     const activeCount = await query(
       `SELECT COUNT(*)::int AS n FROM orders
-      WHERE driver_id=$1 AND status IN ('assigned','accepted','preparing','ready','on_the_way')`,
-                                    [driverId]
+       WHERE driver_id=$1 AND status IN ('assigned','accepted','preparing','ready','on_the_way')`,
+      [driverId]
     );
     if ((activeCount.rows[0]?.n || 0) >= MAX_ACTIVE) return next(new AppError(409, 'No tienes espacio para más pedidos'));
 
+    // 3. Crear oferta y aceptar atómicamente
     await query(
       `INSERT INTO order_driver_offers (order_id, driver_id, status, created_at, updated_at)
-      VALUES ($1, $2, 'pending', NOW(), NOW())
-      ON CONFLICT (order_id, driver_id) DO UPDATE
-      SET status='pending', updated_at=NOW()`,
-                [orderId, driverId]
+       VALUES ($1, $2, 'pending', NOW(), NOW())
+       ON CONFLICT (order_id, driver_id) DO UPDATE
+       SET status='pending', updated_at=NOW()`,
+      [orderId, driverId]
     );
     const assigned = await acceptOffer(orderId, driverId);
 
     if (!assigned) return next(new AppError(409, 'El pedido ya fue tomado por otro driver'));
 
+    // 4. Notificar vía SSE
     try {
       const orderInfo = await query(
         `SELECT o.customer_id, r.owner_user_id AS restaurant_owner_id
-        FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
+         FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
         [orderId]
       );
       if (orderInfo.rowCount > 0) {
@@ -178,9 +200,7 @@ router.post('/orders/:orderId/claim', authenticate, authorize(['driver']), async
 /* ── POST /drivers/offers/:orderId/reject ───────────────────────────────────── */
 router.post('/offers/:orderId/reject', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
-    // Al rechazar, buscamos al siguiente driver elegible inmediatamente
-    await rejectOffer(req.params.orderId, req.user.userId);
-    offerNextDrivers(offerCb);
+    await rejectOffer(req.params.orderId, req.user.userId, offerCb);
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
@@ -195,7 +215,6 @@ router.post('/orders/:orderId/release', authenticate, authorize(['driver']), asy
       try { await query(`UPDATE orders SET driver_note=$1, updated_at=NOW() WHERE id=$2 AND driver_id=$3`, [note, orderId, driverId]); }
       catch (_) {}
     }
-    // Requiere offerCb para re-encolar el pedido tras la liberación
     await releaseOrder(orderId, driverId, offerCb);
     return res.json({ ok: true });
   } catch (error) { return next(error); }
@@ -211,11 +230,12 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
     try { await query('UPDATE driver_profiles SET last_lat=$1, last_lng=$2 WHERE user_id=$3', [lat, lng, req.user.userId]); }
     catch (e) { if (!isMissingColumnError(e)) throw e; }
 
+    // Notificar posición a clientes y restaurantes con pedido activo
     const activeOrders = await query(
       `SELECT o.id, o.customer_id, r.owner_user_id AS restaurant_owner_id
-      FROM orders o JOIN restaurants r ON r.id=o.restaurant_id
-      WHERE o.driver_id=$1 AND o.status IN ('assigned','accepted','preparing','ready','on_the_way')`,
-                                     [req.user.userId]
+       FROM orders o JOIN restaurants r ON r.id=o.restaurant_id
+       WHERE o.driver_id=$1 AND o.status IN ('assigned','accepted','preparing','ready','on_the_way')`,
+      [req.user.userId]
     );
     for (const ord of activeOrders.rows) {
       const payload = { orderId: ord.id, driverId: req.user.userId, lat, lng };

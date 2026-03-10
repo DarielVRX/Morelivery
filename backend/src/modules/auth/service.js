@@ -8,31 +8,34 @@ import { logEvent } from '../../utils/logger.js';
 
 function normalizeUsername(username) { return username.trim().toLowerCase(); }
 function pseudoEmailFromUsername(username) { return `${normalizeUsername(username)}@local.test`; }
-function firstNameFromUsername(username) { return username.split(/[_\-.\s]/)[0] || username; }
 
 const PENDING_STATUSES = ['created','assigned','accepted','preparing','ready','on_the_way','pending_driver'];
 
+export function cleanRestaurantName(name) {
+  return name.trim().replace(/\s+(kitchen|restaurant)$/i, '');
+}
+
 export async function registerUser(payload) {
-  const username = normalizeUsername(payload.username);
+  const username    = normalizeUsername(payload.username);
   const pseudoEmail = pseudoEmailFromUsername(username);
 
   const existing = await query('SELECT id FROM users WHERE email = $1', [pseudoEmail]);
   if (existing.rowCount > 0) throw new AppError(409, 'Ese nombre de usuario ya está registrado');
 
-  const passwordHash = await bcrypt.hash(payload.password, 12);
-  const userAddress = payload.role === 'customer' ? payload.address || null : null;
+  const passwordHash  = await bcrypt.hash(payload.password, 12);
+  const userAddress   = payload.role === 'customer' ? payload.address || null : null;
 
   let result;
   try {
     result = await query(
       'INSERT INTO users(full_name, alias, email, password_hash, role, address) VALUES($1,$2,$3,$4,$5,$6) RETURNING id, full_name, alias, email, role, address',
-                         [username, payload.displayName?.trim() || username, pseudoEmail, passwordHash, payload.role, userAddress]
+      [username, payload.displayName?.trim() || username, pseudoEmail, passwordHash, payload.role, userAddress]
     );
   } catch (error) {
     if (error?.code === '42703') {
       result = await query(
         'INSERT INTO users(full_name, alias, email, password_hash, role) VALUES($1,$2,$3,$4,$5) RETURNING id, full_name, alias, email, role',
-                           [username, payload.displayName?.trim() || username, pseudoEmail, passwordHash, payload.role]
+        [username, payload.displayName?.trim() || username, pseudoEmail, passwordHash, payload.role]
       );
     } else throw error;
   }
@@ -43,7 +46,7 @@ export async function registerUser(payload) {
     const restName = cleanRestaurantName(payload.displayName || username);
     try {
       await query('INSERT INTO restaurants(owner_user_id, name, category, address) VALUES($1,$2,$3,$4)',
-                  [user.id, restName, 'General', payload.address || null]);
+        [user.id, restName, 'General', payload.address || null]);
     } catch (error) {
       if (error?.code === '42703') await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1,$2,$3)', [user.id, restName, 'General']);
       else throw error;
@@ -58,7 +61,7 @@ export async function registerUser(payload) {
 }
 
 export async function loginUser(payload) {
-  const username = normalizeUsername(payload.username);
+  const username    = normalizeUsername(payload.username);
   const pseudoEmail = pseudoEmailFromUsername(username);
 
   let result;
@@ -79,21 +82,29 @@ export async function loginUser(payload) {
 
   const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 
-  let profile = { address: user.address || null, alias: user.alias || user.full_name || username, needsAddress: false };
+  let profile = { address: user.address || null, alias: user.alias || user.full_name || username, needsAddress: false, lat: null, lng: null };
 
   if (user.role === 'restaurant') {
     try {
       const r = await query('SELECT id, name, address, is_open, lat, lng FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
       profile.restaurant = r.rows[0] || null;
-      profile.address = r.rows[0]?.address || null;
-      profile.lat     = r.rows[0]?.lat     ?? null;
-      profile.lng     = r.rows[0]?.lng     ?? null;
+      profile.address    = r.rows[0]?.address || null;
+      profile.lat        = r.rows[0]?.lat     ?? null;
+      profile.lng        = r.rows[0]?.lng     ?? null;
     } catch (error) {
       if (error?.code === '42703') {
-        const r = await query('SELECT id, name FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
+        const r = await query('SELECT id, name, address, is_open FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
         profile.restaurant = r.rows[0] || null;
+        profile.address    = r.rows[0]?.address || null;
       } else throw error;
     }
+  } else {
+    // customer / driver / admin: lat/lng viven en users
+    try {
+      const r = await query('SELECT lat, lng FROM users WHERE id = $1', [user.id]);
+      profile.lat = r.rows[0]?.lat ?? null;
+      profile.lng = r.rows[0]?.lng ?? null;
+    } catch (_) {}
   }
 
   if (user.role === 'driver') {
@@ -115,12 +126,13 @@ export async function loginUser(payload) {
 
 export async function updateProfileAddress(userId, role, address, displayName, lat, lng) {
   if (role === 'restaurant') {
+    // address, lat, lng y name van en restaurants; alias/full_name en users
     const restUpdates = [];
     const restVals    = [];
     let ri = 1;
-    if (address     !== undefined && address     !== null) { restUpdates.push(`address=$${ri++}`); restVals.push(address); }
-    if (lat         !== undefined && lat         !== null) { restUpdates.push(`lat=$${ri++}`);     restVals.push(lat); }
-    if (lng         !== undefined && lng         !== null) { restUpdates.push(`lng=$${ri++}`);     restVals.push(lng); }
+    if (address !== undefined && address !== null) { restUpdates.push(`address=$${ri++}`); restVals.push(address); }
+    if (lat     !== undefined && lat     !== null) { restUpdates.push(`lat=$${ri++}`);     restVals.push(lat); }
+    if (lng     !== undefined && lng     !== null) { restUpdates.push(`lng=$${ri++}`);     restVals.push(lng); }
     if (restUpdates.length > 0) {
       restVals.push(userId);
       try { await query(`UPDATE restaurants SET ${restUpdates.join(',')} WHERE owner_user_id=$${ri}`, restVals); }
@@ -138,12 +150,17 @@ export async function updateProfileAddress(userId, role, address, displayName, l
         } else throw e;
       }
     }
+    // Leer confirmado desde restaurants (lat/lng viven ahí para tienda)
     let rRow = {};
     try {
       const rc = await query('SELECT name, address, lat, lng FROM restaurants WHERE owner_user_id=$1', [userId]);
       rRow = rc.rows[0] || {};
     } catch (_) {}
-    const uRow = (await query('SELECT full_name, alias FROM users WHERE id=$1', [userId])).rows[0] || {};
+    let uRow = {};
+    try {
+      const uc = await query('SELECT full_name, alias FROM users WHERE id=$1', [userId]);
+      uRow = uc.rows[0] || {};
+    } catch (_) {}
     return {
       address:     rRow.address     ?? address     ?? null,
       displayName: uRow.alias       ?? uRow.full_name ?? displayName ?? null,
@@ -152,8 +169,9 @@ export async function updateProfileAddress(userId, role, address, displayName, l
       lng:         rRow.lng         ?? null,
     };
   } else {
+    // customer / driver / admin: todo va en users
     const updates = [];
-    const vals = [];
+    const vals    = [];
     let i = 1;
     if (displayName !== undefined && displayName !== null) {
       updates.push(`full_name=$${i++}`); vals.push(displayName.trim());
@@ -168,6 +186,7 @@ export async function updateProfileAddress(userId, role, address, displayName, l
         await query(`UPDATE users SET ${updates.join(',')} WHERE id=$${i}`, vals);
       } catch (e) {
         if (e?.code === '42703') {
+          // Columnas lat/lng o alias pueden no existir — guardar solo las seguras
           const safeUpdates = [];
           const safeVals    = [];
           let j = 1;
@@ -193,11 +212,11 @@ export async function updateProfileAddress(userId, role, address, displayName, l
       } catch (_2) {}
     }
     return {
-      address:     row.address ?? address ?? null,
+      address:     row.address ?? address     ?? null,
       displayName: row.alias   ?? row.full_name ?? displayName ?? null,
       alias:       row.alias   ?? row.full_name ?? displayName ?? null,
-      lat:         row.lat  ?? null,
-      lng:         row.lng  ?? null,
+      lat:         row.lat     ?? null,
+      lng:         row.lng     ?? null,
     };
   }
 }
@@ -224,14 +243,12 @@ export async function deleteAccount(userId, role) {
   } else if (role === 'restaurant') {
     const r = await query(
       `SELECT 1 FROM orders o JOIN restaurants rest ON rest.id=o.restaurant_id
-      WHERE rest.owner_user_id=$1 AND o.status=ANY($2::text[]) LIMIT 1`,
-                          [userId, PENDING_STATUSES]
+       WHERE rest.owner_user_id=$1 AND o.status=ANY($2::text[]) LIMIT 1`,
+      [userId, PENDING_STATUSES]
     );
     hasPending = r.rowCount > 0;
   }
-  if (hasPending) {
-    throw new AppError(409, 'No puedes eliminar tu cuenta mientras tengas pedidos activos. Completa o cancela tus pedidos primero.');
-  }
+  if (hasPending) throw new AppError(409, 'No puedes eliminar tu cuenta mientras tengas pedidos activos. Completa o cancela tus pedidos primero.');
   await query('DELETE FROM users WHERE id = $1', [userId]);
   return { ok: true };
 }
@@ -247,8 +264,4 @@ export async function updateLoginUsername(userId, role, currentPassword, newUser
   if (taken.rowCount > 0) throw new AppError(409, 'Ese usuario de acceso ya está en uso');
   await query('UPDATE users SET email=$1 WHERE id=$2', [newEmail, userId]);
   return { username: normalized };
-}
-
-export function cleanRestaurantName(name) {
-  return name.trim().replace(/\s+(kitchen|restaurant)$/i, '');
 }

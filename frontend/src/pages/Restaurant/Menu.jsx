@@ -246,7 +246,7 @@ export default function RestaurantMenu() {
                       <label>Precio (MXN)<input type="number" value={price} onChange={e=>setPrice(e.target.value)} step="0.01" min="0" placeholder="0.00" /></label>
                     </div>
                     <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
-                      <button className="btn-primary btn-sm" onClick={save} disabled={!name.trim()||!price}>
+                      <button className="btn-primary btn-sm" onClick={handleSubmit} disabled={!name.trim()||!price}>
                         Guardar cambios
                       </button>
                       <button className="btn-sm" onClick={resetForm}>Cancelar</button>
