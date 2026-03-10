@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
-import { acceptOffer, rejectOffer, releaseOrder, serializedOffer, offerNextDrivers, getQueuedOrders } from '../orders/assignment/index.js';
+import { acceptOffer, rejectOffer, releaseOrder, offerNextDrivers, getQueuedOrders, serializedOffer } from '../orders/assignment/index.js';
 import { sseHub } from '../events/hub.js';
 import { offerCb } from '../events/offerCallback.js';
 import { AppError } from '../../utils/errors.js';
@@ -154,19 +154,15 @@ router.post('/orders/:orderId/claim', authenticate, authorize(['driver']), async
     );
     if ((activeCount.rows[0]?.n || 0) >= MAX_ACTIVE) return next(new AppError(409, 'No tienes espacio para más pedidos'));
 
-    // 3. Crear oferta y aceptar atómicamente usando el módulo de asignación
-    const assigned = await serializedOffer(orderId, async () => {
-      // Dentro del lock serial, crear la oferta directamente
-      await query(
-        `INSERT INTO order_driver_offers (order_id, driver_id, status, created_at, updated_at)
-         VALUES ($1, $2, 'pending', NOW(), NOW())
-         ON CONFLICT (order_id, driver_id) DO UPDATE
-         SET status='pending', updated_at=NOW()
-         WHERE order_driver_offers.status NOT IN ('pending')`,
-        [orderId, driverId]
-      );
-      return acceptOffer(orderId, driverId);
-    });
+    // 3. Crear oferta y aceptar atómicamente
+    await query(
+      `INSERT INTO order_driver_offers (order_id, driver_id, status, created_at, updated_at)
+       VALUES ($1, $2, 'pending', NOW(), NOW())
+       ON CONFLICT (order_id, driver_id) DO UPDATE
+       SET status='pending', updated_at=NOW()`,
+      [orderId, driverId]
+    );
+    const assigned = await acceptOffer(orderId, driverId);
 
     if (!assigned) return next(new AppError(409, 'El pedido ya fue tomado por otro driver'));
 

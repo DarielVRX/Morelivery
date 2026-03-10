@@ -86,20 +86,20 @@ export async function getFirstAvailableOrderForDriver(driverId) {
        -- El driver no tiene cooldown para este pedido
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id=o.id AND od.driver_id=$1
+         WHERE od.order_id=o.id AND od.driver_id=$1::uuid
            AND od.status IN ('rejected','released','expired')
            AND od.wait_until > NOW())
        -- El driver no lo aceptó ya
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id=o.id AND od.driver_id=$1 AND od.status='accepted')
+         WHERE od.order_id=o.id AND od.driver_id=$1::uuid AND od.status='accepted')
        -- El driver no tiene ya una pending offer activa en otro pedido
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
-         WHERE od.driver_id=$1 AND od.status='pending')
+         WHERE od.driver_id=$1::uuid AND od.status='pending')
        -- El driver está bajo el límite de capacidad
        AND (SELECT COUNT(*) FROM orders oo
-            WHERE oo.driver_id=$1 AND oo.status=ANY($2::text[])
+            WHERE oo.driver_id=$1::uuid AND oo.status=ANY($2::text[])
            ) < $3
      ORDER BY
        -- Pedidos sin ningún cooldown activo (más urgentes) primero
@@ -320,8 +320,8 @@ export async function getDriverProfile(driverId) {
   const r = await query(
     `SELECT dp.is_available,
             (SELECT COUNT(*)::int FROM orders o
-             WHERE o.driver_id=$1 AND o.status=ANY($2::text[])) AS active_count
-     FROM driver_profiles dp WHERE dp.user_id=$1`,
+             WHERE o.driver_id=$1::uuid AND o.status=ANY($2::text[])) AS active_count
+     FROM driver_profiles dp WHERE dp.user_id=$1::uuid`,
     [driverId, ACTIVE_STATUSES]
   );
   return r.rows[0] ?? null;
