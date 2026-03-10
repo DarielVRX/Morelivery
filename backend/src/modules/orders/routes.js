@@ -86,13 +86,21 @@ router.get('/pending-assignment', authenticate, authorize(['driver']), async (re
 });
 
 router.post('/', authenticate, authorize(['customer']), validate(createOrderSchema), async (req, res, next) => {
-  const { restaurantId, items, payment_method, tip_cents } = req.validatedBody;
+  const { restaurantId, items, payment_method, tip_cents, delivery_lat, delivery_lng } = req.validatedBody || req.body;
   console.log(`📦 [pedido.nuevo] cliente=${req.user?.userId?.slice(0,8)} pago=${payment_method} propina=${tip_cents} productos=${items?.length}`);
   try {
     let deliveryAddress = 'address-pending';
+    let finalDeliveryLat  = delivery_lat  ? Number(delivery_lat)  : null;
+    let finalDeliveryLng  = delivery_lng  ? Number(delivery_lng)  : null;
     try {
-      const c = await query('SELECT address FROM users WHERE id=$1', [req.user.userId]);
-      deliveryAddress = c.rows[0]?.address || 'address-pending';
+      const c = await query('SELECT address, home_lat, home_lng, lat, lng FROM users WHERE id=$1', [req.user.userId]);
+      const u = c.rows[0] || {};
+      deliveryAddress = u.address || 'address-pending';
+      // Si no vienen coords del frontend, usar home_lat/lng del usuario
+      if (!finalDeliveryLat && !finalDeliveryLng) {
+        finalDeliveryLat = u.home_lat ?? u.lat ?? null;
+        finalDeliveryLng = u.home_lng ?? u.lng ?? null;
+      }
     } catch (e) { if (!isMissingColumnError(e)) throw e; }
     if (!deliveryAddress || deliveryAddress === 'address-pending') return next(new AppError(400, 'Debes guardar tu dirección antes de hacer un pedido'));
 
@@ -109,11 +117,22 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
     const paymentMethod  = payment_method || 'cash';
     const tipCents = Number(tip_cents) || 0;
 
-    const orderResult = await query(
-      `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress]
-    );
+    let orderResult;
+    try {
+      orderResult = await query(
+        `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address, delivery_lat, delivery_lng)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+        [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress, finalDeliveryLat, finalDeliveryLng]
+      );
+    } catch (e) {
+      if (!isMissingColumnError(e)) throw e;
+      // Fallback si delivery_lat/lng no existen aún
+      orderResult = await query(
+        `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+        [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress]
+      );
+    }
     const order = orderResult.rows[0];
     console.log(`📦 [pedido.creado] id=${order.id.slice(0,8)} total=${order.total_cents} rest=${restaurantId.slice(0,8)}`);
 
@@ -414,7 +433,8 @@ router.get('/my', authenticate, async (req, res, next) => {
                 r.lat AS restaurant_lat, r.lng AS restaurant_lng,
                 COALESCE(c.alias, c.full_name) AS customer_first_name, c.full_name AS customer_display_name,
                 COALESCE(d.alias, d.full_name) AS driver_first_name, c.address AS customer_address,
-                c.lat AS customer_lat, c.lng AS customer_lng
+                COALESCE(o.delivery_lat, c.lat)   AS customer_lat,
+                COALESCE(o.delivery_lng, c.lng)   AS customer_lng
          FROM orders o
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id

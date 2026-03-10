@@ -153,8 +153,26 @@ export async function updateProfileAddress(userId, role, address, displayName, l
     if (ciudad     !== undefined && ciudad     !== null) { restUpdates.push(`ciudad=$${ri++}`);     restVals.push(ciudad); }
     if (restUpdates.length > 0) {
       restVals.push(userId);
-      try { await query(`UPDATE restaurants SET ${restUpdates.join(',')} WHERE owner_user_id=$${ri}`, restVals); }
-      catch (e) { if (e?.code !== '42703') throw e; }
+      try {
+        await query(`UPDATE restaurants SET ${restUpdates.join(',')} WHERE owner_user_id=$${ri}`, restVals);
+      } catch (e) {
+        if (e?.code !== '42703') {
+          // Reintentar solo con campos base si hay error de columna desconocida
+          const safeKeys = ['address','lat','lng','name'];
+          const safeU = []; const safeV = []; let si = 1;
+          restUpdates.forEach((upd, idx) => {
+            if (safeKeys.some(k => upd.startsWith(`${k}=`))) {
+              safeU.push(`${upd.split('=')[0]}=$${si++}`);
+              safeV.push(restVals[idx]);
+            }
+          });
+          if (safeU.length > 0) {
+            safeV.push(userId);
+            try { await query(`UPDATE restaurants SET ${safeU.join(',')} WHERE owner_user_id=$${si}`, safeV); }
+            catch (_) {}
+          }
+        }
+      }
     }
     if (displayName !== undefined && displayName !== null) {
       const cleanName = cleanRestaurantName(displayName);
@@ -171,8 +189,13 @@ export async function updateProfileAddress(userId, role, address, displayName, l
     // Leer confirmado desde restaurants (lat/lng viven ahí para tienda)
     let rRow = {};
     try {
-      const rc = await query('SELECT name, address, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM restaurants WHERE owner_user_id=$1', [userId]);
-      rRow = rc.rows[0] || {};
+      try {
+        const rc = await query('SELECT name, address, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM restaurants WHERE owner_user_id=$1', [userId]);
+        rRow = rc.rows[0] || {};
+      } catch (_) {
+        const rc = await query('SELECT name, address, lat, lng FROM restaurants WHERE owner_user_id=$1', [userId]);
+        rRow = rc.rows[0] || {};
+      }
     } catch (_) {}
     let uRow = {};
     try {
