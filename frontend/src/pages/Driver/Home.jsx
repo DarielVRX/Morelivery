@@ -7,34 +7,6 @@ import OfferCountdown from '../../components/OfferCountdown';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
-// Dirección corta: "Colonia · Calle NumExt"
-// Maneja tanto formato libre ("Av. Revolución 1234 Col. Centro")
-// como formato con campos separados por comas ("Av. Revolución 1234, Int. 2, Col. Centro, Morelia, Mich.")
-function shortAddr(full) {
-  if (!full || full === 'address-pending') return '';
-  const parts = full.split(',').map(s => s.trim()).filter(Boolean);
-  if (parts.length <= 1) {
-    // Texto libre sin comas — devolver completo (mejor que devolver parcial)
-    return full.trim();
-  }
-  // Formato con comas: parts[0]=calle+num, parts[1]=Int. X | colonia, etc.
-  const streetAndNum = parts[0] || '';
-  const second = parts[1] || '';
-  const colonia = second.startsWith('Int.') ? (parts[2] || '') : second;
-  if (colonia && streetAndNum) return `${colonia} · ${streetAndNum}`;
-  return streetAndNum || colonia || full;
-}
-
-// Distancia geográfica en km (Haversine)
-function haversineKm(lat1, lng1, lat2, lng2) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2
-    + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
 const STATUS_LABELS = {
   created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
   preparing:'En preparación', ready:'Listo para retiro',
@@ -106,61 +78,79 @@ async function reverseGeocode(lat, lng) {
   } catch { return null; }
 }
 
-// orderPins: [{ lat, lng, type:'restaurant'|'customer', label }]
-function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, orderPins = [] }) {
+// Mapa ligero — instancia única destruida al desmontar
+// customPin: { lat, lng } | null  — marcador manual del driver
+// onCustomPin: (latlng | null) => void
+// hasActiveOrder: boolean — si true, oculta el pin y deshabilita clicks
+function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos }) {
   const containerRef  = useRef(null);
-  const mapRef        = useRef(null); // { map, driverMarker, customMarker, orderMarkers[] }
-  const DEFAULT_POS = { lat: 20.659699, lng: -103.349609 };
+  const mapRef        = useRef(null); // { map, driverMarker, customMarker }
+
+  // Inicializar una vez cuando hay posición
+  // Posición default para inicializar el mapa cuando no hay GPS
+  const DEFAULT_POS = { lat: 20.659699, lng: -103.349609 }; // Guadalajara
 
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    if (!containerRef.current) return;
+    if (mapRef.current) return;
+
     ensureLeafletCSS();
     const initPos = driverPos || DEFAULT_POS;
+
     const t = setTimeout(() => {
       import('leaflet').then(L => {
         if (!containerRef.current || mapRef.current) return;
+
         delete L.Icon.Default.prototype._getIconUrl;
         L.Icon.Default.mergeOptions({
           iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
           iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
           shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
         });
+
         const map = L.map(containerRef.current, {
-          zoomControl: false, attributionControl: false, tap: true, tapTolerance: 15,
+          zoomControl: false, attributionControl: false,
+          tap: true, tapTolerance: 15,
         }).setView([initPos.lat, initPos.lng], driverPos ? 15 : 13);
+
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           keepBuffer: 2, updateWhenIdle: false, detectRetina: true,
         }).addTo(map);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        // Pin fijo permanente de referencia
-        const fixedIcon = L.divIcon({
-          html: `<div style="width:26px;height:32px;position:relative;">
-            <div style="width:26px;height:26px;border-radius:50% 50% 50% 0;background:#e53e3e;border:3px solid #fff;box-shadow:0 3px 10px rgba(0,0,0,0.4);transform:rotate(-45deg);"></div>
-            <div style="position:absolute;top:5px;left:5px;width:12px;height:12px;border-radius:50%;background:#fff;opacity:0.9;"></div>
-          </div>`,
-          iconSize: [26, 32], iconAnchor: [13, 32], className: '',
-        });
-        L.marker([19.755228329961394, -101.137419232067], { icon: fixedIcon, interactive: false, keyboard: false }).addTo(map);
-
+        // Marcador GPS del driver (azul) — solo si hay posición real
         let driverMarker = null;
         if (driverPos) {
           driverMarker = L.circleMarker([driverPos.lat, driverPos.lng], {
             radius: 9, fillColor: '#2563eb', fillOpacity: 1, color: '#fff', weight: 2,
           }).addTo(map);
         }
-        map.on('click', (e) => { if (!hasActiveOrder) onCustomPin?.({ lat: e.latlng.lat, lng: e.latlng.lng }); });
-        mapRef.current = { map, driverMarker, customMarker: null, orderMarkers: [] };
+
+        // Click en mapa → pin personalizado (funciona con o sin GPS)
+        map.on('click', (e) => {
+          if (hasActiveOrder) return;
+          onCustomPin?.({ lat: e.latlng.lat, lng: e.latlng.lng });
+        });
+
+        mapRef.current = { map, driverMarker, customMarker: null, pickupMarker: null, deliveryMarker: null };
         setTimeout(() => map.invalidateSize(), 300);
       }).catch(() => {});
     }, 50);
+
     return () => clearTimeout(t);
-  }, []);
+  }, []); // Solo una vez al montar
 
+  // Destruir al desmontar
   useEffect(() => {
-    return () => { if (mapRef.current?.map) { mapRef.current.map.remove(); mapRef.current = null; } };
+    return () => {
+      if (mapRef.current?.map) {
+        mapRef.current.map.remove();
+        mapRef.current = null;
+      }
+    };
   }, []);
 
+  // Actualizar posición GPS — crear el marcador si aún no existe
   useEffect(() => {
     if (!mapRef.current || !driverPos) return;
     import('leaflet').then(L => {
@@ -177,52 +167,68 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, orderPin
     }).catch(() => {});
   }, [driverPos?.lat, driverPos?.lng]);
 
+  // Sincronizar hasActiveOrder en el listener del mapa
   useEffect(() => {
     if (!mapRef.current?.map) return;
     const map = mapRef.current.map;
     map.off('click');
-    if (!hasActiveOrder) map.on('click', (e) => onCustomPin?.({ lat: e.latlng.lat, lng: e.latlng.lng }));
+    if (!hasActiveOrder) {
+      map.on('click', (e) => onCustomPin?.({ lat: e.latlng.lat, lng: e.latlng.lng }));
+    }
   }, [hasActiveOrder, onCustomPin]);
 
+  // Agregar/quitar pin personalizado
   useEffect(() => {
     if (!mapRef.current) return;
     const { map } = mapRef.current;
     import('leaflet').then(L => {
-      if (mapRef.current.customMarker) { mapRef.current.customMarker.remove(); mapRef.current.customMarker = null; }
+      // Quitar pin anterior
+      if (mapRef.current.customMarker) {
+        mapRef.current.customMarker.remove();
+        mapRef.current.customMarker = null;
+      }
+      // Agregar nuevo si existe y no hay pedido activo
       if (customPin && !hasActiveOrder) {
         const icon = L.divIcon({
           html: `<div style="width:22px;height:22px;border-radius:50% 50% 50% 0;background:var(--brand);border:2px solid #fff;box-shadow:0 2px 6px #0004;transform:rotate(-45deg)"></div>`,
           iconSize: [22, 22], iconAnchor: [11, 22], className: ''
         });
-        mapRef.current.customMarker = L.marker([customPin.lat, customPin.lng], { icon }).addTo(map);
+        const cm = L.marker([customPin.lat, customPin.lng], { icon }).addTo(map);
+        mapRef.current.customMarker = cm;
       }
     });
   }, [customPin?.lat, customPin?.lng, hasActiveOrder]);
 
-  // Pins de pedidos activos: tienda=verde 🏪, cliente=naranja 📦
+  // Marcadores de tienda (verde) y cliente (naranja) para pedido activo
   useEffect(() => {
     if (!mapRef.current) return;
     const { map } = mapRef.current;
     import('leaflet').then(L => {
       if (!mapRef.current) return;
-      (mapRef.current.orderMarkers || []).forEach(m => m.remove());
-      mapRef.current.orderMarkers = [];
-      for (const pin of orderPins) {
-        if (!pin?.lat || !pin?.lng) continue;
-        const isRest = pin.type === 'restaurant';
-        const color  = isRest ? '#16a34a' : '#ea580c';
-        const emoji  = isRest ? '🏪' : '📦';
+      // Quitar marcadores anteriores
+      if (mapRef.current.pickupMarker)   { mapRef.current.pickupMarker.remove();   mapRef.current.pickupMarker = null; }
+      if (mapRef.current.deliveryMarker) { mapRef.current.deliveryMarker.remove(); mapRef.current.deliveryMarker = null; }
+      if (pickupPos) {
         const icon = L.divIcon({
-          html: `<div style="background:${color};color:#fff;border-radius:20px;padding:3px 8px;font-size:13px;box-shadow:0 2px 6px rgba(0,0,0,0.35);border:2px solid #fff;white-space:nowrap;">${emoji}</div>`,
-          iconSize: [36, 26], iconAnchor: [18, 13], className: '',
+          html: `<div style="width:20px;height:20px;border-radius:50%;background:#16a34a;border:2px solid #fff;box-shadow:0 2px 6px #0004;display:flex;align-items:center;justify-content:center;font-size:11px">🏪</div>`,
+          iconSize: [20, 20], iconAnchor: [10, 10], className: ''
         });
-        const m = L.marker([pin.lat, pin.lng], { icon, keyboard: false }).addTo(map);
-        if (pin.label) m.bindTooltip(pin.label, { permanent: false, direction: 'top' });
-        mapRef.current.orderMarkers.push(m);
+        mapRef.current.pickupMarker = L.marker([pickupPos.lat, pickupPos.lng], { icon })
+          .addTo(map).bindPopup('Tienda');
+      }
+      if (deliveryPos) {
+        const icon = L.divIcon({
+          html: `<div style="width:20px;height:20px;border-radius:50%;background:#f97316;border:2px solid #fff;box-shadow:0 2px 6px #0004;display:flex;align-items:center;justify-content:center;font-size:11px">📦</div>`,
+          iconSize: [20, 20], iconAnchor: [10, 10], className: ''
+        });
+        mapRef.current.deliveryMarker = L.marker([deliveryPos.lat, deliveryPos.lng], { icon })
+          .addTo(map).bindPopup('Cliente');
       }
     });
-  }, [JSON.stringify(orderPins)]);
+  }, [pickupPos?.lat, pickupPos?.lng, deliveryPos?.lat, deliveryPos?.lng]);
 
+  // SIEMPRE renderizamos el div del mapa — el containerRef nunca se desmonta.
+  // El mensaje GPS se superpone como overlay cuando no hay posición.
   return (
     <div style={{ height:'100%', width:'100%', position:'relative' }}>
       <div ref={containerRef} style={{ height:'100%', width:'100%' }} />
@@ -257,37 +263,6 @@ export default function DriverHome() {
   const [msg, setMsg] = useState('');
   const loadDataRef   = useRef(null);
 
-  // Permiso de notificaciones al montar
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
-
-  function notifyNewOffer(data) {
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    const earn = (data.delivery_fee_cents||0) + Math.round((data.service_fee_cents||0)*0.5) + (data.tip_cents||0) || 0;
-    const rest = data.restaurant_name || data.restaurantName || 'Pedido nuevo';
-    const body = [
-      data.restaurant_address ? shortAddr(data.restaurant_address) : null,
-      `Entrega: ${shortAddr(data.customer_address || data.delivery_address || '')}`,
-      earn > 0 ? `Ganancia: ${fmt(earn)}` : null,
-      `⏱ ${data.secondsLeft ?? data.seconds_left ?? 60}s para responder`,
-    ].filter(Boolean).join('\n');
-    const title = `🛵 Oferta${earn > 0 ? ` · ${fmt(earn)}` : ''} — ${rest}`;
-    const opts = {
-      body, icon: '/logo.svg', badge: '/logo.svg',
-      tag: `offer-${data.orderId}`, renotify: true,
-      requireInteraction: true, silent: false, vibrate: [200, 100, 200],
-      data: { url: 'https://morelivery.vercel.app/driver' },
-    };
-    try {
-      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.ready.then(reg => reg.showNotification(title, opts)).catch(() => new Notification(title, opts));
-      } else { new Notification(title, opts); }
-    } catch (_) {}
-  }
-
   // GPS activo si disponible O tiene pedido activo
   const hasActiveOrder = Boolean(activeOrder && !['delivered','cancelled'].includes(activeOrder.status));
 
@@ -306,22 +281,19 @@ export default function DriverHome() {
   }, [customPin?.lat, customPin?.lng]);
   const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, availability, hasActiveOrder);
 
+  // Ref para el token — evita que el polling sea invalidado al cambiar auth
   const tokenRef = useRef(auth.token);
   useEffect(() => { tokenRef.current = auth.token; }, [auth.token]);
 
-  // loadOrders: solo pedidos activos — no toca pendingOffer (SSE es source of truth)
-  const loadOrders = useCallback(async () => {
-    if (!auth.token) return;
+  // Anunciar presencia al backend — usa ref para no invalidar el intervalo del polling
+  const announceListener = useCallback(async () => {
+    if (!tokenRef.current) return;
     try {
-      const od = await apiFetch('/orders/my', {}, auth.token);
-      const active = (od.orders || [])
-        .filter(o => !['delivered','cancelled'].includes(o.status))
-        .sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at))[0] || null;
-      setActiveOrder(active);
+      await apiFetch('/drivers/listener', { method:'POST' }, tokenRef.current);
+      loadDataRef.current?.();
     } catch (_) {}
-  }, [auth.token]);
+  }, []); // sin deps — usa refs internamente
 
-  // loadData: sincronización completa (al montar y después de aceptar/rechazar)
   const loadData = useCallback(async () => {
     if (!auth.token) return;
     try {
@@ -329,42 +301,113 @@ export default function DriverHome() {
         apiFetch('/orders/my', {}, auth.token),
         apiFetch('/drivers/offers', {}, auth.token),
       ]);
+      // Pedido aceptado con mayor antigüedad (accepted_at más viejo)
       const active = (od.orders || [])
         .filter(o => !['delivered','cancelled'].includes(o.status))
         .sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at))[0] || null;
       setActiveOrder(active);
+      // Una sola oferta a la vez
       const offers = off.offers || [];
       const newOffer = offers.length > 0 ? offers[0] : null;
       setPendingOffer(prev => {
+        // Si es una oferta diferente, resetear el minimizado
         if (newOffer?.id !== prev?.id) setOfferMinimized(false);
         return newOffer;
       });
     } catch (_) {}
   }, [auth.token]);
 
-  // loadDataRef apunta a loadOrders (SSE es source of truth para ofertas)
-  useEffect(() => { loadDataRef.current = loadOrders; });
+  useEffect(() => { loadDataRef.current = loadData; });
 
+  // Cargar datos al montar + solicitar permiso de notificaciones
   useEffect(() => {
     setAvailability(Boolean(auth.user?.driver?.is_available));
     loadData();
+    // Solicitar permiso para notificaciones nativas (necesario para segundo plano)
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
   }, [auth.token]);
 
-  // SSE: fuente de verdad para nuevas ofertas
+  // Enviar notificación al SW para que la muestre en segundo plano
+  const notifyDriver = useCallback((title, body) => {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.ready.then(reg => {
+      if (reg.active) {
+        reg.active.postMessage({ type: 'SHOW_NOTIFICATION', title, body, tag: 'morelivery-offer' });
+      }
+    });
+    // También mostrar en primer plano si el permiso lo permite
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try { new Notification(title, { body, tag: 'morelivery-offer' }); } catch (_) {}
+    }
+  }, []);
+
+  // ── Polling activo: mientras disponible y sin oferta/pedido activo,
+  //    llamar al listener cada 3s para "jalar" el primer pedido disponible.
+  //    Se detiene cuando: no disponible, ya hay oferta pending, o hay pedido activo.
+  // Refs para las condiciones del polling — evita cancelar/recrear el interval
+  const availabilityRef  = useRef(availability);
+  const pendingOfferRef  = useRef(pendingOffer);
+  const hasActiveOrderRef = useRef(hasActiveOrder);
+  useEffect(() => { availabilityRef.current  = availability;   }, [availability]);
+  useEffect(() => { pendingOfferRef.current  = pendingOffer;   }, [pendingOffer]);
+  useEffect(() => { hasActiveOrderRef.current = hasActiveOrder; }, [hasActiveOrder]);
+
+  // Polling permanente cada 4s — condiciones evaluadas en runtime con refs
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!availabilityRef.current) return;   // no disponible
+      if (pendingOfferRef.current)  return;   // ya tiene oferta
+      if (hasActiveOrderRef.current) return;  // ya tiene pedido activo
+      announceListener();
+    }, 4000);
+
+    // Primera llamada inmediata al montar
+    setTimeout(() => {
+      if (availabilityRef.current && !pendingOfferRef.current && !hasActiveOrderRef.current) {
+        announceListener();
+      }
+    }, 500);
+
+    return () => clearInterval(id);
+  }, [announceListener]); // solo al montar, announceListener es estable
+
+  // SSE: recibir ofertas push sin esperar poll
   const handleNewOffer = useCallback((data) => {
-    console.log(`[DriverHome] handleNewOffer orderId=${data.orderId} secs=${data.secondsLeft}`);
+    console.log(`[DriverHome] handleNewOffer orderId=${data.orderId} secondsLeft=${data.secondsLeft}`);
     setPendingOffer(prev => {
-      if (prev) return prev;
-      notifyNewOffer(data);
+      // Aceptar nueva oferta si no hay ninguna, o si la anterior ya expiró (secondsLeft<=0)
+      if (prev && (prev.seconds_left ?? 1) > 0) return prev;
       return { id: data.orderId, ...data, seconds_left: data.secondsLeft ?? 60 };
     });
+    // Notificación nativa para segundo plano
+    notifyDriver('🛵 Nuevo pedido disponible', `Tienes ${data.secondsLeft ?? 60}s para aceptar`);
+    // Recargar para datos completos (items)
+    setTimeout(() => loadDataRef.current?.(), 400);
+  }, [notifyDriver]);
+
+  // SSE: manejar offer_cancelled (otro driver tomó la oferta) y recargar en reconexión
+  const handleOrderUpdate = useCallback((data) => {
+    if (data.type === 'offer_cancelled' || data.orderId) {
+      // Si la oferta cancelada es la que tenemos activa, limpiarla
+      setPendingOffer(prev => (prev && prev.id === data.orderId) ? null : prev);
+    }
+    loadDataRef.current?.();
+  }, []);
+
+  const handleReconnect = useCallback(() => {
+    // Al reconectar SSE: re-fetch para no perder ofertas emitidas mientras estaba desconectado
+    loadDataRef.current?.();
   }, []);
 
   useRealtimeOrders(
     auth.token,
-    () => loadDataRef.current?.(),
+    handleOrderUpdate,
     () => {},
     handleNewOffer,
+    undefined,
+    handleReconnect,
   );
 
   async function toggleAvailability() {
@@ -459,14 +502,10 @@ export default function DriverHome() {
           customPin={customPin}
           onCustomPin={setCustomPin}
           hasActiveOrder={hasActiveOrder}
-          orderPins={activeOrder ? [
-            activeOrder.restaurant_lat && activeOrder.restaurant_lng
-              ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng), type:'restaurant', label: activeOrder.restaurant_name || 'Tienda' }
-              : null,
-            activeOrder.customer_lat && activeOrder.customer_lng
-              ? { lat: Number(activeOrder.customer_lat), lng: Number(activeOrder.customer_lng), type:'customer', label: 'Cliente' }
-              : null,
-          ].filter(Boolean) : []}
+          pickupPos={activeOrder?.restaurant_lat && activeOrder?.restaurant_lng
+            ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) } : null}
+          deliveryPos={activeOrder?.customer_lat && activeOrder?.customer_lng
+            ? { lat: Number(activeOrder.customer_lat), lng: Number(activeOrder.customer_lng) } : null}
         />
 
         {/* Panel de pin personalizado */}
@@ -559,29 +598,16 @@ export default function DriverHome() {
               )}
               {(pendingOffer.restaurant_address || pendingOffer.restaurantAddress) && (
                 <div style={{ marginBottom:'0.1rem' }}>
-                  <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>📍 </span>
-                  <span>{shortAddr(pendingOffer.restaurant_address || pendingOffer.restaurantAddress)}</span>
+                  <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Dirección tienda: </span>
+                  <strong>{pendingOffer.restaurant_address || pendingOffer.restaurantAddress}</strong>
                 </div>
               )}
               {(pendingOffer.customer_address || pendingOffer.customerAddress || pendingOffer.delivery_address) && (
                 <div style={{ marginBottom:'0.1rem' }}>
                   <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Entrega: </span>
-                  <span>{shortAddr(pendingOffer.customer_address || pendingOffer.customerAddress || pendingOffer.delivery_address)}</span>
+                  <strong>{pendingOffer.customer_address || pendingOffer.customerAddress || pendingOffer.delivery_address}</strong>
                 </div>
               )}
-              {(() => {
-                const rLat = pendingOffer.restaurant_lat ?? pendingOffer.restaurantLat;
-                const rLng = pendingOffer.restaurant_lng ?? pendingOffer.restaurantLng;
-                const cLat = pendingOffer.customer_lat   ?? pendingOffer.customerLat;
-                const cLng = pendingOffer.customer_lng   ?? pendingOffer.customerLng;
-                if (!rLat || !rLng || !cLat || !cLng) return null;
-                const km = haversineKm(Number(rLat), Number(rLng), Number(cLat), Number(cLng)).toFixed(1);
-                return (
-                  <div style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
-                    📏 {km} km entre tienda y cliente
-                  </div>
-                );
-              })()}
             </div>
             {/* Ganancia calculada desde los campos del backend */}
             {(() => {
@@ -599,7 +625,7 @@ export default function DriverHome() {
             <OfferCountdown
               key={pendingOffer.id}
               secondsLeft={pendingOffer.seconds_left ?? pendingOffer.secondsLeft ?? 60}
-              onExpired={() => { setPendingOffer(null); setOfferMinimized(false); }}
+              onExpired={() => { setPendingOffer(null); loadData(); }}
             />
             <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.45rem' }}>
               <button className="btn-primary btn-sm" style={{ flex:1 }}
@@ -624,14 +650,7 @@ export default function DriverHome() {
         const driverEarn = (activeOrder.delivery_fee_cents||0)
                           + Math.round((activeOrder.service_fee_cents||0)*0.5)
                           + (activeOrder.tip_cents||0);
-        // Distancia tienda → cliente
-        const distKm = (activeOrder.restaurant_lat && activeOrder.restaurant_lng &&
-                        activeOrder.customer_lat   && activeOrder.customer_lng)
-          ? haversineKm(
-              Number(activeOrder.restaurant_lat), Number(activeOrder.restaurant_lng),
-              Number(activeOrder.customer_lat),   Number(activeOrder.customer_lng)
-            ).toFixed(1)
-          : null;
+        // Estados del driver (separados de estados de tienda)
         const DRIVER_STATUS = {
           assigned:'Asignado — ve a recoger', on_the_way:'En camino al cliente',
           preparing:'Esperando en tienda', ready:'Listo para retiro',
@@ -668,12 +687,7 @@ export default function DriverHome() {
                   <strong>{activeOrder.restaurant_name}</strong>
                   {activeOrder.restaurant_address && (
                     <div style={{ color:'var(--gray-500)', fontSize:'0.77rem' }}>
-                      {shortAddr(activeOrder.restaurant_address)}
-                    </div>
-                  )}
-                  {distKm !== null && (
-                    <div style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
-                      📏 {distKm} km entre tienda y cliente
+                      {activeOrder.restaurant_address}
                     </div>
                   )}
                   {isCash
@@ -690,12 +704,7 @@ export default function DriverHome() {
                   <strong>{activeOrder.customer_name || 'Cliente'}</strong>
                   {(activeOrder.customer_address || activeOrder.delivery_address) && (
                     <div style={{ color:'var(--gray-500)', fontSize:'0.77rem' }}>
-                      {shortAddr(activeOrder.customer_address || activeOrder.delivery_address)}
-                    </div>
-                  )}
-                  {distKm !== null && (
-                    <div style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
-                      📏 {distKm} km entre tienda y cliente
+                      {activeOrder.customer_address || activeOrder.delivery_address}
                     </div>
                   )}
                   {isCash

@@ -107,8 +107,9 @@ export default function DriverOrders() {
 
   // Pedidos sin ofertar: excluir los que ya son activos de este driver
   const activeIds = useMemo(() => new Set(active.map(o => o.id)), [active]);
-  // Excluir: activos de este driver Y pedidos con oferta activa para cualquier driver
-  const unoffered = useMemo(() => waitingOrders.filter(o => !activeIds.has(o.id) && !o.has_pending_offer), [waitingOrders, activeIds]);
+  // Mostrar todos los pedidos sin driver excepto los que ya son activos de este driver.
+  // El cooldown propio no bloquea — se puede aceptar directamente desde aquí.
+  const unoffered = useMemo(() => waitingOrders.filter(o => !activeIds.has(o.id)), [waitingOrders, activeIds]);
 
   const [actionMsg, setActionMsg] = useState('');
   const [actionLoading, setActionLoading] = useState(null);
@@ -199,10 +200,26 @@ export default function DriverOrders() {
               return (
                 <li key={o.id} className="card" style={{ borderLeft:`3px solid var(--brand)`,
                   marginBottom:'0.5rem', padding:'0.6rem 0.75rem 0.75rem', overflow:'hidden' }}>
-                  {/* Vista igual que oferta en home */}
-                  <div style={{ fontSize:'0.7rem', fontWeight:800, textTransform:'uppercase',
-                    letterSpacing:'0.5px', color:'var(--brand)', marginBottom:'0.25rem' }}>
-                    Pedido disponible
+                  {/* Encabezado con estado */}
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.25rem' }}>
+                    <div style={{ fontSize:'0.7rem', fontWeight:800, textTransform:'uppercase',
+                      letterSpacing:'0.5px', color:'var(--brand)' }}>
+                      Pedido disponible
+                    </div>
+                    <div style={{ display:'flex', gap:'0.3rem' }}>
+                      {o.has_pending_offer && (
+                        <span style={{ fontSize:'0.65rem', background:'#fef3c7', color:'#92400e',
+                          border:'1px solid #fde68a', borderRadius:8, padding:'0.1rem 0.4rem', fontWeight:600 }}>
+                          Ofertado
+                        </span>
+                      )}
+                      {o.cooldown_secs > 0 && (
+                        <span style={{ fontSize:'0.65rem', background:'#f1f5f9', color:'var(--gray-500)',
+                          border:'1px solid var(--gray-200)', borderRadius:8, padding:'0.1rem 0.4rem' }}>
+                          CD {o.cooldown_secs}s
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div style={{ fontSize:'0.82rem', color:'var(--gray-700)', marginBottom:'0.3rem' }}>
                     {o.restaurant_address && (

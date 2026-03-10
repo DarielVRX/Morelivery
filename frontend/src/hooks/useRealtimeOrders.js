@@ -12,8 +12,9 @@ import { API_BASE } from '../api/client';
  * onDriverLocation(data) — driver_location
  * onNewOffer(data)       — new_offer  (push sin esperar poll)
  * onChatMessage(data)    — chat_message
+ * onReconnect()          — llamado al (re)conectar — útil para re-fetch de estado
  */
-export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewOffer, onChatMessage) {
+export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewOffer, onChatMessage, onReconnect) {
   const esRef          = useRef(null);
   const reconnectTimer = useRef(null);
   const mountedRef     = useRef(true);
@@ -25,12 +26,14 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
   const cbLocation = useRef(onDriverLocation);
   const cbOffer    = useRef(onNewOffer);
   const cbChat     = useRef(onChatMessage);
+  const cbReconnect = useRef(onReconnect);
 
   // Actualizar refs cuando cambian los callbacks (sin re-conectar)
-  useEffect(() => { cbUpdate.current   = onOrderUpdate;    }, [onOrderUpdate]);
-  useEffect(() => { cbLocation.current = onDriverLocation; }, [onDriverLocation]);
-  useEffect(() => { cbOffer.current    = onNewOffer;       }, [onNewOffer]);
-  useEffect(() => { cbChat.current     = onChatMessage;    }, [onChatMessage]);
+  useEffect(() => { cbUpdate.current    = onOrderUpdate;    }, [onOrderUpdate]);
+  useEffect(() => { cbLocation.current  = onDriverLocation; }, [onDriverLocation]);
+  useEffect(() => { cbOffer.current     = onNewOffer;       }, [onNewOffer]);
+  useEffect(() => { cbChat.current      = onChatMessage;    }, [onChatMessage]);
+  useEffect(() => { cbReconnect.current = onReconnect;      }, [onReconnect]);
 
   const connect = useCallback(() => {
     if (!token || !mountedRef.current) return;
@@ -54,6 +57,9 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
         cbOffer.current?.(data);
       } catch (_) {}
     });
+    es.addEventListener('offer_cancelled', (e) => {
+      try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {}
+    });
     es.addEventListener('offer_assigned', (e) => {
       try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {}
     });
@@ -64,6 +70,8 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
       retryCount.current = 0;
       console.log('📡 [SSE] conexión establecida');
       clearTimeout(reconnectTimer.current);
+      // Re-fetch al reconectar para no perder ofertas/actualizaciones perdidas durante desconexión
+      cbReconnect.current?.();
     });
 
     es.onerror = () => {
