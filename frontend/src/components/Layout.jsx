@@ -81,7 +81,7 @@ export default function Layout({ children }) {
                 {label}
               </Link>
             ))}
-            <button onClick={logout}>Salir</button>
+            <button onClick={logout} style={{ textDecoration:'none' }}>Salir</button>
           </nav>
         )}
 
