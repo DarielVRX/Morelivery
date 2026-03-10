@@ -47,6 +47,7 @@ export default function RestaurantMenu() {
   const [price, setPrice]       = useState('');
   const [msg, setMsg]           = useState('');
   const [editingId, setEditingId] = useState(null);
+  const [editingIsAvailable, setEditingIsAvailable] = useState(true);
   const [formOpen, setFormOpen]   = useState(false); // colapsado por defecto
   // Imagen
   const [editingImg, setEditingImg] = useState(null);
@@ -98,6 +99,7 @@ export default function RestaurantMenu() {
     try {
       const payload = { name: name.trim(), description: description.trim(), priceCents: cents };
       if (editingId) {
+        payload.isAvailable = editingIsAvailable;
         await apiFetch(`/restaurants/menu-items/${editingId}`, { method:'PATCH', body: JSON.stringify(payload) }, auth.token);
       } else {
         await apiFetch('/restaurants/menu-items', { method:'POST', body: JSON.stringify(payload) }, auth.token);
@@ -109,6 +111,7 @@ export default function RestaurantMenu() {
 
   function startEdit(product) {
     setEditingId(product.id);
+    setEditingIsAvailable(product.is_available ?? true);
     setName(product.name);
     setDesc(product.description || '');
     setPrice((product.price_cents / 100).toFixed(2));
@@ -117,7 +120,7 @@ export default function RestaurantMenu() {
   }
 
   function resetForm() {
-    setEditingId(null); setName(''); setDesc(''); setPrice(''); setMsg('');
+    setEditingId(null); setEditingIsAvailable(true); setName(''); setDesc(''); setPrice(''); setMsg('');
     setFormOpen(false);
   }
 
@@ -134,8 +137,8 @@ export default function RestaurantMenu() {
   async function saveImage(productId) {
     setSavingImg(true);
     try {
-      // Prioridad: imagen local (dataUrl) > URL manual
-      const imageToSave = dataUrl || imgUrl.trim() || null;
+      // Solo imagen local (base64)
+      const imageToSave = dataUrl || null;
       await apiFetch(`/restaurants/menu-items/${productId}`, {
         method:'PATCH', body: JSON.stringify({ imageUrl: imageToSave })
       }, auth.token);
@@ -148,7 +151,6 @@ export default function RestaurantMenu() {
   async function deleteProduct(productId) {
     try {
       await apiFetch(`/restaurants/menu-items/${productId}`, { method:'DELETE' }, auth.token);
-
       setMsg('');
       setConfirmDelete(null);
       load();
@@ -310,16 +312,8 @@ export default function RestaurantMenu() {
                               style={{ width:40, height:40, borderRadius:4, objectFit:'cover', border:'1px solid var(--gray-200)' }} />
                           )}
                         </div>
-                        {/* Opción 2: URL — solo si no hay imagen local */}
-                        {!preview && (
-                          <input
-                            value={imgUrl} onChange={e => setImgUrl(e.target.value)}
-                            placeholder="O pega una URL (https://...)"
-                            style={{ fontSize:'0.82rem' }}
-                          />
-                        )}
                         <div style={{ display:'flex', gap:'0.4rem' }}>
-                          <button className="btn-primary btn-sm" disabled={savingImg || (!preview && !imgUrl.trim())}
+                          <button className="btn-primary btn-sm" disabled={savingImg || !preview}
                             onClick={() => saveImage(product.id)}
                             style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}>
                             {savingImg ? '...' : 'Guardar'}

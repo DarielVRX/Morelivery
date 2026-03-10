@@ -239,6 +239,32 @@ router.patch('/:id/cancel', authenticate, authorize(['customer']), async (req, r
   } catch (error) { return next(error); }
 });
 
+/* ── PATCH /:id/cancel-restaurant ── */
+router.patch('/:id/cancel-restaurant', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const { note } = req.body || {};
+    if (!note?.trim()) return next(new AppError(400, 'El motivo de cancelación es obligatorio'));
+    // Verificar que el pedido pertenece a este restaurante y es cancelable
+    const check = await query(
+      `SELECT o.id, o.status FROM orders o
+       JOIN restaurants r ON r.id = o.restaurant_id
+       WHERE o.id=$1 AND r.owner_user_id=$2`,
+      [req.params.id, req.user.userId]
+    );
+    if (check.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
+    const cancellable = ['created','pending_driver','assigned','accepted','preparing','ready'];
+    if (!cancellable.includes(check.rows[0].status))
+      return next(new AppError(409, 'El pedido ya no puede cancelarse en este estado'));
+    const result = await query(
+      `UPDATE orders SET status='cancelled', restaurant_note=$2, cancelled_at=NOW(), updated_at=NOW()
+       WHERE id=$1 RETURNING *`,
+      [req.params.id, `[CANCELADO POR TIENDA] ${note.trim()}`]
+    );
+    await notifyOrderParties(req.params.id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
+    return res.json({ order: result.rows[0] });
+  } catch (error) { return next(error); }
+});
+
 /* ── PATCH /:id/suggest ── */
 router.patch('/:id/suggest', authenticate, authorize(['restaurant']), validate(suggestionSchema), async (req, res, next) => {
   try {

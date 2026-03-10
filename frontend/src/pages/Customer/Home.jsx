@@ -69,8 +69,16 @@ export default function CustomerHome() {
   }
   async function respondSugg(orderId, accepted) {
     try {
+      const body = { accepted };
+      if (accepted) {
+        const draft = suggDrafts[orderId] || {};
+        const items = Object.entries(draft)
+          .filter(([, q]) => Number(q) > 0)
+          .map(([menuItemId, qty]) => ({ menuItemId, quantity: Number(qty) }));
+        if (items.length > 0) body.items = items;
+      }
       await apiFetch(`/orders/${orderId}/suggestion-response`, {
-        method:'PATCH', body: JSON.stringify({ accepted })
+        method:'PATCH', body: JSON.stringify(body)
       }, auth.token);
       setSuggFor(''); loadSuggestions();
     } catch (e) { setMsg(e.message); }
@@ -147,6 +155,26 @@ export default function CustomerHome() {
                   );
                 })}
               </div>
+              {(() => {
+                const menuItems = restaurantMenus[order.restaurant_id] || order.suggestion_items || [];
+                const draft = suggDrafts[order.id] || {};
+                const subtotal = menuItems.reduce((sum, item) => {
+                  const id = item.id || item.menuItemId;
+                  const qty = Number(draft[id] ?? (order.suggestion_items||[]).find(s=>s.menuItemId===id)?.quantity ?? 0);
+                  return sum + (item.price_cents || item.unitPriceCents || 0) * qty;
+                }, 0);
+                if (subtotal <= 0) return null;
+                const svc = Math.round(subtotal * 0.05);
+                const del = Math.round(subtotal * 0.10);
+                return (
+                  <div style={{ fontSize:'0.78rem', color:'#92400e', background:'#fef3c7', borderRadius:6, padding:'0.35rem 0.6rem', marginBottom:'0.4rem' }}>
+                    Total estimado: <strong>{fmt(subtotal + svc + del)}</strong>
+                    <span style={{ color:'#b45309', marginLeft:'0.4rem', fontWeight:400 }}>
+                      (subtotal {fmt(subtotal)} + servicio {fmt(svc)} + envío {fmt(del)})
+                    </span>
+                  </div>
+                );
+              })()}
               <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
                 <button className="btn-primary btn-sm" onClick={()=>respondSugg(order.id,true)}>Aceptar</button>
                 <button className="btn-sm btn-danger" onClick={()=>respondSugg(order.id,false)}>Rechazar</button>

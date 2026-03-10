@@ -18,7 +18,7 @@ import {
   rejectDriverOffer, releaseDriverOffer,
   expireAllPendingForDriver,
   expireTimedOutOffersInDB,
-  getOpenOrder,
+  getOpenOrder, getQueuedOrders,
 } from './queries.js';
 import { serializedOffer, hasActiveChain } from './queue.js';
 import { offerNextDrivers } from './core.js';
@@ -129,5 +129,19 @@ export async function expireTimedOutOffers(onOffer) {
     } else {
       log(orderId, 'oferta expirada — pedido ya no necesita driver, skip');
     }
+  }
+
+  // Barrer pedidos huérfanos (pending_driver sin oferta activa ni cadena en memoria).
+  // Cubre el caso de un driver que se conecta vía SSE sin cambiar disponibilidad,
+  // o pedidos que quedaron varados entre ticks.
+  try {
+    const orphans = await getQueuedOrders();
+    for (const ord of orphans) {
+      if (!hasActiveChain(ord.id)) {
+        serializedOffer(ord.id, offerNextDrivers, onOffer);
+      }
+    }
+  } catch (e) {
+    logWarn('ticker', `error barriendo pedidos huérfanos: ${e.message}`);
   }
 }
