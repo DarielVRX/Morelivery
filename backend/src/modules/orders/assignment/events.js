@@ -132,12 +132,13 @@ export async function expireTimedOutOffers(onOffer) {
   }
 
   // Barrer pedidos huérfanos (pending_driver sin oferta activa ni cadena en memoria).
-  // Cubre el caso de un driver que se conecta vía SSE sin cambiar disponibilidad,
-  // o pedidos que quedaron varados entre ticks.
+  // Solo pedidos con candidatos disponibles ahora (has_candidates=true).
+  // Pedidos donde todos los drivers están en cooldown se reencolan solos cuando
+  // expira su oferta via expireTimedOutOffersInDB — no los tocamos aquí.
   try {
     const orphans = await getQueuedOrders();
     for (const ord of orphans) {
-      if (!hasActiveChain(ord.id)) {
+      if (ord.has_candidates && !hasActiveChain(ord.id)) {
         serializedOffer(ord.id, offerNextDrivers, onOffer);
       }
     }
