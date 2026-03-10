@@ -132,7 +132,7 @@ export async function updateProfileAddress(userId, role, address, displayName, l
       try { await query('UPDATE restaurants SET name=$1 WHERE owner_user_id=$2', [cleanName, userId]); }
       catch (e) { if (e?.code !== '42703') throw e; }
       try {
-        await query('UPDATE users SET full_name=$1, alias=$1 WHERE id=$2::uuid', [displayName.trim(), userId]);
+        await query('UPDATE users SET full_name=$1::text, alias=$1::text WHERE id=$2::uuid', [displayName.trim(), userId]);
       } catch (e) {
         if (e?.code === '42703') {
           try { await query('UPDATE users SET full_name=$1 WHERE id=$2', [displayName.trim(), userId]); } catch (_) {}
