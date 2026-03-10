@@ -390,5 +390,3 @@ export async function getPendingAssignmentOrders(driverId) {
   );
   return r.rows;
 }
-  return r.rows;
-}

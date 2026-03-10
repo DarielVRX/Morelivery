@@ -2,64 +2,47 @@
 import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
-import { offerOrdersToDriver, expireTimedOutOffers, acceptOffer, rejectOffer, releaseOrder, serializedOffer } from '../orders/assignment/index.js';
+import { acceptOffer, rejectOffer, releaseOrder, serializedOffer, offerNextDrivers, getQueuedOrders } from '../orders/assignment/index.js';
 import { sseHub } from '../events/hub.js';
+import { offerCb } from '../events/offerCallback.js';
 import { AppError } from '../../utils/errors.js';
 
 const router = Router();
 
-// Callback SSE para notificar ofertas — evita import circular en assignment.js
-function makeOfferCallback() {
-  return function onOffer(driverId, orderId, data) {
-    try {
-      sseHub.notifyNewOffer(driverId, orderId, data);
-    } catch (_) {}
-  };
-}
-const offerCb = makeOfferCallback();
-
-// Rate-limit del listener: evitar que el mismo driver dispare offerOrdersToDriver
-// más de una vez cada 10s (el SSE se reconecta seguido y el frontend llama /listener)
-const listenerLastCall = new Map(); // driverId → timestamp
-const LISTENER_MIN_INTERVAL_MS = 2_000; // sincronizado con cron de 1s del frontend
-
 function isMissingColumnError(e)   { return e?.code === '42703'; }
 function isMissingRelationError(e) { return e?.code === '42P01'; }
 
-/* ── POST /drivers/listener ── driver anuncia presencia ─────────────────────── */
-router.post('/listener', authenticate, authorize(['driver']), async (req, res, next) => {
-  try {
-    const driverId = req.user.userId;
-    const now = Date.now();
-    const last = listenerLastCall.get(driverId) || 0;
-
-    if (now - last < LISTENER_MIN_INTERVAL_MS) {
-      // Demasiado frecuente — solo expirar ofertas, no re-encolear pedidos
-      console.log(`🛵 [driver.ping] driver=${driverId.slice(0,8)} → rate-limit (${Math.round((now-last)/1000)}s desde último ping)`);
-      await expireTimedOutOffers(offerCb);
-      return res.json({ ok: true, rateLimited: true });
-    }
-
-    listenerLastCall.set(driverId, now);
-    console.log(`🛵 [driver.ping] driver=${driverId.slice(0,8)} → buscando pedidos disponibles`);
-    await expireTimedOutOffers(offerCb);
-    await offerOrdersToDriver(driverId, offerCb);
-    return res.json({ ok: true });
-  } catch (error) { return next(error); }
+// POST /drivers/listener — mantenido por compatibilidad con clientes viejos,
+// pero ya no es necesario. El sistema es push puro desde el servidor.
+router.post('/listener', authenticate, authorize(['driver']), async (_req, res) => {
+  return res.json({ ok: true, deprecated: true });
 });
 
 /* ── PATCH /drivers/availability ────────────────────────────────────────────── */
-// Disponibilidad es independiente de "online" (tener SSE abierto).
-// GPS activo se controla en el frontend basado en: is_available OR tiene pedido activo.
 router.patch('/availability', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const { isAvailable } = req.body;
+    const driverId = req.user.userId;
     const result = await query(
       'UPDATE driver_profiles SET is_available=$1 WHERE user_id=$2 RETURNING *',
-      [Boolean(isAvailable), req.user.userId]
+      [Boolean(isAvailable), driverId]
     );
     if (result.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
-    if (isAvailable) await offerOrdersToDriver(req.user.userId, offerCb);
+
+    if (isAvailable) {
+      // Push: buscar todos los pedidos abiertos sin driver y disparar assignment.
+      // serializedOffer es idempotente — si ya tiene cadena activa la ignora.
+      try {
+        const openOrders = await getQueuedOrders();
+        for (const ord of openOrders) {
+          serializedOffer(ord.id, offerNextDrivers, offerCb);
+        }
+        console.log(`[availability] driver=${driverId.slice(0,8)} disponible → ${openOrders.length} pedido(s) abierto(s) encolados`);
+      } catch (e) {
+        console.error('[availability] error encolando pedidos:', e.message);
+      }
+    }
+
     return res.json({ profile: result.rows[0] });
   } catch (error) { return next(error); }
 });
