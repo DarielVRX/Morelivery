@@ -128,14 +128,17 @@ export default function ProfilePage() {
   useEffect(() => {
     const raw = user?.address && user.address !== 'address-pending' ? user.address : '';
     if (!raw) return;
-    // Formato: "Calle NumExt, Int. X, Colonia, Ciudad, Estado"
-    const parts = raw.split(',').map(s => s.trim());
+    // Formato nuevo: "Calle NumExt, Int. X, Colonia, Ciudad, Estado"
+    const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length <= 1) {
+      // Texto libre sin comas — poner todo en el campo calle
+      setStreet(raw.trim());
+      return;
+    }
     const firstPart = parts[0] || '';
-    // Separar número del final de la calle: "Av. Revolución 1234"
     const numMatch = firstPart.match(/^(.*?)\s+(\d+\w*)$/);
     setStreet(numMatch ? numMatch[1] : firstPart);
     setNumExt(numMatch ? numMatch[2] : '');
-    // Si segundo segmento empieza con "Int." es interior, si no es colonia
     let colIdx = 1;
     if (parts[1]?.startsWith('Int.')) {
       setNumInt(parts[1].replace(/^Int\.\s*/, ''));

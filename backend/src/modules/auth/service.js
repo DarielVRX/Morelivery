@@ -63,7 +63,7 @@ export async function loginUser(payload) {
 
   let result;
   try {
-    result = await query('SELECT id, full_name, alias, email, password_hash, role, status, address, lat, lng FROM users WHERE email = $1', [pseudoEmail]);
+    result = await query('SELECT id, full_name, alias, email, password_hash, role, status, address FROM users WHERE email = $1', [pseudoEmail]);
   } catch (error) {
     if (error?.code === '42703') result = await query('SELECT id, full_name, alias, email, password_hash, role, status FROM users WHERE email = $1', [pseudoEmail]);
     else throw error;
@@ -79,13 +79,15 @@ export async function loginUser(payload) {
 
   const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 
-  let profile = { address: user.address || null, alias: user.alias || user.full_name || username, needsAddress: false, lat: user.lat ?? null, lng: user.lng ?? null };
+  let profile = { address: user.address || null, alias: user.alias || user.full_name || username, needsAddress: false };
 
   if (user.role === 'restaurant') {
     try {
-      const r = await query('SELECT id, name, address, is_open FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
+      const r = await query('SELECT id, name, address, is_open, lat, lng FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
       profile.restaurant = r.rows[0] || null;
       profile.address = r.rows[0]?.address || null;
+      profile.lat     = r.rows[0]?.lat     ?? null;
+      profile.lng     = r.rows[0]?.lng     ?? null;
     } catch (error) {
       if (error?.code === '42703') {
         const r = await query('SELECT id, name FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
@@ -113,36 +115,56 @@ export async function loginUser(payload) {
 
 export async function updateProfileAddress(userId, role, address, displayName, lat, lng) {
   if (role === 'restaurant') {
-    if (address !== undefined && address !== null) {
-      try { await query('UPDATE restaurants SET address=$1 WHERE owner_user_id=$2', [address, userId]); }
+    // Para tienda: address, name y lat/lng van en restaurants; alias/full_name en users
+    const restUpdates = [];
+    const restVals    = [];
+    let ri = 1;
+    if (address     !== undefined && address     !== null) { restUpdates.push(`address=$${ri++}`); restVals.push(address); }
+    if (lat         !== undefined && lat         !== null) { restUpdates.push(`lat=$${ri++}`);     restVals.push(lat); }
+    if (lng         !== undefined && lng         !== null) { restUpdates.push(`lng=$${ri++}`);     restVals.push(lng); }
+    if (restUpdates.length > 0) {
+      restVals.push(userId);
+      try { await query(`UPDATE restaurants SET ${restUpdates.join(',')} WHERE owner_user_id=$${ri}`, restVals); }
       catch (e) { if (e?.code !== '42703') throw e; }
     }
     if (displayName !== undefined && displayName !== null) {
       const cleanName = cleanRestaurantName(displayName);
-      try {
-        await query('UPDATE restaurants SET name=$1 WHERE owner_user_id=$2', [cleanName, userId]);
-      } catch (e) { if (e?.code !== '42703') throw e; }
+      try { await query('UPDATE restaurants SET name=$1 WHERE owner_user_id=$2', [cleanName, userId]); }
+      catch (e) { if (e?.code !== '42703') throw e; }
       try {
         await query('UPDATE users SET full_name=$1, alias=$1 WHERE id=$2', [displayName.trim(), userId]);
       } catch (e) {
-        // alias column may not exist yet — retry with only full_name
         if (e?.code === '42703') {
           try { await query('UPDATE users SET full_name=$1 WHERE id=$2', [displayName.trim(), userId]); } catch (_) {}
         } else throw e;
       }
     }
+    // Leer confirmado desde restaurants (lat/lng viven ahí para tienda)
+    let rRow = {};
+    try {
+      const rc = await query('SELECT name, address, lat, lng FROM restaurants WHERE owner_user_id=$1', [userId]);
+      rRow = rc.rows[0] || {};
+    } catch (_) {}
+    const uRow = (await query('SELECT full_name, alias FROM users WHERE id=$1', [userId])).rows[0] || {};
+    return {
+      address:     rRow.address     ?? address     ?? null,
+      displayName: uRow.alias       ?? uRow.full_name ?? displayName ?? null,
+      alias:       uRow.alias       ?? uRow.full_name ?? displayName ?? null,
+      lat:         rRow.lat         ?? null,
+      lng:         rRow.lng         ?? null,
+    };
   } else {
-    // customer / driver / admin
+    // customer / driver / admin: todo va en users
     const updates = [];
     const vals = [];
     let i = 1;
     if (displayName !== undefined && displayName !== null) {
       updates.push(`full_name=$${i++}`); vals.push(displayName.trim());
-      updates.push(`alias=$${i++}`); vals.push(displayName.trim());
+      updates.push(`alias=$${i++}`);     vals.push(displayName.trim());
     }
-    if (address !== undefined && address !== null)         { updates.push(`address=$${i++}`);    vals.push(address); }
-    if (lat     !== undefined && lat     !== null)         { updates.push(`lat=$${i++}`);         vals.push(lat); }
-    if (lng     !== undefined && lng     !== null)         { updates.push(`lng=$${i++}`);         vals.push(lng); }
+    if (address !== undefined && address !== null) { updates.push(`address=$${i++}`); vals.push(address); }
+    if (lat     !== undefined && lat     !== null) { updates.push(`lat=$${i++}`);     vals.push(lat); }
+    if (lng     !== undefined && lng     !== null) { updates.push(`lng=$${i++}`);     vals.push(lng); }
     if (updates.length > 0) {
       vals.push(userId);
       try {
@@ -161,19 +183,16 @@ export async function updateProfileAddress(userId, role, address, displayName, l
         } else throw e;
       }
     }
+    const confirmed = await query('SELECT full_name, alias, address, lat, lng FROM users WHERE id=$1', [userId]);
+    const row = confirmed.rows[0] || {};
+    return {
+      address:     row.address ?? address ?? null,
+      displayName: row.alias   ?? row.full_name ?? displayName ?? null,
+      alias:       row.alias   ?? row.full_name ?? displayName ?? null,
+      lat:         row.lat  ?? null,
+      lng:         row.lng  ?? null,
+    };
   }
-
-  const confirmed = await query(
-    'SELECT full_name, alias, address, lat, lng FROM users WHERE id=$1', [userId]
-  );
-  const row = confirmed.rows[0] || {};
-  return {
-    address:     row.address ?? address ?? null,
-    displayName: row.alias   ?? row.full_name ?? displayName ?? null,
-    alias:       row.alias   ?? row.full_name ?? displayName ?? null,
-    lat:         row.lat  ?? null,
-    lng:         row.lng  ?? null,
-  };
 }
 
 export async function changePassword(userId, currentPassword, newPassword) {

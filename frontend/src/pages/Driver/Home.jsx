@@ -8,12 +8,17 @@ import OfferCountdown from '../../components/OfferCountdown';
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
 // Dirección corta: "Colonia · Calle NumExt"
-// El formato guardado es: "Calle NumExt, Int. X, Colonia, Ciudad, Estado"
+// Maneja tanto formato libre ("Av. Revolución 1234 Col. Centro")
+// como formato con campos separados por comas ("Av. Revolución 1234, Int. 2, Col. Centro, Morelia, Mich.")
 function shortAddr(full) {
   if (!full || full === 'address-pending') return '';
-  const parts = full.split(',').map(s => s.trim());
+  const parts = full.split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length <= 1) {
+    // Texto libre sin comas — devolver completo (mejor que devolver parcial)
+    return full.trim();
+  }
+  // Formato con comas: parts[0]=calle+num, parts[1]=Int. X | colonia, etc.
   const streetAndNum = parts[0] || '';
-  // El segundo segmento puede ser "Int. X" o la colonia
   const second = parts[1] || '';
   const colonia = second.startsWith('Int.') ? (parts[2] || '') : second;
   if (colonia && streetAndNum) return `${colonia} · ${streetAndNum}`;
@@ -599,6 +604,19 @@ export default function DriverHome() {
                   <span>{shortAddr(pendingOffer.customer_address || pendingOffer.customerAddress || pendingOffer.delivery_address)}</span>
                 </div>
               )}
+              {(() => {
+                const rLat = pendingOffer.restaurant_lat ?? pendingOffer.restaurantLat;
+                const rLng = pendingOffer.restaurant_lng ?? pendingOffer.restaurantLng;
+                const cLat = pendingOffer.customer_lat   ?? pendingOffer.customerLat;
+                const cLng = pendingOffer.customer_lng   ?? pendingOffer.customerLng;
+                if (!rLat || !rLng || !cLat || !cLng) return null;
+                const km = haversineKm(Number(rLat), Number(rLng), Number(cLat), Number(cLng)).toFixed(1);
+                return (
+                  <div style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
+                    📏 {km} km entre tienda y cliente
+                  </div>
+                );
+              })()}
             </div>
             {/* Ganancia calculada desde los campos del backend */}
             {(() => {
