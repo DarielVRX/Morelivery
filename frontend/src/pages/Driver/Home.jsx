@@ -208,21 +208,49 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
       // Quitar marcadores anteriores
       if (mapRef.current.pickupMarker)   { mapRef.current.pickupMarker.remove();   mapRef.current.pickupMarker = null; }
       if (mapRef.current.deliveryMarker) { mapRef.current.deliveryMarker.remove(); mapRef.current.deliveryMarker = null; }
+
+      // Inyectar keyframe de animación si no existe aún
+      if (!document.getElementById('ml-marker-anim')) {
+        const style = document.createElement('style');
+        style.id = 'ml-marker-anim';
+        style.textContent = `
+          @keyframes ml-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.2); } }
+          .ml-marker-selected > div { animation: ml-pulse 0.6s ease-in-out 3; }
+        `;
+        document.head.appendChild(style);
+      }
+
       if (pickupPos) {
         const icon = L.divIcon({
-          html: `<div style="width:20px;height:20px;border-radius:50%;background:#16a34a;border:2px solid #fff;box-shadow:0 2px 6px #0004;display:flex;align-items:center;justify-content:center;font-size:11px">🏪</div>`,
-          iconSize: [20, 20], iconAnchor: [10, 10], className: ''
+          html: `<div style="width:22px;height:22px;border-radius:50%;background:#16a34a;border:2px solid #fff;box-shadow:0 2px 8px #0005;display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform 0.15s">🏪</div>`,
+          iconSize: [22, 22], iconAnchor: [11, 11], className: 'ml-pickup-marker'
         });
-        mapRef.current.pickupMarker = L.marker([pickupPos.lat, pickupPos.lng], { icon })
-          .addTo(map).bindPopup('Tienda');
+        const m = L.marker([pickupPos.lat, pickupPos.lng], { icon }).addTo(map).bindPopup('Tienda');
+        m.on('click', () => {
+          const el = m.getElement();
+          if (el) {
+            el.classList.remove('ml-marker-selected');
+            void el.offsetWidth; // reflow para reiniciar animación
+            el.classList.add('ml-marker-selected');
+          }
+        });
+        mapRef.current.pickupMarker = m;
       }
       if (deliveryPos) {
         const icon = L.divIcon({
-          html: `<div style="width:20px;height:20px;border-radius:50%;background:#f97316;border:2px solid #fff;box-shadow:0 2px 6px #0004;display:flex;align-items:center;justify-content:center;font-size:11px">📦</div>`,
-          iconSize: [20, 20], iconAnchor: [10, 10], className: ''
+          html: `<div style="width:22px;height:22px;border-radius:50%;background:#f97316;border:2px solid #fff;box-shadow:0 2px 8px #0005;display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform 0.15s">📦</div>`,
+          iconSize: [22, 22], iconAnchor: [11, 11], className: 'ml-delivery-marker'
         });
-        mapRef.current.deliveryMarker = L.marker([deliveryPos.lat, deliveryPos.lng], { icon })
-          .addTo(map).bindPopup('Cliente');
+        const m = L.marker([deliveryPos.lat, deliveryPos.lng], { icon }).addTo(map).bindPopup('Cliente');
+        m.on('click', () => {
+          const el = m.getElement();
+          if (el) {
+            el.classList.remove('ml-marker-selected');
+            void el.offsetWidth;
+            el.classList.add('ml-marker-selected');
+          }
+        });
+        mapRef.current.deliveryMarker = m;
       }
     });
   }, [pickupPos?.lat, pickupPos?.lng, deliveryPos?.lat, deliveryPos?.lng]);

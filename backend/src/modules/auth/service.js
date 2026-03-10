@@ -235,15 +235,15 @@ export async function changePassword(userId, currentPassword, newPassword) {
 export async function deleteAccount(userId, role) {
   let hasPending = false;
   if (role === 'customer') {
-    const r = await query(`SELECT 1 FROM orders WHERE customer_id=$1 AND status=ANY($2::text[]) LIMIT 1`, [userId, PENDING_STATUSES]);
+    const r = await query(`SELECT 1 FROM orders WHERE customer_id=$1::uuid AND status=ANY($2::text[]) LIMIT 1`, [userId, PENDING_STATUSES]);
     hasPending = r.rowCount > 0;
   } else if (role === 'driver') {
-    const r = await query(`SELECT 1 FROM orders WHERE driver_id=$1 AND status=ANY($2::text[]) LIMIT 1`, [userId, PENDING_STATUSES]);
+    const r = await query(`SELECT 1 FROM orders WHERE driver_id=$1::uuid AND status=ANY($2::text[]) LIMIT 1`, [userId, PENDING_STATUSES]);
     hasPending = r.rowCount > 0;
   } else if (role === 'restaurant') {
     const r = await query(
       `SELECT 1 FROM orders o JOIN restaurants rest ON rest.id=o.restaurant_id
-       WHERE rest.owner_user_id=$1 AND o.status=ANY($2::text[]) LIMIT 1`,
+       WHERE rest.owner_user_id=$1::uuid AND o.status=ANY($2::text[]) LIMIT 1`,
       [userId, PENDING_STATUSES]
     );
     hasPending = r.rowCount > 0;
@@ -260,7 +260,7 @@ export async function updateLoginUsername(userId, role, currentPassword, newUser
   if (r.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
   const matches = await bcrypt.compare(currentPassword, r.rows[0].password_hash);
   if (!matches) throw new AppError(401, 'Contraseña actual incorrecta');
-  const taken = await query('SELECT id FROM users WHERE email=$1 AND role=$2 AND id<>$3', [newEmail, role, userId]);
+  const taken = await query('SELECT id FROM users WHERE email=$1 AND role=$2 AND id<>$3::uuid', [newEmail, role, userId]);
   if (taken.rowCount > 0) throw new AppError(409, 'Ese usuario de acceso ya está en uso');
   await query('UPDATE users SET email=$1 WHERE id=$2', [newEmail, userId]);
   return { username: normalized };

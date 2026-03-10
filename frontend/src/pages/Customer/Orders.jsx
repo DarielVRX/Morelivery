@@ -319,6 +319,21 @@ export default function CustomerOrders() {
                           </div>
                         )}
                         <FeeBreakdown order={order} />
+                        {/* Preview total en tiempo real según tip draft */}
+                        {tipDraft[order.id] !== undefined && tipDraft[order.id] !== order.tip_cents && (() => {
+                          const sub     = order.total_cents || 0;
+                          const svc     = order.service_fee_cents || 0;
+                          const del_fee = order.delivery_fee_cents || 0;
+                          const previewTip   = tipDraft[order.id];
+                          const previewTotal = sub + svc + del_fee + previewTip;
+                          return (
+                            <div style={{ fontSize:'0.78rem', background:'#f0fdf4', border:'1px solid #bbf7d0',
+                              borderRadius:6, padding:'0.25rem 0.6rem', marginTop:'0.25rem', color:'#166534' }}>
+                              Total con agradecimiento: <strong>{fmt(previewTotal)}</strong>
+                              {previewTip > 0 && <span style={{ fontWeight:400, marginLeft:'0.3rem' }}>(incl. {fmt(previewTip)})</span>}
+                            </div>
+                          );
+                        })()}
                         {/* Agradecimiento editable en activos */}
                         <div style={{ marginTop:'0.4rem', display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
                           <span style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>Agradecimiento:</span>
@@ -465,7 +480,7 @@ export default function CustomerOrders() {
                                   Mínimo al entregar: {fmt(minTip)}
                                 </div>
                               )}
-                              {isDirty && canSave && (
+                              {isDirty && canSave && draft > 0 && (
                                 <div style={{ marginTop:'0.3rem', display:'flex', alignItems:'center', gap:'0.5rem' }}>
                                   <button
                                     onClick={() => saveTip(o.id, draft, true, minTip)}
