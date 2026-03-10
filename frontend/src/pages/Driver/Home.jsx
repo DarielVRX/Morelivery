@@ -209,46 +209,52 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
       if (mapRef.current.pickupMarker)   { mapRef.current.pickupMarker.remove();   mapRef.current.pickupMarker = null; }
       if (mapRef.current.deliveryMarker) { mapRef.current.deliveryMarker.remove(); mapRef.current.deliveryMarker = null; }
 
-      // Inyectar keyframe de animación si no existe aún
+      // Inyectar estilos de marcadores si no existen aún
       if (!document.getElementById('ml-marker-anim')) {
         const style = document.createElement('style');
         style.id = 'ml-marker-anim';
         style.textContent = `
-          @keyframes ml-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.2); } }
-          .ml-marker-selected > div { animation: ml-pulse 0.6s ease-in-out 3; }
+          .ml-pickup-marker > div, .ml-delivery-marker > div {
+            transition: transform 0.18s ease;
+          }
+          .ml-marker-selected > div {
+            transform: scale(1.2);
+          }
         `;
         document.head.appendChild(style);
       }
 
+      // Desseleccionar al hacer click en cualquier parte del mapa
+      map.off('click.markerDeselect');
+      map.on('click.markerDeselect', () => {
+        document.querySelectorAll('.ml-marker-selected').forEach(el => {
+          el.classList.remove('ml-marker-selected');
+        });
+      });
+
       if (pickupPos) {
         const icon = L.divIcon({
-          html: `<div style="width:22px;height:22px;border-radius:50%;background:#16a34a;border:2px solid #fff;box-shadow:0 2px 8px #0005;display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform 0.15s">🏪</div>`,
+          html: `<div style="width:22px;height:22px;border-radius:50%;background:#16a34a;border:2px solid #fff;box-shadow:0 2px 8px #0005;display:flex;align-items:center;justify-content:center;font-size:12px">🏪</div>`,
           iconSize: [22, 22], iconAnchor: [11, 11], className: 'ml-pickup-marker'
         });
         const m = L.marker([pickupPos.lat, pickupPos.lng], { icon }).addTo(map).bindPopup('Tienda');
-        m.on('click', () => {
-          const el = m.getElement();
-          if (el) {
-            el.classList.remove('ml-marker-selected');
-            void el.offsetWidth; // reflow para reiniciar animación
-            el.classList.add('ml-marker-selected');
-          }
+        m.on('click', (e) => {
+          L.DomEvent.stopPropagation(e);
+          document.querySelectorAll('.ml-marker-selected').forEach(el => el.classList.remove('ml-marker-selected'));
+          m.getElement()?.classList.add('ml-marker-selected');
         });
         mapRef.current.pickupMarker = m;
       }
       if (deliveryPos) {
         const icon = L.divIcon({
-          html: `<div style="width:22px;height:22px;border-radius:50%;background:#f97316;border:2px solid #fff;box-shadow:0 2px 8px #0005;display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform 0.15s">📦</div>`,
+          html: `<div style="width:22px;height:22px;border-radius:50%;background:#f97316;border:2px solid #fff;box-shadow:0 2px 8px #0005;display:flex;align-items:center;justify-content:center;font-size:12px">📦</div>`,
           iconSize: [22, 22], iconAnchor: [11, 11], className: 'ml-delivery-marker'
         });
         const m = L.marker([deliveryPos.lat, deliveryPos.lng], { icon }).addTo(map).bindPopup('Cliente');
-        m.on('click', () => {
-          const el = m.getElement();
-          if (el) {
-            el.classList.remove('ml-marker-selected');
-            void el.offsetWidth;
-            el.classList.add('ml-marker-selected');
-          }
+        m.on('click', (e) => {
+          L.DomEvent.stopPropagation(e);
+          document.querySelectorAll('.ml-marker-selected').forEach(el => el.classList.remove('ml-marker-selected'));
+          m.getElement()?.classList.add('ml-marker-selected');
         });
         mapRef.current.deliveryMarker = m;
       }
@@ -378,6 +384,7 @@ export default function DriverHome() {
   const availabilityRef  = useRef(availability);
   const pendingOfferRef  = useRef(pendingOffer);
   const hasActiveOrderRef = useRef(hasActiveOrder);
+  const consecutiveTimeoutsRef = useRef(0); // 3 timeouts seguidos → no disponible
   useEffect(() => { availabilityRef.current  = availability;   }, [availability]);
   useEffect(() => { pendingOfferRef.current  = pendingOffer;   }, [pendingOffer]);
   useEffect(() => { hasActiveOrderRef.current = hasActiveOrder; }, [hasActiveOrder]);
@@ -449,6 +456,7 @@ export default function DriverHome() {
 
   async function acceptOffer() {
     if (!pendingOffer) return;
+    consecutiveTimeoutsRef.current = 0; // interacción manual — resetear contador
     setLoadingOffer(true);
     try {
       await apiFetch(`/drivers/offers/${pendingOffer.id}/accept`, { method:'POST' }, auth.token);
@@ -460,6 +468,7 @@ export default function DriverHome() {
 
   async function rejectOffer() {
     if (!pendingOffer) return;
+    consecutiveTimeoutsRef.current = 0; // interacción manual — resetear contador
     setLoadingOffer(true);
     try {
       await apiFetch(`/drivers/offers/${pendingOffer.id}/reject`, { method:'POST' }, auth.token);
@@ -653,7 +662,19 @@ export default function DriverHome() {
             <OfferCountdown
               key={pendingOffer.id}
               secondsLeft={pendingOffer.seconds_left ?? pendingOffer.secondsLeft ?? 60}
-              onExpired={() => { setPendingOffer(null); loadData(); }}
+              onExpired={() => {
+                setPendingOffer(null);
+                loadData();
+                // Contar timeouts consecutivos sin interacción manual
+                consecutiveTimeoutsRef.current += 1;
+                if (consecutiveTimeoutsRef.current >= 3) {
+                  consecutiveTimeoutsRef.current = 0;
+                  setAvailability(false);
+                  apiFetch('/drivers/availability', {
+                    method: 'PATCH', body: JSON.stringify({ isAvailable: false })
+                  }, auth.token).catch(() => {});
+                }
+              }}
             />
             <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.45rem' }}>
               <button className="btn-primary btn-sm" style={{ flex:1 }}
