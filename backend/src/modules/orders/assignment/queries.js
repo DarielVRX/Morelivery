@@ -379,7 +379,7 @@ export async function getPendingAssignmentOrders(driverId) {
           AND od.status IN ('rejected','released','expired')
           AND od.wait_until > NOW()
      WHERE o.driver_id IS NULL
-       AND o.status IN ('created','pending_driver')
+       AND o.status IN ('created','pending_driver','accepted','preparing','ready')
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od2
          WHERE od2.order_id=o.id AND od2.driver_id=$1 AND od2.status='pending'

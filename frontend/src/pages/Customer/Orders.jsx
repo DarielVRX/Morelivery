@@ -5,17 +5,6 @@ import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
-// Dirección corta: "Colonia · Calle NumExt"
-function shortAddr(full) {
-  if (!full || full === 'address-pending') return '';
-  const parts = full.split(',').map(s => s.trim());
-  const streetAndNum = parts[0] || '';
-  const second = parts[1] || '';
-  const colonia = second.startsWith('Int.') ? (parts[2] || '') : second;
-  if (colonia && streetAndNum) return `${colonia} · ${streetAndNum}`;
-  return streetAndNum || colonia || full;
-}
-
 // Desglose de tarifas — visible solo para Cliente y Conductor
 // total_cents = subtotal neto (lo que ve la Tienda)
 // Desglose para Cliente — lo que paga
@@ -118,9 +107,9 @@ function toDraft(items=[]) {
 }
 
 // Componente local para el input custom de propina — evita re-renders de la lista completa
+// Solo actualiza el draft en el padre; el botón "Confirmar propina" del padre envía.
 function TipInput({ onValidAmount }) {
   const [val, setVal] = useState('');
-  const showBtn = val.trim() !== '' && Number(val.replace(/\D/g,'')) > 0;
   return (
     <div style={{ display:'flex', alignItems:'center', gap:'0.3rem', flexWrap:'wrap' }}>
       <input
@@ -129,20 +118,12 @@ function TipInput({ onValidAmount }) {
         onChange={e => {
           const raw = e.target.value.replace(/[^0-9]/g,'');
           setVal(raw);
+          const cents = Math.round(Number(raw) * 100);
+          if (cents > 0) onValidAmount(cents);
+          else if (raw === '') onValidAmount(0);
         }}
         style={{ width:62, fontSize:'0.75rem', padding:'0.2rem 0.4rem', border:'1px solid var(--gray-200)', borderRadius:6 }}
       />
-      {showBtn && (
-        <button
-          onClick={() => {
-            const cents = Math.round(Number(val) * 100);
-            if (cents > 0) { onValidAmount(cents); setVal(''); }
-          }}
-          style={{ padding:'0.2rem 0.5rem', background:'var(--success)', color:'#fff', border:'none',
-            borderRadius:6, fontWeight:700, fontSize:'0.72rem', cursor:'pointer' }}>
-          Confirmar
-        </button>
-      )}
     </div>
   );
 }
@@ -375,7 +356,7 @@ export default function CustomerOrders() {
                           )}
                         {order.customer_address && (
                           <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.3rem', marginTop:'0.35rem' }}>
-                            Dirección: <strong>{shortAddr(order.customer_address)}</strong>
+                            Dirección: <strong>{order.customer_address}</strong>
                           </div>
                         )}
                         <div style={{ fontSize:'0.83rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>
@@ -484,17 +465,13 @@ export default function CustomerOrders() {
                                   Mínimo al entregar: {fmt(minTip)}
                                 </div>
                               )}
-                              {isDirty && (
+                              {isDirty && canSave && (
                                 <div style={{ marginTop:'0.3rem', display:'flex', alignItems:'center', gap:'0.5rem' }}>
                                   <button
-                                    onClick={() => { if (canSave) saveTip(o.id, draft, true, minTip); }}
-                                    disabled={!canSave}
-                                    style={{ padding:'0.25rem 0.9rem', background: canSave?'var(--success)':'var(--gray-300)', color:'#fff', border:'none', borderRadius:6, fontWeight:700, fontSize:'0.78rem', cursor: canSave?'pointer':'default' }}>
+                                    onClick={() => saveTip(o.id, draft, true, minTip)}
+                                    style={{ padding:'0.25rem 0.9rem', background:'var(--success)', color:'#fff', border:'none', borderRadius:6, fontWeight:700, fontSize:'0.78rem', cursor:'pointer' }}>
                                     Confirmar
                                   </button>
-                                  {!canSave && (
-                                    <span style={{ fontSize:'0.72rem', color:'var(--danger)' }}>Mínimo: {fmt(minTip)}</span>
-                                  )}
                                 </div>
                               )}
                             </div>

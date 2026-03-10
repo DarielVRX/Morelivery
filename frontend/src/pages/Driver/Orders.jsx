@@ -131,7 +131,7 @@ export default function DriverOrders() {
     if (!releaseNote.trim()) { setActionMsg('Escribe una nota antes de liberar'); return; }
     setActionLoading(orderId);
     try {
-      await apiFetch(`/drivers/release/${orderId}`, {
+      await apiFetch(`/drivers/orders/${orderId}/release`, {
         method:'POST', body: JSON.stringify({ note: releaseNote.trim() })
       }, auth.token);
       setReleasingId(null); setReleaseNote('');
