@@ -76,6 +76,9 @@ Entidades principales:
 - `POST /api/drivers/orders/:id/respond`
 - `PATCH /api/orders/:id/status`
 
+### Rutas (OSRM)
+- `POST /api/routes/model`
+
 ### Admin
 - `GET /api/admin/orders`
 - `GET /api/admin/users`
@@ -271,3 +274,41 @@ Se agregó `frontend/vercel.json` con rewrite global a `index.html` para rutas S
 - Cada driver puede tener hasta **4 pedidos activos** simultáneos.
 - Se agregó `POST /api/drivers/listener` para ofertar pedidos pendientes cuando el driver se conecta o libera capacidad.
 - Esto evita polling agresivo y reduce carga en arquitectura gratuita.
+
+## 18) Uso rápido de la nueva ruta `/api/routes/model`
+
+Ejemplo con `curl`:
+
+```bash
+curl -X POST "https://<tu-backend>/api/routes/model" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "origin": { "lat": 19.70595, "lng": -101.19498 },
+    "destination": { "lat": 19.702, "lng": -101.185 },
+    "waypoints": [],
+    "includeSteps": true
+  }'
+```
+
+Respuesta esperada:
+- `distance_m`
+- `duration_s`
+- `geometry`
+- `steps`
+
+## 19) Permiso de notificaciones push (Android/Chrome)
+
+1. En la app: **Perfil → Activar notificaciones**.
+2. Acepta el permiso del navegador.
+3. Si está bloqueado: Ajustes de sitio → Notificaciones → Permitir.
+4. Para mayor prioridad visual en Android: desactiva ahorro de batería para el navegador/PWA.
+
+> Nota: En Web Push no se puede forzar al 100% el modo "heads-up" en todos los dispositivos; depende del sistema/canal del navegador.
+
+
+## 20) Activar utilidad de rutas en Driver Home
+
+- Abre la app como **Conductor** y entra a `/driver`.
+- Con un pedido activo, usa el botón **"🗺 Ruta nueva"**.
+- Ese botón consume `POST /api/routes/model` para trazar la ruta en el mapa.
