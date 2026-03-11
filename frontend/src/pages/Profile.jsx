@@ -33,33 +33,53 @@ function Flash({ text, isError }) {
 
 const ROLE_LABELS = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
 
-// API de SEPOMEX gratuita (datos.gob.mx) para consulta por CP
+function ensureLeafletCSS() {
+  if (document.getElementById('leaflet-css')) return;
+  const lnk = document.createElement('link');
+  lnk.id = 'leaflet-css';
+  lnk.rel = 'stylesheet';
+  lnk.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  document.head.appendChild(lnk);
+}
+
+// Consulta de CP: SEPOMEX primaria + fallback gratuito
 async function fetchColoniasByPostal(cp) {
-  // Primaria: México API (open source, datos 2025, sin key, sin límite)
+  const normalize = (estado, ciudad, colonias) => {
+    const uniqueColonias = [...new Set((colonias || []).filter(Boolean).map(c => String(c).trim()).filter(Boolean))].sort();
+    return {
+      estado: estado || '',
+      ciudad: ciudad || '',
+      colonias: uniqueColonias,
+    };
+  };
+
+  // Primaria: SEPOMEX (proxy comunitario)
   try {
-    const r = await fetch(`https://mexico-api.devaleff.com/api/codigo-postal/${cp}`);
+    const r = await fetch(`https://api-sepomex.hckdrk.mx/query/info_cp/${cp}?type=simplified`);
     if (!r.ok) throw new Error('no data');
     const data = await r.json();
-    const items = data.data || [];
-    if (items.length === 0) throw new Error('empty');
-    return {
-      estado:   items[0].d_estado,
-      ciudad:   items[0].D_mnpio || items[0].d_ciudad || '',
-      colonias: items.map(z => z.d_asenta).filter(Boolean).sort(),
-    };
+    const rows = Array.isArray(data?.response) ? data.response : [];
+    if (rows.length > 0) {
+      return normalize(
+        rows[0]?.estado || rows[0]?.d_estado || '',
+        rows[0]?.municipio || rows[0]?.ciudad || rows[0]?.D_mnpio || '',
+        rows.map(i => i?.asentamiento || i?.colonia || i?.d_asenta)
+      );
+    }
+    throw new Error('empty');
   } catch {
-    // Fallback: COPOMEX
+    // Fallback gratuito: Mexico API
     try {
-      const r2 = await fetch(`https://api.copomex.com/query/info_cp/${cp}?type=colonia&token=pruebas`);
+      const r2 = await fetch(`https://mexico-api.devaleff.com/api/codigo-postal/${cp}`);
       if (!r2.ok) throw new Error('no data');
       const data2 = await r2.json();
-      const items = Array.isArray(data2) ? data2 : [data2];
-      if (!items[0]?.response) return null;
-      return {
-        estado:   items[0].response.estado,
-        ciudad:   items[0].response.municipio || '',
-        colonias: items.map(i => i.response?.asentamiento).filter(Boolean).sort(),
-      };
+      const items = Array.isArray(data2?.data) ? data2.data : [];
+      if (items.length === 0) throw new Error('empty');
+      return normalize(
+        items[0]?.d_estado || '',
+        items[0]?.D_mnpio || items[0]?.d_ciudad || '',
+        items.map(z => z?.d_asenta)
+      );
     } catch {
       return null;
     }
@@ -85,6 +105,38 @@ export default function ProfilePage() {
   const [cpLoading,    setCpLoading]    = useState(false);
   const [cpError,      setCpError]      = useState('');
   const cpTimerRef = useRef(null);
+  const coloniaRef = useRef(colonia);
+
+
+  const [notifStatus, setNotifStatus] = useState(
+    (typeof window !== 'undefined' && 'Notification' in window)
+      ? Notification.permission
+      : 'unsupported'
+  );
+  const [notifMsg, setNotifMsg] = useState('');
+
+  async function enablePushNotifications() {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setNotifMsg('Este dispositivo no soporta notificaciones web.');
+      return;
+    }
+    try {
+      if ('serviceWorker' in navigator) {
+        await navigator.serviceWorker.register('/sw.js');
+      }
+      const permission = await Notification.requestPermission();
+      setNotifStatus(permission);
+      if (permission === 'granted') {
+        setNotifMsg('Notificaciones activadas correctamente.');
+      } else if (permission === 'denied') {
+        setNotifMsg('Permiso bloqueado. Actívalo en ajustes del navegador/sitio.');
+      } else {
+        setNotifMsg('Solicitud cerrada sin cambios.');
+      }
+    } catch {
+      setNotifMsg('No se pudo solicitar permiso de notificaciones.');
+    }
+  }
 
   // Pin Casa
   const [homeLat, setHomeLat] = useState(user?.home_lat ?? null);
@@ -102,10 +154,13 @@ export default function ProfilePage() {
   const [deleteMsg, setDeleteMsg] = useState('');
   const [deleteErr, setDeleteErr] = useState(false);
 
+  useEffect(() => { coloniaRef.current = colonia; }, [colonia]);
+
   // Buscar CP cuando cambia (debounce 600ms)
   useEffect(() => {
     const cp = postalCode.trim();
     if (cp.length !== 5 || !/^\d{5}$/.test(cp)) {
+      setCpError('');
       setColoniasList([]);
       return;
     }
@@ -122,9 +177,9 @@ export default function ProfilePage() {
         setEstado(result.estado || '');
         setCiudad(result.ciudad || '');
         setColoniasList(result.colonias || []);
-        // Si la colonia actual no está en la lista nueva, limpiar
-        if (result.colonias && result.colonias.length > 0 && !result.colonias.includes(colonia)) {
-          setColonia('');
+        // Si la colonia actual no está en la lista nueva, usar la primera disponible
+        if (result.colonias && result.colonias.length > 0 && !result.colonias.includes(coloniaRef.current)) {
+          setColonia(result.colonias[0]);
         }
       }
     }, 600);
@@ -185,21 +240,9 @@ export default function ProfilePage() {
     if (!showPinMap || !pinMapRef.current) return;
     if (typeof window === 'undefined') return;
 
-    // Cargar Leaflet si no está cargado
     const loadLeaflet = async () => {
-      if (!window.L) {
-        await new Promise(resolve => {
-          const link = document.createElement('link');
-          link.rel = 'stylesheet';
-          link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-          document.head.appendChild(link);
-          const script = document.createElement('script');
-          script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-          script.onload = resolve;
-          document.head.appendChild(script);
-        });
-      }
-      const L = window.L;
+      ensureLeafletCSS();
+      const L = await import('leaflet');
       if (pinMapInstance.current) {
         pinMapInstance.current.remove();
         pinMapInstance.current = null;
@@ -211,6 +254,7 @@ export default function ProfilePage() {
 
       const map = L.map(pinMapRef.current, { center, zoom: pinMapResult ? 17 : 13 });
       pinMapInstance.current = map;
+      setTimeout(() => map.invalidateSize(), 50);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap'
@@ -411,6 +455,19 @@ export default function ProfilePage() {
             <input value={address} onChange={e => setAddress(e.target.value)}
               placeholder="Ej: Av. Revolución 1234" />
           </label>
+
+
+          <div style={{ padding:'0.6rem 0.7rem', border:'1px solid var(--gray-200)', borderRadius:8, background:'#fafafa' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', gap:'0.5rem', alignItems:'center', flexWrap:'wrap' }}>
+              <span style={{ fontSize:'0.78rem', color:'var(--gray-600)' }}>
+                Notificaciones push: <strong>{notifStatus}</strong>
+              </span>
+              <button type="button" className="btn-sm" onClick={enablePushNotifications}>
+                Activar notificaciones
+              </button>
+            </div>
+            {notifMsg && <div style={{ marginTop:'0.35rem', fontSize:'0.74rem', color:'var(--gray-500)' }}>{notifMsg}</div>}
+          </div>
 
           {/* Botón Buscar pin */}
           <div style={{ display:'flex', gap:'0.4rem', alignItems:'center' }}>

@@ -12,11 +12,16 @@ self.addEventListener('message', (event) => {
         self.registration.showNotification(title, {
           body,
           tag: tag || 'morelivery',
-          icon: '/logo.svg',
-          badge: '/logo.svg',
+          icon: '/icon-192.svg',
+          badge: '/badge.svg',
+          image: '/icon-512.svg',
           requireInteraction: true,
           renotify: true,
           silent: false,
+          timestamp: Date.now(),
+          actions: [
+            { action: 'open', title: 'Abrir' },
+          ],
           vibrate: [200, 100, 200],
           data: data || { url: url || '/' },
         });
@@ -37,11 +42,16 @@ self.addEventListener('push', (event) => {
     self.registration.showNotification(title, {
       body,
       tag,
-      icon: '/logo.svg',
-      badge: '/logo.svg',
+      icon: '/icon-192.svg',
+      badge: '/badge.svg',
+      image: '/icon-512.svg',
       requireInteraction: true,
       renotify: true,
       silent: false,
+      timestamp: Date.now(),
+      actions: [
+        { action: 'open', title: 'Abrir' },
+      ],
       vibrate: [200, 100, 200],
       data: { url },
     })
