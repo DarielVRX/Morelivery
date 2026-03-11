@@ -382,7 +382,7 @@ function DriverMap({
         if (!map.getLayer(LYR)) map.addLayer({ id:LYR, type:'line', source:SRC,
           paint:{ 'line-color':'#ad1457', 'line-width':16, 'line-opacity':1 },
           layout:{ 'line-cap':'round', 'line-join':'round' } });
-        if (!map.getLayer(BDR)) map.addLayer({ id:LYR, type:'line', source:SRC,
+        if (!map.getLayer(BDR)) map.addLayer({ id:BDR, type:'line', source:SRC,
           paint:{ 'line-color':'#e3aaaa', 'line-width':10, 'line-opacity':0.8 },
           layout:{ 'line-cap':'round', 'line-join':'round' } });
       };
