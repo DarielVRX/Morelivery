@@ -788,7 +788,13 @@ export default function DriverHome() {
                 consecutiveTimeoutsRef.current += 1;
                 if (consecutiveTimeoutsRef.current >= 3) {
                   consecutiveTimeoutsRef.current = 0;
-                  setMsg('Se han vencido 3 ofertas seguidas. Tu disponibilidad no cambió automáticamente.');
+                  setAvailability(false);
+                  apiFetch('/drivers/availability', {
+                    method: 'PATCH', body: JSON.stringify({ isAvailable: false })
+                  }, auth.token).catch(() => {
+                    // Si el PATCH falla, revertir el estado local
+                    setAvailability(true);
+                  });
                 }
               }}
             />

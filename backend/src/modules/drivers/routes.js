@@ -57,7 +57,7 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
                 o.tip_cents, o.payment_method, o.status,
                 r.name AS restaurant_name, r.address AS restaurant_address,
                 r.lat AS restaurant_lat, r.lng AS restaurant_lng,
-                COALESCE(c.address, o.delivery_address) AS customer_address,
+                COALESCE(o.delivery_address, c.address) AS customer_address,
                 COALESCE(o.delivery_lat, c.lat) AS customer_lat,
                 COALESCE(o.delivery_lng, c.lng) AS customer_lng,
                 GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + (60::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
