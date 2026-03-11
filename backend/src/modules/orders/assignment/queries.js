@@ -347,7 +347,7 @@ export async function getOfferPayload(orderId, driverId) {
             r.lat     AS restaurant_lat,
             r.lng     AS restaurant_lng,
             -- Usar dirección fresca del cliente (puede haberse actualizado desde que se creó el pedido)
-            COALESCE(c.address, o.delivery_address) AS customer_address,
+            COALESCE(o.delivery_address, c.address) AS customer_address,
             COALESCE(o.delivery_lat, c.lat) AS customer_lat,
             COALESCE(o.delivery_lng, c.lng) AS customer_lng,
             GREATEST(0, EXTRACT(EPOCH FROM (
@@ -370,7 +370,7 @@ export async function getPendingAssignmentOrders(driverId) {
             o.tip_cents, o.payment_method, o.created_at,
             r.name AS restaurant_name, r.address AS restaurant_address,
             r.lat AS restaurant_lat, r.lng AS restaurant_lng,
-            COALESCE(c.address, o.delivery_address) AS customer_address,
+            COALESCE(o.delivery_address, c.address) AS customer_address,
             COALESCE(o.delivery_lat, c.lat) AS customer_lat,
             COALESCE(o.delivery_lng, c.lng) AS customer_lng,
             EXISTS (
@@ -408,9 +408,13 @@ export async function getNearestCooldownDriver(orderId) {
     `SELECT od.driver_id,
             EXTRACT(EPOCH FROM (od.wait_until - NOW()))::float AS secs_remaining
      FROM order_driver_offers od
+     JOIN driver_profiles dp ON dp.user_id = od.driver_id
+     JOIN users u ON u.id = od.driver_id
      WHERE od.order_id = $1
        AND od.status IN ('rejected','expired','released')
        AND od.wait_until > NOW()
+       AND dp.is_available = true
+       AND u.status = 'active'
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od2
          WHERE od2.driver_id = od.driver_id AND od2.status = 'pending'

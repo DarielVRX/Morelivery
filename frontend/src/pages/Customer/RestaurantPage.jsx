@@ -3,9 +3,19 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 
+function ensureLeafletCSS() {
+  if (document.getElementById('leaflet-css')) return;
+  const lnk = document.createElement('link');
+  lnk.id = 'leaflet-css';
+  lnk.rel = 'stylesheet';
+  lnk.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  document.head.appendChild(lnk);
+}
+
 
 function ManualPinMap({ initialPos, mapRef, onConfirm, onCancel }) {
   const containerRef = useRef(null);
+  const pinMarkerRef = useRef(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -15,6 +25,7 @@ function ManualPinMap({ initialPos, mapRef, onConfirm, onCancel }) {
     import('leaflet').then(L => {
       if (!containerRef.current) return;
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+      ensureLeafletCSS();
 
       delete L.Icon.Default.prototype._getIconUrl;
       L.Icon.Default.mergeOptions({
@@ -39,6 +50,7 @@ function ManualPinMap({ initialPos, mapRef, onConfirm, onCancel }) {
       });
 
       pinMarker = L.marker(center, { icon, draggable: true }).addTo(map);
+      pinMarkerRef.current = pinMarker;
 
       pinMarker.on('dragend', () => {
         const ll = pinMarker.getLatLng();
@@ -52,12 +64,13 @@ function ManualPinMap({ initialPos, mapRef, onConfirm, onCancel }) {
 
     return () => {
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+      pinMarkerRef.current = null;
     };
   }, []); // solo al montar
 
   async function handleConfirm() {
-    if (!mapRef.current) return;
-    const ll = Object.values(mapRef.current._layers || {}).find(l => l.getLatLng)?.getLatLng();
+    if (!mapRef.current || !pinMarkerRef.current) return;
+    const ll = pinMarkerRef.current.getLatLng();
     if (!ll) return;
     // Geocodificación inversa para obtener dirección aproximada
     let label = null;

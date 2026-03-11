@@ -11,6 +11,11 @@ function shouldNotifyInBackground() {
   return document.visibilityState !== 'visible' || !document.hasFocus();
 }
 
+function notificationPriority() {
+  try { return localStorage.getItem('morelivery_notif_priority') === 'high' ? 'high' : 'normal'; }
+  catch { return 'normal'; }
+}
+
 async function notifyRealtime({ title, body, tag, url = '/' }) {
   if (!canNotify() || Notification.permission !== 'granted') return;
 
@@ -21,6 +26,7 @@ async function notifyRealtime({ title, body, tag, url = '/' }) {
     tag,
     url,
     data: { url, ts: Date.now() },
+    priority: notificationPriority(),
   };
 
   // Preferir SW para soporte en segundo plano (móvil/PWA)
@@ -36,7 +42,8 @@ async function notifyRealtime({ title, body, tag, url = '/' }) {
 
   // Fallback foreground
   try {
-    new Notification(title, { body, tag, renotify: true });
+    const high = notificationPriority() === 'high';
+    new Notification(title, { body, tag, renotify: true, requireInteraction: high });
   } catch (_) {}
 }
 

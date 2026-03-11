@@ -26,6 +26,53 @@ router.post('/login', validate(loginSchema), async (req, res, next) => {
   } catch (error) { return next(error); }
 });
 
+
+/* ── GET /auth/postal/:cp ── proxy CP/colonias para evitar problemas CORS ── */
+router.get('/postal/:cp', authenticate, async (req, res, next) => {
+  try {
+    const cp = String(req.params.cp || '').trim();
+    if (!/^\d{5}$/.test(cp)) return next(new AppError(400, 'Código postal inválido'));
+
+    const normalize = (estado, ciudad, colonias) => ({
+      estado: estado || '',
+      ciudad: ciudad || '',
+      colonias: [...new Set((colonias || []).filter(Boolean).map(c => String(c).trim()))].sort(),
+    });
+
+    try {
+      const r = await fetch(`https://api-sepomex.hckdrk.mx/query/info_cp/${cp}?type=simplified`);
+      if (r.ok) {
+        const data = await r.json();
+        const rows = Array.isArray(data?.response) ? data.response : [];
+        if (rows.length > 0) {
+          return res.json(normalize(
+            rows[0]?.estado || rows[0]?.d_estado || '',
+            rows[0]?.municipio || rows[0]?.ciudad || rows[0]?.D_mnpio || '',
+            rows.map(i => i?.asentamiento || i?.colonia || i?.d_asenta)
+          ));
+        }
+      }
+    } catch (_) {}
+
+    try {
+      const r2 = await fetch(`https://mexico-api.devaleff.com/api/codigo-postal/${cp}`);
+      if (r2.ok) {
+        const data2 = await r2.json();
+        const items = Array.isArray(data2?.data) ? data2.data : [];
+        if (items.length > 0) {
+          return res.json(normalize(
+            items[0]?.d_estado || '',
+            items[0]?.D_mnpio || items[0]?.d_ciudad || '',
+            items.map(i => i?.d_asenta)
+          ));
+        }
+      }
+    } catch (_) {}
+
+    return next(new AppError(404, 'CP no encontrado'));
+  } catch (error) { return next(error); }
+});
+
 /* ── PATCH /auth/profile ── */
 router.patch('/profile', authenticate, async (req, res, next) => {
   try {
