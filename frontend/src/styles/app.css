@@ -94,6 +94,10 @@ a:hover { text-decoration: underline; }
 }
 .nav-desktop a, .nav-desktop button {
   padding: 0.35rem 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.2;
   border-radius: 6px;
   font-size: 0.875rem;
   font-weight: 500;
@@ -436,4 +440,41 @@ button:focus:not(:focus-visible), a:focus:not(:focus-visible) {
 button, a, [role="button"] {
   min-height: 44px;
   touch-action: manipulation;
+}
+
+/* Leaflet controles no deben heredar touch target global */
+.leaflet-container a {
+  min-height: 0;
+  touch-action: auto;
+}
+
+
+/* Zoom controls visibles solo tras interacción reciente */
+.driver-map-zoom-hidden .leaflet-control-zoom {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+}
+.driver-map-zoom-visible .leaflet-control-zoom {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.driver-map-zoom-hidden .leaflet-control-zoom,
+.driver-map-zoom-visible .leaflet-control-zoom {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+@media (max-width: 767px) {
+  .orders-tab-panel,
+  .orders-tab-panel.reverse {
+    animation: none;
+  }
+  * {
+    scroll-behavior: auto !important;
+  }
+  .btn-primary,
+  .btn-sm {
+    transition: none;
+  }
 }
