@@ -159,8 +159,20 @@ function DriverMap({
   useEffect(() => { hasActiveOrderRef.current  = hasActiveOrder;  }, [hasActiveOrder]);
   useEffect(() => { navFollowRef.current        = navFollowEnabled; }, [navFollowEnabled]);
   useEffect(() => { onHeadingChangeRef.current  = onHeadingChange;  }, [onHeadingChange]);
-  useEffect(() => { if (driverPos) { livePosRef.current = driverPos; setHasGPS(true); } },
-            [driverPos?.lat, driverPos?.lng]);
+  useEffect(() => {
+    if (driverPos) {
+      livePosRef.current = driverPos;
+      setHasGPS(true);
+    }
+  }, [driverPos?.lat, driverPos?.lng]);
+  // Si el mapa ya está creado y se recibe la primera posición GPS después del load,
+  // (re)construir el marcador para que siempre sea visible.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !_ml) return;
+    if (!driverPos && !livePosRef.current) return;
+    _buildDriverMarker(_ml, map);
+  }, [driverPos?.lat, driverPos?.lng]);
 
   // watchPosition — suscripción ÚNICA, todo vía refs (OPT-12)
   // En cada tick: mueve el marcador directamente en el DOM, NO llama setState
@@ -220,8 +232,11 @@ function DriverMap({
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('width', '80'); svg.setAttribute('height', '80');
     svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('fill', 'rgba(227,170,170,0.55)');
-    svg.setAttribute('stroke', '#e3aaaa');
+    // Colores invertidos: relleno más sólido y borde ligeramente translúcido
+    const fillColor   = '#e3aaaa';
+    const strokeColor = 'rgba(227,170,170,0.85)';
+    svg.setAttribute('fill', fillColor);
+    svg.setAttribute('stroke', strokeColor);
     svg.setAttribute('stroke-width', '1.4');
     svg.setAttribute('stroke-linejoin', 'round');
     svg.style.cssText = 'display:block;transform-origin:50% 55%;';
