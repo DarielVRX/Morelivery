@@ -58,7 +58,8 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
                 r.name AS restaurant_name, r.address AS restaurant_address,
                 r.lat AS restaurant_lat, r.lng AS restaurant_lng,
                 COALESCE(c.address, o.delivery_address) AS customer_address,
-                c.lat AS customer_lat, c.lng AS customer_lng,
+                COALESCE(o.delivery_lat, c.lat) AS customer_lat,
+                COALESCE(o.delivery_lng, c.lng) AS customer_lng,
                 GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + (60::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
          FROM order_driver_offers od
          JOIN orders o ON o.id = od.order_id
@@ -141,20 +142,16 @@ router.post('/orders/:orderId/claim', authenticate, authorize(['driver']), async
     const driverId = req.user.userId;
     const orderId  = req.params.orderId;
 
-    // 1. Verificar que el pedido existe, sigue sin driver, y este driver es elegible
+    // 1. Verificar que el pedido existe y sigue sin driver.
+    // Nota de negocio: desde "En espera" el driver PUEDE aceptar aunque tenga
+    // cooldown pendiente para ese pedido; el cooldown solo limita re-ofertas push.
     const orderCheck = await query(
       `SELECT o.id FROM orders o
        WHERE o.id=$1 AND o.driver_id IS NULL
-         AND o.status IN ('created','pending_driver')
-         AND NOT EXISTS (
-           SELECT 1 FROM order_driver_offers od
-           WHERE od.order_id=$1 AND od.driver_id=$2
-             AND od.status IN ('rejected','released','expired')
-             AND od.wait_until > NOW()
-         )`,
-      [orderId, driverId]
+         AND o.status IN ('created','pending_driver')`,
+      [orderId]
     );
-    if (orderCheck.rowCount === 0) return next(new AppError(409, 'Pedido no disponible o en cooldown'));
+    if (orderCheck.rowCount === 0) return next(new AppError(409, 'Pedido no disponible'));
 
     // 2. Verificar que el driver tiene espacio (< MAX_ACTIVE_ORDERS)
     const MAX_ACTIVE = 4;

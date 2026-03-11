@@ -109,12 +109,13 @@ export async function releaseOrder(orderId, driverId, onOffer) {
  */
 export async function expireTimedOutOffers(onOffer) {
   const expired = await expireTimedOutOffersInDB(OFFER_TIMEOUT_SECONDS, COOLDOWN_SECONDS);
-  if (expired.length === 0) return;
 
-  console.log(
-    `[assign] expireTimedOutOffers: ${expired.length} oferta(s) expiradas:`,
-    expired.map(r => `order=${r.order_id} driver=${r.driver_id}`).join(', ')
-  );
+  if (expired.length > 0) {
+    console.log(
+      `[assign] expireTimedOutOffers: ${expired.length} oferta(s) expiradas:`,
+      expired.map(r => `order=${r.order_id} driver=${r.driver_id}`).join(', ')
+    );
+  }
 
   const orderIds = [...new Set(expired.map(r => r.order_id))];
   for (const orderId of orderIds) {
