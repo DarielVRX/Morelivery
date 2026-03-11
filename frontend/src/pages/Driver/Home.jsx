@@ -82,7 +82,7 @@ async function reverseGeocode(lat, lng) {
 // customPin: { lat, lng } | null  — marcador manual del driver
 // onCustomPin: (latlng | null) => void
 // hasActiveOrder: boolean — si true, oculta el pin y deshabilita clicks
-function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos, routeGeometry, onRouteError }) {
+function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos, pickupLabel, deliveryLabel, routeGeometry, onRouteError }) {
   const containerRef  = useRef(null);
   const mapRef        = useRef(null); // { map, driverMarker, customMarker, pickupMarker, deliveryMarker }
   const autoCenterTimeoutRef = useRef(null);
@@ -140,8 +140,14 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
           if (autoCenterTimeoutRef.current) clearTimeout(autoCenterTimeoutRef.current);
           autoCenterTimeoutRef.current = setTimeout(() => {
             autoCenterTimeoutRef.current = null;
-            if (!mapRef.current?.map || !driverPosRef.current) return;
-            mapRef.current.map.panTo([driverPosRef.current.lat, driverPosRef.current.lng], { animate: true, duration: 0.5 });
+            const ref = mapRef.current;
+            if (!ref?.map || !driverPosRef.current) return;
+            const { lat, lng } = driverPosRef.current;
+            // Solo panTo si el driver salió de los límites visibles del mapa
+            const bounds = ref.map.getBounds();
+            if (!bounds.contains([lat, lng])) {
+              ref.map.panTo([lat, lng], { animate: true, duration: 0.5 });
+            }
           }, 5000);
         };
 
@@ -251,8 +257,8 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
         return m;
       }
 
-      if (pickupPos)   mapRef.current.pickupMarker   = makeMarker(pickupPos,   '🏪', '#16a34a', 'Tienda');
-      if (deliveryPos) mapRef.current.deliveryMarker = makeMarker(deliveryPos, '📦', '#f97316', 'Cliente');
+      if (pickupPos)   mapRef.current.pickupMarker   = makeMarker(pickupPos,   '🏪', '#16a34a', pickupLabel   || 'Tienda');
+      if (deliveryPos) mapRef.current.deliveryMarker = makeMarker(deliveryPos, '📦', '#f97316', deliveryLabel || 'Cliente');
 
     });
   }, [pickupPos?.lat, pickupPos?.lng, deliveryPos?.lat, deliveryPos?.lng]);
@@ -317,6 +323,15 @@ export default function DriverHome() {
   const [routeGeometry, setRouteGeometry] = useState(null);
   const [msg, setMsg] = useState('');
   const loadDataRef   = useRef(null);
+  const loadDebounceRef = useRef(null);
+
+  function scheduleLoad() {
+    if (loadDebounceRef.current) clearTimeout(loadDebounceRef.current);
+    loadDebounceRef.current = setTimeout(() => {
+      loadDebounceRef.current = null;
+      loadDataRef.current?.();
+    }, 800);
+  }
 
   // GPS activo si disponible O tiene pedido activo
   const hasActiveOrder = Boolean(activeOrder && !['delivered','cancelled'].includes(activeOrder.status));
@@ -427,7 +442,7 @@ export default function DriverHome() {
 
   useRealtimeOrders(
     auth.token,
-    () => loadDataRef.current?.(),
+    () => scheduleLoad(),
     () => {},
     handleNewOffer,
   );
@@ -537,6 +552,40 @@ export default function DriverHome() {
     if (!activeOrder) setRouteGeometry(null);
   }, [activeOrder]);
 
+  // Navegación guiada: destino según estado del pedido
+  function openGuidedNavigation() {
+    if (!activeOrder) return;
+    const isOnTheWay = activeOrder.status === 'on_the_way';
+    const destLat = isOnTheWay
+      ? Number(activeOrder.customer_lat)
+      : Number(activeOrder.restaurant_lat);
+    const destLng = isOnTheWay
+      ? Number(activeOrder.customer_lng)
+      : Number(activeOrder.restaurant_lng);
+    if (!destLat || !destLng) return setMsg('Faltan coordenadas para navegar');
+
+    const ua    = (navigator.userAgent || '').toLowerCase();
+    const isIOS = /iphone|ipad|ipod/.test(ua);
+
+    // iOS: intentar abrir Google Maps nativo primero, caer a maps://
+    // Android: google.navigation abre navegación activa directa
+    const url = isIOS
+      ? `comgooglemaps://?daddr=${destLat},${destLng}&directionsmode=driving`
+      : `google.navigation:q=${destLat},${destLng}&mode=d`;
+
+    // En iOS intentar Google Maps; si no está instalado, Apple Maps con navegación
+    if (isIOS) {
+      const fallback = `maps://?daddr=${destLat},${destLng}&dirflg=d`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.click();
+      // Si no abre en 500ms, abrir Apple Maps
+      setTimeout(() => { window.location.href = fallback; }, 500);
+    } else {
+      window.location.href = url;
+    }
+  }
+
   return (
     <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden', position:'relative', paddingBottom:'calc(var(--nav-h-mobile) + env(safe-area-inset-bottom, 0px))' }}>
 
@@ -583,6 +632,8 @@ export default function DriverHome() {
             ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) } : null}
           deliveryPos={activeOrder?.customer_lat && activeOrder?.customer_lng
             ? { lat: Number(activeOrder.customer_lat), lng: Number(activeOrder.customer_lng) } : null}
+          pickupLabel={activeOrder?.restaurant_name || 'Tienda'}
+          deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
           routeGeometry={routeGeometry}
           onRouteError={setMsg}
         />
@@ -730,6 +781,39 @@ export default function DriverHome() {
               <button className="btn-sm" disabled={loadingOffer} onClick={rejectOffer}>
                 Rechazar
               </button>
+              <button className="btn-sm" onClick={() => {
+                // Usar coords de la oferta para trazar ruta previa
+                const start    = myPosition;
+                const offerPickup = pendingOffer.restaurant_lat && pendingOffer.restaurant_lng
+                  ? { lat: Number(pendingOffer.restaurant_lat), lng: Number(pendingOffer.restaurant_lng) } : null;
+                const offerDel = pendingOffer.customer_lat && pendingOffer.customer_lng
+                  ? { lat: Number(pendingOffer.customer_lat), lng: Number(pendingOffer.customer_lng) } : null;
+                if (!start || !offerPickup || !offerDel) { setMsg('Faltan coordenadas'); return; }
+                const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${offerPickup.lng},${offerPickup.lat};${offerDel.lng},${offerDel.lat}?overview=full&geometries=geojson`;
+                fetch(osrmUrl)
+                  .then(r => r.ok ? r.json() : Promise.reject())
+                  .then(data => {
+                    const coords = data?.routes?.[0]?.geometry?.coordinates;
+                    if (!coords?.length) throw new Error();
+                    setRouteGeometry(coords.map(([lng, lat]) => ({ lat, lng })));
+                    setMsg('Ruta trazada (previa a aceptar)');
+                  })
+                  .catch(() => { setRouteGeometry(null); setMsg('No se pudo calcular la ruta'); });
+              }}>Ruta</button>
+              <button className="btn-sm" onClick={() => {
+                const offerPickup = pendingOffer.restaurant_lat && pendingOffer.restaurant_lng
+                  ? `${Number(pendingOffer.restaurant_lat)},${Number(pendingOffer.restaurant_lng)}` : null;
+                const offerDel = pendingOffer.customer_lat && pendingOffer.customer_lng
+                  ? `${Number(pendingOffer.customer_lat)},${Number(pendingOffer.customer_lng)}` : null;
+                const origin = myPosition ? `${myPosition.lat},${myPosition.lng}` : offerPickup;
+                if (!origin || !offerPickup || !offerDel) { setMsg('Faltan coordenadas'); return; }
+                const ua = (navigator.userAgent || '').toLowerCase();
+                const isIOS = /iphone|ipad|ipod/.test(ua);
+                const url = isIOS
+                  ? `https://maps.apple.com/?saddr=${encodeURIComponent(origin)}&daddr=${encodeURIComponent(`${offerPickup}+to:${offerDel}`)}&dirflg=d`
+                  : `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(offerDel)}&waypoints=${encodeURIComponent(offerPickup)}&travelmode=driving`;
+                window.open(url, '_blank', 'noopener,noreferrer');
+              }}>Maps</button>
             </div>
           </div>
           </div>{/* fin panel con overflow */}
@@ -815,8 +899,8 @@ export default function DriverHome() {
               )}
 
               <div style={{ display:'flex', gap:'0.35rem', flexWrap:'wrap', marginTop:'0.45rem' }}>
-                <button className="btn-sm" onClick={openRoadRouteApi}>Ruta carretera (API)</button>
-                <button className="btn-sm" onClick={openMobileMapsRoute}>Abrir en Maps</button>
+                <button className="btn-sm" onClick={openRoadRouteApi}>Ruta</button>
+                <button className="btn-sm" onClick={openMobileMapsRoute}>Maps</button>
               </div>
             </div>
 
@@ -872,6 +956,33 @@ export default function DriverHome() {
           </div>
         );
       })()}
+
+      {/* ── Botón flotante de navegación guiada — visible solo cuando hay ruta trazada ── */}
+      {hasActiveOrder && routeGeometry?.length > 0 && (
+        <button
+          onClick={openGuidedNavigation}
+          aria-label="Navegación guiada"
+          style={{
+            position: 'absolute',
+            bottom: 'calc(var(--nav-h-mobile, 56px) + 1rem + env(safe-area-inset-bottom, 0px))',
+            right: '1rem',
+            zIndex: 400,
+            width: 56, height: 56,
+            borderRadius: '50%',
+            background: 'var(--brand)',
+            color: '#fff',
+            border: 'none',
+            cursor: 'pointer',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.28)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          {/* Ícono navegación */}
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/>
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
