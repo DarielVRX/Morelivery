@@ -33,6 +33,15 @@ function Flash({ text, isError }) {
 
 const ROLE_LABELS = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
 
+function ensureLeafletCSS() {
+  if (document.getElementById('leaflet-css')) return;
+  const lnk = document.createElement('link');
+  lnk.id = 'leaflet-css';
+  lnk.rel = 'stylesheet';
+  lnk.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  document.head.appendChild(lnk);
+}
+
 // Consulta de CP: SEPOMEX primaria + fallback gratuito
 async function fetchColoniasByPostal(cp) {
   // Primaria: SEPOMEX (proxy comunitario)
@@ -186,21 +195,9 @@ export default function ProfilePage() {
     if (!showPinMap || !pinMapRef.current) return;
     if (typeof window === 'undefined') return;
 
-    // Cargar Leaflet si no está cargado
     const loadLeaflet = async () => {
-      if (!window.L) {
-        await new Promise(resolve => {
-          const link = document.createElement('link');
-          link.rel = 'stylesheet';
-          link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-          document.head.appendChild(link);
-          const script = document.createElement('script');
-          script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-          script.onload = resolve;
-          document.head.appendChild(script);
-        });
-      }
-      const L = window.L;
+      ensureLeafletCSS();
+      const L = await import('leaflet');
       if (pinMapInstance.current) {
         pinMapInstance.current.remove();
         pinMapInstance.current = null;
@@ -212,6 +209,7 @@ export default function ProfilePage() {
 
       const map = L.map(pinMapRef.current, { center, zoom: pinMapResult ? 17 : 13 });
       pinMapInstance.current = map;
+      setTimeout(() => map.invalidateSize(), 50);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap'

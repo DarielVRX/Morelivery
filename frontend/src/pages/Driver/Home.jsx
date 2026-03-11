@@ -708,6 +708,7 @@ export default function DriverHome() {
         <div style={{
           position:'absolute', bottom:0, left:0, right:0,
           zIndex:30,
+          pointerEvents: offerMinimized ? 'none' : 'auto',
         }}>
           <div style={{
             position:'relative',
@@ -717,14 +718,15 @@ export default function DriverHome() {
           <button
             onClick={() => setOfferMinimized(m => !m)}
             style={{
-              position:'absolute', top:-22, left:'50%', transform:'translateX(-50%)',
-              width:74, height:22,
+              position:'absolute', top:-24, left:'50%', transform:'translateX(-50%)',
+              width:74, height:24,
               background:'#f3e8ed', color:'var(--brand)', border:'1px solid #e8c8d4',
               borderBottom:'none', borderRadius:'6px 6px 0 0',
               padding:'0', cursor:'pointer', fontSize:'0.62rem', fontWeight:700,
               boxShadow:'0 -2px 6px rgba(0,0,0,0.06)',
               zIndex:31, whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:3,
               justifyContent:'center',
+              pointerEvents:'auto',
             }}
             aria-label={offerMinimized ? 'Expandir oferta' : 'Minimizar oferta'}
           >
