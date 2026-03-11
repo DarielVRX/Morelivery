@@ -380,10 +380,10 @@ function DriverMap({
         if (!map.getSource(SRC)) map.addSource(SRC, { type:'geojson', data:geo });
         else map.getSource(SRC).setData(geo);
         if (!map.getLayer(LYR)) map.addLayer({ id:LYR, type:'line', source:SRC,
-          paint:{ 'line-color':'#ad1457', 'line-width':16, 'line-opacity':1 },
+          paint:{ 'line-color':'#ad1457', 'line-width':14, 'line-opacity':0.8 },
           layout:{ 'line-cap':'round', 'line-join':'round' } });
         if (!map.getLayer(BDR)) map.addLayer({ id:BDR, type:'line', source:SRC,
-          paint:{ 'line-color':'#e3aaaa', 'line-width':10, 'line-opacity':0.8 },
+          paint:{ 'line-color':'#e3aaaa', 'line-width':8, 'line-opacity':0.6 },
           layout:{ 'line-cap':'round', 'line-join':'round' } });
       };
       if (map.isStyleLoaded()) draw(); else map.once('load', draw);
