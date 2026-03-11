@@ -373,14 +373,17 @@ function DriverMap({
     useEffect(() => {
       const map = mapRef.current;
       if (!map) return;
-      const SRC = 'driver-route-source', LYR = 'driver-route-layer';
+      const SRC = 'driver-route-source', LYR = 'driver-route-layer', BDR = 'driver-route-border';
       const draw = () => {
         const geo = { type:'Feature', properties:{},
         geometry:{ type:'LineString', coordinates:(routeGeometry||[]).map(p=>[p.lng,p.lat]) } };
         if (!map.getSource(SRC)) map.addSource(SRC, { type:'geojson', data:geo });
         else map.getSource(SRC).setData(geo);
         if (!map.getLayer(LYR)) map.addLayer({ id:LYR, type:'line', source:SRC,
-          paint:{ 'line-color':'#e3aaaa', 'line-width':8, 'line-opacity':0.9 },
+          paint:{ 'line-color':'#ad1457', 'line-width':16, 'line-opacity':1 },
+          layout:{ 'line-cap':'round', 'line-join':'round' } });
+        if (!map.getLayer(BDR)) map.addLayer({ id:LYR, type:'line', source:SRC,
+          paint:{ 'line-color':'#e3aaaa', 'line-width':10, 'line-opacity':0.8 },
           layout:{ 'line-cap':'round', 'line-join':'round' } });
       };
       if (map.isStyleLoaded()) draw(); else map.once('load', draw);
