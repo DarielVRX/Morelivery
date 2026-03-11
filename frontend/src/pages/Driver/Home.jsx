@@ -82,9 +82,13 @@ async function reverseGeocode(lat, lng) {
 // customPin: { lat, lng } | null  — marcador manual del driver
 // onCustomPin: (latlng | null) => void
 // hasActiveOrder: boolean — si true, oculta el pin y deshabilita clicks
-function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos }) {
+function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos, routeGeometry, onRouteError }) {
   const containerRef  = useRef(null);
   const mapRef        = useRef(null); // { map, driverMarker, customMarker, pickupMarker, deliveryMarker }
+  const autoCenterTimeoutRef = useRef(null);
+  const driverPosRef = useRef(driverPos);
+
+  useEffect(() => { driverPosRef.current = driverPos; }, [driverPos]);
   // Inicializar una vez cuando hay posición
   // Posición default para inicializar el mapa cuando no hay GPS
   const DEFAULT_POS = { lat: 19.70595, lng: -101.19498 }; // Morelia
@@ -126,12 +130,37 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
         }
 
         // Click en mapa → pin personalizado (funciona con o sin GPS)
-        map.on('click', (e) => {
+        const handleCustomClick = (e) => {
           if (hasActiveOrder) return;
           onCustomPin?.({ lat: e.latlng.lat, lng: e.latlng.lng });
-        });
+        };
+        map.on('click', handleCustomClick);
 
-        mapRef.current = { map, driverMarker, customMarker: null, pickupMarker: null, deliveryMarker: null };
+        const deferAutoCenter = () => {
+          if (autoCenterTimeoutRef.current) clearTimeout(autoCenterTimeoutRef.current);
+          autoCenterTimeoutRef.current = setTimeout(() => {
+            autoCenterTimeoutRef.current = null;
+            if (!mapRef.current?.map || !driverPosRef.current) return;
+            mapRef.current.map.panTo([driverPosRef.current.lat, driverPosRef.current.lng], { animate: true, duration: 0.5 });
+          }, 5000);
+        };
+
+        map.on('click', deferAutoCenter);
+        map.on('mousedown', deferAutoCenter);
+        map.on('touchstart', deferAutoCenter);
+        map.on('dragstart', deferAutoCenter);
+        map.on('zoomstart', deferAutoCenter);
+
+        mapRef.current = {
+          map,
+          driverMarker,
+          customMarker: null,
+          pickupMarker: null,
+          deliveryMarker: null,
+          routeLayer: null,
+          deferAutoCenter,
+          handleCustomClick,
+        };
         setTimeout(() => map.invalidateSize(), 300);
       }).catch(() => {});
     }, 50);
@@ -143,6 +172,7 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
   useEffect(() => {
     return () => {
       if (mapRef.current?.map) {
+        if (autoCenterTimeoutRef.current) clearTimeout(autoCenterTimeoutRef.current);
         mapRef.current.map.remove();
         mapRef.current = null;
       }
@@ -162,7 +192,7 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
           radius: 9, fillColor: '#2563eb', fillOpacity: 1, color: '#fff', weight: 2,
         }).addTo(map);
       }
-      map.panTo([driverPos.lat, driverPos.lng], { animate: true, duration: 0.5 });
+      mapRef.current.deferAutoCenter?.();
     }).catch(() => {});
   }, [driverPos?.lat, driverPos?.lng]);
 
@@ -170,9 +200,11 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
   useEffect(() => {
     if (!mapRef.current?.map) return;
     const map = mapRef.current.map;
-    map.off('click');
+    const { handleCustomClick } = mapRef.current;
+    if (!handleCustomClick) return;
+    map.off('click', handleCustomClick);
     if (!hasActiveOrder) {
-      map.on('click', (e) => onCustomPin?.({ lat: e.latlng.lat, lng: e.latlng.lng }));
+      map.on('click', handleCustomClick);
     }
   }, [hasActiveOrder, onCustomPin]);
 
@@ -225,6 +257,30 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
     });
   }, [pickupPos?.lat, pickupPos?.lng, deliveryPos?.lat, deliveryPos?.lng]);
 
+  // Dibujar ruta carretera en el mapa actual
+  useEffect(() => {
+    if (!mapRef.current?.map) return;
+    import('leaflet').then(L => {
+      if (!mapRef.current?.map) return;
+      if (mapRef.current.routeLayer) {
+        mapRef.current.routeLayer.remove();
+        mapRef.current.routeLayer = null;
+      }
+      if (!routeGeometry?.length) return;
+
+      const line = L.polyline(routeGeometry.map(p => [p.lat, p.lng]), {
+        color: '#e11d48',
+        weight: 5,
+        opacity: 0.85,
+      }).addTo(mapRef.current.map);
+
+      mapRef.current.routeLayer = line;
+      mapRef.current.map.fitBounds(line.getBounds(), { padding: [30, 30], maxZoom: 16 });
+    }).catch(() => {
+      onRouteError?.('No se pudo pintar la ruta en el mapa');
+    });
+  }, [routeGeometry, onRouteError]);
+
   // SIEMPRE renderizamos el div del mapa — el containerRef nunca se desmonta.
   // El mensaje GPS se superpone como overlay cuando no hay posición.
   return (
@@ -258,6 +314,7 @@ export default function DriverHome() {
   const [customPin,    setCustomPin]     = useState(null);   // { lat, lng }
   const [pinAddress,   setPinAddress]    = useState(null);   // string | null
   const [loadingPin,   setLoadingPin]    = useState(false);
+  const [routeGeometry, setRouteGeometry] = useState(null);
   const [msg, setMsg] = useState('');
   const loadDataRef   = useRef(null);
 
@@ -441,7 +498,18 @@ export default function DriverHome() {
     if (!start || !pickup || !delivery) return setMsg('Faltan coordenadas para trazar la ruta');
 
     const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${pickup.lng},${pickup.lat};${delivery.lng},${delivery.lat}?overview=full&geometries=geojson`;
-    window.open(osrmUrl, '_blank', 'noopener,noreferrer');
+    fetch(osrmUrl)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('No se obtuvo ruta')))
+      .then(data => {
+        const coords = data?.routes?.[0]?.geometry?.coordinates;
+        if (!coords?.length) throw new Error('No hay geometría de ruta');
+        setRouteGeometry(coords.map(([lng, lat]) => ({ lat, lng })));
+        setMsg('Ruta carretera trazada en el mapa');
+      })
+      .catch(() => {
+        setRouteGeometry(null);
+        setMsg('No se pudo calcular la ruta carretera');
+      });
   }
 
   function openMobileMapsRoute() {
@@ -464,6 +532,10 @@ export default function DriverHome() {
 
     window.open(url, '_blank', 'noopener,noreferrer');
   }
+
+  useEffect(() => {
+    if (!activeOrder) setRouteGeometry(null);
+  }, [activeOrder]);
 
   return (
     <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden', position:'relative', paddingBottom:'calc(var(--nav-h-mobile) + env(safe-area-inset-bottom, 0px))' }}>
@@ -511,6 +583,8 @@ export default function DriverHome() {
             ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) } : null}
           deliveryPos={activeOrder?.customer_lat && activeOrder?.customer_lng
             ? { lat: Number(activeOrder.customer_lat), lng: Number(activeOrder.customer_lng) } : null}
+          routeGeometry={routeGeometry}
+          onRouteError={setMsg}
         />
 
         {/* Panel de pin personalizado */}
@@ -567,12 +641,14 @@ export default function DriverHome() {
           <button
             onClick={() => setOfferMinimized(m => !m)}
             style={{
-              position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)',
+              position:'absolute', top:-28, left:'50%', transform:'translateX(-50%)',
+              width:74, height:28,
               background:'#f3e8ed', color:'var(--brand)', border:'1px solid #e8c8d4',
               borderBottom:'none', borderRadius:'6px 6px 0 0',
-              padding:'0.1rem 0.5rem', cursor:'pointer', fontSize:'0.62rem', fontWeight:700,
+              padding:'0', cursor:'pointer', fontSize:'0.62rem', fontWeight:700,
               boxShadow:'0 -2px 6px rgba(0,0,0,0.06)',
               zIndex:31, whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:3,
+              justifyContent:'center',
             }}
             aria-label={offerMinimized ? 'Expandir oferta' : 'Minimizar oferta'}
           >
@@ -580,7 +656,7 @@ export default function DriverHome() {
               stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <polyline points={offerMinimized ? '6 15 12 9 18 15' : '18 9 12 15 6 9'} />
             </svg>
-            {offerMinimized ? 'Oferta' : '—'}
+            Oferta
           </button>
 
           {/* Panel con overflow:hidden — el botón queda fuera de este */}
@@ -690,8 +766,9 @@ export default function DriverHome() {
                   {DRIVER_STATUS[activeOrder.status] || activeOrder.status}
                 </span>
                 <button onClick={() => setOrderExpanded(e => !e)}
-                  style={{ border:'none', background:'none', cursor:'pointer',
-                    color:'var(--gray-400)', padding:'0.1rem 0.3rem', fontSize:'0.78rem',
+                  style={{ border:'1px solid #e8c8d4', background:'#f3e8ed', cursor:'pointer',
+                    color:'var(--brand)', padding:'0.15rem 0.45rem', fontSize:'0.78rem',
+                    borderRadius:'6px 6px 0 0',
                     display:'flex', alignItems:'center', gap:2 }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
