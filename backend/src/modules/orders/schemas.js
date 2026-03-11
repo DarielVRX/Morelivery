@@ -14,6 +14,7 @@ export const createOrderSchema = z.object({
   tip_cents:      z.number().int().min(0).optional().default(0),
   delivery_lat:   z.number().finite().min(-90).max(90).optional(),
   delivery_lng:   z.number().finite().min(-180).max(180).optional(),
+  delivery_address: z.string().trim().min(3).max(300).optional(),
 });
 
 export const updateOrderStatusSchema = z.object({
