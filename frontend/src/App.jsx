@@ -9,6 +9,7 @@ import { apiFetch } from './api/client';
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const CustomerHome    = lazy(() => import('./pages/Customer/Home'));
 const CustomerOrders  = lazy(() => import('./pages/Customer/Orders'));
+const CustomerPayments = lazy(() => import('./pages/Customer/Payments'));
 const RestaurantPage  = lazy(() => import('./pages/Customer/RestaurantPage'));
 const RestaurantMenu     = lazy(() => import('./pages/Restaurant/Menu'));
 const RestaurantOrders   = lazy(() => import('./pages/Restaurant/Orders'));
@@ -280,6 +281,7 @@ function AppRoutes() {
             </ProtectedRole>
           } />
           <Route path="/customer/pedidos" element={<Navigate to="/customer" replace />} />
+          <Route path="/customer/pagos" element={<ProtectedRole role="customer"><CustomerPayments /></ProtectedRole>} />
 
           <Route path="/restaurant" element={
             <ProtectedRole role="restaurant">

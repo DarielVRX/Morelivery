@@ -50,6 +50,9 @@ a:hover { text-decoration: underline; }
   align-items: center;
   justify-content: space-between;
   padding: 0 1.25rem;
+  /* Soporte notch/dynamic island iOS en PWA standalone */
+  padding-top: env(safe-area-inset-top, 0);
+  height: calc(var(--header-h) + env(safe-area-inset-top, 0px));
   gap: 1rem;
 }
 .brand-block {
@@ -172,16 +175,16 @@ a:hover { text-decoration: underline; }
 
 /* ── Barra nav inferior móvil ──────────────────────────────────────────────── */
 .nav-mobile {
-  /* Footer real dentro del flex column — no flota sobre el contenido */
   flex-shrink: 0;
-  height: var(--nav-h-mobile);
+  /* Altura base + home bar de iPhone (safe-area-inset-bottom) */
+  height: calc(var(--nav-h-mobile) + env(safe-area-inset-bottom, 0px));
   background: #fff;
   border-top: 1px solid var(--gray-200);
   display: flex;
-  align-items: stretch;
+  align-items: flex-start; /* items se alinean arriba, el padding absorbe el home bar */
+  padding-top: 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   z-index: 200;
-  /* Soporte para safe area en iOS */
-  padding-bottom: env(safe-area-inset-bottom, 0);
 }
 .nav-mobile-item {
   flex: 1;
@@ -477,4 +480,21 @@ button, a, [role="button"] {
   .btn-sm {
     transition: none;
   }
+}
+
+/* ── PWA standalone — eliminar overscroll bounce y rubber-band ────────────── */
+/* Evita que el body "rebote" en iOS cuando la PWA está en standalone */
+html, body {
+  overscroll-behavior: none;
+}
+/* En standalone el header ya tiene safe-area-inset-top, pero body puede
+   recibir el status bar color correcto via theme-color en index.html */
+@media (display-mode: standalone) {
+  .app-shell {
+    /* Asegura que el shell ocupe exactamente la pantalla completa */
+    height: 100dvh;
+    overscroll-behavior: none;
+  }
+  /* Ocultar la barra desktop en standalone — siempre es móvil */
+  .nav-desktop { display: none !important; }
 }

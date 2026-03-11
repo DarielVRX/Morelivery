@@ -229,6 +229,17 @@ export default function CustomerHome() {
                     {r.address}
                   </div>
                 )}
+                {r.rating_avg != null && r.rating_count > 0 && (
+                  <div style={{ display:'flex', alignItems:'center', gap:'0.25rem', marginTop:'0.2rem' }}>
+                    <span style={{ color:'#f59e0b', fontSize:'0.78rem', lineHeight:1 }}>★</span>
+                    <span style={{ fontSize:'0.78rem', fontWeight:700, color:'var(--gray-700)' }}>
+                      {Number(r.rating_avg).toFixed(1)}
+                    </span>
+                    <span style={{ fontSize:'0.72rem', color:'var(--gray-400)' }}>
+                      ({r.rating_count})
+                    </span>
+                  </div>
+                )}
               </div>
               <span style={{
                 fontSize:'0.72rem', fontWeight:700, flexShrink:0,

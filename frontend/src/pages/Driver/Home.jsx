@@ -132,12 +132,20 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
           }, 3000);
         };
 
-        // Marcador GPS del driver (azul) — solo si hay posición real
+        // Marcador GPS del driver — círculo rosa, o flecha de navegación en follow mode
         let driverMarker = null;
         if (driverPos) {
-          driverMarker = L.circleMarker([driverPos.lat, driverPos.lng], {
-            radius: 9, fillColor: '#2563eb', fillOpacity: 1, color: '#fff', weight: 2,
-          }).addTo(map);
+          const icon = navFollowEnabled
+            ? L.divIcon({
+                html: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="#e3aaaa" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>`,
+                iconSize: [28, 28], iconAnchor: [14, 14], className: ''
+              })
+            : null;
+          driverMarker = icon
+            ? L.marker([driverPos.lat, driverPos.lng], { icon }).addTo(map)
+            : L.circleMarker([driverPos.lat, driverPos.lng], {
+                radius: 9, fillColor: '#e3aaaa', fillOpacity: 1, color: '#fff', weight: 2,
+              }).addTo(map);
         }
 
         // Click en mapa → pin personalizado (funciona con o sin GPS)
@@ -204,25 +212,39 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
     };
   }, []);
 
-  // Actualizar posición GPS — crear el marcador si aún no existe
+  // Actualizar posición GPS — recrear marcador si cambia modo follow o posición
   useEffect(() => {
     if (!mapRef.current || !driverPos) return;
     import('leaflet').then(L => {
       if (!mapRef.current) return;
       const { map } = mapRef.current;
+
+      // Siempre recrear el marcador para cambiar entre círculo y flecha
       if (mapRef.current.driverMarker) {
-        mapRef.current.driverMarker.setLatLng([driverPos.lat, driverPos.lng]);
-      } else {
-        mapRef.current.driverMarker = L.circleMarker([driverPos.lat, driverPos.lng], {
-          radius: 9, fillColor: '#2563eb', fillOpacity: 1, color: '#fff', weight: 2,
-        }).addTo(map);
+        mapRef.current.driverMarker.remove();
+        mapRef.current.driverMarker = null;
       }
+
+      const icon = navFollowEnabled
+        ? L.divIcon({
+            html: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="#e3aaaa" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>`,
+            iconSize: [28, 28], iconAnchor: [14, 14], className: ''
+          })
+        : null;
+
+      mapRef.current.driverMarker = icon
+        ? L.marker([driverPos.lat, driverPos.lng], { icon }).addTo(map)
+        : L.circleMarker([driverPos.lat, driverPos.lng], {
+            radius: 9, fillColor: '#e3aaaa', fillOpacity: 1, color: '#fff', weight: 2,
+          }).addTo(map);
+
       if (navFollowEnabled) {
-        const zoom = Math.max(map.getZoom(), 16);
+        // Zoom 17 + driver en el tercio inferior para ver la ruta por delante
+        const zoom = Math.max(map.getZoom(), 17);
         const targetPoint = map.project([driverPos.lat, driverPos.lng], zoom);
-        targetPoint.y += map.getSize().y * 0.18;
+        targetPoint.y += map.getSize().y * 0.25;
         const targetLatLng = map.unproject(targetPoint, zoom);
-        map.setView(targetLatLng, zoom, { animate: true });
+        map.setView(targetLatLng, zoom, { animate: true, duration: 0.3 });
       } else {
         mapRef.current.deferAutoCenter?.();
       }

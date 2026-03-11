@@ -301,9 +301,45 @@ export default function AdminDashboard() {
   const [msg, setMsg]           = useState('');
   const [liveOffers, setLiveOffers] = useState([]);
   const [orderLog, setOrderLog]     = useState([]);
+  const [actionLoading, setActionLoading] = useState(''); // id de la entidad en operación
 
   // Registro nuevo admin
   const [newUser, setNewUser] = useState({ username:'', password:'', displayName:'' });
+
+  // ── Suspender / Activar usuario ──────────────────────────────────────────
+  async function handleToggleUserStatus(user) {
+    const next = user.status === 'active' ? 'suspended' : 'active';
+    const label = next === 'suspended' ? 'suspender' : 'activar';
+    if (!window.confirm(`¿${label} a ${user.full_name || user.username}?`)) return;
+    setActionLoading(user.id);
+    try {
+      await apiFetch(`/admin/users/${user.id}/status`, {
+        method: 'PATCH', body: JSON.stringify({ status: next }),
+      }, auth.token);
+      setUsers(prev => prev.map(u => u.id === user.id ? { ...u, status: next } : u));
+      setMsg(`Usuario ${next === 'active' ? 'activado' : 'suspendido'} correctamente`);
+    } catch (e) { setMsg(`Error: ${e.message}`); }
+    finally { setActionLoading(''); }
+  }
+
+  // ── Forzar estado de pedido ──────────────────────────────────────────────
+  async function handleForceOrderStatus(orderId, currentStatus) {
+    const validStatuses = ['created','accepted','preparing','ready','on_the_way','delivered','cancelled'];
+    const next = window.prompt(
+      `Estado actual: ${currentStatus}\nNuevo estado (${validStatuses.join(', ')}):`
+    );
+    if (!next || !validStatuses.includes(next.trim())) return;
+    const note = window.prompt('Nota interna (opcional):') || '';
+    setActionLoading(orderId);
+    try {
+      await apiFetch(`/admin/orders/${orderId}/status`, {
+        method: 'PATCH', body: JSON.stringify({ status: next.trim(), note }),
+      }, auth.token);
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: next.trim() } : o));
+      setMsg(`Pedido actualizado a "${next.trim()}"`);
+    } catch (e) { setMsg(`Error: ${e.message}`); }
+    finally { setActionLoading(''); }
+  }
 
   const load = useCallback(async () => {
     if (!auth.token) return;
@@ -570,7 +606,7 @@ export default function AdminDashboard() {
                 <tr>
                   <Th>ID</Th><Th>Estado</Th><Th>Tienda</Th><Th>Cliente</Th>
                   <Th>Driver</Th><Th>Total</Th><Th>Creado</Th>
-                  <Th>Pend.</Th><Th>Rech.</Th><Th>Exp.</Th>
+                  <Th>Pend.</Th><Th>Rech.</Th><Th>Exp.</Th><Th>Acción</Th>
                 </tr>
               </thead>
               <tbody>
@@ -586,6 +622,18 @@ export default function AdminDashboard() {
                     <Td>{o.pending_offers > 0 ? <span style={{color:'#f59e0b',fontWeight:700}}>⏳{o.pending_offers}</span> : 0}</Td>
                     <Td>{o.rejected_offers > 0 ? <span style={{color:'#dc2626'}}>{o.rejected_offers}</span> : 0}</Td>
                     <Td>{o.expired_offers > 0 ? <span style={{color:'#9ca3af'}}>{o.expired_offers}</span> : 0}</Td>
+                    <Td>
+                      <button
+                        disabled={actionLoading === o.id || ['delivered','cancelled'].includes(o.status)}
+                        onClick={() => handleForceOrderStatus(o.id, o.status)}
+                        style={{
+                          padding:'0.2rem 0.5rem', fontSize:'0.72rem', fontWeight:700, borderRadius:6, cursor:'pointer',
+                          border:'1px solid #fde68a', background:'#fffbeb', color:'#92400e',
+                          opacity: ['delivered','cancelled'].includes(o.status) ? 0.35 : 1,
+                        }}>
+                        {actionLoading === o.id ? '…' : '✏️ Estado'}
+                      </button>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
@@ -661,7 +709,7 @@ export default function AdminDashboard() {
           </div>
           <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:10 }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
-              <thead><tr><Th>Usuario</Th><Th>Nombre</Th><Th>Rol</Th><Th>Estado</Th><Th>Creado</Th></tr></thead>
+              <thead><tr><Th>Usuario</Th><Th>Nombre</Th><Th>Rol</Th><Th>Estado</Th><Th>Creado</Th><Th>Acción</Th></tr></thead>
               <tbody>
                 {users.map(u => (
                   <tr key={u.id}>
@@ -670,6 +718,20 @@ export default function AdminDashboard() {
                     <Td><Badge status={u.role} label={u.role} /></Td>
                     <Td><Badge status={u.status==='active'?'ready':'cancelled'} label={u.status} /></Td>
                     <Td>{fmtDate(u.created_at)}</Td>
+                    <Td>
+                      <button
+                        disabled={actionLoading === u.id || u.role === 'admin'}
+                        onClick={() => handleToggleUserStatus(u)}
+                        style={{
+                          padding:'0.2rem 0.55rem', fontSize:'0.72rem', fontWeight:700, borderRadius:6, cursor:'pointer',
+                          border:`1px solid ${u.status==='active'?'#fca5a5':'#86efac'}`,
+                          background: u.status==='active'?'#fef2f2':'#f0fdf4',
+                          color: u.status==='active'?'#dc2626':'#16a34a',
+                          opacity: u.role==='admin' ? 0.4 : 1,
+                        }}>
+                        {actionLoading === u.id ? '…' : u.status==='active' ? 'Suspender' : 'Activar'}
+                      </button>
+                    </Td>
                   </tr>
                 ))}
               </tbody>

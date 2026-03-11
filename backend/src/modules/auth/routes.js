@@ -5,11 +5,12 @@ import { validate } from '../../middlewares/validate.js';
 import { registerSchema, loginSchema } from './schemas.js';
 import { registerUser, loginUser, updateProfileAddress, changePassword, deleteAccount, updateLoginUsername } from './service.js';
 import { AppError } from '../../utils/errors.js';
+import { authRateLimit } from '../../middlewares/rateLimit.js';
 
 const router = Router();
 
 /* ── POST /auth/register ── */
-router.post('/register', validate(registerSchema), async (req, res, next) => {
+router.post('/register', authRateLimit, validate(registerSchema), async (req, res, next) => {
   try {
     // Registro público de admin bloqueado — solo el dashboard de admin puede crear admins
     if (req.body.role === 'admin') return next(new AppError(403, 'El registro de administradores no está disponible públicamente'));
@@ -19,7 +20,7 @@ router.post('/register', validate(registerSchema), async (req, res, next) => {
 });
 
 /* ── POST /auth/login ── */
-router.post('/login', validate(loginSchema), async (req, res, next) => {
+router.post('/login', authRateLimit, validate(loginSchema), async (req, res, next) => {
   try {
     const result = await loginUser(req.body);
     return res.json(result);

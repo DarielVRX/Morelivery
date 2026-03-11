@@ -12,6 +12,7 @@ import driverRoutes from './modules/drivers/routes.js';
 import adminRoutes from './modules/admin/routes.js';
 import eventRoutes from './modules/events/routes.js';
 import routeModelRoutes from './modules/routes/routes.js';
+import paymentsRoutes from './modules/payments/routes.js';
 import { errorHandler, notFoundHandler } from './middlewares/errorHandler.js';
 import { checkDbConnection } from './config/db.js';
 
@@ -54,6 +55,7 @@ export function createApp() {
   app.use('/api/admin', adminRoutes);
   app.use('/api/events', eventRoutes);   // \u2190 SSE
   app.use('/api/routes', routeModelRoutes);
+  app.use('/api/payments', paymentsRoutes);
 
   // Aliases sin /api/ para compatibilidad con c\u00f3digo existente
   app.use('/auth', authRoutes);
@@ -63,6 +65,7 @@ export function createApp() {
   app.use('/admin', adminRoutes);
   app.use('/events', eventRoutes);
   app.use('/routes', routeModelRoutes);
+  app.use('/payments', paymentsRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

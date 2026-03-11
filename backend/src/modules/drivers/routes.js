@@ -256,4 +256,62 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
   } catch (error) { return next(error); }
 });
 
+/* ── GET /drivers/earnings — resumen de ganancias con filtro por días ──────── */
+// Devuelve solo pedidos entregados del driver, paginados, con totales agregados.
+// Reemplaza el uso de /orders/my para el módulo de ganancias.
+router.get('/earnings', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const days   = Math.min(Number(req.query.days)   || 30, 365);
+    const limit  = Math.min(Number(req.query.limit)  || 50, 200);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+
+    const rows = await query(
+      `SELECT
+         o.id, o.total_cents, o.delivery_fee_cents, o.service_fee_cents,
+         o.tip_cents, o.delivered_tip_cents, o.payment_method,
+         o.delivered_at, o.created_at,
+         r.name AS restaurant_name,
+         COALESCE(c.alias, c.full_name) AS customer_name
+       FROM orders o
+       JOIN restaurants r ON r.id = o.restaurant_id
+       JOIN users c ON c.id = o.customer_id
+       WHERE o.driver_id = $1
+         AND o.status = 'delivered'
+         AND o.delivered_at >= NOW() - INTERVAL '1 day' * $2
+       ORDER BY o.delivered_at DESC
+       LIMIT $3 OFFSET $4`,
+      [req.user.userId, days, limit, offset]
+    );
+
+    // Totales agregados del periodo (sin paginación) para el resumen
+    const totals = await query(
+      `SELECT
+         COUNT(*)::int                                                      AS deliveries,
+         COALESCE(SUM(o.delivery_fee_cents), 0)::int                       AS total_delivery_fee,
+         COALESCE(SUM(ROUND(o.service_fee_cents * 0.5)), 0)::int           AS total_service_share,
+         COALESCE(SUM(o.tip_cents + COALESCE(o.delivered_tip_cents,0)), 0)::int AS total_tips
+       FROM orders o
+       WHERE o.driver_id = $1
+         AND o.status = 'delivered'
+         AND o.delivered_at >= NOW() - INTERVAL '1 day' * $2`,
+      [req.user.userId, days]
+    );
+
+    const { deliveries, total_delivery_fee, total_service_share, total_tips } = totals.rows[0];
+    const totalEarnings = total_delivery_fee + total_service_share + total_tips;
+
+    return res.json({
+      orders: rows.rows.map(r => ({
+        ...r,
+        delivery_fee_cents:   Number(r.delivery_fee_cents   || 0),
+        service_fee_cents:    Number(r.service_fee_cents    || 0),
+        tip_cents:            Number(r.tip_cents            || 0),
+        delivered_tip_cents:  Number(r.delivered_tip_cents  || 0),
+      })),
+      summary: { deliveries, total_earnings: totalEarnings, total_tips, days },
+      limit, offset,
+    });
+  } catch (error) { return next(error); }
+});
+
 export default router;

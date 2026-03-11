@@ -1,15 +1,8 @@
+// orderEvents — stub vacío. Las notificaciones en tiempo real
+// se manejan íntegramente a través de SSE (modules/events/hub.js).
+// Mantenemos el módulo para no romper imports existentes.
 class OrderEvents {
-  io = null;
-
-  setSocket(io) {
-    this.io = io;
-  }
-
-  emitOrderUpdate(orderId, status) {
-    if (!this.io) return;
-    // En lugar de new Date(), podrías enviar un flag de actualización
-    this.io.emit('order:update', { orderId, status });
-  }
+  emitOrderUpdate(_orderId, _status) {}
 }
 
 export const orderEvents = new OrderEvents();

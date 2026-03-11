@@ -133,7 +133,7 @@ export default function CustomerOrders() {
   const [orders, setOrders]               = useState([]);
   const [tab, setTab]                     = useState('active');
   const [expanded, setExpanded]           = useState(null);
-  const [tipDraft, setTipDraft]           = useState({}); // orderId -> cents draft
+  const [tipDraft, setTipDraft]           = useState({});
   const [driverPos, setDriverPos]         = useState({});
   const [suggestionFor, setSuggestionFor] = useState('');
   const [suggDrafts, setSuggDrafts]       = useState({});
@@ -141,6 +141,50 @@ export default function CustomerOrders() {
   const [reportText, setReportText]       = useState('');
   const [msg, setMsg] = useState('');
   const loadDataRef = useRef(null);
+
+  // ── Rating state ─────────────────────────────────────────────────────────
+  const [ratingOrder,    setRatingOrder]    = useState(null); // order a calificar
+  const [ratingRestStar, setRatingRestStar] = useState(0);
+  const [ratingDrvStar,  setRatingDrvStar]  = useState(0);
+  const [ratingComment,  setRatingComment]  = useState('');
+  const [ratingLoading,  setRatingLoading]  = useState(false);
+  const [ratedOrders,    setRatedOrders]    = useState(new Set()); // ids ya calificados
+
+  async function submitRating() {
+    if (!ratingOrder || ratingRestStar < 1) return;
+    setRatingLoading(true);
+    try {
+      await apiFetch(`/orders/${ratingOrder.id}/rating`, {
+        method: 'POST',
+        body: JSON.stringify({
+          restaurant_stars: ratingRestStar,
+          driver_stars:     ratingDrvStar > 0 ? ratingDrvStar : undefined,
+          comment:          ratingComment.trim() || undefined,
+        }),
+      }, auth.token);
+      setRatedOrders(prev => new Set([...prev, ratingOrder.id]));
+      setRatingOrder(null); setRatingRestStar(0); setRatingDrvStar(0); setRatingComment('');
+    } catch (e) { setMsg(e.message || 'Error al calificar'); }
+    finally { setRatingLoading(false); }
+  }
+
+  function StarPicker({ value, onChange, label }) {
+    return (
+      <div style={{ marginBottom:'0.6rem' }}>
+        <div style={{ fontSize:'0.78rem', fontWeight:600, color:'var(--gray-600)', marginBottom:'0.3rem' }}>{label}</div>
+        <div style={{ display:'flex', gap:'0.3rem' }}>
+          {[1,2,3,4,5].map(s => (
+            <button key={s} onClick={() => onChange(s)}
+              style={{ fontSize:'1.5rem', background:'none', border:'none', cursor:'pointer',
+                padding:'0 0.1rem', opacity: s <= value ? 1 : 0.25,
+                filter: s <= value ? 'none' : 'grayscale(1)' }}>
+              ⭐
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   async function loadData() {
     if (!auth.token) return;
@@ -249,6 +293,46 @@ export default function CustomerOrders() {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+
+      {/* ── Modal calificación ─────────────────────────────────────── */}
+      {ratingOrder && (
+        <div style={{
+          position:'fixed', inset:0, zIndex:9000,
+          background:'rgba(0,0,0,0.45)',
+          display:'flex', alignItems:'flex-end', justifyContent:'center',
+          padding:`0 0 env(safe-area-inset-bottom,0px)`,
+        }}>
+          <div style={{ background:'#fff', borderRadius:'18px 18px 0 0', padding:'1.5rem 1.25rem 1.75rem',
+            width:'100%', maxWidth:480, boxShadow:'0 -4px 32px rgba(0,0,0,0.18)' }}>
+            <div style={{ fontWeight:800, fontSize:'1rem', marginBottom:'0.25rem' }}>⭐ Calificar pedido</div>
+            <div style={{ fontSize:'0.82rem', color:'var(--gray-500)', marginBottom:'1rem' }}>
+              {ratingOrder.restaurant_name}
+            </div>
+            <StarPicker value={ratingRestStar} onChange={setRatingRestStar} label="Tienda / Restaurante" />
+            {ratingOrder.driver_id && (
+              <StarPicker value={ratingDrvStar} onChange={setRatingDrvStar} label="Conductor (opcional)" />
+            )}
+            <div style={{ marginBottom:'0.75rem' }}>
+              <div style={{ fontSize:'0.78rem', fontWeight:600, color:'var(--gray-600)', marginBottom:'0.3rem' }}>Comentario (opcional)</div>
+              <textarea value={ratingComment} onChange={e => setRatingComment(e.target.value)}
+                placeholder="¿Qué tal estuvo tu experiencia?" rows={2}
+                style={{ width:'100%', fontSize:'0.85rem', resize:'none', boxSizing:'border-box' }} />
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:'0.5rem' }}>
+              <button onClick={submitRating} disabled={ratingRestStar < 1 || ratingLoading}
+                style={{ background:'var(--brand)', color:'#fff', border:'none', borderRadius:10,
+                  padding:'0.75rem', fontSize:'0.95rem', fontWeight:700, cursor:'pointer',
+                  opacity: ratingRestStar < 1 ? 0.5 : 1 }}>
+                {ratingLoading ? 'Enviando…' : 'Enviar calificación'}
+              </button>
+              <button onClick={() => setRatingOrder(null)}
+                style={{ background:'none', border:'none', color:'var(--gray-400)', padding:'0.4rem', cursor:'pointer', fontSize:'0.875rem' }}>
+                Ahora no
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ── Encabezado fijo ─────────────────────────────────────────── */}
       <div style={{
         flexShrink:0, background:'#fff', borderBottom:'2px solid var(--brand-light)',
@@ -503,7 +587,19 @@ export default function CustomerOrders() {
                             </div>
                           </div>
                         ) : (
-                          <button className="btn-sm" style={{ fontSize:'0.78rem', marginTop:'0.3rem' }} onClick={()=>setReportingId(o.id)}>Reportar problema</button>
+                          <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginTop:'0.3rem' }}>
+                            {o.status === 'delivered' && !ratedOrders.has(o.id) && (
+                              <button className="btn-sm"
+                                style={{ background:'var(--brand-light)', color:'var(--brand)', borderColor:'var(--brand)', fontSize:'0.78rem', fontWeight:700 }}
+                                onClick={() => { setRatingOrder(o); setRatingRestStar(0); setRatingDrvStar(0); setRatingComment(''); }}>
+                                ⭐ Calificar
+                              </button>
+                            )}
+                            {ratedOrders.has(o.id) && (
+                              <span style={{ fontSize:'0.75rem', color:'var(--success)', fontWeight:600 }}>✓ Calificado</span>
+                            )}
+                            <button className="btn-sm" style={{ fontSize:'0.78rem' }} onClick={()=>setReportingId(o.id)}>Reportar problema</button>
+                          </div>
                         )}
                       </div>
                     )}
