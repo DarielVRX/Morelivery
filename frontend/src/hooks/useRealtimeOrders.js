@@ -11,9 +11,14 @@ function shouldNotifyInBackground() {
   return document.visibilityState !== 'visible' || !document.hasFocus();
 }
 
-function notificationPriority() {
-  try { return localStorage.getItem('morelivery_notif_priority') === 'high' ? 'high' : 'normal'; }
-  catch { return 'normal'; }
+function notificationPriority(group) {
+  try {
+    const stored = localStorage.getItem('morelivery_notif_priority');
+    if (stored === 'high') return 'high';
+    // Priorizar siempre ofertas y updates de pedido aunque el resto sea "normal"
+    if (group === 'offers' || group === 'order_updates') return 'high';
+    return 'normal';
+  } catch { return 'normal'; }
 }
 
 // Notificar al SW que la app está activa → limpia badge y contadores
@@ -30,6 +35,7 @@ async function notifyAppFocused() {
 async function notifyRealtime({ title, body, tag, group, url = '/' }) {
   if (!canNotify() || Notification.permission !== 'granted') return;
 
+  const priority = notificationPriority(group || tag);
   const payload = {
     type: 'SHOW_NOTIFICATION',
     title,
@@ -38,7 +44,7 @@ async function notifyRealtime({ title, body, tag, group, url = '/' }) {
     group: group || tag,   // el SW usa group para agrupar; tag era por pedido individual
     url,
     data: { url, ts: Date.now() },
-    priority: notificationPriority(),
+    priority,
   };
 
   // Preferir SW para soporte en segundo plano (móvil/PWA)
@@ -54,7 +60,7 @@ async function notifyRealtime({ title, body, tag, group, url = '/' }) {
 
   // Fallback foreground
   try {
-    const high = notificationPriority() === 'high';
+    const high = priority === 'high';
     new Notification(title, { body, tag, renotify: true, requireInteraction: high });
   } catch (_) {}
 }

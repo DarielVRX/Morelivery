@@ -19,7 +19,7 @@ async function registerServiceWorker() {
 // y aumenta significativamente la tasa de aceptación (mejor UX + más alcance).
 async function requestNotificationPermission() {
   if (!('Notification' in window)) return;
-  if (Notification.permission !== 'default') return;
+  if (Notification.permission === 'denied') return;
   // Solo mostrar el diálogo si el usuario no lo rechazó antes
   if (localStorage.getItem('notif_asked') === '1') return;
 
@@ -38,12 +38,17 @@ async function requestNotificationPermission() {
   await new Promise(r => setTimeout(r, 1200));
 
   // Mostrar diálogo propio antes del nativo
-  const accepted = await showNotificationPrompt();
-  localStorage.setItem('notif_asked', '1');
-  if (!accepted) return;
+  let accepted = false;
+  if (Notification.permission === 'default') {
+    accepted = await showNotificationPrompt();
+    localStorage.setItem('notif_asked', '1');
+    if (!accepted) return;
+  }
 
   try {
-    const result = await Notification.requestPermission();
+    const result = Notification.permission === 'granted'
+      ? 'granted'
+      : await Notification.requestPermission();
     if (result === 'granted') {
       // Intentar registrar suscripción push (si hay VAPID key disponible)
       await trySubscribePush();
