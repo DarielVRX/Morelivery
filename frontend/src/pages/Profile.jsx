@@ -4,6 +4,9 @@ import { useAuth } from '../contexts/AuthContext';
 
 function Collapsible({ title, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
+  // Mantener el árbol montado siempre — solo ocultar con CSS.
+  // Esto elimina el retraso de montar/desmontar nodos complejos (inputs, selects, mapa).
+  // content-visibility:hidden le dice al navegador que omita layout y paint del contenido oculto.
   return (
     <div className="card" style={{ marginBottom:'0.75rem', padding:0, overflow:'hidden' }}>
       <button
@@ -21,7 +24,15 @@ function Collapsible({ title, defaultOpen = false, children }) {
           <path d="M6 9l6 6 6-6"/>
         </svg>
       </button>
-      {open && <div style={{ padding:'1rem' }}>{children}</div>}
+      <div style={{
+        padding: open ? '1rem' : 0,
+        // content-visibility:hidden omite layout/paint sin desmontar el árbol React
+        contentVisibility: open ? 'visible' : 'hidden',
+        // Reservar altura 0 cuando está oculto para evitar reflow al abrir
+        containIntrinsicSize: open ? 'auto' : '0 0',
+      }}>
+        {children}
+      </div>
     </div>
   );
 }
