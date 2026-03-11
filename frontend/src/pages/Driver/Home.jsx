@@ -380,7 +380,7 @@ function DriverMap({
         if (!map.getSource(SRC)) map.addSource(SRC, { type:'geojson', data:geo });
         else map.getSource(SRC).setData(geo);
         if (!map.getLayer(LYR)) map.addLayer({ id:LYR, type:'line', source:SRC,
-          paint:{ 'line-color':'#e3aaaa', 'line-width':5, 'line-opacity':0.9 },
+          paint:{ 'line-color':'#e3aaaa', 'line-width':8, 'line-opacity':0.9 },
           layout:{ 'line-cap':'round', 'line-join':'round' } });
       };
       if (map.isStyleLoaded()) draw(); else map.once('load', draw);
@@ -977,8 +977,8 @@ export default function DriverHome() {
                 <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:30 }}>
                   {/* OPT-10: will-change:transform en .dh-offer-panel */}
                   <div className="dh-offer-panel" style={{
-                    transform: offerMinimized ? 'translateY(calc(100% - 22px))' : 'translateY(0)',
-                                transition: 'transform 0.0s ease',
+                    transform: offerMinimized ? 'translateY(calc(100%))' : 'translateY(0)',
+                                transition: 'transform 0.22s ease',
                   }}>
                   <button onClick={() => setOfferMinimized(m => !m)}
                   style={{ position:'absolute', top:-43, left:'50%', transform:'translateX(-50%)',
@@ -1134,7 +1134,7 @@ export default function DriverHome() {
 
                             <div style={{ display:'flex', gap:'0.35rem', marginTop:'0.45rem' }}
                             onClick={e => e.stopPropagation()}>
-                            <button className="btn-sm" onClick={openRoadRouteApi}>🗺 Ruta nueva</button>
+                            <button className="btn-sm" onClick={openRoadRouteApi}>🗺 Ruta</button>
                             </div>
                             </div>
 
