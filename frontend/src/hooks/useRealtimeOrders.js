@@ -39,7 +39,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
     if (!token || !mountedRef.current) return;
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
 
-    const url = `${API_BASE}/events?token=${encodeURIComponent(token)}`;
+    const url = `${API_BASE}/api/events?token=${encodeURIComponent(token)}`;
     console.log(`📡 [SSE] conectando (intento ${retryCount.current + 1})`);
     const es = new EventSource(url);
     esRef.current = es;
