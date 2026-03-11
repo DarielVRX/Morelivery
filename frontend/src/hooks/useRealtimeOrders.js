@@ -16,7 +16,18 @@ function notificationPriority() {
   catch { return 'normal'; }
 }
 
-async function notifyRealtime({ title, body, tag, url = '/' }) {
+// Notificar al SW que la app está activa → limpia badge y contadores
+async function notifyAppFocused() {
+  try {
+    if (!('serviceWorker' in navigator)) return;
+    const reg = await navigator.serviceWorker.getRegistration();
+    reg?.active?.postMessage({ type: 'APP_FOCUSED' });
+  } catch (_) {}
+}
+
+// group: clave de agrupación por categoría (ej. 'offers', 'order_updates', 'chat')
+// Todos los eventos del mismo group colapsan en una sola notificación en el SW.
+async function notifyRealtime({ title, body, tag, group, url = '/' }) {
   if (!canNotify() || Notification.permission !== 'granted') return;
 
   const payload = {
@@ -24,6 +35,7 @@ async function notifyRealtime({ title, body, tag, url = '/' }) {
     title,
     body,
     tag,
+    group: group || tag,   // el SW usa group para agrupar; tag era por pedido individual
     url,
     data: { url, ts: Date.now() },
     priority: notificationPriority(),
@@ -108,9 +120,10 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
           const status = data?.status ? `Estado: ${data.status}` : 'Tu pedido fue actualizado';
           notifyRealtime({
             title: 'Actualización de pedido',
-            body: status,
-            tag: `order_update_${data?.orderId || 'general'}`,
-            url: '/customer/pedidos',
+            body:  status,
+            tag:   'order_updates',        // tag fijo = agrupa todos los updates
+            group: 'order_updates',
+            url:   '/customer/pedidos',
           });
         }
       } catch (_) {}
@@ -127,9 +140,10 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
         cbOffer.current?.(data);
         notifyRealtime({
           title: 'Nueva oferta disponible',
-          body: 'Tienes un pedido por aceptar.',
-          tag: `new_offer_${data.orderId || 'driver'}`,
-          url: '/driver',
+          body:  'Tienes un pedido por aceptar.',
+          tag:   'offers',          // tag fijo = todas las ofertas colapsan en una notif
+          group: 'offers',
+          url:   '/driver',
         });
       } catch (_) {}
     });
@@ -149,9 +163,10 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
         if (shouldNotifyInBackground()) {
           notifyRealtime({
             title: `Mensaje de ${data.senderName || 'soporte'}`,
-            body: data.text || 'Tienes un nuevo mensaje.',
-            tag: `chat_${data.orderId || 'general'}`,
-            url: '/customer/pedidos',
+            body:  data.text || 'Tienes un nuevo mensaje.',
+            tag:   'chat',          // tag fijo = todos los chats en una notif
+            group: 'chat',
+            url:   '/customer/pedidos',
           });
         }
       } catch (_) {}
@@ -183,6 +198,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
     // Reconectar si iOS/Android pausó el JS y el SSE quedó muerto al volver al foco
     function onVisible() {
       if (document.hidden || !mountedRef.current) return;
+      notifyAppFocused(); // limpiar badge del ícono de la app
       const state = esRef.current?.readyState;
       // 1 = OPEN — si no está abierto, reconectar
       if (state !== 1) {

@@ -13,8 +13,10 @@ import { createOrderSchema, suggestionResponseSchema, suggestionSchema, updateOr
 import { AppError } from '../../utils/errors.js';
 import { offerNextDrivers, expireTimedOutOffers, serializedOffer, getPendingAssignmentOrders } from './assignment/index.js';
 import { sseHub } from '../events/hub.js';
+import ratingsRouter from './ratings.js';
 
 const router = Router();
+router.use('/:id/rating', ratingsRouter);
 
 function isMissingColumnError(e) { return e?.code === '42703'; }
 function isMissingRelationError(e) { return e?.code === '42P01'; }
@@ -127,11 +129,20 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       return next(new AppError(409, `Esta tienda está fuera de cobertura (${distKm.toFixed(1)} km). Máximo permitido: 5 km.`));
     }
 
+    // Batch: traer todos los precios en una sola query
+    const menuIds = items.map(i => i.menuItemId);
+    const priceRows = await query(
+      `SELECT id, price_cents FROM menu_items WHERE id = ANY($1::uuid[]) AND restaurant_id = $2`,
+      [menuIds, restaurantId]
+    );
+    if (priceRows.rowCount !== menuIds.length) {
+      return next(new AppError(400, 'Uno o más productos no pertenecen a este restaurante'));
+    }
+    const priceMap = new Map(priceRows.rows.map(r => [r.id, r.price_cents]));
+
     let totalCents = 0;
     for (const item of items) {
-      const m = await query('SELECT price_cents FROM menu_items WHERE id=$1 AND restaurant_id=$2', [item.menuItemId, restaurantId]);
-      if (m.rowCount === 0) return next(new AppError(400, 'Producto del menú no encontrado'));
-      totalCents += m.rows[0].price_cents * item.quantity;
+      totalCents += priceMap.get(item.menuItemId) * item.quantity;
     }
 
     const serviceFee     = Math.round(totalCents * SERVICE_FEE_PCT);
@@ -148,11 +159,18 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
     const order = orderResult.rows[0];
     console.log(`📦 [pedido.creado] id=${order.id.slice(0,8)} total=${order.total_cents} rest=${restaurantId.slice(0,8)}`);
 
-    for (const item of items) {
-      const m = await query('SELECT price_cents FROM menu_items WHERE id=$1', [item.menuItemId]);
-      await query('INSERT INTO order_items(order_id, menu_item_id, quantity, unit_price_cents) VALUES($1,$2,$3,$4)',
-        [order.id, item.menuItemId, item.quantity, m.rows[0].price_cents]);
-    }
+    // Batch INSERT de items en una sola query
+    const itemValues = items.map((item, i) => {
+      const base = i * 4;
+      return `($${base+1},$${base+2},$${base+3},$${base+4})`;
+    }).join(',');
+    const itemParams = items.flatMap(item => [
+      order.id, item.menuItemId, item.quantity, priceMap.get(item.menuItemId)
+    ]);
+    await query(
+      `INSERT INTO order_items(order_id, menu_item_id, quantity, unit_price_cents) VALUES ${itemValues}`,
+      itemParams
+    );
 
     try { await serializedOffer(order.id, offerNextDrivers); } catch (e) {
       if (!isMissingRelationError(e) && !isMissingColumnError(e)) throw e;
@@ -412,6 +430,19 @@ router.patch('/:id/tip', authenticate, authorize(['customer']), async (req, res,
 
 router.get('/my', authenticate, async (req, res, next) => {
   try {
+    // Paginación: limit por defecto 50, offset 0
+    // Para pedidos activos (no delivered/cancelled) siempre se devuelven todos
+    // Para historial se pagina con ?limit=50&offset=0
+    const limit  = Math.min(Number(req.query.limit)  || 50, 200);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+    // active=1 devuelve solo pedidos en curso (sin paginación, siempre pocos)
+    const activeOnly = req.query.active === '1';
+
+    const baseWhere = `WHERE (o.customer_id=$1 OR o.driver_id=$1 OR o.restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id=$1))`;
+    const activeWhere = `${baseWhere} AND o.status NOT IN ('delivered','cancelled')`;
+    const paginatedClause = activeOnly ? '' : `LIMIT ${limit} OFFSET ${offset}`;
+    const whereClause = activeOnly ? activeWhere : baseWhere;
+
     let result;
     try {
       result = await query(
@@ -426,8 +457,8 @@ router.get('/my', authenticate, async (req, res, next) => {
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id
          LEFT JOIN users d ON d.id = o.driver_id
-         WHERE o.customer_id=$1 OR o.driver_id=$1 OR o.restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id=$1)
-         ORDER BY o.created_at DESC`,
+         ${whereClause}
+         ORDER BY o.created_at DESC ${paginatedClause}`,
         [req.user.userId]
       );
     } catch (error) {
@@ -441,8 +472,8 @@ router.get('/my', authenticate, async (req, res, next) => {
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id
          LEFT JOIN users d ON d.id = o.driver_id
-         WHERE o.customer_id=$1 OR o.driver_id=$1 OR o.restaurant_id IN (SELECT id FROM restaurants WHERE owner_user_id=$1)
-         ORDER BY o.created_at DESC`,
+         ${whereClause}
+         ORDER BY o.created_at DESC ${paginatedClause}`,
         [req.user.userId]
       );
     }
@@ -460,7 +491,7 @@ router.get('/my', authenticate, async (req, res, next) => {
       suggestion_items: parseSuggestionItems(row.suggestion_text),
       suggestion_note: parseSuggestionNote(row.suggestion_text),
     }));
-    return res.json({ orders });
+    return res.json({ orders, limit, offset, count: orders.length });
   } catch (error) { return next(error); }
 });
 

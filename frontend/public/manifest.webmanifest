@@ -1,22 +1,47 @@
 {
   "name": "Morelivery",
   "short_name": "Morelivery",
+  "description": "Plataforma de entregas a domicilio en Morelia",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#ef4444",
+  "theme_color": "#e3aaaa",
+  "lang": "es",
   "icons": [
     {
-      "src": "/icon-192.svg",
+      "src": "/icon-192.ico",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/x-icon",
       "purpose": "any maskable"
     },
     {
-      "src": "/icon-512.svg",
+      "src": "/icon-512.ico",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/x-icon",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Mis pedidos",
+      "short_name": "Pedidos",
+      "description": "Ver mis pedidos activos",
+      "url": "/customer",
+      "icons": [{ "src": "/icon-192.ico", "sizes": "192x192", "type": "image/x-icon" }]
+    },
+    {
+      "name": "Panel conductor",
+      "short_name": "Conductor",
+      "description": "Ver ofertas y pedidos activos",
+      "url": "/driver",
+      "icons": [{ "src": "/icon-192.ico", "sizes": "192x192", "type": "image/x-icon" }]
+    },
+    {
+      "name": "Panel tienda",
+      "short_name": "Tienda",
+      "description": "Gestionar pedidos de mi tienda",
+      "url": "/restaurant",
+      "icons": [{ "src": "/icon-192.ico", "sizes": "192x192", "type": "image/x-icon" }]
     }
   ]
 }

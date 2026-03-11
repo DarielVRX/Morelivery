@@ -1,31 +1,17 @@
 import http from 'http';
-import { Server } from 'socket.io';
 import { createApp } from './app.js';
 import { env } from './config/env.js';
-import { orderEvents } from './events/orderEvents.js';
 import { expireTimedOutOffers } from './modules/orders/assignment/index.js';
 import { offerCb } from './modules/events/offerCallback.js';
 
-const app = createApp();
+const app    = createApp();
 const server = http.createServer(app);
-
-const io = new Server(server, {
-  cors: {
-    origin: env.allowedOrigins
-  }
-});
-
-io.on('connection', (socket) => {
-  console.log(`Socket connected: ${socket.id}`);
-});
-
-orderEvents.setSocket(io);
 
 // Scheduler resiliente sin solapamientos:
 // - ejecuta expiración + barrido huérfano en secuencia
 // - en error aplica backoff para evitar ruido constante
 let assignmentDelayMs = 2_000;
-let assignmentTimer = null;
+let assignmentTimer   = null;
 
 async function runAssignmentLoop() {
   try {
@@ -50,4 +36,4 @@ function shutdown() {
 }
 
 process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+process.on('SIGINT',  shutdown);

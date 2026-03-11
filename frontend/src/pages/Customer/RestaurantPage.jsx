@@ -329,6 +329,17 @@ export default function RestaurantPage() {
         {restaurant?.address && (
           <p style={{ color:'rgba(255,255,255,0.85)', fontSize:'0.85rem', margin:'0 0 0.35rem' }}>{restaurant.address}</p>
         )}
+        {restaurant?.rating_avg != null && restaurant.rating_count > 0 && (
+          <div style={{ display:'inline-flex', alignItems:'center', gap:'0.25rem', marginBottom:'0.35rem' }}>
+            <span style={{ color:'#fbbf24', fontSize:'0.85rem' }}>★</span>
+            <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#fff' }}>
+              {Number(restaurant.rating_avg).toFixed(1)}
+            </span>
+            <span style={{ fontSize:'0.75rem', color:'rgba(255,255,255,0.7)' }}>
+              ({restaurant.rating_count} {restaurant.rating_count === 1 ? 'reseña' : 'reseñas'})
+            </span>
+          </div>
+        )}
         <span style={{
           fontSize:'0.75rem', fontWeight:700,
           color: isClosed ? 'rgba(255,255,255,0.6)' : '#fff',
