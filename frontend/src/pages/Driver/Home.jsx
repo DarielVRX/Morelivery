@@ -1079,7 +1079,7 @@ export default function DriverHome() {
                 };
                 return (
                   <div style={{ flexShrink:0, background:'#fff',
-                    borderTop:'2px solid var(--success)', zIndex:10, position:'absolute',
+                    borderTop:'2px solid var(--success)', zIndex:10, position:'absolute', bottom: 0, left: 0, right: 0, width: '100%',
                         display:'flex', flexDirection:'column' }}>
 
                         {/* Cabecera compacta */}
