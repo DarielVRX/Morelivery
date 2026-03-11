@@ -46,15 +46,45 @@ function FeeBreakdown({ order }) {
   );
 }
 
-function ensureLeafletCSS() {
-  if (document.getElementById('leaflet-css')) return;
-
+function ensureMapLibreCSS() {
+  if (document.getElementById('maplibre-css')) return;
   const lnk = document.createElement('link');
-  lnk.id = 'leaflet-css';
+  lnk.id = 'maplibre-css';
   lnk.rel = 'stylesheet';
-  lnk.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-
+  lnk.href = 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css';
   document.head.appendChild(lnk);
+}
+
+
+function ensureMapLibreJS() {
+  if (window.maplibregl) return Promise.resolve(window.maplibregl);
+  if (window.__mapLibreLoadingPromise) return window.__mapLibreLoadingPromise;
+
+  window.__mapLibreLoadingPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js';
+    s.async = true;
+    s.onload = () => resolve(window.maplibregl);
+    s.onerror = () => reject(new Error('No se pudo cargar MapLibre GL JS'));
+    document.head.appendChild(s);
+  });
+
+  return window.__mapLibreLoadingPromise;
+}
+
+function normalizeBearing(deg) {
+  return (deg + 360) % 360;
+}
+
+function getBearing(from, to) {
+  if (!from || !to) return 0;
+  const lat1 = from.lat * Math.PI / 180;
+  const lat2 = to.lat * Math.PI / 180;
+  const dLon = (to.lng - from.lng) * Math.PI / 180;
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2)
+    - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  return normalizeBearing(Math.atan2(y, x) * 180 / Math.PI);
 }
 
 // Reverse geocoding con Nominatim (gratuito, sin API key)
@@ -78,289 +108,262 @@ async function reverseGeocode(lat, lng) {
   } catch { return null; }
 }
 
-// Mapa ligero — instancia única destruida al desmontar
-// customPin: { lat, lng } | null  — marcador manual del driver
-// onCustomPin: (latlng | null) => void
-// hasActiveOrder: boolean — si true, oculta el pin y deshabilita clicks
-function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos, pickupLabel, deliveryLabel, routeGeometry, onRouteError, navFollowEnabled, navHeadingDeg }) {
-  const containerRef  = useRef(null);
-  const mapRef        = useRef(null); // { map, driverMarker, customMarker, pickupMarker, deliveryMarker }
-  const autoCenterTimeoutRef = useRef(null);
-  const zoomUiTimeoutRef = useRef(null);
-  const [showZoomControls, setShowZoomControls] = useState(false);
-  const driverPosRef = useRef(driverPos);
+// customPin: { lat, lng } | null
+function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos, pickupLabel, deliveryLabel, routeGeometry, onRouteError, navFollowEnabled, navHeadingDeg, onHeadingChange }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const markersRef = useRef({ driver: null, custom: null, pickup: null, delivery: null });
+  const localWatchIdRef = useRef(null);
+  const prevWatchPosRef = useRef(null);
+  const [livePos, setLivePos] = useState(driverPos || null);
+  const [liveHeading, setLiveHeading] = useState(0);
 
-  useEffect(() => { driverPosRef.current = driverPos; }, [driverPos]);
-  // Inicializar una vez cuando hay posición
-  // Posición default para inicializar el mapa cuando no hay GPS
-  const DEFAULT_POS = { lat: 19.70595, lng: -101.19498 }; // Morelia
+  const DEFAULT_POS = { lat: 19.70595, lng: -101.19498 };
+
+  useEffect(() => { if (driverPos) setLivePos(driverPos); }, [driverPos?.lat, driverPos?.lng]);
 
   useEffect(() => {
-    if (!containerRef.current) return;
-    if (mapRef.current) return;
+    if (!navigator?.geolocation) return;
+    if (localWatchIdRef.current != null) navigator.geolocation.clearWatch(localWatchIdRef.current);
 
-    ensureLeafletCSS();
-    const initPos = driverPos || DEFAULT_POS;
-
-    const t = setTimeout(() => {
-      import('leaflet').then(L => {
-        if (!containerRef.current || mapRef.current) return;
-
-        delete L.Icon.Default.prototype._getIconUrl;
-        L.Icon.Default.mergeOptions({
-          iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-          iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-          shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-        });
-
-        const map = L.map(containerRef.current, {
-          zoomControl: false, attributionControl: false,
-          tap: true, tapTolerance: 15,
-        }).setView([initPos.lat, initPos.lng], driverPos ? 15 : 13);
-
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          keepBuffer: 2, updateWhenIdle: false, detectRetina: true,
-        }).addTo(map);
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
-
-        const revealZoomControls = () => {
-          setShowZoomControls(true);
-          if (zoomUiTimeoutRef.current) clearTimeout(zoomUiTimeoutRef.current);
-          zoomUiTimeoutRef.current = setTimeout(() => {
-            zoomUiTimeoutRef.current = null;
-            setShowZoomControls(false);
-          }, 3000);
-        };
-
-        // Marcador GPS del driver — círculo rosa, o flecha de navegación en follow mode
-        let driverMarker = null;
-        if (driverPos) {
-          const icon = navFollowEnabled
-            ? L.divIcon({
-                html: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="#e3aaaa" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>`,
-                iconSize: [28, 28], iconAnchor: [14, 14], className: ''
-              })
-            : null;
-          driverMarker = icon
-            ? L.marker([driverPos.lat, driverPos.lng], { icon }).addTo(map)
-            : L.circleMarker([driverPos.lat, driverPos.lng], {
-                radius: 9, fillColor: '#e3aaaa', fillOpacity: 1, color: '#fff', weight: 2,
-              }).addTo(map);
+    localWatchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setLivePos(next);
+        if (prevWatchPosRef.current) {
+          const heading = getBearing(prevWatchPosRef.current, next);
+          setLiveHeading(heading);
+          onHeadingChange?.(heading);
         }
+        prevWatchPosRef.current = next;
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+    );
 
-        // Click en mapa → pin personalizado (funciona con o sin GPS)
-        const handleCustomClick = (e) => {
-          if (hasActiveOrder) return;
-          onCustomPin?.({ lat: e.latlng.lat, lng: e.latlng.lng });
-        };
-        map.on('click', handleCustomClick);
-
-        const deferAutoCenter = () => {
-          if (autoCenterTimeoutRef.current) clearTimeout(autoCenterTimeoutRef.current);
-          autoCenterTimeoutRef.current = setTimeout(() => {
-            autoCenterTimeoutRef.current = null;
-            const ref = mapRef.current;
-            if (!ref?.map || !driverPosRef.current) return;
-            const { lat, lng } = driverPosRef.current;
-            // Solo panTo si el driver salió de los límites visibles del mapa
-            const bounds = ref.map.getBounds();
-            if (!bounds.contains([lat, lng])) {
-              ref.map.panTo([lat, lng], { animate: true, duration: 0.5 });
-            }
-          }, 5000);
-        };
-
-        map.on('click', deferAutoCenter);
-        map.on('mousedown', deferAutoCenter);
-        map.on('touchstart', deferAutoCenter);
-        map.on('dragstart', deferAutoCenter);
-        map.on('zoomstart', deferAutoCenter);
-
-        map.on('click', revealZoomControls);
-        map.on('mousedown', revealZoomControls);
-        map.on('touchstart', revealZoomControls);
-        map.on('dragstart', revealZoomControls);
-        map.on('zoomstart', revealZoomControls);
-
-        mapRef.current = {
-          map,
-          driverMarker,
-          customMarker: null,
-          pickupMarker: null,
-          deliveryMarker: null,
-          routeLayer: null,
-          deferAutoCenter,
-          revealZoomControls,
-          handleCustomClick,
-        };
-        setTimeout(() => map.invalidateSize(), 300);
-      }).catch(() => {});
-    }, 50);
-
-    return () => clearTimeout(t);
-  }, []); // Solo una vez al montar
-
-  // Destruir al desmontar
-  useEffect(() => {
     return () => {
-      if (mapRef.current?.map) {
-        if (autoCenterTimeoutRef.current) clearTimeout(autoCenterTimeoutRef.current);
-        if (zoomUiTimeoutRef.current) clearTimeout(zoomUiTimeoutRef.current);
-        mapRef.current.map.remove();
+      if (localWatchIdRef.current != null) {
+        navigator.geolocation.clearWatch(localWatchIdRef.current);
+        localWatchIdRef.current = null;
+      }
+    };
+  }, [onHeadingChange]);
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+    ensureMapLibreCSS();
+
+    ensureMapLibreJS().then((maplibregl) => {
+      if (!containerRef.current || mapRef.current) return;
+
+      const start = livePos || driverPos || DEFAULT_POS;
+      const map = new maplibregl.Map({
+        container: containerRef.current,
+        style: 'https://tiles.openfreemap.org/styles/liberty',
+        center: [start.lng, start.lat],
+        zoom: 14,
+        pitch: 30,
+        bearing: 0,
+        maxZoom: 20,
+        attributionControl: true,
+      });
+
+      map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+
+      map.on('click', (evt) => {
+        if (hasActiveOrder) return;
+        onCustomPin?.({ lat: evt.lngLat.lat, lng: evt.lngLat.lng });
+      });
+
+      mapRef.current = map;
+    }).catch(() => {
+      onRouteError?.('No se pudo inicializar el mapa de navegación');
+    });
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
         mapRef.current = null;
       }
     };
   }, []);
 
-  // Actualizar posición GPS — recrear marcador si cambia modo follow o posición
-  useEffect(() => {
-    if (!mapRef.current || !driverPos) return;
-    import('leaflet').then(L => {
-      if (!mapRef.current) return;
-      const { map } = mapRef.current;
-
-      // Siempre recrear el marcador para cambiar entre círculo y flecha
-      if (mapRef.current.driverMarker) {
-        mapRef.current.driverMarker.remove();
-        mapRef.current.driverMarker = null;
-      }
-
-      const icon = navFollowEnabled
-        ? L.divIcon({
-            html: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="#e3aaaa" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>`,
-            iconSize: [28, 28], iconAnchor: [14, 14], className: ''
-          })
-        : null;
-
-      mapRef.current.driverMarker = icon
-        ? L.marker([driverPos.lat, driverPos.lng], { icon }).addTo(map)
-        : L.circleMarker([driverPos.lat, driverPos.lng], {
-            radius: 9, fillColor: '#e3aaaa', fillOpacity: 1, color: '#fff', weight: 2,
-          }).addTo(map);
-
-      if (navFollowEnabled) {
-        // Zoom 17 + driver en el tercio inferior para ver la ruta por delante
-        const zoom = Math.max(map.getZoom(), 17);
-        const targetPoint = map.project([driverPos.lat, driverPos.lng], zoom);
-        targetPoint.y += map.getSize().y * 0.25;
-        const targetLatLng = map.unproject(targetPoint, zoom);
-        map.setView(targetLatLng, zoom, { animate: true, duration: 0.3 });
-      } else {
-        mapRef.current.deferAutoCenter?.();
-      }
-    }).catch(() => {});
-  }, [driverPos?.lat, driverPos?.lng, navFollowEnabled]);
-
-  // Sincronizar hasActiveOrder en el listener del mapa
-  useEffect(() => {
-    if (!mapRef.current?.map) return;
-    const map = mapRef.current.map;
-    const { handleCustomClick } = mapRef.current;
-    if (!handleCustomClick) return;
-    map.off('click', handleCustomClick);
-    if (!hasActiveOrder) {
-      map.on('click', handleCustomClick);
-    }
-  }, [hasActiveOrder, onCustomPin]);
-
-  // Agregar/quitar pin personalizado
   useEffect(() => {
     if (!mapRef.current) return;
-    const { map } = mapRef.current;
-    import('leaflet').then(L => {
-      // Quitar pin anterior
-      if (mapRef.current.customMarker) {
-        mapRef.current.customMarker.remove();
-        mapRef.current.customMarker = null;
+    ensureMapLibreJS().then((maplibregl) => {
+      const map = mapRef.current;
+
+      if (markersRef.current.driver) markersRef.current.driver.remove();
+      if (!livePos) {
+        markersRef.current.driver = null;
+        return;
       }
-      // Agregar nuevo si existe y no hay pedido activo
-      if (customPin && !hasActiveOrder) {
-        const icon = L.divIcon({
-          html: `<div style="width:22px;height:22px;border-radius:50% 50% 50% 0;background:var(--brand);border:2px solid #fff;box-shadow:0 2px 6px #0004;transform:rotate(-45deg)"></div>`,
-          iconSize: [22, 22], iconAnchor: [11, 22], className: ''
+
+      const heading = navFollowEnabled ? (liveHeading || navHeadingDeg || 0) : 0;
+      const el = document.createElement('div');
+      el.innerHTML = '▲';
+      el.style.color = '#e3aaaa';
+      el.style.fontSize = '20px';
+      el.style.textShadow = '0 0 4px rgba(0,0,0,0.45)';
+      el.style.transform = `rotate(${heading}deg)`;
+      el.style.transformOrigin = '50% 55%';
+
+      markersRef.current.driver = new maplibregl.Marker({ element: el, rotationAlignment: 'map' })
+        .setLngLat([livePos.lng, livePos.lat])
+        .addTo(map);
+
+      if (navFollowEnabled) {
+        const offsetY = Math.round(map.getContainer().clientHeight * 0.18);
+        map.easeTo({
+          center: [livePos.lng, livePos.lat],
+          bearing: heading,
+          pitch: 60,
+          zoom: 20,
+          duration: 300,
+          offset: [0, offsetY],
+          essential: true,
         });
-        const cm = L.marker([customPin.lat, customPin.lng], { icon }).addTo(map);
-        mapRef.current.customMarker = cm;
+      }
+    });
+  }, [livePos?.lat, livePos?.lng, navFollowEnabled, navHeadingDeg, liveHeading]);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    ensureMapLibreJS().then((maplibregl) => {
+      const map = mapRef.current;
+
+      if (markersRef.current.custom) markersRef.current.custom.remove();
+      markersRef.current.custom = null;
+      if (customPin && !hasActiveOrder) {
+        const el = document.createElement('div');
+        el.style.width = '16px';
+        el.style.height = '16px';
+        el.style.borderRadius = '999px';
+        el.style.background = 'var(--brand)';
+        el.style.border = '2px solid #fff';
+        el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.35)';
+        markersRef.current.custom = new maplibregl.Marker({ element: el })
+          .setLngLat([customPin.lng, customPin.lat])
+          .addTo(map);
       }
     });
   }, [customPin?.lat, customPin?.lng, hasActiveOrder]);
 
-
-  // Marcadores tienda (🏪) y cliente (📦) con popup de navegación
   useEffect(() => {
     if (!mapRef.current) return;
-    const { map } = mapRef.current;
-    import('leaflet').then(L => {
-      if (!mapRef.current) return;
-      if (mapRef.current.pickupMarker)   { mapRef.current.pickupMarker.remove();   mapRef.current.pickupMarker = null; }
-      if (mapRef.current.deliveryMarker) { mapRef.current.deliveryMarker.remove(); mapRef.current.deliveryMarker = null; }
+    ensureMapLibreJS().then((maplibregl) => {
+      const map = mapRef.current;
 
-      function makeMarker(pos, emoji, color, label) {
-        const icon = L.divIcon({
-          html: `<div style="width:24px;height:24px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 2px 8px #0005;display:flex;align-items:center;justify-content:center;font-size:13px">${emoji}</div>`,
-          iconSize: [24, 24], iconAnchor: [12, 12], className: ''
-        });
-        const m = L.marker([pos.lat, pos.lng], { icon });
-        m.bindPopup(`<div style="text-align:center;min-width:90px"><b style="font-size:0.82rem">${label}</b></div>`, { closeButton: false });
-        m.addTo(map);
-        return m;
-      }
+      if (markersRef.current.pickup) markersRef.current.pickup.remove();
+      if (markersRef.current.delivery) markersRef.current.delivery.remove();
 
-      if (pickupPos)   mapRef.current.pickupMarker   = makeMarker(pickupPos,   '🏪', '#16a34a', pickupLabel   || 'Tienda');
-      if (deliveryPos) mapRef.current.deliveryMarker = makeMarker(deliveryPos, '📦', '#f97316', deliveryLabel || 'Cliente');
+      const makeMarker = (pos, emoji, color, label) => {
+        const el = document.createElement('div');
+        el.style.width = '24px';
+        el.style.height = '24px';
+        el.style.borderRadius = '999px';
+        el.style.background = color;
+        el.style.display = 'grid';
+        el.style.placeItems = 'center';
+        el.style.border = '2px solid #fff';
+        el.style.boxShadow = '0 2px 8px rgba(0,0,0,0.35)';
+        el.textContent = emoji;
+        return new maplibregl.Marker({ element: el }).setLngLat([pos.lng, pos.lat]).setPopup(new maplibregl.Popup({ closeButton: false }).setText(label));
+      };
 
+      markersRef.current.pickup = pickupPos ? makeMarker(pickupPos, '🏪', '#16a34a', pickupLabel || 'Tienda').addTo(map) : null;
+      markersRef.current.delivery = deliveryPos ? makeMarker(deliveryPos, '📦', '#f97316', deliveryLabel || 'Cliente').addTo(map) : null;
     });
-  }, [pickupPos?.lat, pickupPos?.lng, deliveryPos?.lat, deliveryPos?.lng]);
+  }, [pickupPos?.lat, pickupPos?.lng, deliveryPos?.lat, deliveryPos?.lng, pickupLabel, deliveryLabel]);
 
-  // Dibujar ruta carretera en el mapa actual
   useEffect(() => {
-    if (!mapRef.current?.map) return;
-    import('leaflet').then(L => {
-      if (!mapRef.current?.map) return;
-      if (mapRef.current.routeLayer) {
-        mapRef.current.routeLayer.remove();
-        mapRef.current.routeLayer = null;
+    if (!mapRef.current) return;
+    const map = mapRef.current;
+    const sourceId = 'driver-route-source';
+    const layerId = 'driver-route-layer';
+
+    const draw = () => {
+      const routeGeoJson = {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'LineString',
+          coordinates: (routeGeometry || []).map((p) => [p.lng, p.lat]),
+        },
+      };
+
+      if (!map.getSource(sourceId)) {
+        map.addSource(sourceId, { type: 'geojson', data: routeGeoJson });
+      } else {
+        map.getSource(sourceId).setData(routeGeoJson);
       }
-      if (!routeGeometry?.length) return;
 
-      const line = L.polyline(routeGeometry.map(p => [p.lat, p.lng]), {
-        color: '#e11d48',
-        weight: 5,
-        opacity: 0.85,
-      }).addTo(mapRef.current.map);
+      if (!map.getLayer(layerId)) {
+        map.addLayer({
+          id: layerId,
+          type: 'line',
+          source: sourceId,
+          paint: {
+            'line-color': '#2563eb',
+            'line-width': 6,
+            'line-opacity': 0.9,
+          },
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+        });
+      }
+    };
 
-      mapRef.current.routeLayer = line;
-      mapRef.current.map.fitBounds(line.getBounds(), { padding: [30, 30], maxZoom: 16 });
-    }).catch(() => {
-      onRouteError?.('No se pudo pintar la ruta en el mapa');
-    });
+    if (map.isStyleLoaded()) draw();
+    else map.once('load', draw);
   }, [routeGeometry, onRouteError]);
 
+  const centerNow = () => {
+    const map = mapRef.current;
+    const pos = livePos || driverPos;
+    if (!map || !pos) return;
+    const heading = liveHeading || navHeadingDeg || 0;
+    const offsetY = Math.round(map.getContainer().clientHeight * 0.18);
+    map.easeTo({
+      center: [pos.lng, pos.lat],
+      zoom: 20,
+      pitch: 60,
+      bearing: heading,
+      duration: 300,
+      offset: [0, offsetY],
+      essential: true,
+    });
+  };
 
-  // Navegación tercera persona: rotar vista para alinear al frente
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const t = navFollowEnabled ? `rotate(${-1 * (navHeadingDeg || 0)}deg) scale(1.06)` : 'none';
-    containerRef.current.style.transform = t;
-    containerRef.current.style.transformOrigin = '50% 50%';
-    containerRef.current.style.transition = 'transform 0.22s linear';
-  }, [navFollowEnabled, navHeadingDeg]);
-
-  // SIEMPRE renderizamos el div del mapa — el containerRef nunca se desmonta.
-  // El mensaje GPS se superpone como overlay cuando no hay posición.
   return (
-    <div style={{ height:'100%', width:'100%', position:'relative' }}>
-      <div
-        ref={containerRef}
-        className={showZoomControls ? 'driver-map-zoom-visible' : 'driver-map-zoom-hidden'}
-        style={{ height:'100%', width:'100%' }}
-      />
-      {!driverPos && (
+    <div style={{ height: '100%', width: '100%', position: 'relative' }}>
+      <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
+      <button
+        type="button"
+        onClick={centerNow}
+        style={{
+          position: 'absolute',
+          right: 12,
+          bottom: 12,
+          zIndex: 5,
+          border: 'none',
+          borderRadius: 999,
+          width: 42,
+          height: 42,
+          background: '#fff',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
+          cursor: 'pointer',
+        }}
+        title="Centrar"
+        aria-label="Centrar"
+      >
+        ⌖
+      </button>
+      {!livePos && (
         <div style={{
-          position:'absolute', top:8, left:'50%', transform:'translateX(-50%)',
-          background:'rgba(0,0,0,0.5)', color:'#fff', borderRadius:20,
-          padding:'0.2rem 0.75rem', fontSize:'0.72rem', zIndex:5,
-          pointerEvents:'none', whiteSpace:'nowrap',
+          position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(0,0,0,0.5)', color: '#fff', borderRadius: 20,
+          padding: '0.2rem 0.75rem', fontSize: '0.72rem', zIndex: 5,
+          pointerEvents: 'none', whiteSpace: 'nowrap',
         }}>
           📍 Sin GPS — toca el mapa para marcar posición
         </div>
@@ -733,6 +736,7 @@ export default function DriverHome() {
           onRouteError={setMsg}
           navFollowEnabled={navFollowEnabled}
           navHeadingDeg={navHeadingDeg}
+          onHeadingChange={setNavHeadingDeg}
         />
 
         {/* Panel de pin personalizado */}
