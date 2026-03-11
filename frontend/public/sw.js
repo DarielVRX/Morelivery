@@ -5,17 +5,18 @@ self.addEventListener('fetch', () => {});
 // ── Notificaciones via postMessage (SSE foreground → SW) ─────────────
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SHOW_NOTIFICATION') {
-    const { title, body, tag, data, url } = event.data;
+    const { title, body, tag, data, url, priority = 'normal' } = event.data;
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
       const anyFocused = clients.some(c => c.focused);
       if (!anyFocused) {
+        const isHigh = priority === 'high';
         self.registration.showNotification(title, {
           body,
           tag: tag || 'morelivery',
           icon: '/icon-192.svg',
           badge: '/badge.svg',
           image: '/icon-512.svg',
-          requireInteraction: true,
+          requireInteraction: isHigh,
           renotify: true,
           silent: false,
           timestamp: Date.now(),
@@ -36,7 +37,8 @@ self.addEventListener('push', (event) => {
   let payload;
   try { payload = event.data.json(); } catch { payload = { title: 'Morelivery', body: event.data.text() }; }
 
-  const { title = 'Morelivery', body = '', tag = 'morelivery', url = '/' } = payload;
+  const { title = 'Morelivery', body = '', tag = 'morelivery', url = '/', priority = 'normal' } = payload;
+  const isHigh = priority === 'high';
 
   event.waitUntil(
     self.registration.showNotification(title, {
@@ -45,7 +47,7 @@ self.addEventListener('push', (event) => {
       icon: '/icon-192.svg',
       badge: '/badge.svg',
       image: '/icon-512.svg',
-      requireInteraction: true,
+      requireInteraction: isHigh,
       renotify: true,
       silent: false,
       timestamp: Date.now(),
