@@ -54,6 +54,7 @@ export default function RestaurantMenu() {
   const [imgUrl, setImgUrl]         = useState('');
   const [savingImg, setSavingImg]   = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [restaurantData, setRestaurantData] = useState(null);
   const { preview, dataUrl, pick, clear } = useLocalImage();
   const fileRef = useRef(null);
 
@@ -87,6 +88,7 @@ export default function RestaurantMenu() {
       ]);
       setProducts(menuData.menu || []);
       if (myData?.restaurant?.profile_photo) setProfilePhoto(myData.restaurant.profile_photo);
+      if (myData?.restaurant) setRestaurantData(myData.restaurant);
     } catch (_) {}
   }
 
@@ -164,6 +166,25 @@ export default function RestaurantMenu() {
         <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>📋 Gestión de menú</div>
         <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Productos, precios e imagen de tu tienda</div>
       </div>
+
+      {/* ── Alerta coordenadas faltantes ─────────────────────────────────── */}
+      {restaurantData && !Number.isFinite(Number(restaurantData.lat)) && (
+        <div style={{
+          display:'flex', alignItems:'flex-start', gap:'0.6rem',
+          background:'#fffbeb', border:'1px solid #fde68a',
+          borderRadius:8, padding:'0.7rem 0.875rem', marginBottom:'1rem',
+        }}>
+          <span style={{ fontSize:'1.1rem', flexShrink:0 }}>⚠️</span>
+          <div style={{ flex:1, fontSize:'0.82rem', color:'#92400e' }}>
+            <strong>Tu tienda no tiene ubicación configurada.</strong>
+            <span> Los clientes a más de 5 km no podrán hacerte pedidos.</span>
+            <br />
+            <a href="/profile" style={{ color:'#b45309', fontWeight:700, textDecoration:'underline' }}>
+              Ir a Perfil → configurar ubicación
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* ── Foto de perfil de la tienda ── */}
       <div style={{ display:'flex', alignItems:'center', gap:'0.875rem', marginBottom:'1.25rem',

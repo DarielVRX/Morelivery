@@ -71,7 +71,7 @@ router.get('/', async (_req, res, next) => {
 router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const result = await query(
-      'SELECT id, name, category, is_open, address, manual_open_override, profile_photo FROM restaurants WHERE owner_user_id=$1 LIMIT 1',
+      'SELECT id, name, category, is_open, address, manual_open_override, profile_photo, lat, lng FROM restaurants WHERE owner_user_id=$1 LIMIT 1',
       [req.user.userId]
     );
     if (result.rowCount === 0) return res.json({ restaurant: null });

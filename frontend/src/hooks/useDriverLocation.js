@@ -6,6 +6,7 @@ import { apiFetch } from '../api/client';
 
 const SEND_INTERVAL_MS    = 12000;
 const MIN_DISTANCE_METERS = 15;
+const MIN_RENDER_METERS   = 5;   // no actualizar estado UI si movimiento < 5m
 
 function haversineMeters(lat1, lng1, lat2, lng2) {
   const R = 6371000;
@@ -54,12 +55,18 @@ export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
           return;
         }
         const p = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) };
+        // Solo re-renderizar si el driver se movió más de MIN_RENDER_METERS
+        const prev = posRef.current;
+        if (prev && haversineMeters(prev.lat, prev.lng, p.lat, p.lng) < MIN_RENDER_METERS) {
+          posRef.current = p; // actualizar ref para envíos, sin re-render
+          return;
+        }
         posRef.current = p;
         setPosition(p);
         setError(null);
       },
       (err) => setError(err.message),
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 }
     );
 
     async function maybeSend() {

@@ -376,6 +376,7 @@ tr:last-child td { border-bottom: none; }
 @media (max-width: 767px) {
   .app-header { padding: 0 0.875rem; }
   .page-content { padding: 0.75rem 0.875rem 1rem; }
+  .page-content:has(.split-root) { padding: 0; }
   .auth-card { margin: 1rem; padding: 1.25rem; }
   .brand-block h1 { font-size: 1rem; }
 }
