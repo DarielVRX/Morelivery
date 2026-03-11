@@ -138,6 +138,37 @@ export default function ProfilePage() {
     }
   }
 
+
+  const [notifStatus, setNotifStatus] = useState(
+    (typeof window !== 'undefined' && 'Notification' in window)
+      ? Notification.permission
+      : 'unsupported'
+  );
+  const [notifMsg, setNotifMsg] = useState('');
+
+  async function enablePushNotifications() {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setNotifMsg('Este dispositivo no soporta notificaciones web.');
+      return;
+    }
+    try {
+      if ('serviceWorker' in navigator) {
+        await navigator.serviceWorker.register('/sw.js');
+      }
+      const permission = await Notification.requestPermission();
+      setNotifStatus(permission);
+      if (permission === 'granted') {
+        setNotifMsg('Notificaciones activadas correctamente.');
+      } else if (permission === 'denied') {
+        setNotifMsg('Permiso bloqueado. Actívalo en ajustes del navegador/sitio.');
+      } else {
+        setNotifMsg('Solicitud cerrada sin cambios.');
+      }
+    } catch {
+      setNotifMsg('No se pudo solicitar permiso de notificaciones.');
+    }
+  }
+
   // Pin Casa
   const [homeLat, setHomeLat] = useState(user?.home_lat ?? null);
   const [homeLng, setHomeLng] = useState(user?.home_lng ?? null);
