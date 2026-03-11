@@ -17,19 +17,19 @@ if (typeof document !== 'undefined' && !document.getElementById('dh-animations')
   const s = document.createElement('style');
   s.id = 'dh-animations';
   s.textContent = `
-    @keyframes dh-spin { to { transform: rotate(360deg); } }
-    .dh-spinner { animation: dh-spin 0.75s linear infinite; transform-origin: 50% 50%; }
-    .dh-ptr-indicator {
-      position: absolute; top: 0; left: 50%;
-      transform: translateX(-50%) translateY(-50px);
-      will-change: transform; pointer-events: none;
-    }
-    .dh-ptr-indicator.pulling { transition: none; }
-    .dh-ptr-indicator.releasing { transition: transform 0.18s ease; }
-    .dh-ptr-content { will-change: transform; }
-    .dh-ptr-content.releasing { transition: transform 0.22s ease; }
-    .dh-offer-panel { will-change: transform; transform: translateZ(0); }
-    .dh-fab { will-change: transform; }
+  @keyframes dh-spin { to { transform: rotate(360deg); } }
+  .dh-spinner { animation: dh-spin 0.75s linear infinite; transform-origin: 50% 50%; }
+  .dh-ptr-indicator {
+    position: absolute; top: 0; left: 50%;
+    transform: translateX(-50%) translateY(-50px);
+    will-change: transform; pointer-events: none;
+  }
+  .dh-ptr-indicator.pulling { transition: none; }
+  .dh-ptr-indicator.releasing { transition: transform 0.18s ease; }
+  .dh-ptr-content { will-change: transform; }
+  .dh-ptr-content.releasing { transition: transform 0.22s ease; }
+  .dh-offer-panel { will-change: transform; transform: translateZ(0); }
+  .dh-fab { will-change: transform; }
   `;
   document.head.appendChild(s);
 }
@@ -57,25 +57,25 @@ function FeeBreakdown({ order }) {
       borderTop:'1px solid var(--gray-100)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
       {isCash && (
         <>
-          <div style={{ display:'flex', justifyContent:'space-between', color:'var(--gray-700)' }}>
-            <span>A pagar a tienda</span><span>{fmt(sub)}</span>
+        <div style={{ display:'flex', justifyContent:'space-between', color:'var(--gray-700)' }}>
+        <span>A pagar a tienda</span><span>{fmt(sub)}</span>
+        </div>
+        <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700,
+          color:'var(--brand)', marginBottom:'0.15rem' }}>
+          <span>Cobrar a cliente</span><span>{fmt(total)}</span>
           </div>
-          <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700,
-            color:'var(--brand)', marginBottom:'0.15rem' }}>
-            <span>Cobrar a cliente</span><span>{fmt(total)}</span>
-          </div>
-        </>
+          </>
       )}
       <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700,
         color:'var(--success)', marginTop:'0.1rem' }}>
         <span>Tu ganancia</span><span>{fmt(earn)}</span>
-      </div>
-      {tip > 0 && (
-        <div style={{ fontSize:'0.72rem', color:'var(--success)', textAlign:'right' }}>
-          incl. agradecimiento {fmt(tip)}
         </div>
-      )}
-    </div>
+        {tip > 0 && (
+          <div style={{ fontSize:'0.72rem', color:'var(--success)', textAlign:'right' }}>
+          incl. agradecimiento {fmt(tip)}
+          </div>
+        )}
+        </div>
   );
 }
 
@@ -167,7 +167,7 @@ function DriverMap({
   useEffect(() => { navFollowRef.current        = navFollowEnabled; }, [navFollowEnabled]);
   useEffect(() => { onHeadingChangeRef.current  = onHeadingChange;  }, [onHeadingChange]);
   useEffect(() => { if (driverPos) { livePosRef.current = driverPos; setHasGPS(true); } },
-    [driverPos?.lat, driverPos?.lng]);
+            [driverPos?.lat, driverPos?.lng]);
 
   // watchPosition — suscripción ÚNICA, todo vía refs (OPT-12)
   // En cada tick: mueve el marcador directamente en el DOM, NO llama setState
@@ -197,13 +197,13 @@ function DriverMap({
             map.easeTo({
               center: [next.lng, next.lat], bearing: h, pitch: 60, zoom: 19,
               duration: 250, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
-              essential: true,
+                       essential: true,
             });
           }
         }
       },
       () => {},
-      { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+                                                             { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
     );
     return () => {
       if (watchIdRef.current != null) {
@@ -233,7 +233,7 @@ function DriverMap({
     svg.setAttribute('stroke-linejoin', 'round');
     svg.style.cssText = 'display:block;transform-origin:50% 55%;';
     svg.style.transform = navFollowRef.current
-      ? `rotate(${liveHeadingRef.current}deg)` : 'rotate(0deg)';
+    ? `rotate(${liveHeadingRef.current}deg)` : 'rotate(0deg)';
 
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', 'M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z');
@@ -245,7 +245,7 @@ function DriverMap({
 
     markersRef.current.driverSvg = svg;
     markersRef.current.driver = new ml.Marker({ element: wrap, anchor: 'center' })
-      .setLngLat([pos.lng, pos.lat]).addTo(map);
+    .setLngLat([pos.lng, pos.lat]).addTo(map);
   }
 
   // Inicializar mapa UNA sola vez
@@ -295,7 +295,7 @@ function DriverMap({
     const svg = markersRef.current.driverSvg;
     if (!svg) return;
     svg.style.transform = navFollowEnabled
-      ? `rotate(${navHeadingDeg}deg)` : 'rotate(0deg)';
+    ? `rotate(${navHeadingDeg}deg)` : 'rotate(0deg)';
   }, [navHeadingDeg, navFollowEnabled]);
 
   // Marcadores tienda / cliente
@@ -309,79 +309,79 @@ function DriverMap({
       el.style.cssText = `width:28px;height:28px;border-radius:50%;background:${color};display:grid;place-items:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);font-size:15px`;
       el.textContent = emoji;
       return new _ml.Marker({ element: el }).setLngLat([pos.lng, pos.lat])
-        .setPopup(new _ml.Popup({ closeButton: false }).setText(label));
+      .setPopup(new _ml.Popup({ closeButton: false }).setText(label));
     };
     if (pickupPos)   markersRef.current.pickup   = mkr(pickupPos,   '🏪', '#16a34a', pickupLabel   || 'Tienda').addTo(map);
     if (deliveryPos) markersRef.current.delivery = mkr(deliveryPos, '📦', '#f97316', deliveryLabel || 'Cliente').addTo(map);
   }, [pickupPos?.lat, pickupPos?.lng, deliveryPos?.lat, deliveryPos?.lng, pickupLabel, deliveryLabel]);
 
-  // Ruta GeoJSON
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const SRC = 'driver-route-source', LYR = 'driver-route-layer';
-    const draw = () => {
-      const geo = { type:'Feature', properties:{},
+    // Ruta GeoJSON
+    useEffect(() => {
+      const map = mapRef.current;
+      if (!map) return;
+      const SRC = 'driver-route-source', LYR = 'driver-route-layer';
+      const draw = () => {
+        const geo = { type:'Feature', properties:{},
         geometry:{ type:'LineString', coordinates:(routeGeometry||[]).map(p=>[p.lng,p.lat]) } };
-      if (!map.getSource(SRC)) map.addSource(SRC, { type:'geojson', data:geo });
-      else map.getSource(SRC).setData(geo);
-      if (!map.getLayer(LYR)) map.addLayer({ id:LYR, type:'line', source:SRC,
-        paint:{ 'line-color':'#e3aaaa', 'line-width':5, 'line-opacity':0.9 },
-        layout:{ 'line-cap':'round', 'line-join':'round' } });
-    };
-    if (map.isStyleLoaded()) draw(); else map.once('load', draw);
-  }, [routeGeometry]);
+        if (!map.getSource(SRC)) map.addSource(SRC, { type:'geojson', data:geo });
+        else map.getSource(SRC).setData(geo);
+        if (!map.getLayer(LYR)) map.addLayer({ id:LYR, type:'line', source:SRC,
+          paint:{ 'line-color':'#e3aaaa', 'line-width':5, 'line-opacity':0.9 },
+          layout:{ 'line-cap':'round', 'line-join':'round' } });
+      };
+      if (map.isStyleLoaded()) draw(); else map.once('load', draw);
+    }, [routeGeometry]);
 
-  // Centrar — señal puntual del padre
-  useEffect(() => {
-    if (!centerSignal || !mapRef.current) return;
-    const map = mapRef.current;
-    const pos = livePosRef.current || driverPos;
-    if (!pos) { onCenterDone?.(); return; }
-    if (centerSignal === 'follow') {
-      const h = liveHeadingRef.current || navHeadingDeg || 0;
-      const offsetY = Math.round(map.getContainer().clientHeight * 0.18);
-      map.easeTo({ center:[pos.lng,pos.lat], zoom:19, pitch:60, bearing:h,
-        duration:350, offset:[0,offsetY], essential:true });
-    } else {
-      map.easeTo({ center:[pos.lng,pos.lat], zoom:14, pitch:30, bearing:0, duration:350, essential:true });
-    }
-    onCenterDone?.();
-  }, [centerSignal]); // eslint-disable-line react-hooks/exhaustive-deps
+      // Centrar — señal puntual del padre
+      useEffect(() => {
+        if (!centerSignal || !mapRef.current) return;
+        const map = mapRef.current;
+        const pos = livePosRef.current || driverPos;
+        if (!pos) { onCenterDone?.(); return; }
+        if (centerSignal === 'follow') {
+          const h = liveHeadingRef.current || navHeadingDeg || 0;
+          const offsetY = Math.round(map.getContainer().clientHeight * 0.18);
+          map.easeTo({ center:[pos.lng,pos.lat], zoom:19, pitch:60, bearing:h,
+            duration:350, offset:[0,offsetY], essential:true });
+        } else {
+          map.easeTo({ center:[pos.lng,pos.lat], zoom:14, pitch:30, bearing:0, duration:350, essential:true });
+        }
+        onCenterDone?.();
+      }, [centerSignal]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return (
-    <div style={{ height:'100%', width:'100%', position:'relative' }}>
-      <div ref={containerRef} style={{ height:'100%', width:'100%' }} />
+      return (
+        <div style={{ height:'100%', width:'100%', position:'relative' }}>
+        <div ref={containerRef} style={{ height:'100%', width:'100%' }} />
 
-      {showAttrib && (
-        <div style={{ position:'absolute', bottom:52, left:8, zIndex:10,
-          background:'rgba(255,255,255,0.92)', borderRadius:6, padding:'0.3rem 0.6rem',
-          fontSize:'0.65rem', color:'#444', boxShadow:'0 1px 6px #0002', maxWidth:260, pointerEvents:'none' }}>
-          © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer"
-            style={{ color:'#2563eb' }}>OpenStreetMap</a> contributors ·{' '}
-          <a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer"
-            style={{ color:'#2563eb' }}>OpenFreeMap</a> ·{' '}
-          <a href="https://maplibre.org" target="_blank" rel="noopener noreferrer"
-            style={{ color:'#2563eb' }}>MapLibre</a>
-        </div>
-      )}
-      <button onClick={() => setShowAttrib(v => !v)} title="Atribuciones"
+        {showAttrib && (
+          <div style={{ position:'absolute', bottom:52, left:8, zIndex:10,
+            background:'rgba(255,255,255,0.92)', borderRadius:6, padding:'0.3rem 0.6rem',
+                        fontSize:'0.65rem', color:'#444', boxShadow:'0 1px 6px #0002', maxWidth:260, pointerEvents:'none' }}>
+                        © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer"
+                        style={{ color:'#2563eb' }}>OpenStreetMap</a> contributors ·{' '}
+                        <a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer"
+                        style={{ color:'#2563eb' }}>OpenFreeMap</a> ·{' '}
+                        <a href="https://maplibre.org" target="_blank" rel="noopener noreferrer"
+                        style={{ color:'#2563eb' }}>MapLibre</a>
+                        </div>
+        )}
+        <button onClick={() => setShowAttrib(v => !v)} title="Atribuciones"
         style={{ position:'absolute', bottom:8, left:8, zIndex:10,
           background:'rgba(255,255,255,0.82)', border:'1px solid #ccc',
-          borderRadius:4, width:22, height:22, cursor:'pointer',
-          fontSize:'0.65rem', display:'flex', alignItems:'center', justifyContent:'center',
-          color:'#555', padding:0 }}>ℹ</button>
+              borderRadius:4, width:22, height:22, cursor:'pointer',
+              fontSize:'0.65rem', display:'flex', alignItems:'center', justifyContent:'center',
+              color:'#555', padding:0 }}>ℹ</button>
 
-      {!hasGPS && (
-        <div style={{ position:'absolute', top:8, left:'50%', transform:'translateX(-50%)',
-          background:'rgba(0,0,0,0.5)', color:'#fff', borderRadius:20,
-          padding:'0.2rem 0.75rem', fontSize:'0.72rem', zIndex:5,
-          pointerEvents:'none', whiteSpace:'nowrap' }}>
-          📍 Sin GPS — toca el mapa para marcar posición
-        </div>
-      )}
-    </div>
-  );
+              {!hasGPS && (
+                <div style={{ position:'absolute', top:8, left:'50%', transform:'translateX(-50%)',
+                  background:'rgba(0,0,0,0.5)', color:'#fff', borderRadius:20,
+                           padding:'0.2rem 0.75rem', fontSize:'0.72rem', zIndex:5,
+                           pointerEvents:'none', whiteSpace:'nowrap' }}>
+                           📍 Sin GPS — toca el mapa para marcar posición
+                           </div>
+              )}
+              </div>
+      );
 }
 
 // ── PullToRefresh ─────────────────────────────────────────────────────────────
@@ -461,34 +461,34 @@ function PullToRefresh({ onRefresh, children }) {
 
   return (
     <div ref={wrapRef} style={{ height:'100%', overflow:'hidden', position:'relative' }}
-      onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+    onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
 
-      {/* OPT-3: posición siempre con transform, nunca con `top` */}
-      <div ref={indicatorRef} className="dh-ptr-indicator releasing">
-        <div style={{ width:36, height:36, borderRadius:'50%', background:'#fff',
-          boxShadow:'0 2px 12px rgba(0,0,0,0.18)', display:'flex',
+    {/* OPT-3: posición siempre con transform, nunca con `top` */}
+    <div ref={indicatorRef} className="dh-ptr-indicator releasing">
+    <div style={{ width:36, height:36, borderRadius:'50%', background:'#fff',
+      boxShadow:'0 2px 12px rgba(0,0,0,0.18)', display:'flex',
           alignItems:'center', justifyContent:'center' }}>
           <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-            <circle cx="11" cy="11" r="9" stroke="#e5e7eb" strokeWidth="2.5"/>
-            {/* OPT-2: cuando loading, anima con CSS puro; cuando se arrastra, stroke-dasharray se muta por ref */}
-            <circle ref={arcRef} cx="11" cy="11" r="9"
-              stroke="var(--brand)" strokeWidth="2.5"
-              strokeDasharray="0 56.5" strokeLinecap="round"
-              style={{
-                transformOrigin: '50% 50%',
-                ...(loading ? { animation:'dh-spin 0.75s linear infinite' } : {}),
-              }}
-            />
+          <circle cx="11" cy="11" r="9" stroke="#e5e7eb" strokeWidth="2.5"/>
+          {/* OPT-2: cuando loading, anima con CSS puro; cuando se arrastra, stroke-dasharray se muta por ref */}
+          <circle ref={arcRef} cx="11" cy="11" r="9"
+          stroke="var(--brand)" strokeWidth="2.5"
+          strokeDasharray="0 56.5" strokeLinecap="round"
+          style={{
+            transformOrigin: '50% 50%',
+            ...(loading ? { animation:'dh-spin 0.75s linear infinite' } : {}),
+          }}
+          />
           </svg>
-        </div>
-      </div>
+          </div>
+          </div>
 
-      {/* OPT-1: transform gestionado por refs, NO por state */}
-      <div ref={contentRef} className="dh-ptr-content"
-        style={{ height:'100%', display:'flex', flexDirection:'column' }}>
-        {children}
-      </div>
-    </div>
+          {/* OPT-1: transform gestionado por refs, NO por state */}
+          <div ref={contentRef} className="dh-ptr-content"
+          style={{ height:'100%', display:'flex', flexDirection:'column' }}>
+          {children}
+          </div>
+          </div>
   );
 }
 
@@ -557,8 +557,8 @@ export default function DriverHome() {
     if (!customPin) { setPinAddress(null); return; }
     setLoadingPin(true);
     reverseGeocode(customPin.lat, customPin.lng)
-      .then(a => setPinAddress(a || `${customPin.lat.toFixed(5)}, ${customPin.lng.toFixed(5)}`))
-      .finally(() => setLoadingPin(false));
+    .then(a => setPinAddress(a || `${customPin.lat.toFixed(5)}, ${customPin.lng.toFixed(5)}`))
+    .finally(() => setLoadingPin(false));
   }, [customPin?.lat, customPin?.lng]);
 
   const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, availability, hasActiveOrder);
@@ -589,11 +589,11 @@ export default function DriverHome() {
     try {
       const [od, off] = await Promise.all([
         apiFetch('/orders/my?active=1', {}, auth.token),
-        apiFetch('/drivers/offers',     {}, auth.token),
+                                          apiFetch('/drivers/offers',     {}, auth.token),
       ]);
       const active = (od.orders||[])
-        .filter(o => !['delivered','cancelled'].includes(o.status))
-        .sort((a,b) => new Date(a.accepted_at||a.created_at) - new Date(b.accepted_at||b.created_at))[0] || null;
+      .filter(o => !['delivered','cancelled'].includes(o.status))
+      .sort((a,b) => new Date(a.accepted_at||a.created_at) - new Date(b.accepted_at||b.created_at))[0] || null;
       setActiveOrder(active);
       const newOffer = (off.offers||[]).length > 0 ? off.offers[0] : null;
       setPendingOffer(prev => { if (newOffer?.id !== prev?.id) setOfferMinimized(false); return newOffer; });
@@ -607,11 +607,11 @@ export default function DriverHome() {
     loadData();
     if (!auth.token) return;
     apiFetch('/drivers/me', {}, auth.token)
-      .then(d => {
-        const fresh = Boolean(d?.profile?.is_available);
-        setAvailability(fresh);
-        patchUser({ driver: { ...(auth.user?.driver||{}), is_available: fresh } });
-      }).catch(() => {});
+    .then(d => {
+      const fresh = Boolean(d?.profile?.is_available);
+      setAvailability(fresh);
+      patchUser({ driver: { ...(auth.user?.driver||{}), is_available: fresh } });
+    }).catch(() => {});
   }, [auth.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const availabilityRef     = useRef(availability);
@@ -644,7 +644,7 @@ export default function DriverHome() {
   async function toggleAvailability() {
     try {
       const r = await apiFetch('/drivers/availability',
-        { method:'PATCH', body:JSON.stringify({ isAvailable:!availability }) }, auth.token);
+                               { method:'PATCH', body:JSON.stringify({ isAvailable:!availability }) }, auth.token);
       const next = Boolean(r?.profile?.is_available);
       setAvailability(next);
       patchUser({ driver: { ...(auth.user?.driver||{}), is_available: next } });
@@ -677,7 +677,7 @@ export default function DriverHome() {
     setLoadingStatus(status);
     try {
       await apiFetch(`/orders/${orderId}/status`,
-        { method:'PATCH', body:JSON.stringify({ status }) }, auth.token);
+                     { method:'PATCH', body:JSON.stringify({ status }) }, auth.token);
       loadData();
     } catch (e) { setMsg(e.message); }
     finally { setLoadingStatus(''); }
@@ -687,7 +687,7 @@ export default function DriverHome() {
     if (!activeOrder) return;
     try {
       await apiFetch(`/drivers/orders/${activeOrder.id}/release`,
-        { method:'POST', body:JSON.stringify({ note: releaseNote }) }, auth.token);
+                     { method:'POST', body:JSON.stringify({ note: releaseNote }) }, auth.token);
       setShowRelease(false); setReleaseNote(''); loadData();
     } catch (e) { setMsg(e.message); }
   }
@@ -695,18 +695,18 @@ export default function DriverHome() {
   function openRoadRouteApi() {
     if (!activeOrder) return;
     const start    = myPosition || (activeOrder.restaurant_lat
-      ? { lat:Number(activeOrder.restaurant_lat), lng:Number(activeOrder.restaurant_lng) } : null);
+    ? { lat:Number(activeOrder.restaurant_lat), lng:Number(activeOrder.restaurant_lng) } : null);
     const pickup   = activeOrder.restaurant_lat
-      ? { lat:Number(activeOrder.restaurant_lat), lng:Number(activeOrder.restaurant_lng) } : null;
+    ? { lat:Number(activeOrder.restaurant_lat), lng:Number(activeOrder.restaurant_lng) } : null;
     const delivery = activeOrder.customer_lat
-      ? { lat:Number(activeOrder.customer_lat),   lng:Number(activeOrder.customer_lng)   } : null;
+    ? { lat:Number(activeOrder.customer_lat),   lng:Number(activeOrder.customer_lng)   } : null;
     if (!start || !pickup || !delivery) return setMsg('Faltan coordenadas para trazar la ruta');
     apiFetch('/routes/model', {
       method:'POST',
       body:JSON.stringify({ origin:start, destination:delivery, waypoints:[pickup], includeSteps:true }),
     }, auth.token)
-      .then(d => { if (!d?.geometry?.length) throw new Error(); setRouteGeometry(d.geometry); setMsg('Ruta trazada'); })
-      .catch(() => { setRouteGeometry(null); setMsg('No se pudo calcular la ruta'); });
+    .then(d => { if (!d?.geometry?.length) throw new Error(); setRouteGeometry(d.geometry); setMsg('Ruta trazada'); })
+    .catch(() => { setRouteGeometry(null); setMsg('No se pudo calcular la ruta'); });
   }
 
   function openGoogleNavigation() {
@@ -748,327 +748,327 @@ export default function DriverHome() {
 
   return (
     <PullToRefresh onRefresh={handleRefresh}>
-      <div className="driver-map-root" style={{ display:'flex', flexDirection:'column',
-        height:'100%', overflow:'hidden', position:'relative' }}>
+    <div className="driver-map-root" style={{ display:'flex', flexDirection:'column',
+      height:'100%', overflow:'hidden', position:'relative' }}>
 
-        {/* Encabezado */}
-        <div style={{ flexShrink:0,
-          background:'linear-gradient(135deg,var(--brand) 0%,#c0546a 100%)',
+      {/* Encabezado */}
+      <div style={{ flexShrink:0,
+        background:'linear-gradient(135deg,var(--brand) 0%,#c0546a 100%)',
           padding:'0.65rem 1rem', display:'flex', justifyContent:'space-between',
           alignItems:'center', gap:8, zIndex:10 }}>
           <div>
-            <div style={{ fontWeight:700, fontSize:'0.875rem', color:'#fff' }}>
-              {availability ? '● Disponible' : '○ No disponible'}
-            </div>
-            {myPosition && <div style={{ fontSize:'0.7rem', color:'rgba(255,255,255,0.8)' }}>GPS · ±{myPosition.accuracy}m</div>}
-            {gpsError   && <div style={{ fontSize:'0.7rem', color:'#ffb3b3', maxWidth:200 }}>{gpsError}</div>}
+          <div style={{ fontWeight:700, fontSize:'0.875rem', color:'#fff' }}>
+          {availability ? '● Disponible' : '○ No disponible'}
+          </div>
+          {myPosition && <div style={{ fontSize:'0.7rem', color:'rgba(255,255,255,0.8)' }}>GPS · ±{myPosition.accuracy}m</div>}
+          {gpsError   && <div style={{ fontSize:'0.7rem', color:'#ffb3b3', maxWidth:200 }}>{gpsError}</div>}
           </div>
           <button onClick={toggleAvailability}
-            className={availability ? 'btn-primary btn-sm' : 'btn-sm'}>
-            {availability ? 'Disponible' : 'No disponible'}
+          className={availability ? 'btn-primary btn-sm' : 'btn-sm'}>
+          {availability ? 'Disponible' : 'No disponible'}
           </button>
-        </div>
+          </div>
 
-        {msg && (
-          <div className="flash flash-error"
+          {msg && (
+            <div className="flash flash-error"
             style={{ flexShrink:0, borderRadius:0, margin:0, display:'flex', justifyContent:'space-between' }}>
             <span style={{ fontSize:'0.83rem' }}>{msg}</span>
             <button onClick={() => setMsg('')}
-              style={{ border:'none', background:'none', cursor:'pointer', fontWeight:700 }}>✕</button>
-          </div>
-        )}
+            style={{ border:'none', background:'none', cursor:'pointer', fontWeight:700 }}>✕</button>
+            </div>
+          )}
 
-        {/* Mapa */}
-        <div style={{ flex:1, minHeight:0, position:'relative', overflow:'hidden', zIndex:0 }}>
+          {/* Mapa */}
+          <div style={{ flex:1, minHeight:0, position:'relative', overflow:'hidden', zIndex:0 }}>
 
           {!customPin && !hasActiveOrder && availability && (
             <div style={{ position:'absolute', top:8, left:'50%', transform:'translateX(-50%)',
               background:'rgba(0,0,0,0.55)', color:'#fff', borderRadius:20,
-              padding:'0.25rem 0.75rem', fontSize:'0.72rem', zIndex:5,
-              pointerEvents:'none', whiteSpace:'nowrap' }}>
-            </div>
+                                                             padding:'0.25rem 0.75rem', fontSize:'0.72rem', zIndex:5,
+                                                             pointerEvents:'none', whiteSpace:'nowrap' }}>
+                                                             </div>
           )}
 
           <DriverMap
-            driverPos={myPosition}
-            customPin={customPin}
-            onCustomPin={setCustomPin}
-            hasActiveOrder={hasActiveOrder}
-            pickupPos={activeOrder?.restaurant_lat
-              ? { lat:Number(activeOrder.restaurant_lat), lng:Number(activeOrder.restaurant_lng) } : null}
+          driverPos={myPosition}
+          customPin={customPin}
+          onCustomPin={setCustomPin}
+          hasActiveOrder={hasActiveOrder}
+          pickupPos={activeOrder?.restaurant_lat
+            ? { lat:Number(activeOrder.restaurant_lat), lng:Number(activeOrder.restaurant_lng) } : null}
             deliveryPos={activeOrder?.customer_lat
               ? { lat:Number(activeOrder.customer_lat),   lng:Number(activeOrder.customer_lng)   } : null}
-            pickupLabel={activeOrder?.restaurant_name || 'Tienda'}
-            deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
-            routeGeometry={routeGeometry}
-            onRouteError={setMsg}
-            navFollowEnabled={navFollowEnabled}
-            navHeadingDeg={navHeadingDeg}
-            onHeadingChange={setNavHeadingDeg}
-            centerSignal={centerSignal}
-            onCenterDone={() => setCenterSignal(null)}
-          />
+              pickupLabel={activeOrder?.restaurant_name || 'Tienda'}
+              deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
+              routeGeometry={routeGeometry}
+              onRouteError={setMsg}
+              navFollowEnabled={navFollowEnabled}
+              navHeadingDeg={navHeadingDeg}
+              onHeadingChange={setNavHeadingDeg}
+              centerSignal={centerSignal}
+              onCenterDone={() => setCenterSignal(null)}
+              />
 
-          {/* ── FABs — columna derecha, sin solapamiento ──────────── */}
+              {/* ── FABs — columna derecha, sin solapamiento ──────────── */}
 
-          {/* Centrar — toggle rosa/blanco */}
-          <button onClick={handleCenterToggle}
-            aria-label={centerActive ? 'Desactivar centrado' : 'Activar centrado'}
-            className="dh-fab"
-            style={{
-              position:'absolute',
-              bottom: hasActiveOrder && routeGeometry?.length > 0
-                ? 'calc(16px + 56px + 8px + 36px + 8px + env(safe-area-inset-bottom,0px))'
-                : 'calc(16px + env(safe-area-inset-bottom,0px))',
-              right:12, zIndex:402,
-              width:36, height:36, borderRadius:'50%',
-              background: centerActive ? 'var(--brand)' : '#ffffff',
-              color:       centerActive ? '#ffffff'     : '#111827',
-              border: centerActive ? 'none' : '1px solid #d1d5db',
-              boxShadow:'0 2px 8px rgba(0,0,0,0.18)', cursor:'pointer',
-              display:'flex', alignItems:'center', justifyContent:'center',
-              fontSize:'1rem', transition:'background 0.15s, color 0.15s',
-            }}>⌖</button>
-
-          {/* Google Navigation FAB */}
-          {hasActiveOrder && routeGeometry?.length > 0 && (
-            <button onClick={openGoogleNavigation}
-              aria-label="Abrir en Google Maps" className="dh-fab"
+              {/* Centrar — toggle rosa/blanco */}
+              <button onClick={handleCenterToggle}
+              aria-label={centerActive ? 'Desactivar centrado' : 'Activar centrado'}
+              className="dh-fab"
               style={{
                 position:'absolute',
-                bottom:'calc(16px + env(safe-area-inset-bottom,0px))',
-                right:12, zIndex:400, width:56, height:56, borderRadius:'50%',
-                background:'var(--brand)', color:'#fff', border:'none',
-                cursor:'pointer', boxShadow:'0 4px 16px rgba(0,0,0,0.28)',
-                display:'flex', alignItems:'center', justifyContent:'center',
-              }}>
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+                bottom: hasActiveOrder && routeGeometry?.length > 0
+                ? 'calc(16px + 56px + 8px + 36px + 8px + env(safe-area-inset-bottom,0px))'
+                : 'calc(16px + env(safe-area-inset-bottom,0px))',
+          right:12, zIndex:402,
+          width:36, height:36, borderRadius:'50%',
+          background: centerActive ? 'var(--brand)' : '#ffffff',
+          color:       centerActive ? '#ffffff'     : '#111827',
+          border: centerActive ? 'none' : '1px solid #d1d5db',
+          boxShadow:'0 2px 8px rgba(0,0,0,0.18)', cursor:'pointer',
+          display:'flex', alignItems:'center', justifyContent:'center',
+          fontSize:'1rem', transition:'background 0.15s, color 0.15s',
+              }}>⌖</button>
+
+              {/* Google Navigation FAB */}
+              {hasActiveOrder && routeGeometry?.length > 0 && (
+                <button onClick={openGoogleNavigation}
+                aria-label="Abrir en Google Maps" className="dh-fab"
+                style={{
+                  position:'absolute',
+                  bottom:'calc(16px + env(safe-area-inset-bottom,0px))',
+                                                               right:12, zIndex:400, width:56, height:56, borderRadius:'50%',
+                                                               background:'var(--brand)', color:'#fff', border:'none',
+                                                               cursor:'pointer', boxShadow:'0 4px 16px rgba(0,0,0,0.28)',
+                                                               display:'flex', alignItems:'center', justifyContent:'center',
+                }}>
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
                 <polygon points="3 11 22 2 13 21 11 13 3 11" fill="#fff"/>
-              </svg>
-            </button>
-          )}
-        </div>{/* fin mapa */}
-
-        {/* ── Panel de oferta ─────────────────────────────────────── */}
-        {pendingOffer && (
-          <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:30,
-            pointerEvents: offerMinimized ? 'none' : 'auto' }}>
-            {/* OPT-10: will-change:transform en .dh-offer-panel */}
-            <div className="dh-offer-panel" style={{
-              transform: offerMinimized ? 'translateY(calc(100% - 22px))' : 'translateY(0)',
-              transition: 'transform 0.22s ease',
-            }}>
-              <button onClick={() => setOfferMinimized(m => !m)}
-                style={{ position:'absolute', top:-42, left:'50%', transform:'translateX(-50%)',
-                  width:74, height:22, background:'#f3e8ed', color:'var(--brand)',
-                  border:'1px solid #e8c8d4', borderRadius:'6px 6px 0 0',
-                  padding:0, cursor:'pointer', fontSize:'0.62rem', fontWeight:700,
-                  boxShadow:'0 -2px 6px rgba(0,0,0,0.06)', zIndex:31,
-                  whiteSpace:'nowrap', display:'flex', alignItems:'center',
-                  gap:3, justifyContent:'center', pointerEvents:'auto' }}
-                aria-label={offerMinimized ? 'Expandir oferta' : 'Minimizar oferta'}>
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                  <polyline points={offerMinimized ? '6 15 12 9 18 15' : '18 9 12 15 6 9'} />
                 </svg>
-                Oferta
-              </button>
-              <div style={{ background:'#fff', borderTop:'1px solid #e8c8d4',
-                boxShadow:'0 -4px 20px rgba(0,0,0,0.14)', overflow:'hidden',
-                pointerEvents: offerMinimized ? 'none' : 'auto' }}>
-                <div style={{ padding:'0.6rem 1rem 0.75rem', overflowY:'auto' }}>
-                  <div style={{ fontSize:'0.82rem', color:'var(--gray-700)', marginBottom:'0.3rem' }}>
-                    {(pendingOffer.restaurant_name||pendingOffer.restaurantAddress) && (
-                      <div style={{ marginBottom:'0.1rem' }}>
-                        <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Tienda: </span>
-                        <strong>{pendingOffer.restaurant_name||pendingOffer.restaurantAddress}</strong>
-                      </div>
-                    )}
-                    {(pendingOffer.restaurant_address||pendingOffer.restaurantAddress) && (
-                      <div style={{ marginBottom:'0.1rem' }}>
-                        <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Dir. tienda: </span>
-                        <strong>{pendingOffer.restaurant_address||pendingOffer.restaurantAddress}</strong>
-                      </div>
-                    )}
-                    {(pendingOffer.customer_address||pendingOffer.customerAddress||pendingOffer.delivery_address) && (
-                      <div style={{ marginBottom:'0.1rem' }}>
-                        <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Entrega: </span>
-                        <strong>{pendingOffer.customer_address||pendingOffer.customerAddress||pendingOffer.delivery_address}</strong>
-                      </div>
-                    )}
-                  </div>
-                  {(() => {
-                    const earn = (pendingOffer.delivery_fee_cents||0)
-                      + Math.round((pendingOffer.service_fee_cents||0)*0.5)
-                      + (pendingOffer.tip_cents||0) || pendingOffer.driverEarning || 0;
-                    return earn > 0
-                      ? <div style={{ fontSize:'0.9rem', fontWeight:800, color:'var(--success)', marginBottom:'0.35rem' }}>
-                          Tu ganancia: {fmt(earn)}
-                        </div>
-                      : null;
-                  })()}
-                  <OfferCountdown key={pendingOffer.id}
-                    secondsLeft={pendingOffer.seconds_left ?? pendingOffer.secondsLeft ?? 60}
-                    onExpired={() => {
-                      setPendingOffer(null); loadData();
-                      consecutiveTimeouts.current += 1;
-                      if (consecutiveTimeouts.current >= 3) {
-                        consecutiveTimeouts.current = 0;
-                        setMsg('Se han vencido 3 ofertas seguidas.');
-                      }
-                    }}
-                  />
-                  <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.5rem' }}>
-                    <button className="btn-primary"
-                      style={{ flex:1, padding:'0.65rem 0', fontSize:'0.95rem', fontWeight:700, borderRadius:10 }}
-                      disabled={loadingOffer} onClick={acceptOffer}>
-                      {loadingOffer ? 'Aceptando…' : '✓ Aceptar'}
-                    </button>
-                    <button
-                      style={{ flex:1, padding:'0.65rem 0', fontSize:'0.95rem', fontWeight:700, borderRadius:10,
-                        background:'var(--gray-100)', color:'var(--gray-700)',
-                        border:'1px solid var(--gray-200)', cursor:'pointer' }}
-                      disabled={loadingOffer} onClick={rejectOffer}>
-                      ✕ Rechazar
-                    </button>
-                  </div>
-                </div>
+                </button>
+              )}
+              </div>{/* fin mapa */}
+
+              {/* ── Panel de oferta ─────────────────────────────────────── */}
+              {pendingOffer && (
+                <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:30,
+                  pointerEvents: offerMinimized ? 'none' : 'auto' }}>
+                  {/* OPT-10: will-change:transform en .dh-offer-panel */}
+                  <div className="dh-offer-panel" style={{
+                    transform: offerMinimized ? 'translateY(calc(100% - 22px))' : 'translateY(0)',
+                                transition: 'transform 0.22s ease',
+                  }}>
+                  <button onClick={() => setOfferMinimized(m => !m)}
+                  style={{ position:'absolute', top:-42, left:'50%', transform:'translateX(-50%)',
+                    width:74, height:22, background:'#f3e8ed', color:'var(--brand)',
+                                border:'1px solid #e8c8d4', borderRadius:'6px 6px 0 0',
+                                padding:0, cursor:'pointer', fontSize:'0.62rem', fontWeight:700,
+                                boxShadow:'0 -2px 6px rgba(0,0,0,0.06)', zIndex:31,
+                                whiteSpace:'nowrap', display:'flex', alignItems:'center',
+                                gap:3, justifyContent:'center', pointerEvents:'auto' }}
+                                aria-label={offerMinimized ? 'Expandir oferta' : 'Minimizar oferta'}>
+                                <svg width="9" height="9" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                                <polyline points={offerMinimized ? '6 15 12 9 18 15' : '18 9 12 15 6 9'} />
+                                </svg>
+                                Oferta
+                                </button>
+                                <div style={{ background:'#fff', borderTop:'1px solid #e8c8d4',
+                                  boxShadow:'0 -4px 20px rgba(0,0,0,0.14)', overflow:'hidden',
+                                pointerEvents: offerMinimized ? 'none' : 'auto' }}>
+                                <div style={{ padding:'0.6rem 1rem 0.75rem', overflowY:'auto' }}>
+                                <div style={{ fontSize:'0.82rem', color:'var(--gray-700)', marginBottom:'0.3rem' }}>
+                                {(pendingOffer.restaurant_name||pendingOffer.restaurantAddress) && (
+                                  <div style={{ marginBottom:'0.1rem' }}>
+                                  <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Tienda: </span>
+                                  <strong>{pendingOffer.restaurant_name||pendingOffer.restaurantAddress}</strong>
+                                  </div>
+                                )}
+                                {(pendingOffer.restaurant_address||pendingOffer.restaurantAddress) && (
+                                  <div style={{ marginBottom:'0.1rem' }}>
+                                  <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Dir. tienda: </span>
+                                  <strong>{pendingOffer.restaurant_address||pendingOffer.restaurantAddress}</strong>
+                                  </div>
+                                )}
+                                {(pendingOffer.customer_address||pendingOffer.customerAddress||pendingOffer.delivery_address) && (
+                                  <div style={{ marginBottom:'0.1rem' }}>
+                                  <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Entrega: </span>
+                                  <strong>{pendingOffer.customer_address||pendingOffer.customerAddress||pendingOffer.delivery_address}</strong>
+                                  </div>
+                                )}
+                                </div>
+                                {(() => {
+                                  const earn = (pendingOffer.delivery_fee_cents||0)
+                                  + Math.round((pendingOffer.service_fee_cents||0)*0.5)
+                                  + (pendingOffer.tip_cents||0) || pendingOffer.driverEarning || 0;
+                                  return earn > 0
+                                  ? <div style={{ fontSize:'0.9rem', fontWeight:800, color:'var(--success)', marginBottom:'0.35rem' }}>
+                                  Tu ganancia: {fmt(earn)}
+                                  </div>
+                                  : null;
+                                })()}
+                                <OfferCountdown key={pendingOffer.id}
+                                secondsLeft={pendingOffer.seconds_left ?? pendingOffer.secondsLeft ?? 60}
+                                onExpired={() => {
+                                  setPendingOffer(null); loadData();
+                                  consecutiveTimeouts.current += 1;
+                                  if (consecutiveTimeouts.current >= 3) {
+                                    consecutiveTimeouts.current = 0;
+                                    setMsg('Se han vencido 3 ofertas seguidas.');
+                                  }
+                                }}
+                                />
+                                <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.5rem' }}>
+                                <button className="btn-primary"
+                                style={{ flex:1, padding:'0.65rem 0', fontSize:'0.95rem', fontWeight:700, borderRadius:10 }}
+                                disabled={loadingOffer} onClick={acceptOffer}>
+                                {loadingOffer ? 'Aceptando…' : '✓ Aceptar'}
+                                </button>
+                                <button
+                                style={{ flex:1, padding:'0.65rem 0', fontSize:'0.95rem', fontWeight:700, borderRadius:10,
+                                  background:'var(--gray-100)', color:'var(--gray-700)',
+                                border:'1px solid var(--gray-200)', cursor:'pointer' }}
+                                disabled={loadingOffer} onClick={rejectOffer}>
+                                ✕ Rechazar
+                                </button>
+                                </div>
+                                </div>
+                                </div>
+                                </div>
+                                </div>
+              )}
+
+              {/* ── Panel de pedido activo ──────────────────────────────── */}
+              {activeOrder && (() => {
+                const isOTW  = activeOrder.status === 'on_the_way';
+                const isCash = (activeOrder.payment_method || 'cash') === 'cash';
+                const total  = (activeOrder.total_cents||0)+(activeOrder.service_fee_cents||0)
+                +(activeOrder.delivery_fee_cents||0)+(activeOrder.tip_cents||0);
+                const earn   = (activeOrder.delivery_fee_cents||0)
+                + Math.round((activeOrder.service_fee_cents||0)*0.5)
+                + (activeOrder.tip_cents||0);
+                const DST = {
+                  assigned:'Asignado — ve a recoger', on_the_way:'En camino al cliente',
+                  preparing:'Esperando en tienda',    ready:'Listo para retiro',
+                  accepted:'Aceptado',                created:'Nuevo pedido',
+                };
+                return (
+                  <div style={{ flexShrink:0, background:'#fff',
+                    borderTop:'2px solid var(--success)', zIndex:10, position:'relative',
+                        display:'flex', flexDirection:'column' }}>
+
+                        {/* Cabecera compacta */}
+                        <div onClick={() => setOrderExpanded(e => !e)}
+                        style={{ padding:'0.55rem 1rem 0.6rem', flexShrink:0, cursor:'pointer', userSelect:'none' }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                        <span style={{ fontSize:'0.7rem', fontWeight:800, textTransform:'uppercase',
+                          letterSpacing:'0.5px', color:'var(--success)' }}>
+                          {DST[activeOrder.status] || activeOrder.status}
+                          </span>
+                          {/* Chevron animado con CSS transform, sin cambiar `points` */}
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                          stroke="var(--gray-400)" strokeWidth="2.5" strokeLinecap="round"
+                          style={{ transform: orderExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                            transition:'transform 0.2s' }}>
+                            <polyline points="6 9 12 15 18 9"/>
+                            </svg>
+                            </div>
+
+                            {!isOTW ? (
+                              <div style={{ fontSize:'0.82rem', marginTop:'0.15rem' }}>
+                              <strong>{activeOrder.restaurant_name}</strong>
+                              {activeOrder.restaurant_address && (
+                                <div style={{ color:'var(--gray-500)', fontSize:'0.77rem' }}>{activeOrder.restaurant_address}</div>
+                              )}
+                              {isCash
+                                ? <div style={{ fontWeight:700, color:'var(--brand)', fontSize:'0.8rem', marginTop:'0.1rem' }}>
+                                Pagar a tienda: {fmt(activeOrder.total_cents||0)}
+                                </div>
+                                : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
+                                {activeOrder.payment_method==='card' ? '💳 Pago con tarjeta — no cobrar' : '🏦 Pago SPEI — no cobrar'}
+                                </div>
+                              }
+                              </div>
+                            ) : (
+                              <div style={{ fontSize:'0.82rem', marginTop:'0.15rem' }}>
+                              <strong>{activeOrder.customer_name || 'Cliente'}</strong>
+                              {(activeOrder.customer_address || activeOrder.delivery_address) && (
+                                <div style={{ color:'var(--gray-500)', fontSize:'0.77rem' }}>
+                                {activeOrder.customer_address || activeOrder.delivery_address}
+                                </div>
+                              )}
+                              {isCash
+                                ? <div style={{ fontWeight:700, color:'var(--success)', fontSize:'0.8rem', marginTop:'0.1rem' }}>
+                                Cobrar a cliente: {fmt(total)}
+                                </div>
+                                : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
+                                {activeOrder.payment_method==='card' ? '💳 Ya pagó con tarjeta' : '🏦 Ya pagó SPEI'}
+                                </div>
+                              }
+                              </div>
+                            )}
+
+                            <div style={{ display:'flex', gap:'0.35rem', marginTop:'0.45rem' }}
+                            onClick={e => e.stopPropagation()}>
+                            <button className="btn-sm" onClick={openRoadRouteApi}>🗺 Ruta nueva</button>
+                            </div>
+                            </div>
+
+                            {/* OPT-11: grid-template-rows — NO usa max-height, no genera reflow por frame */}
+                            <div style={expandStyle}>
+                            <div style={{ overflow:'hidden' }}>
+                            <div style={{ padding:'0.4rem 1rem 0.6rem',
+                              borderTop:'1px solid var(--gray-100)' }}>
+                              {(activeOrder.items||[]).length > 0 && (
+                                <ul style={{ fontSize:'0.8rem', margin:'0 0 0.3rem 1rem', color:'var(--gray-700)' }}>
+                                {activeOrder.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
+                                </ul>
+                              )}
+                              <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.3rem' }}>
+                              Ganancia estimada:{' '}
+                              <strong style={{ color:'var(--success)' }}>{fmt(earn)}</strong>
+                              </div>
+                              <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginBottom:'0.4rem' }}>
+                              <button className="btn-sm"
+                              style={{ background:activeOrder.status==='ready' ? 'var(--brand)':'',
+                                color:activeOrder.status==='ready' ? '#fff':'' }}
+                                disabled={loadingStatus==='on_the_way' || activeOrder.status!=='ready'}
+                                onClick={() => changeStatus(activeOrder.id,'on_the_way')}>
+                                En camino
+                                </button>
+                                <button className="btn-sm"
+                                style={{ background:activeOrder.status==='on_the_way' ? 'var(--success)':'',
+                                  color:activeOrder.status==='on_the_way' ? '#fff':'' }}
+                                  disabled={loadingStatus==='delivered' || activeOrder.status!=='on_the_way'}
+                                  onClick={() => changeStatus(activeOrder.id,'delivered')}>
+                                  Entregado
+                                  </button>
+                                  {!['on_the_way','delivered','cancelled'].includes(activeOrder.status) && (
+                                    <button className="btn-sm btn-danger"
+                                    onClick={() => setShowRelease(s => !s)}>Liberar</button>
+                                  )}
+                                  </div>
+                                  {showRelease && (
+                                    <div>
+                                    <textarea value={releaseNote} onChange={e => setReleaseNote(e.target.value)}
+                                    placeholder="Motivo (obligatorio)" rows={2}
+                                    style={{ width:'100%', boxSizing:'border-box', marginBottom:'0.3rem', fontSize:'0.82rem' }} />
+                                    <div style={{ display:'flex', gap:'0.3rem' }}>
+                                    <button className="btn-sm btn-danger" onClick={doRelease}>Confirmar</button>
+                                    <button className="btn-sm"
+                                    onClick={() => { setShowRelease(false); setReleaseNote(''); }}>Cancelar</button>
+                                    </div>
+                                    </div>
+                                  )}
+                                  </div>
+                                  </div>
+                                  </div>
+
+                                  </div>
+                );
+              })()}
+
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Panel de pedido activo ──────────────────────────────── */}
-        {activeOrder && (() => {
-          const isOTW  = activeOrder.status === 'on_the_way';
-          const isCash = (activeOrder.payment_method || 'cash') === 'cash';
-          const total  = (activeOrder.total_cents||0)+(activeOrder.service_fee_cents||0)
-                        +(activeOrder.delivery_fee_cents||0)+(activeOrder.tip_cents||0);
-          const earn   = (activeOrder.delivery_fee_cents||0)
-                        + Math.round((activeOrder.service_fee_cents||0)*0.5)
-                        + (activeOrder.tip_cents||0);
-          const DST = {
-            assigned:'Asignado — ve a recoger', on_the_way:'En camino al cliente',
-            preparing:'Esperando en tienda',    ready:'Listo para retiro',
-            accepted:'Aceptado',                created:'Nuevo pedido',
-          };
-          return (
-            <div style={{ flexShrink:0, background:'#fff',
-              borderTop:'2px solid var(--success)', zIndex:10, position:'relative',
-              display:'flex', flexDirection:'column' }}>
-
-              {/* Cabecera compacta */}
-              <div onClick={() => setOrderExpanded(e => !e)}
-                style={{ padding:'0.55rem 1rem 0.6rem', flexShrink:0, cursor:'pointer', userSelect:'none' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  <span style={{ fontSize:'0.7rem', fontWeight:800, textTransform:'uppercase',
-                    letterSpacing:'0.5px', color:'var(--success)' }}>
-                    {DST[activeOrder.status] || activeOrder.status}
-                  </span>
-                  {/* Chevron animado con CSS transform, sin cambiar `points` */}
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                    stroke="var(--gray-400)" strokeWidth="2.5" strokeLinecap="round"
-                    style={{ transform: orderExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                      transition:'transform 0.2s' }}>
-                    <polyline points="6 9 12 15 18 9"/>
-                  </svg>
-                </div>
-
-                {!isOTW ? (
-                  <div style={{ fontSize:'0.82rem', marginTop:'0.15rem' }}>
-                    <strong>{activeOrder.restaurant_name}</strong>
-                    {activeOrder.restaurant_address && (
-                      <div style={{ color:'var(--gray-500)', fontSize:'0.77rem' }}>{activeOrder.restaurant_address}</div>
-                    )}
-                    {isCash
-                      ? <div style={{ fontWeight:700, color:'var(--brand)', fontSize:'0.8rem', marginTop:'0.1rem' }}>
-                          Pagar a tienda: {fmt(activeOrder.total_cents||0)}
-                        </div>
-                      : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
-                          {activeOrder.payment_method==='card' ? '💳 Pago con tarjeta — no cobrar' : '🏦 Pago SPEI — no cobrar'}
-                        </div>
-                    }
-                  </div>
-                ) : (
-                  <div style={{ fontSize:'0.82rem', marginTop:'0.15rem' }}>
-                    <strong>{activeOrder.customer_name || 'Cliente'}</strong>
-                    {(activeOrder.customer_address || activeOrder.delivery_address) && (
-                      <div style={{ color:'var(--gray-500)', fontSize:'0.77rem' }}>
-                        {activeOrder.customer_address || activeOrder.delivery_address}
-                      </div>
-                    )}
-                    {isCash
-                      ? <div style={{ fontWeight:700, color:'var(--success)', fontSize:'0.8rem', marginTop:'0.1rem' }}>
-                          Cobrar a cliente: {fmt(total)}
-                        </div>
-                      : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
-                          {activeOrder.payment_method==='card' ? '💳 Ya pagó con tarjeta' : '🏦 Ya pagó SPEI'}
-                        </div>
-                    }
-                  </div>
-                )}
-
-                <div style={{ display:'flex', gap:'0.35rem', marginTop:'0.45rem' }}
-                  onClick={e => e.stopPropagation()}>
-                  <button className="btn-sm" onClick={openRoadRouteApi}>🗺 Ruta nueva</button>
-                </div>
-              </div>
-
-              {/* OPT-11: grid-template-rows — NO usa max-height, no genera reflow por frame */}
-              <div style={expandStyle}>
-                <div style={{ overflow:'hidden' }}>
-                  <div style={{ padding:'0.4rem 1rem 0.6rem',
-                    borderTop:'1px solid var(--gray-100)' }}>
-                    {(activeOrder.items||[]).length > 0 && (
-                      <ul style={{ fontSize:'0.8rem', margin:'0 0 0.3rem 1rem', color:'var(--gray-700)' }}>
-                        {activeOrder.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
-                      </ul>
-                    )}
-                    <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.3rem' }}>
-                      Ganancia estimada:{' '}
-                      <strong style={{ color:'var(--success)' }}>{fmt(earn)}</strong>
-                    </div>
-                    <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginBottom:'0.4rem' }}>
-                      <button className="btn-sm"
-                        style={{ background:activeOrder.status==='ready' ? 'var(--brand)':'',
-                          color:activeOrder.status==='ready' ? '#fff':'' }}
-                        disabled={loadingStatus==='on_the_way' || activeOrder.status!=='ready'}
-                        onClick={() => changeStatus(activeOrder.id,'on_the_way')}>
-                        En camino
-                      </button>
-                      <button className="btn-sm"
-                        style={{ background:activeOrder.status==='on_the_way' ? 'var(--success)':'',
-                          color:activeOrder.status==='on_the_way' ? '#fff':'' }}
-                        disabled={loadingStatus==='delivered' || activeOrder.status!=='on_the_way'}
-                        onClick={() => changeStatus(activeOrder.id,'delivered')}>
-                        Entregado
-                      </button>
-                      {!['on_the_way','delivered','cancelled'].includes(activeOrder.status) && (
-                        <button className="btn-sm btn-danger"
-                          onClick={() => setShowRelease(s => !s)}>Liberar</button>
-                      )}
-                    </div>
-                    {showRelease && (
-                      <div>
-                        <textarea value={releaseNote} onChange={e => setReleaseNote(e.target.value)}
-                          placeholder="Motivo (obligatorio)" rows={2}
-                          style={{ width:'100%', boxSizing:'border-box', marginBottom:'0.3rem', fontSize:'0.82rem' }} />
-                        <div style={{ display:'flex', gap:'0.3rem' }}>
-                          <button className="btn-sm btn-danger" onClick={doRelease}>Confirmar</button>
-                          <button className="btn-sm"
-                            onClick={() => { setShowRelease(false); setReleaseNote(''); }}>Cancelar</button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-            </div>
-          );
-        })()}
-
-      </div>
-    </PullToRefresh>
+              </PullToRefresh>
   );
 }
