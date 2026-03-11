@@ -330,7 +330,7 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
 }
 
 export default function DriverHome() {
-  const { auth } = useAuth();
+  const { auth, patchUser } = useAuth();
   const [activeOrder,     setActiveOrder]     = useState(null);
   const [availability,    setAvailability]    = useState(false);
   const [pendingOffer,    setPendingOffer]    = useState(null);
@@ -416,6 +416,14 @@ export default function DriverHome() {
   useEffect(() => {
     setAvailability(Boolean(auth.user?.driver?.is_available));
     loadData();
+    if (!auth.token) return;
+    apiFetch('/drivers/me', {}, auth.token)
+      .then(data => {
+        const fresh = Boolean(data?.profile?.is_available);
+        setAvailability(fresh);
+        patchUser({ driver: { ...(auth.user?.driver || {}), is_available: fresh } });
+      })
+      .catch(() => {});
   }, [auth.token]);
 
   // ── Polling activo: mientras disponible y sin oferta/pedido activo,
@@ -474,7 +482,9 @@ export default function DriverHome() {
       const r = await apiFetch('/drivers/availability', {
         method:'PATCH', body: JSON.stringify({ isAvailable: !availability })
       }, auth.token);
-      setAvailability(r.profile.is_available);
+      const next = Boolean(r?.profile?.is_available);
+      setAvailability(next);
+      patchUser({ driver: { ...(auth.user?.driver || {}), is_available: next } });
     } catch (e) { setMsg(e.message); }
   }
 
@@ -534,18 +544,24 @@ export default function DriverHome() {
       : null;
     if (!start || !pickup || !delivery) return setMsg('Faltan coordenadas para trazar la ruta');
 
-    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${pickup.lng},${pickup.lat};${delivery.lng},${delivery.lat}?overview=full&geometries=geojson`;
-    fetch(osrmUrl)
-      .then(r => r.ok ? r.json() : Promise.reject(new Error('No se obtuvo ruta')))
+    apiFetch('/routes/model', {
+      method:'POST',
+      body: JSON.stringify({
+        origin: start,
+        destination: delivery,
+        waypoints: [pickup],
+        includeSteps: true,
+      }),
+    }, auth.token)
       .then(data => {
-        const coords = data?.routes?.[0]?.geometry?.coordinates;
+        const coords = data?.geometry;
         if (!coords?.length) throw new Error('No hay geometría de ruta');
-        setRouteGeometry(coords.map(([lng, lat]) => ({ lat, lng })));
-        setMsg('Ruta carretera trazada en el mapa');
+        setRouteGeometry(coords);
+        setMsg('Ruta (API nueva) trazada en el mapa');
       })
       .catch(() => {
         setRouteGeometry(null);
-        setMsg('No se pudo calcular la ruta carretera');
+        setMsg('No se pudo calcular la ruta con la API nueva');
       });
   }
 
@@ -890,7 +906,7 @@ export default function DriverHome() {
               {/* Botones Ruta y Maps — siempre visibles, detienen propagación del tap */}
               <div style={{ display:'flex', gap:'0.35rem', marginTop:'0.45rem' }}
                 onClick={e => e.stopPropagation()}>
-                <button className="btn-sm" onClick={openRoadRouteApi}>🗺 Ruta</button>
+                <button className="btn-sm" onClick={openRoadRouteApi}>🗺 Ruta nueva</button>
                 <button className="btn-sm" onClick={openMobileMapsRoute}>📍 Maps</button>
               </div>
             </div>

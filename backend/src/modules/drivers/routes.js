@@ -47,6 +47,19 @@ router.patch('/availability', authenticate, authorize(['driver']), async (req, r
   } catch (error) { return next(error); }
 });
 
+
+/* ── GET /drivers/me ───────────────────────────────────────────────────────── */
+router.get('/me', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const r = await query(
+      'SELECT user_id, is_available, vehicle_type, is_verified, driver_number FROM driver_profiles WHERE user_id=$1 LIMIT 1',
+      [req.user.userId]
+    );
+    if (r.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
+    return res.json({ profile: r.rows[0] });
+  } catch (error) { return next(error); }
+});
+
 /* ── GET /drivers/offers ── ofertas pendientes del driver ───────────────────── */
 router.get('/offers', authenticate, authorize(['driver']), async (req, res, next) => {
   try {

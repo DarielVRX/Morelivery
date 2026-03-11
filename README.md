@@ -305,3 +305,10 @@ Respuesta esperada:
 4. Para mayor prioridad visual en Android: desactiva ahorro de batería para el navegador/PWA.
 
 > Nota: En Web Push no se puede forzar al 100% el modo "heads-up" en todos los dispositivos; depende del sistema/canal del navegador.
+
+
+## 20) Activar utilidad de rutas en Driver Home
+
+- Abre la app como **Conductor** y entra a `/driver`.
+- Con un pedido activo, usa el botón **"🗺 Ruta nueva"**.
+- Ese botón consume `POST /api/routes/model` para trazar la ruta en el mapa.
