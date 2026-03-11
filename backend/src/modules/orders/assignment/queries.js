@@ -79,6 +79,14 @@ export async function getFirstAvailableOrderForDriver(driverId) {
      FROM orders o
      WHERE o.driver_id IS NULL
        AND o.status NOT IN ('delivered','cancelled')
+       AND EXISTS (
+         SELECT 1
+         FROM driver_profiles dp
+         JOIN users u ON u.id = dp.user_id
+         WHERE dp.user_id=$1::uuid
+           AND dp.is_available=true
+           AND u.status='active'
+       )
        -- Sin oferta pending activa para ningún driver (el pedido está libre)
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
@@ -340,8 +348,8 @@ export async function getOfferPayload(orderId, driverId) {
             r.lng     AS restaurant_lng,
             -- Usar dirección fresca del cliente (puede haberse actualizado desde que se creó el pedido)
             COALESCE(c.address, o.delivery_address) AS customer_address,
-            c.lat     AS customer_lat,
-            c.lng     AS customer_lng,
+            COALESCE(o.delivery_lat, c.lat) AS customer_lat,
+            COALESCE(o.delivery_lng, c.lng) AS customer_lng,
             GREATEST(0, EXTRACT(EPOCH FROM (
               od.updated_at + ($3::int * INTERVAL '1 second') - NOW()
             )))::int AS seconds_left
@@ -363,7 +371,8 @@ export async function getPendingAssignmentOrders(driverId) {
             r.name AS restaurant_name, r.address AS restaurant_address,
             r.lat AS restaurant_lat, r.lng AS restaurant_lng,
             COALESCE(c.address, o.delivery_address) AS customer_address,
-            c.lat AS customer_lat, c.lng AS customer_lng,
+            COALESCE(o.delivery_lat, c.lat) AS customer_lat,
+            COALESCE(o.delivery_lng, c.lng) AS customer_lng,
             EXISTS (
               SELECT 1 FROM order_driver_offers od2
               WHERE od2.order_id=o.id AND od2.status='pending'
