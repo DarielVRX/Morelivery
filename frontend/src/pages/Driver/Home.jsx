@@ -977,7 +977,7 @@ export default function DriverHome() {
 
               {/* ── Panel de oferta ─────────────────────────────────────── */}
               {pendingOffer && (
-                <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:30 }}>
+                <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:30, pointerEvents:offerMinimized ? 'none' : 'auto' }}>
                   {/* OPT-10: will-change:transform en .dh-offer-panel */}
                   <div className="dh-offer-panel" style={{
                     transform: offerMinimized ? 'translateY(calc(100%))' : 'translateY(0)',
