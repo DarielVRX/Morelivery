@@ -12,10 +12,13 @@ export const createOrderSchema = z.object({
     .min(1),
   payment_method: z.enum(['cash','card','spei']).optional().default('cash'),
   tip_cents:      z.number().int().min(0).optional().default(0),
+  delivery_lat:   z.number().finite().min(-90).max(90).optional(),
+  delivery_lng:   z.number().finite().min(-180).max(180).optional(),
+  delivery_address: z.string().trim().min(3).max(300).optional(),
 });
 
 export const updateOrderStatusSchema = z.object({
-  status: z.enum(['accepted', 'preparing', 'ready', 'assigned', 'on_the_way', 'delivered', 'cancelled'])
+  status: z.enum(['accepted', 'preparing', 'ready', 'on_the_way', 'delivered', 'cancelled'])
 });
 
 export const suggestionSchema = z.object({

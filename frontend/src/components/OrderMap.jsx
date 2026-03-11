@@ -167,7 +167,7 @@ export default function OrderMap({ driverPos, pickupPos, deliveryPos, showPickup
   const routeFetchRef = useRef(0);
 
   const center = useMemo(() => {
-    return driverPos || pickupPos || deliveryPos || { lat: 20.67, lng: -103.35 };
+    return driverPos || pickupPos || deliveryPos || { lat: 19.70595, lng: -101.19498 };
   }, []);
 
   useEffect(() => {
