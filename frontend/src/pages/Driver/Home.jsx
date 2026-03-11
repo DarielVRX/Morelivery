@@ -82,7 +82,7 @@ async function reverseGeocode(lat, lng) {
 // customPin: { lat, lng } | null  — marcador manual del driver
 // onCustomPin: (latlng | null) => void
 // hasActiveOrder: boolean — si true, oculta el pin y deshabilita clicks
-function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos, pickupLabel, deliveryLabel, routeGeometry, onRouteError }) {
+function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos, pickupLabel, deliveryLabel, routeGeometry, onRouteError, navFollowEnabled, navHeadingDeg }) {
   const containerRef  = useRef(null);
   const mapRef        = useRef(null); // { map, driverMarker, customMarker, pickupMarker, deliveryMarker }
   const autoCenterTimeoutRef = useRef(null);
@@ -217,9 +217,17 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
           radius: 9, fillColor: '#2563eb', fillOpacity: 1, color: '#fff', weight: 2,
         }).addTo(map);
       }
-      mapRef.current.deferAutoCenter?.();
+      if (navFollowEnabled) {
+        const zoom = Math.max(map.getZoom(), 16);
+        const targetPoint = map.project([driverPos.lat, driverPos.lng], zoom);
+        targetPoint.y += map.getSize().y * 0.18;
+        const targetLatLng = map.unproject(targetPoint, zoom);
+        map.setView(targetLatLng, zoom, { animate: true });
+      } else {
+        mapRef.current.deferAutoCenter?.();
+      }
     }).catch(() => {});
-  }, [driverPos?.lat, driverPos?.lng]);
+  }, [driverPos?.lat, driverPos?.lng, navFollowEnabled]);
 
   // Sincronizar hasActiveOrder en el listener del mapa
   useEffect(() => {
@@ -306,6 +314,16 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
     });
   }, [routeGeometry, onRouteError]);
 
+
+  // Navegación tercera persona: rotar vista para alinear al frente
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const t = navFollowEnabled ? `rotate(${-1 * (navHeadingDeg || 0)}deg) scale(1.06)` : 'none';
+    containerRef.current.style.transform = t;
+    containerRef.current.style.transformOrigin = '50% 50%';
+    containerRef.current.style.transition = 'transform 0.22s linear';
+  }, [navFollowEnabled, navHeadingDeg]);
+
   // SIEMPRE renderizamos el div del mapa — el containerRef nunca se desmonta.
   // El mensaje GPS se superpone como overlay cuando no hay posición.
   return (
@@ -345,6 +363,8 @@ export default function DriverHome() {
   const [loadingPin,   setLoadingPin]    = useState(false);
   const [routeGeometry, setRouteGeometry] = useState(null);
   const [msg, setMsg] = useState('');
+  const [navFollowEnabled, setNavFollowEnabled] = useState(false);
+  const [navHeadingDeg, setNavHeadingDeg] = useState(0);
   const loadDataRef   = useRef(null);
   const loadDebounceRef = useRef(null);
 
@@ -373,6 +393,21 @@ export default function DriverHome() {
       .finally(() => setLoadingPin(false));
   }, [customPin?.lat, customPin?.lng]);
   const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, availability, hasActiveOrder);
+
+  const prevPosRef = useRef(null);
+  useEffect(() => {
+    if (!myPosition) return;
+    const prev = prevPosRef.current;
+    if (prev) {
+      const dy = myPosition.lat - prev.lat;
+      const dx = myPosition.lng - prev.lng;
+      if (Math.abs(dx) + Math.abs(dy) > 0.00001) {
+        const angle = Math.atan2(dx, dy) * (180 / Math.PI);
+        setNavHeadingDeg((angle + 360) % 360);
+      }
+    }
+    prevPosRef.current = myPosition;
+  }, [myPosition?.lat, myPosition?.lng]);
 
   // Ref para el token — evita que el polling sea invalidado al cambiar auth
   const tokenRef = useRef(auth.token);
@@ -674,6 +709,8 @@ export default function DriverHome() {
           deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
           routeGeometry={routeGeometry}
           onRouteError={setMsg}
+          navFollowEnabled={navFollowEnabled}
+          navHeadingDeg={navHeadingDeg}
         />
 
         {/* Panel de pin personalizado */}
@@ -963,6 +1000,29 @@ export default function DriverHome() {
           </div>
         );
       })()}
+
+
+      {hasActiveOrder && routeGeometry?.length > 0 && (
+        <button
+          onClick={() => setNavFollowEnabled(v => !v)}
+          aria-label="Seguir en tercera persona"
+          style={{
+            position: 'absolute',
+            bottom: 'calc(5.4rem + env(safe-area-inset-bottom, 0px))',
+            right: '1rem',
+            zIndex: 401,
+            borderRadius: 999,
+            background: navFollowEnabled ? '#111827' : '#ffffff',
+            color: navFollowEnabled ? '#fff' : '#111827',
+            border: '1px solid #d1d5db',
+            padding: '0.45rem 0.7rem',
+            fontSize: '0.74rem',
+            fontWeight: 700,
+          }}
+        >
+          {navFollowEnabled ? 'Seguir ON' : 'Seguir OFF'}
+        </button>
+      )}
 
       {/* ── Botón flotante de navegación guiada — visible solo cuando hay ruta trazada ── */}
       {hasActiveOrder && routeGeometry?.length > 0 && (

@@ -42,47 +42,17 @@ function ensureLeafletCSS() {
   document.head.appendChild(lnk);
 }
 
-// Consulta de CP: SEPOMEX primaria + fallback gratuito
-async function fetchColoniasByPostal(cp) {
-  const normalize = (estado, ciudad, colonias) => {
-    const uniqueColonias = [...new Set((colonias || []).filter(Boolean).map(c => String(c).trim()).filter(Boolean))].sort();
-    return {
-      estado: estado || '',
-      ciudad: ciudad || '',
-      colonias: uniqueColonias,
-    };
-  };
-
-  // Primaria: SEPOMEX (proxy comunitario)
+// Consulta de CP vía backend (proxy anti-CORS)
+async function fetchColoniasByPostal(cp, token) {
   try {
-    const r = await fetch(`https://api-sepomex.hckdrk.mx/query/info_cp/${cp}?type=simplified`);
-    if (!r.ok) throw new Error('no data');
-    const data = await r.json();
-    const rows = Array.isArray(data?.response) ? data.response : [];
-    if (rows.length > 0) {
-      return normalize(
-        rows[0]?.estado || rows[0]?.d_estado || '',
-        rows[0]?.municipio || rows[0]?.ciudad || rows[0]?.D_mnpio || '',
-        rows.map(i => i?.asentamiento || i?.colonia || i?.d_asenta)
-      );
-    }
-    throw new Error('empty');
+    const result = await apiFetch(`/auth/postal/${cp}`, {}, token);
+    return {
+      estado: result?.estado || '',
+      ciudad: result?.ciudad || '',
+      colonias: Array.isArray(result?.colonias) ? result.colonias : [],
+    };
   } catch {
-    // Fallback gratuito: Mexico API
-    try {
-      const r2 = await fetch(`https://mexico-api.devaleff.com/api/codigo-postal/${cp}`);
-      if (!r2.ok) throw new Error('no data');
-      const data2 = await r2.json();
-      const items = Array.isArray(data2?.data) ? data2.data : [];
-      if (items.length === 0) throw new Error('empty');
-      return normalize(
-        items[0]?.d_estado || '',
-        items[0]?.D_mnpio || items[0]?.d_ciudad || '',
-        items.map(z => z?.d_asenta)
-      );
-    } catch {
-      return null;
-    }
+    return null;
   }
 }
 
@@ -114,6 +84,9 @@ export default function ProfilePage() {
       : 'unsupported'
   );
   const [notifMsg, setNotifMsg] = useState('');
+  const [highPriorityNotifs, setHighPriorityNotifs] = useState(() => {
+    try { return localStorage.getItem('morelivery_notif_priority') === 'high'; } catch { return false; }
+  });
 
   async function enablePushNotifications() {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -136,6 +109,15 @@ export default function ProfilePage() {
     } catch {
       setNotifMsg('No se pudo solicitar permiso de notificaciones.');
     }
+  }
+
+
+  function toggleHighPriorityNotifs() {
+    setHighPriorityNotifs(prev => {
+      const next = !prev;
+      try { localStorage.setItem('morelivery_notif_priority', next ? 'high' : 'normal'); } catch (_) {}
+      return next;
+    });
   }
 
   // Pin Casa
@@ -168,7 +150,7 @@ export default function ProfilePage() {
     cpTimerRef.current = setTimeout(async () => {
       setCpLoading(true);
       setCpError('');
-      const result = await fetchColoniasByPostal(cp);
+      const result = await fetchColoniasByPostal(cp, auth.token);
       setCpLoading(false);
       if (!result) {
         setCpError('CP no encontrado — ingresa estado, ciudad y colonia manualmente');
@@ -184,7 +166,7 @@ export default function ProfilePage() {
       }
     }, 600);
     return () => clearTimeout(cpTimerRef.current);
-  }, [postalCode]);
+  }, [postalCode, auth.token]);
 
   // Estado para el modal del mapa de pin
   const [showPinMap,   setShowPinMap]   = useState(false);
@@ -467,6 +449,13 @@ export default function ProfilePage() {
               </button>
             </div>
             {notifMsg && <div style={{ marginTop:'0.35rem', fontSize:'0.74rem', color:'var(--gray-500)' }}>{notifMsg}</div>}
+
+          <div style={{ marginTop:'0.45rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+            <span style={{ fontSize:'0.76rem', color:'var(--gray-600)' }}>Notificaciones de alta prioridad</span>
+            <button type="button" className="btn-sm" onClick={toggleHighPriorityNotifs}>
+              {highPriorityNotifs ? 'Activadas' : 'Desactivadas'}
+            </button>
+          </div>
           </div>
 
           {/* Botón Buscar pin */}
