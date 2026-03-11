@@ -1056,7 +1056,9 @@ export default function DriverHome() {
                                 </button>
                                 </div>
                                 </div>
+                                </div>
                                 )}
+                                </div>
                                 </div>
               )}
 
@@ -1188,7 +1190,7 @@ export default function DriverHome() {
 
                                   </div>
                 );
-              })
+              })()}
 
               </div>
               </PullToRefresh>
