@@ -172,11 +172,27 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
   useEffect(() => {
     mountedRef.current = true;
     connect();
+
+    // Reconectar si iOS/Android pausó el JS y el SSE quedó muerto al volver al foco
+    function onVisible() {
+      if (document.hidden || !mountedRef.current) return;
+      const state = esRef.current?.readyState;
+      // 1 = OPEN — si no está abierto, reconectar
+      if (state !== 1) {
+        console.warn('[SSE] tab visible pero SSE no activo (state=' + state + ') — reconectando');
+        clearTimeout(reconnectTimer.current);
+        retryCount.current = 0; // reset backoff al volver manual
+        connect();
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
       mountedRef.current = false;
       clearTimeout(reconnectTimer.current);
       esRef.current?.close();
       esRef.current = null;
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [connect]);
 }
