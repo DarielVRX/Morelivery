@@ -998,7 +998,7 @@ export default function DriverHome() {
                                 </svg>
                                 Oferta
                                 </button>
-                                {!offerMinimized && (
+                                {
                                 <div style={{ background:'#fff', borderTop:'1px solid #e8c8d4',
                                   boxShadow:'0 -4px 20px rgba(0,0,0,0.14)', overflow:'hidden',
                                 pointerEvents:'auto' }}>
@@ -1060,7 +1060,7 @@ export default function DriverHome() {
                                 </div>
                                 </div>
                                 </div>
-                                )}
+                                }
                                 </div>
                                 </div>
               )}
