@@ -82,7 +82,7 @@ async function reverseGeocode(lat, lng) {
 // customPin: { lat, lng } | null  — marcador manual del driver
 // onCustomPin: (latlng | null) => void
 // hasActiveOrder: boolean — si true, oculta el pin y deshabilita clicks
-function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos, pickupLabel, deliveryLabel, routeGeometry, onRouteError, navFollowEnabled, navHeadingDeg }) {
+function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPos, deliveryPos, pickupLabel, deliveryLabel, routeGeometry, onRouteError }) {
   const containerRef  = useRef(null);
   const mapRef        = useRef(null); // { map, driverMarker, customMarker, pickupMarker, deliveryMarker }
   const autoCenterTimeoutRef = useRef(null);
@@ -217,17 +217,9 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
           radius: 9, fillColor: '#2563eb', fillOpacity: 1, color: '#fff', weight: 2,
         }).addTo(map);
       }
-      if (navFollowEnabled) {
-        const zoom = Math.max(map.getZoom(), 16);
-        const targetPoint = map.project([driverPos.lat, driverPos.lng], zoom);
-        targetPoint.y += map.getSize().y * 0.18;
-        const targetLatLng = map.unproject(targetPoint, zoom);
-        map.setView(targetLatLng, zoom, { animate: true });
-      } else {
-        mapRef.current.deferAutoCenter?.();
-      }
+      mapRef.current.deferAutoCenter?.();
     }).catch(() => {});
-  }, [driverPos?.lat, driverPos?.lng, navFollowEnabled]);
+  }, [driverPos?.lat, driverPos?.lng]);
 
   // Sincronizar hasActiveOrder en el listener del mapa
   useEffect(() => {
@@ -314,16 +306,6 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
     });
   }, [routeGeometry, onRouteError]);
 
-
-  // Navegación tercera persona: rotar vista para alinear al frente
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const t = navFollowEnabled ? `rotate(${-1 * (navHeadingDeg || 0)}deg) scale(1.06)` : 'none';
-    containerRef.current.style.transform = t;
-    containerRef.current.style.transformOrigin = '50% 50%';
-    containerRef.current.style.transition = 'transform 0.22s linear';
-  }, [navFollowEnabled, navHeadingDeg]);
-
   // SIEMPRE renderizamos el div del mapa — el containerRef nunca se desmonta.
   // El mensaje GPS se superpone como overlay cuando no hay posición.
   return (
@@ -348,7 +330,7 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
 }
 
 export default function DriverHome() {
-  const { auth, patchUser } = useAuth();
+  const { auth } = useAuth();
   const [activeOrder,     setActiveOrder]     = useState(null);
   const [availability,    setAvailability]    = useState(false);
   const [pendingOffer,    setPendingOffer]    = useState(null);
@@ -363,8 +345,6 @@ export default function DriverHome() {
   const [loadingPin,   setLoadingPin]    = useState(false);
   const [routeGeometry, setRouteGeometry] = useState(null);
   const [msg, setMsg] = useState('');
-  const [navFollowEnabled, setNavFollowEnabled] = useState(false);
-  const [navHeadingDeg, setNavHeadingDeg] = useState(0);
   const loadDataRef   = useRef(null);
   const loadDebounceRef = useRef(null);
 
@@ -393,21 +373,6 @@ export default function DriverHome() {
       .finally(() => setLoadingPin(false));
   }, [customPin?.lat, customPin?.lng]);
   const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, availability, hasActiveOrder);
-
-  const prevPosRef = useRef(null);
-  useEffect(() => {
-    if (!myPosition) return;
-    const prev = prevPosRef.current;
-    if (prev) {
-      const dy = myPosition.lat - prev.lat;
-      const dx = myPosition.lng - prev.lng;
-      if (Math.abs(dx) + Math.abs(dy) > 0.00001) {
-        const angle = Math.atan2(dx, dy) * (180 / Math.PI);
-        setNavHeadingDeg((angle + 360) % 360);
-      }
-    }
-    prevPosRef.current = myPosition;
-  }, [myPosition?.lat, myPosition?.lng]);
 
   // Ref para el token — evita que el polling sea invalidado al cambiar auth
   const tokenRef = useRef(auth.token);
@@ -451,14 +416,6 @@ export default function DriverHome() {
   useEffect(() => {
     setAvailability(Boolean(auth.user?.driver?.is_available));
     loadData();
-    if (!auth.token) return;
-    apiFetch('/drivers/me', {}, auth.token)
-      .then(data => {
-        const fresh = Boolean(data?.profile?.is_available);
-        setAvailability(fresh);
-        patchUser({ driver: { ...(auth.user?.driver || {}), is_available: fresh } });
-      })
-      .catch(() => {});
   }, [auth.token]);
 
   // ── Polling activo: mientras disponible y sin oferta/pedido activo,
@@ -517,9 +474,7 @@ export default function DriverHome() {
       const r = await apiFetch('/drivers/availability', {
         method:'PATCH', body: JSON.stringify({ isAvailable: !availability })
       }, auth.token);
-      const next = Boolean(r?.profile?.is_available);
-      setAvailability(next);
-      patchUser({ driver: { ...(auth.user?.driver || {}), is_available: next } });
+      setAvailability(r.profile.is_available);
     } catch (e) { setMsg(e.message); }
   }
 
@@ -579,24 +534,18 @@ export default function DriverHome() {
       : null;
     if (!start || !pickup || !delivery) return setMsg('Faltan coordenadas para trazar la ruta');
 
-    apiFetch('/routes/model', {
-      method:'POST',
-      body: JSON.stringify({
-        origin: start,
-        destination: delivery,
-        waypoints: [pickup],
-        includeSteps: true,
-      }),
-    }, auth.token)
+    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${pickup.lng},${pickup.lat};${delivery.lng},${delivery.lat}?overview=full&geometries=geojson`;
+    fetch(osrmUrl)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('No se obtuvo ruta')))
       .then(data => {
-        const coords = data?.geometry;
+        const coords = data?.routes?.[0]?.geometry?.coordinates;
         if (!coords?.length) throw new Error('No hay geometría de ruta');
-        setRouteGeometry(coords);
-        setMsg('Ruta (API nueva) trazada en el mapa');
+        setRouteGeometry(coords.map(([lng, lat]) => ({ lat, lng })));
+        setMsg('Ruta carretera trazada en el mapa');
       })
       .catch(() => {
         setRouteGeometry(null);
-        setMsg('No se pudo calcular la ruta con la API nueva');
+        setMsg('No se pudo calcular la ruta carretera');
       });
   }
 
@@ -709,8 +658,6 @@ export default function DriverHome() {
           deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
           routeGeometry={routeGeometry}
           onRouteError={setMsg}
-          navFollowEnabled={navFollowEnabled}
-          navHeadingDeg={navHeadingDeg}
         />
 
         {/* Panel de pin personalizado */}
@@ -771,8 +718,8 @@ export default function DriverHome() {
           <button
             onClick={() => setOfferMinimized(m => !m)}
             style={{
-              position:'absolute', top:-22, left:'50%', transform:'translateX(-50%)',
-              width:74, height:22,
+              position:'absolute', top:-24, left:'50%', transform:'translateX(-50%)',
+              width:74, height:24,
               background:'#f3e8ed', color:'var(--brand)', border:'1px solid #e8c8d4',
               borderBottom:'none', borderRadius:'6px 6px 0 0',
               padding:'0', cursor:'pointer', fontSize:'0.62rem', fontWeight:700,
@@ -792,7 +739,7 @@ export default function DriverHome() {
 
           <div style={{
             background:'#fff',
-            borderTop:'1px solid #e8c8d4',
+            borderTop:'3px solid var(--brand)',
             boxShadow:'0 -4px 20px rgba(0,0,0,0.14)',
             overflow:'hidden',
             pointerEvents: offerMinimized ? 'none' : 'auto',
@@ -841,7 +788,13 @@ export default function DriverHome() {
                 consecutiveTimeoutsRef.current += 1;
                 if (consecutiveTimeoutsRef.current >= 3) {
                   consecutiveTimeoutsRef.current = 0;
-                  setMsg('Se han vencido 3 ofertas seguidas. Tu disponibilidad no cambió automáticamente.');
+                  setAvailability(false);
+                  apiFetch('/drivers/availability', {
+                    method: 'PATCH', body: JSON.stringify({ isAvailable: false })
+                  }, auth.token).catch(() => {
+                    // Si el PATCH falla, revertir el estado local
+                    setAvailability(true);
+                  });
                 }
               }}
             />
@@ -943,7 +896,7 @@ export default function DriverHome() {
               {/* Botones Ruta y Maps — siempre visibles, detienen propagación del tap */}
               <div style={{ display:'flex', gap:'0.35rem', marginTop:'0.45rem' }}
                 onClick={e => e.stopPropagation()}>
-                <button className="btn-sm" onClick={openRoadRouteApi}>🗺 Ruta nueva</button>
+                <button className="btn-sm" onClick={openRoadRouteApi}>🗺 Ruta</button>
                 <button className="btn-sm" onClick={openMobileMapsRoute}>📍 Maps</button>
               </div>
             </div>
@@ -1000,29 +953,6 @@ export default function DriverHome() {
           </div>
         );
       })()}
-
-
-      {hasActiveOrder && routeGeometry?.length > 0 && (
-        <button
-          onClick={() => setNavFollowEnabled(v => !v)}
-          aria-label="Seguir en tercera persona"
-          style={{
-            position: 'absolute',
-            bottom: 'calc(5.4rem + env(safe-area-inset-bottom, 0px))',
-            right: '1rem',
-            zIndex: 401,
-            borderRadius: 999,
-            background: navFollowEnabled ? '#111827' : '#ffffff',
-            color: navFollowEnabled ? '#fff' : '#111827',
-            border: '1px solid #d1d5db',
-            padding: '0.45rem 0.7rem',
-            fontSize: '0.74rem',
-            fontWeight: 700,
-          }}
-        >
-          {navFollowEnabled ? 'Seguir ON' : 'Seguir OFF'}
-        </button>
-      )}
 
       {/* ── Botón flotante de navegación guiada — visible solo cuando hay ruta trazada ── */}
       {hasActiveOrder && routeGeometry?.length > 0 && (

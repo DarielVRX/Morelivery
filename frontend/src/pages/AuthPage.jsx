@@ -2,7 +2,7 @@
 // Inputs no controlados (useRef) para cero re-renders al tipear.
 // Lee localStorage directamente para el redirect — sin consumir AuthContext
 // en el ciclo de render, lo que elimina el jank causado por re-renders del árbol.
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../api/client';
@@ -26,6 +26,25 @@ function AuthForm({ mode }) {
   const [message, setMessage] = useState('');
 
   const isLogin = mode === 'login';
+
+  const [installPromptEvent, setInstallPromptEvent] = useState(null);
+
+  useEffect(() => {
+    const onBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setInstallPromptEvent(e);
+    };
+    window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+  }, []);
+
+  const installPwa = useCallback(async () => {
+    if (!installPromptEvent) return;
+    installPromptEvent.prompt();
+    await installPromptEvent.userChoice.catch(() => null);
+    setInstallPromptEvent(null);
+  }, [installPromptEvent]);
+
 
   const submit = useCallback(async () => {
     const username    = usernameRef.current?.value?.trim()    || '';
@@ -82,6 +101,12 @@ function AuthForm({ mode }) {
             </select>
           </label>
         )}
+
+          {installPromptEvent && (
+            <button type="button" className="btn-sm" onClick={installPwa} style={{ marginTop:'0.4rem' }}>
+              Instalar app (PWA)
+            </button>
+          )}
       </div>
 
       {!isLogin && role === 'restaurant' && (
