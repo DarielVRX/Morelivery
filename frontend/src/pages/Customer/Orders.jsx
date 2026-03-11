@@ -226,7 +226,7 @@ export default function CustomerOrders() {
     try {
       await apiFetch(`/orders/${orderId}/tip`, { method:'PATCH', body: JSON.stringify({ tip_cents: val }) }, auth.token);
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, tip_cents: val } : o));
-    } catch (e) { setMsg(e.message || 'Error al guardar agradecimiento'); }
+    } catch (_) { /* evitar ruido: el botón ya se oculta si no cumple reglas */ }
   }
 
   async function sendReport(orderId) {
