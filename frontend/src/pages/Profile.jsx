@@ -33,32 +33,42 @@ function Flash({ text, isError }) {
 
 const ROLE_LABELS = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
 
-// API de SEPOMEX gratuita (datos.gob.mx) para consulta por CP
+function ensureLeafletCSS() {
+  if (document.getElementById('leaflet-css')) return;
+  const lnk = document.createElement('link');
+  lnk.id = 'leaflet-css';
+  lnk.rel = 'stylesheet';
+  lnk.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  document.head.appendChild(lnk);
+}
+
+// Consulta de CP: SEPOMEX primaria + fallback gratuito
 async function fetchColoniasByPostal(cp) {
-  // Primaria: México API (open source, datos 2025, sin key, sin límite)
+  // Primaria: SEPOMEX (proxy comunitario)
   try {
-    const r = await fetch(`https://mexico-api.devaleff.com/api/codigo-postal/${cp}`);
+    const r = await fetch(`https://api-sepomex.hckdrk.mx/query/info_cp/${cp}?type=simplified`);
     if (!r.ok) throw new Error('no data');
     const data = await r.json();
-    const items = data.data || [];
-    if (items.length === 0) throw new Error('empty');
+    const response = Array.isArray(data?.response) ? data.response : [];
+    if (response.length === 0) throw new Error('empty');
+
     return {
-      estado:   items[0].d_estado,
-      ciudad:   items[0].D_mnpio || items[0].d_ciudad || '',
-      colonias: items.map(z => z.d_asenta).filter(Boolean).sort(),
+      estado: response[0].estado || '',
+      ciudad: response[0].municipio || '',
+      colonias: response.map(i => i.asentamiento).filter(Boolean).sort(),
     };
   } catch {
-    // Fallback: COPOMEX
+    // Fallback gratuito: Mexico API
     try {
-      const r2 = await fetch(`https://api.copomex.com/query/info_cp/${cp}?type=colonia&token=pruebas`);
+      const r2 = await fetch(`https://mexico-api.devaleff.com/api/codigo-postal/${cp}`);
       if (!r2.ok) throw new Error('no data');
       const data2 = await r2.json();
-      const items = Array.isArray(data2) ? data2 : [data2];
-      if (!items[0]?.response) return null;
+      const items = data2.data || [];
+      if (items.length === 0) throw new Error('empty');
       return {
-        estado:   items[0].response.estado,
-        ciudad:   items[0].response.municipio || '',
-        colonias: items.map(i => i.response?.asentamiento).filter(Boolean).sort(),
+        estado: items[0].d_estado,
+        ciudad: items[0].D_mnpio || items[0].d_ciudad || '',
+        colonias: items.map(z => z.d_asenta).filter(Boolean).sort(),
       };
     } catch {
       return null;
@@ -185,21 +195,9 @@ export default function ProfilePage() {
     if (!showPinMap || !pinMapRef.current) return;
     if (typeof window === 'undefined') return;
 
-    // Cargar Leaflet si no está cargado
     const loadLeaflet = async () => {
-      if (!window.L) {
-        await new Promise(resolve => {
-          const link = document.createElement('link');
-          link.rel = 'stylesheet';
-          link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-          document.head.appendChild(link);
-          const script = document.createElement('script');
-          script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-          script.onload = resolve;
-          document.head.appendChild(script);
-        });
-      }
-      const L = window.L;
+      ensureLeafletCSS();
+      const L = await import('leaflet');
       if (pinMapInstance.current) {
         pinMapInstance.current.remove();
         pinMapInstance.current = null;
@@ -211,6 +209,7 @@ export default function ProfilePage() {
 
       const map = L.map(pinMapRef.current, { center, zoom: pinMapResult ? 17 : 13 });
       pinMapInstance.current = map;
+      setTimeout(() => map.invalidateSize(), 50);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap'
