@@ -438,7 +438,7 @@ function PullToRefresh({ onRefresh, children }) {
     }
   }
 
-  function _release(trigger) {
+  function _release() {
     const con = contentRef.current, ind = indicatorRef.current;
     ind?.classList.remove('pulling');
     ind?.classList.add('releasing');
@@ -451,12 +451,6 @@ function PullToRefresh({ onRefresh, children }) {
     }, 250);
     if (arcRef.current) arcRef.current.setAttribute('stroke-dasharray', '0 56.5');
     pullRef.current = 0;
-    if (trigger) {
-      setLoading(true); loadingRef.current = true;
-      Promise.resolve(onRefresh()).finally(() => {
-        setLoading(false); loadingRef.current = false;
-      });
-    }
   }
 
   const onTouchStart = useCallback((e) => {
@@ -477,7 +471,28 @@ function PullToRefresh({ onRefresh, children }) {
   const onTouchEnd = useCallback(() => {
     if (startYRef.current == null) return;
     startYRef.current = null;
-    _release(pullRef.current >= PTR_THRESHOLD && !loadingRef.current);
+    const shouldRefresh = pullRef.current >= PTR_THRESHOLD && !loadingRef.current;
+    if (!shouldRefresh) {
+      _release();
+      return;
+    }
+    loadingRef.current = true;
+    setLoading(true);
+    // Mantener la posición "pull" mientras se recarga en segundo plano
+    Promise.resolve(onRefresh()).then(() => {
+      const con = contentRef.current;
+      if (con) {
+        con.style.transition = 'opacity 0.18s ease';
+        con.style.opacity = '0';
+        requestAnimationFrame(() => {
+          con.style.opacity = '1';
+        });
+      }
+    }).finally(() => {
+      loadingRef.current = false;
+      setLoading(false);
+      _release();
+    });
   }, [onRefresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -926,16 +941,15 @@ export default function DriverHome() {
 
               {/* ── Panel de oferta ─────────────────────────────────────── */}
               {pendingOffer && (
-                <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:30,
-                  pointerEvents: offerMinimized ? 'none' : 'auto' }}>
+                <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:30 }}>
                   {/* OPT-10: will-change:transform en .dh-offer-panel */}
                   <div className="dh-offer-panel" style={{
                     transform: offerMinimized ? 'translateY(calc(100% - 22px))' : 'translateY(0)',
                                 transition: 'transform 0.22s ease',
                   }}>
                   <button onClick={() => setOfferMinimized(m => !m)}
-                  style={{ position:'absolute', top:-42, left:'50%', transform:'translateX(-50%)',
-                    width:74, height:22, background:'#f3e8ed', color:'var(--brand)',
+                  style={{ position:'absolute', top:-43, left:'50%', transform:'translateX(-50%)',
+                    width:74, height:15, background:'#f3e8ed', color:'var(--brand)',
                                 border:'1px solid #e8c8d4', borderRadius:'6px 6px 0 0',
                                 padding:0, cursor:'pointer', fontSize:'0.62rem', fontWeight:700,
                                 boxShadow:'0 -2px 6px rgba(0,0,0,0.06)', zIndex:31,
@@ -948,9 +962,10 @@ export default function DriverHome() {
                                 </svg>
                                 Oferta
                                 </button>
+                                {!offerMinimized && (
                                 <div style={{ background:'#fff', borderTop:'1px solid #e8c8d4',
                                   boxShadow:'0 -4px 20px rgba(0,0,0,0.14)', overflow:'hidden',
-                                pointerEvents: offerMinimized ? 'none' : 'auto' }}>
+                                pointerEvents:'auto' }}>
                                 <div style={{ padding:'0.6rem 1rem 0.75rem', overflowY:'auto' }}>
                                 <div style={{ fontSize:'0.82rem', color:'var(--gray-700)', marginBottom:'0.3rem' }}>
                                 {(pendingOffer.restaurant_name||pendingOffer.restaurantAddress) && (
@@ -1008,7 +1023,7 @@ export default function DriverHome() {
                                 </button>
                                 </div>
                                 </div>
-                                </div>
+                                )}
                                 </div>
                                 </div>
               )}
