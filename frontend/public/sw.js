@@ -11,8 +11,8 @@ self.addEventListener('message', (event) => {
         self.registration.showNotification(title, {
           body,
           tag: tag || 'morelivery',
-          icon: '/icon-192.png',
-          badge: '/icon-192.png',
+          icon: '/logo.svg',
+          badge: '/logo.svg',
           requireInteraction: true,
           renotify: true,
           silent: false,

@@ -64,9 +64,24 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
   // Pedir permiso una vez cuando hay sesión activa
   useEffect(() => {
     if (!token || !canNotify()) return;
-    if (Notification.permission === 'default') {
-      Notification.requestPermission().catch(() => {});
-    }
+    if (Notification.permission !== 'default') return;
+
+    const request = () => {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+      window.removeEventListener('pointerdown', request);
+      window.removeEventListener('keydown', request);
+    };
+
+    // Solicitar tras interacción real del usuario (más confiable en móvil)
+    window.addEventListener('pointerdown', request, { once: true });
+    window.addEventListener('keydown', request, { once: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', request);
+      window.removeEventListener('keydown', request);
+    };
   }, [token]);
 
   const connect = useCallback(() => {
