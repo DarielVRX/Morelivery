@@ -50,6 +50,7 @@ async function requestNotificationPermission() {
       ? 'granted'
       : await Notification.requestPermission();
     if (result === 'granted') {
+      try { localStorage.setItem('morelivery_notif_enabled', '1'); } catch (_) {}
       // Intentar registrar suscripción push (si hay VAPID key disponible)
       await trySubscribePush();
     }

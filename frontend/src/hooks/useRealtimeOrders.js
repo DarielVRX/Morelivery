@@ -6,6 +6,14 @@ function canNotify() {
   return typeof window !== 'undefined' && 'Notification' in window;
 }
 
+function notificationsEnabled() {
+  try {
+    return localStorage.getItem('morelivery_notif_enabled') !== '0';
+  } catch {
+    return true;
+  }
+}
+
 function shouldNotifyInBackground() {
   if (typeof document === 'undefined') return true;
   return document.visibilityState !== 'visible' || !document.hasFocus();
@@ -34,6 +42,7 @@ async function notifyAppFocused() {
 // Todos los eventos del mismo group colapsan en una sola notificación en el SW.
 async function notifyRealtime({ title, body, tag, group, url = '/' }) {
   if (!canNotify() || Notification.permission !== 'granted') return;
+  if (!notificationsEnabled()) return;
 
   const priority = notificationPriority(group || tag);
   const payload = {
