@@ -21,17 +21,33 @@ io.on('connection', (socket) => {
 
 orderEvents.setSocket(io);
 
-// Ticker global: expira ofertas sin respuesta cada 1s y re-encola con SSE real.
-// La query UPDATE solo toca filas con status='pending' vencidas — costo mínimo
-// cuando no hay nada que expirar (el caso normal).
-setInterval(async () => {
+// Scheduler resiliente sin solapamientos:
+// - ejecuta expiración + barrido huérfano en secuencia
+// - en error aplica backoff para evitar ruido constante
+let assignmentDelayMs = 2_000;
+let assignmentTimer = null;
+
+async function runAssignmentLoop() {
   try {
     await expireTimedOutOffers(offerCb);
+    assignmentDelayMs = 2_000;
   } catch (e) {
-    console.error('[ticker] expireTimedOutOffers error:', e.message);
+    assignmentDelayMs = Math.min(assignmentDelayMs * 2, 15_000);
+    console.error('[assign.scheduler] error:', e.message);
+  } finally {
+    assignmentTimer = setTimeout(runAssignmentLoop, assignmentDelayMs);
   }
-}, 1_000);
+}
+
+assignmentTimer = setTimeout(runAssignmentLoop, assignmentDelayMs);
 
 server.listen(env.port, () => {
   console.log(`API running on port ${env.port}`);
 });
+
+function shutdown() {
+  if (assignmentTimer) clearTimeout(assignmentTimer);
+}
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
