@@ -925,7 +925,7 @@ export default function DriverHome() {
               style={{
                 position:'absolute',
                 bottom: hasActiveOrder && routeGeometry?.length > 0
-                ? 'calc(16px + 56px + 8px + 36px + 8px + env(safe-area-inset-bottom,0px))'
+                ? 'calc(16px + 196px + 8px + 36px + 8px + env(safe-area-inset-bottom,0px))'
                 : 'calc(16px + env(safe-area-inset-bottom,0px))',
           right:12, zIndex:402,
           width:36, height:36, borderRadius:'50%',
@@ -937,32 +937,13 @@ export default function DriverHome() {
           fontSize:'1rem', transition:'background 0.15s, color 0.15s',
               }}>⌖</button>
 
-              {/* Seguir ON/OFF */}
-              {hasActiveOrder && routeGeometry?.length > 0 && (
-                <button onClick={() => setNavFollowEnabled(v => !v)}
-                aria-label="Modo seguimiento" className="dh-fab"
-                style={{
-                  position:'absolute',
-                  bottom:'calc(16px + 56px + 8px + env(safe-area-inset-bottom,0px))',
-                                                               right:12, zIndex:401, height:36, borderRadius:18,
-                                                               background: navFollowEnabled ? '#111827' : '#ffffff',
-                                                               color:       navFollowEnabled ? '#fff'    : '#111827',
-                                                               border:'1px solid #d1d5db', padding:'0 0.7rem',
-                                                               fontSize:'0.74rem', fontWeight:700,
-                                                               boxShadow:'0 2px 8px rgba(0,0,0,0.14)', cursor:'pointer',
-                                                               whiteSpace:'nowrap', transition:'background 0.15s, color 0.15s',
-                }}>
-                {navFollowEnabled ? 'Seguir ON' : 'Seguir OFF'}
-                </button>
-              )}
-
               {/* Google Navigation FAB */}
               {hasActiveOrder && routeGeometry?.length > 0 && (
                 <button onClick={openGoogleNavigation}
                 aria-label="Abrir en Google Maps" className="dh-fab"
                 style={{
                   position:'absolute',
-                  bottom:'calc(16px + env(safe-area-inset-bottom,0px))',
+                  bottom:'calc(156px + env(safe-area-inset-bottom,0px))',
                                                                right:12, zIndex:400, width:56, height:56, borderRadius:'50%',
                                                                background:'var(--brand)', color:'#fff', border:'none',
                                                                cursor:'pointer', boxShadow:'0 4px 16px rgba(0,0,0,0.28)',
