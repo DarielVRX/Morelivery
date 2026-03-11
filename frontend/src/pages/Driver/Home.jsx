@@ -86,6 +86,8 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
   const containerRef  = useRef(null);
   const mapRef        = useRef(null); // { map, driverMarker, customMarker, pickupMarker, deliveryMarker }
   const autoCenterTimeoutRef = useRef(null);
+  const zoomUiTimeoutRef = useRef(null);
+  const [showZoomControls, setShowZoomControls] = useState(false);
   const driverPosRef = useRef(driverPos);
 
   useEffect(() => { driverPosRef.current = driverPos; }, [driverPos]);
@@ -120,6 +122,15 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
           keepBuffer: 2, updateWhenIdle: false, detectRetina: true,
         }).addTo(map);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        const revealZoomControls = () => {
+          setShowZoomControls(true);
+          if (zoomUiTimeoutRef.current) clearTimeout(zoomUiTimeoutRef.current);
+          zoomUiTimeoutRef.current = setTimeout(() => {
+            zoomUiTimeoutRef.current = null;
+            setShowZoomControls(false);
+          }, 3000);
+        };
 
         // Marcador GPS del driver (azul) — solo si hay posición real
         let driverMarker = null;
@@ -157,6 +168,12 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
         map.on('dragstart', deferAutoCenter);
         map.on('zoomstart', deferAutoCenter);
 
+        map.on('click', revealZoomControls);
+        map.on('mousedown', revealZoomControls);
+        map.on('touchstart', revealZoomControls);
+        map.on('dragstart', revealZoomControls);
+        map.on('zoomstart', revealZoomControls);
+
         mapRef.current = {
           map,
           driverMarker,
@@ -165,6 +182,7 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
           deliveryMarker: null,
           routeLayer: null,
           deferAutoCenter,
+          revealZoomControls,
           handleCustomClick,
         };
         setTimeout(() => map.invalidateSize(), 300);
@@ -179,6 +197,7 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
     return () => {
       if (mapRef.current?.map) {
         if (autoCenterTimeoutRef.current) clearTimeout(autoCenterTimeoutRef.current);
+        if (zoomUiTimeoutRef.current) clearTimeout(zoomUiTimeoutRef.current);
         mapRef.current.map.remove();
         mapRef.current = null;
       }
@@ -291,7 +310,11 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
   // El mensaje GPS se superpone como overlay cuando no hay posición.
   return (
     <div style={{ height:'100%', width:'100%', position:'relative' }}>
-      <div ref={containerRef} style={{ height:'100%', width:'100%' }} />
+      <div
+        ref={containerRef}
+        className={showZoomControls ? 'driver-map-zoom-visible' : 'driver-map-zoom-hidden'}
+        style={{ height:'100%', width:'100%' }}
+      />
       {!driverPos && (
         <div style={{
           position:'absolute', top:8, left:'50%', transform:'translateX(-50%)',
@@ -686,13 +709,16 @@ export default function DriverHome() {
           position:'absolute', bottom:0, left:0, right:0,
           zIndex:30,
         }}>
-          {/* Botón oreja — FUERA del div con overflow:hidden para que no se oculte */}
-          {/* Botón colapsar — "oreja" centrada en el borde superior, siempre visible */}
+          <div style={{
+            position:'relative',
+            transform: offerMinimized ? 'translateY(calc(100% - 22px))' : 'translateY(0)',
+            transition:'transform 0.22s ease',
+          }}>
           <button
             onClick={() => setOfferMinimized(m => !m)}
             style={{
-              position:'absolute', top:-28, left:'50%', transform:'translateX(-50%)',
-              width:74, height:28,
+              position:'absolute', top:-22, left:'50%', transform:'translateX(-50%)',
+              width:74, height:22,
               background:'#f3e8ed', color:'var(--brand)', border:'1px solid #e8c8d4',
               borderBottom:'none', borderRadius:'6px 6px 0 0',
               padding:'0', cursor:'pointer', fontSize:'0.62rem', fontWeight:700,
@@ -709,15 +735,11 @@ export default function DriverHome() {
             Oferta
           </button>
 
-          {/* Panel con overflow:hidden — el botón queda fuera de este */}
           <div style={{
             background:'#fff',
             borderTop:'3px solid var(--brand)',
             boxShadow:'0 -4px 20px rgba(0,0,0,0.14)',
             overflow:'hidden',
-            transition:'opacity 0.18s ease, transform 0.22s ease',
-            opacity: offerMinimized ? 0 : 1,
-            transform: offerMinimized ? 'translateY(100%)' : 'translateY(0)',
             pointerEvents: offerMinimized ? 'none' : 'auto',
           }}>
           <div style={{ padding:'0.6rem 1rem 0.75rem', overflowY:'auto' }}>
@@ -791,6 +813,7 @@ export default function DriverHome() {
             </div>
           </div>
           </div>{/* fin panel con overflow */}
+        </div>
         </div>
       )}
 
