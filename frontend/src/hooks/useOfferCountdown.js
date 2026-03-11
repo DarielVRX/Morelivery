@@ -25,14 +25,18 @@ export function useOfferCountdown(initialSecondsLeft) {
   }, [initialSecondsLeft]);
 
   // Intervalo estable — se limpia al desmontar (key change fuerza un nuevo mount)
+  // Diferido 80ms para no competir con el paint inicial del panel de oferta
   useEffect(() => {
     if (ref.current <= 0) return;
-    const id = setInterval(() => {
-      if (ref.current <= 0) { clearInterval(id); return; }
-      ref.current -= 1;
-      setSecs(ref.current);
-    }, 1000);
-    return () => clearInterval(id);
+    let id;
+    const defer = setTimeout(() => {
+      id = setInterval(() => {
+        if (ref.current <= 0) { clearInterval(id); return; }
+        ref.current -= 1;
+        setSecs(ref.current);
+      }, 1000);
+    }, 80);
+    return () => { clearTimeout(defer); clearInterval(id); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {

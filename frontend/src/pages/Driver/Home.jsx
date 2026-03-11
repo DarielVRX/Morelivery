@@ -433,11 +433,10 @@ export default function DriverHome() {
       if (prev) return prev; // Ya hay una oferta activa
       return { id: data.orderId, ...data, seconds_left: data.secondsLeft ?? 60 };
     });
-    // Recargar para datos completos (items), pero sin llamar al listener de nuevo
+    // Recargar para datos completos (items), sin bloquear el paint inicial de la oferta
     setTimeout(() => {
-      apiFetch('/drivers/offers', {}, data._token || '').catch(() => {});
       loadDataRef.current?.();
-    }, 400);
+    }, 600);
   }, []);
 
   useRealtimeOrders(
@@ -587,7 +586,7 @@ export default function DriverHome() {
   }
 
   return (
-    <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden', position:'relative', paddingBottom:'calc(var(--nav-h-mobile) + env(safe-area-inset-bottom, 0px))' }}>
+    <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden', position:'relative' }}>
 
       {/* ── Encabezado FIJO ─────────────────────────────────────────── */}
       <div style={{ flexShrink:0, background:'linear-gradient(135deg,var(--brand) 0%,#c0546a 100%)', padding:'0.65rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, zIndex:10 }}>
@@ -716,8 +715,10 @@ export default function DriverHome() {
             borderTop:'3px solid var(--brand)',
             boxShadow:'0 -4px 20px rgba(0,0,0,0.14)',
             overflow:'hidden',
-            transition:'max-height 0.3s ease',
-            maxHeight: offerMinimized ? 0 : 340,
+            transition:'opacity 0.18s ease, transform 0.22s ease',
+            opacity: offerMinimized ? 0 : 1,
+            transform: offerMinimized ? 'translateY(100%)' : 'translateY(0)',
+            pointerEvents: offerMinimized ? 'none' : 'auto',
           }}>
           <div style={{ padding:'0.6rem 1rem 0.75rem', overflowY:'auto' }}>
             {/* Tienda, cliente y ganancia */}
@@ -773,47 +774,20 @@ export default function DriverHome() {
                 }
               }}
             />
-            <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.45rem' }}>
-              <button className="btn-primary btn-sm" style={{ flex:1 }}
+            <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.5rem' }}>
+              <button
+                className="btn-primary"
+                style={{ flex:1, padding:'0.65rem 0', fontSize:'0.95rem', fontWeight:700, borderRadius:10 }}
                 disabled={loadingOffer} onClick={acceptOffer}>
-                {loadingOffer ? 'Aceptando…' : 'Aceptar'}
+                {loadingOffer ? 'Aceptando…' : '✓ Aceptar'}
               </button>
-              <button className="btn-sm" disabled={loadingOffer} onClick={rejectOffer}>
-                Rechazar
+              <button
+                style={{ flex:1, padding:'0.65rem 0', fontSize:'0.95rem', fontWeight:700, borderRadius:10,
+                  background:'var(--gray-100)', color:'var(--gray-700)', border:'1px solid var(--gray-200)',
+                  cursor:'pointer' }}
+                disabled={loadingOffer} onClick={rejectOffer}>
+                ✕ Rechazar
               </button>
-              <button className="btn-sm" onClick={() => {
-                // Usar coords de la oferta para trazar ruta previa
-                const start    = myPosition;
-                const offerPickup = pendingOffer.restaurant_lat && pendingOffer.restaurant_lng
-                  ? { lat: Number(pendingOffer.restaurant_lat), lng: Number(pendingOffer.restaurant_lng) } : null;
-                const offerDel = pendingOffer.customer_lat && pendingOffer.customer_lng
-                  ? { lat: Number(pendingOffer.customer_lat), lng: Number(pendingOffer.customer_lng) } : null;
-                if (!start || !offerPickup || !offerDel) { setMsg('Faltan coordenadas'); return; }
-                const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${offerPickup.lng},${offerPickup.lat};${offerDel.lng},${offerDel.lat}?overview=full&geometries=geojson`;
-                fetch(osrmUrl)
-                  .then(r => r.ok ? r.json() : Promise.reject())
-                  .then(data => {
-                    const coords = data?.routes?.[0]?.geometry?.coordinates;
-                    if (!coords?.length) throw new Error();
-                    setRouteGeometry(coords.map(([lng, lat]) => ({ lat, lng })));
-                    setMsg('Ruta trazada (previa a aceptar)');
-                  })
-                  .catch(() => { setRouteGeometry(null); setMsg('No se pudo calcular la ruta'); });
-              }}>Ruta</button>
-              <button className="btn-sm" onClick={() => {
-                const offerPickup = pendingOffer.restaurant_lat && pendingOffer.restaurant_lng
-                  ? `${Number(pendingOffer.restaurant_lat)},${Number(pendingOffer.restaurant_lng)}` : null;
-                const offerDel = pendingOffer.customer_lat && pendingOffer.customer_lng
-                  ? `${Number(pendingOffer.customer_lat)},${Number(pendingOffer.customer_lng)}` : null;
-                const origin = myPosition ? `${myPosition.lat},${myPosition.lng}` : offerPickup;
-                if (!origin || !offerPickup || !offerDel) { setMsg('Faltan coordenadas'); return; }
-                const ua = (navigator.userAgent || '').toLowerCase();
-                const isIOS = /iphone|ipad|ipod/.test(ua);
-                const url = isIOS
-                  ? `https://maps.apple.com/?saddr=${encodeURIComponent(origin)}&daddr=${encodeURIComponent(`${offerPickup}+to:${offerDel}`)}&dirflg=d`
-                  : `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(offerDel)}&waypoints=${encodeURIComponent(offerPickup)}&travelmode=driving`;
-                window.open(url, '_blank', 'noopener,noreferrer');
-              }}>Maps</button>
             </div>
           </div>
           </div>{/* fin panel con overflow */}
@@ -839,26 +813,22 @@ export default function DriverHome() {
           <div style={{ flexShrink:0, background:'#fff',
             borderTop:'2px solid var(--success)', zIndex:10, position:'relative',
             display:'flex', flexDirection:'column',
-            maxHeight: orderExpanded ? 'min(72vh, 520px)' : 120,
+            maxHeight: orderExpanded ? 'min(72vh, 520px)' : 'none',
             transition:'max-height 0.3s ease', overflow:'hidden' }}>
 
-            {/* Vista compacta — siempre visible */}
-            <div style={{ padding:'0.55rem 1rem 0', flexShrink:0 }}>
+            {/* Vista compacta — siempre visible, toca para expandir */}
+            <div
+              onClick={() => setOrderExpanded(e => !e)}
+              style={{ padding:'0.55rem 1rem 0.6rem', flexShrink:0, cursor:'pointer', userSelect:'none' }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                 <span style={{ fontSize:'0.7rem', fontWeight:800, textTransform:'uppercase',
                   letterSpacing:'0.5px', color:'var(--success)' }}>
                   {DRIVER_STATUS[activeOrder.status] || activeOrder.status}
                 </span>
-                <button onClick={() => setOrderExpanded(e => !e)}
-                  style={{ border:'1px solid #e8c8d4', background:'#f3e8ed', cursor:'pointer',
-                    color:'var(--brand)', padding:'0.15rem 0.45rem', fontSize:'0.78rem',
-                    borderRadius:'6px 6px 0 0',
-                    display:'flex', alignItems:'center', gap:2 }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                    <polyline points={orderExpanded ? '18 15 12 9 6 15' : '6 9 12 15 18 9'} />
-                  </svg>
-                </button>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="var(--gray-400)" strokeWidth="2.5" strokeLinecap="round">
+                  <polyline points={orderExpanded ? '18 15 12 9 6 15' : '6 9 12 15 18 9'} />
+                </svg>
               </div>
 
               {/* Info contextual según estado */}
@@ -898,9 +868,11 @@ export default function DriverHome() {
                 </div>
               )}
 
-              <div style={{ display:'flex', gap:'0.35rem', flexWrap:'wrap', marginTop:'0.45rem' }}>
-                <button className="btn-sm" onClick={openRoadRouteApi}>Ruta</button>
-                <button className="btn-sm" onClick={openMobileMapsRoute}>Maps</button>
+              {/* Botones Ruta y Maps — siempre visibles, detienen propagación del tap */}
+              <div style={{ display:'flex', gap:'0.35rem', marginTop:'0.45rem' }}
+                onClick={e => e.stopPropagation()}>
+                <button className="btn-sm" onClick={openRoadRouteApi}>🗺 Ruta</button>
+                <button className="btn-sm" onClick={openMobileMapsRoute}>📍 Maps</button>
               </div>
             </div>
 
@@ -964,7 +936,7 @@ export default function DriverHome() {
           aria-label="Navegación guiada"
           style={{
             position: 'absolute',
-            bottom: 'calc(var(--nav-h-mobile, 56px) + 1rem + env(safe-area-inset-bottom, 0px))',
+            bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))',
             right: '1rem',
             zIndex: 400,
             width: 56, height: 56,
