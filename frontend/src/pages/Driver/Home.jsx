@@ -90,7 +90,7 @@ function DriverMap({ driverPos, customPin, onCustomPin, hasActiveOrder, pickupPo
 
   // Inicializar una vez cuando hay posición
   // Posición default para inicializar el mapa cuando no hay GPS
-  const DEFAULT_POS = { lat: 20.659699, lng: -103.349609 }; // Guadalajara
+  const DEFAULT_POS = { lat: 19.70595, lng: -101.19498 }; // Morelia
 
   useEffect(() => {
     if (!containerRef.current) return;
