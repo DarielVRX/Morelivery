@@ -298,19 +298,6 @@ function DriverMap({
       ? `rotate(${navHeadingDeg}deg)` : 'rotate(0deg)';
   }, [navHeadingDeg, navFollowEnabled]);
 
-  // Pin personalizado
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !_ml) return;
-    if (markersRef.current.custom) { markersRef.current.custom.remove(); markersRef.current.custom = null; }
-    if (customPin && !hasActiveOrder) {
-      const el = document.createElement('div');
-      el.style.cssText = 'width:16px;height:16px;border-radius:999px;background:var(--brand);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35)';
-      markersRef.current.custom = new _ml.Marker({ element: el })
-        .setLngLat([customPin.lng, customPin.lat]).addTo(map);
-    }
-  }, [customPin?.lat, customPin?.lng, hasActiveOrder]);
-
   // Marcadores tienda / cliente
   useEffect(() => {
     const map = mapRef.current;
@@ -799,7 +786,6 @@ export default function DriverHome() {
               background:'rgba(0,0,0,0.55)', color:'#fff', borderRadius:20,
               padding:'0.25rem 0.75rem', fontSize:'0.72rem', zIndex:5,
               pointerEvents:'none', whiteSpace:'nowrap' }}>
-              📍 Toca el mapa para marcar tu posición
             </div>
           )}
 
@@ -823,40 +809,6 @@ export default function DriverHome() {
             onCenterDone={() => setCenterSignal(null)}
           />
 
-          {/* Panel de pin */}
-          {!hasActiveOrder && customPin && (
-            <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)',
-              background:'#fff', borderRadius:10, padding:'0.5rem 0.875rem',
-              boxShadow:'0 2px 12px #0003', maxWidth:'calc(100% - 2rem)',
-              zIndex:10, display:'flex', alignItems:'center', gap:'0.5rem', minWidth:180 }}>
-              <span style={{ fontSize:'1rem', flexShrink:0 }}>📍</span>
-              <div style={{ flex:1, minWidth:0 }}>
-                {loadingPin
-                  ? <span style={{ fontSize:'0.78rem', color:'var(--gray-400)' }}>Buscando dirección…</span>
-                  : <span style={{ fontSize:'0.78rem', color:'var(--gray-700)', fontWeight:600,
-                      overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block' }}>
-                      {pinAddress}
-                    </span>
-                }
-                <span style={{ fontSize:'0.7rem', color:'var(--gray-400)' }}>Toca el mapa para mover</span>
-              </div>
-              <button onClick={() => { setCustomPin(null); setPinAddress(null); }}
-                style={{ border:'none', background:'none', cursor:'pointer',
-                  color:'var(--gray-400)', fontSize:'1rem', lineHeight:1,
-                  padding:'0.15rem', flexShrink:0 }}>✕</button>
-            </div>
-          )}
-
-          {/* Hint */}
-          {!hasActiveOrder && !customPin && !pendingOffer && availability && myPosition && (
-            <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)',
-              background:'#ffffffdd', borderRadius:20, padding:'0.4rem 1rem',
-              fontSize:'0.78rem', color:'var(--gray-500)', boxShadow:'0 2px 8px #0002',
-              whiteSpace:'nowrap', zIndex:5, pointerEvents:'none' }}>
-              Toca el mapa para marcar tu ubicación
-            </div>
-          )}
-
           {/* ── FABs — columna derecha, sin solapamiento ──────────── */}
 
           {/* Centrar — toggle rosa/blanco */}
@@ -877,25 +829,6 @@ export default function DriverHome() {
               display:'flex', alignItems:'center', justifyContent:'center',
               fontSize:'1rem', transition:'background 0.15s, color 0.15s',
             }}>⌖</button>
-
-          {/* Seguir ON/OFF */}
-          {hasActiveOrder && routeGeometry?.length > 0 && (
-            <button onClick={() => setNavFollowEnabled(v => !v)}
-              aria-label="Modo seguimiento" className="dh-fab"
-              style={{
-                position:'absolute',
-                bottom:'calc(16px + 56px + 8px + env(safe-area-inset-bottom,0px))',
-                right:12, zIndex:401, height:36, borderRadius:18,
-                background: navFollowEnabled ? '#111827' : '#ffffff',
-                color:       navFollowEnabled ? '#fff'    : '#111827',
-                border:'1px solid #d1d5db', padding:'0 0.7rem',
-                fontSize:'0.74rem', fontWeight:700,
-                boxShadow:'0 2px 8px rgba(0,0,0,0.14)', cursor:'pointer',
-                whiteSpace:'nowrap', transition:'background 0.15s, color 0.15s',
-              }}>
-              {navFollowEnabled ? 'Seguir ON' : 'Seguir OFF'}
-            </button>
-          )}
 
           {/* Google Navigation FAB */}
           {hasActiveOrder && routeGeometry?.length > 0 && (
