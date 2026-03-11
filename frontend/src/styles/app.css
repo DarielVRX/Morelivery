@@ -38,11 +38,6 @@ a:hover { text-decoration: underline; }
   overflow: hidden;
 }
 
-.maplibregl-marker {
-  z-index: 9999 !important;
-  border: 2px solid red; /* Esto te dirá dónde está el contenedor aunque el SVG falle */
-}
-
 /* Header */
 .app-header {
   position: sticky;
