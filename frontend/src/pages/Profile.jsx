@@ -105,6 +105,7 @@ export default function ProfilePage() {
   const [cpLoading,    setCpLoading]    = useState(false);
   const [cpError,      setCpError]      = useState('');
   const cpTimerRef = useRef(null);
+  const coloniaRef = useRef(colonia);
 
 
   const [notifStatus, setNotifStatus] = useState(
@@ -153,10 +154,13 @@ export default function ProfilePage() {
   const [deleteMsg, setDeleteMsg] = useState('');
   const [deleteErr, setDeleteErr] = useState(false);
 
+  useEffect(() => { coloniaRef.current = colonia; }, [colonia]);
+
   // Buscar CP cuando cambia (debounce 600ms)
   useEffect(() => {
     const cp = postalCode.trim();
     if (cp.length !== 5 || !/^\d{5}$/.test(cp)) {
+      setCpError('');
       setColoniasList([]);
       return;
     }
@@ -174,7 +178,7 @@ export default function ProfilePage() {
         setCiudad(result.ciudad || '');
         setColoniasList(result.colonias || []);
         // Si la colonia actual no está en la lista nueva, usar la primera disponible
-        if (result.colonias && result.colonias.length > 0 && !result.colonias.includes(colonia)) {
+        if (result.colonias && result.colonias.length > 0 && !result.colonias.includes(coloniaRef.current)) {
           setColonia(result.colonias[0]);
         }
       }
