@@ -224,6 +224,12 @@ export default function RestaurantPage() {
     setOrdering(true);
     try {
       const orderBody = { restaurantId: id, items, payment_method: paymentMethod, tip_cents: tipCents };
+
+      if (deliveryMode === 'manual' && manualPos?.label) {
+        orderBody.delivery_address = manualPos.label;
+      } else if (deliveryMode === 'home' && auth.user?.address) {
+        orderBody.delivery_address = auth.user.address;
+      }
       // Elegir coordenadas según modo de entrega
       if (deliveryMode === 'home' && hasHomePin) {
         orderBody.delivery_lat = auth.user.home_lat;

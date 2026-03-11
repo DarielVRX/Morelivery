@@ -85,13 +85,13 @@ router.get('/pending-assignment', authenticate, authorize(['driver']), async (re
 });
 
 router.post('/', authenticate, authorize(['customer']), validate(createOrderSchema), async (req, res, next) => {
-  const { restaurantId, items, payment_method, tip_cents, delivery_lat, delivery_lng } = req.validatedBody;
+  const { restaurantId, items, payment_method, tip_cents, delivery_lat, delivery_lng, delivery_address } = req.validatedBody;
   console.log(`📦 [pedido.nuevo] cliente=${req.user?.userId?.slice(0,8)} pago=${payment_method} propina=${tip_cents} productos=${items?.length}`);
   try {
     let deliveryAddress = 'address-pending';
     try {
       const c = await query('SELECT address FROM users WHERE id=$1', [req.user.userId]);
-      deliveryAddress = c.rows[0]?.address || 'address-pending';
+      deliveryAddress = delivery_address?.trim() || c.rows[0]?.address || 'address-pending';
     } catch (e) { if (!isMissingColumnError(e)) throw e; }
     if (!deliveryAddress || deliveryAddress === 'address-pending') return next(new AppError(400, 'Debes guardar tu dirección antes de hacer un pedido'));
 
@@ -419,6 +419,8 @@ router.get('/my', authenticate, async (req, res, next) => {
                 COALESCE(c.alias, c.full_name) AS customer_first_name, c.full_name AS customer_display_name,
                 COALESCE(d.alias, d.full_name) AS driver_first_name,
                 COALESCE(o.delivery_address, c.address) AS customer_address,
+                COALESCE(o.delivery_lat, c.lat) AS customer_lat,
+                COALESCE(o.delivery_lng, c.lng) AS customer_lng,
                 o.delivery_lat, o.delivery_lng
          FROM orders o
          JOIN restaurants r ON r.id = o.restaurant_id
@@ -433,7 +435,8 @@ router.get('/my', authenticate, async (req, res, next) => {
       result = await query(
         `SELECT o.*, r.name AS restaurant_name, NULL AS restaurant_address,
                 COALESCE(c.alias, c.full_name) AS customer_first_name, c.full_name AS customer_display_name,
-                COALESCE(d.alias, d.full_name) AS driver_first_name, o.delivery_address AS customer_address
+                COALESCE(d.alias, d.full_name) AS driver_first_name, o.delivery_address AS customer_address,
+                NULL::float8 AS customer_lat, NULL::float8 AS customer_lng
          FROM orders o
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id
