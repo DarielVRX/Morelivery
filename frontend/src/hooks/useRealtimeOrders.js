@@ -2,17 +2,46 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { API_BASE } from '../api/client';
 
+function canNotify() {
+  return typeof window !== 'undefined' && 'Notification' in window;
+}
+
+function shouldNotifyInBackground() {
+  if (typeof document === 'undefined') return true;
+  return document.visibilityState !== 'visible' || !document.hasFocus();
+}
+
+async function notifyRealtime({ title, body, tag, url = '/' }) {
+  if (!canNotify() || Notification.permission !== 'granted') return;
+
+  const payload = {
+    type: 'SHOW_NOTIFICATION',
+    title,
+    body,
+    tag,
+    url,
+    data: { url, ts: Date.now() },
+  };
+
+  // Preferir SW para soporte en segundo plano (móvil/PWA)
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg?.active) {
+        reg.active.postMessage(payload);
+        return;
+      }
+    }
+  } catch (_) {}
+
+  // Fallback foreground
+  try {
+    new Notification(title, { body, tag, renotify: true });
+  } catch (_) {}
+}
+
 /**
  * SSE listener central — una sola conexión estable por token.
- *
- * CRÍTICO: los callbacks se guardan en refs para que connect() no tenga
- * dependencias cambiantes y NO se recree el SSE en cada render.
- *
- * onOrderUpdate(data)    — order_update / offer_assigned
- * onDriverLocation(data) — driver_location
- * onNewOffer(data)       — new_offer  (push sin esperar poll)
- * onChatMessage(data)    — chat_message
- * onReconnect()          — llamado al (re)conectar — útil para re-fetch de estado
  */
 export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewOffer, onChatMessage, onReconnect) {
   const esRef          = useRef(null);
@@ -20,57 +49,111 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
   const mountedRef     = useRef(true);
   const retryCount     = useRef(0);
 
-  // Guardar callbacks en refs para que connect() no dependa de ellos
-  // y no se destruya/recree el SSE cuando cambian los callbacks
   const cbUpdate   = useRef(onOrderUpdate);
   const cbLocation = useRef(onDriverLocation);
   const cbOffer    = useRef(onNewOffer);
   const cbChat     = useRef(onChatMessage);
   const cbReconnect = useRef(onReconnect);
 
-  // Actualizar refs cuando cambian los callbacks (sin re-conectar)
   useEffect(() => { cbUpdate.current    = onOrderUpdate;    }, [onOrderUpdate]);
   useEffect(() => { cbLocation.current  = onDriverLocation; }, [onDriverLocation]);
   useEffect(() => { cbOffer.current     = onNewOffer;       }, [onNewOffer]);
   useEffect(() => { cbChat.current      = onChatMessage;    }, [onChatMessage]);
   useEffect(() => { cbReconnect.current = onReconnect;      }, [onReconnect]);
 
+  // Pedir permiso una vez cuando hay sesión activa
+  useEffect(() => {
+    if (!token || !canNotify()) return;
+    if (Notification.permission !== 'default') return;
+
+    const request = () => {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+      window.removeEventListener('pointerdown', request);
+      window.removeEventListener('keydown', request);
+    };
+
+    // Solicitar tras interacción real del usuario (más confiable en móvil)
+    window.addEventListener('pointerdown', request, { once: true });
+    window.addEventListener('keydown', request, { once: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', request);
+      window.removeEventListener('keydown', request);
+    };
+  }, [token]);
+
   const connect = useCallback(() => {
     if (!token || !mountedRef.current) return;
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
 
-    const url = `${API_BASE}/events?token=${encodeURIComponent(token)}`;
+    const url = `${API_BASE}/api/events?token=${encodeURIComponent(token)}`;
     console.log(`📡 [SSE] conectando (intento ${retryCount.current + 1})`);
     const es = new EventSource(url);
     esRef.current = es;
 
     es.addEventListener('order_update', (e) => {
-      try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {}
+      try {
+        const data = JSON.parse(e.data);
+        cbUpdate.current?.(data);
+        if (shouldNotifyInBackground()) {
+          const status = data?.status ? `Estado: ${data.status}` : 'Tu pedido fue actualizado';
+          notifyRealtime({
+            title: 'Actualización de pedido',
+            body: status,
+            tag: `order_update_${data?.orderId || 'general'}`,
+            url: '/customer/pedidos',
+          });
+        }
+      } catch (_) {}
     });
+
     es.addEventListener('driver_location', (e) => {
       try { cbLocation.current?.(JSON.parse(e.data)); } catch (_) {}
     });
+
     es.addEventListener('new_offer', (e) => {
       try {
         const data = JSON.parse(e.data);
         console.log(`[SSE] new_offer received orderId=${data.orderId} secondsLeft=${data.secondsLeft}`);
         cbOffer.current?.(data);
+        notifyRealtime({
+          title: 'Nueva oferta disponible',
+          body: 'Tienes un pedido por aceptar.',
+          tag: `new_offer_${data.orderId || 'driver'}`,
+          url: '/driver',
+        });
       } catch (_) {}
     });
+
     es.addEventListener('offer_cancelled', (e) => {
       try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {}
     });
+
     es.addEventListener('offer_assigned', (e) => {
       try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {}
     });
+
     es.addEventListener('chat_message', (e) => {
-      try { cbChat.current?.(JSON.parse(e.data)); } catch (_) {}
+      try {
+        const data = JSON.parse(e.data);
+        cbChat.current?.(data);
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: `Mensaje de ${data.senderName || 'soporte'}`,
+            body: data.text || 'Tienes un nuevo mensaje.',
+            tag: `chat_${data.orderId || 'general'}`,
+            url: '/customer/pedidos',
+          });
+        }
+      } catch (_) {}
     });
+
     es.addEventListener('connected', () => {
       retryCount.current = 0;
       console.log('📡 [SSE] conexión establecida');
       clearTimeout(reconnectTimer.current);
-      // Re-fetch al reconectar para no perder ofertas/actualizaciones perdidas durante desconexión
       cbReconnect.current?.();
     });
 
@@ -79,13 +162,12 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
       esRef.current = null;
       if (!mountedRef.current) return;
       clearTimeout(reconnectTimer.current);
-      // Backoff exponencial: 4s, 8s, 16s… máximo 30s
       const delay = Math.min(4000 * Math.pow(2, retryCount.current), 30000);
       retryCount.current++;
       console.warn(`📡 [SSE] error — reintentando en ${delay / 1000}s (intento ${retryCount.current})`);
       reconnectTimer.current = setTimeout(connect, delay);
     };
-  }, [token]); // SOLO token como dependencia — no los callbacks
+  }, [token]);
 
   useEffect(() => {
     mountedRef.current = true;
