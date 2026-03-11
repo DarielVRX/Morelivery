@@ -1058,7 +1058,6 @@ export default function DriverHome() {
                                 </div>
                                 )}
                                 </div>
-                                </div>
               )}
 
               {/* ── Panel de pedido activo ──────────────────────────────── */}
