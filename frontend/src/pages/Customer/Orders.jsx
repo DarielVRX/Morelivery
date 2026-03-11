@@ -449,7 +449,7 @@ export default function CustomerOrders() {
                           const minTip  = o.delivered_tip_cents || 0;
                           const draft   = tipDraft[o.id] ?? o.tip_cents ?? minTip;
                           const isDirty = draft !== o.tip_cents;
-                          const canSave = draft >= minTip;
+                          const canSave = draft >= Math.max(minTip, o.tip_cents || 0);
                           return (
                             <div style={{ marginTop:'0.35rem' }}>
                               <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
