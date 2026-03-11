@@ -978,7 +978,7 @@ export default function DriverHome() {
                   {/* OPT-10: will-change:transform en .dh-offer-panel */}
                   <div className="dh-offer-panel" style={{
                     transform: offerMinimized ? 'translateY(calc(100% - 22px))' : 'translateY(0)',
-                                transition: 'transform 0.22s ease',
+                                transition: 'transform 0.0s ease',
                   }}>
                   <button onClick={() => setOfferMinimized(m => !m)}
                   style={{ position:'absolute', top:-43, left:'50%', transform:'translateX(-50%)',
