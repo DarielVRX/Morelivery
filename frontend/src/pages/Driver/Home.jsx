@@ -12,13 +12,6 @@ import OfferCountdown from '../../components/OfferCountdown';
   visibility: visible !important;
 }
 
-/* Estilo de depuración para ver si el contenedor existe */
-.dh-marker-debug {
-  background: rgba(255, 0, 0, 0.2);
-  border: 2px solid #e3aaaa;
-  border-radius: 50%;
-}
-
 // ── CSS global de animaciones — inyectado UNA sola vez, completamente fuera del render ──
 if (typeof document !== 'undefined' && !document.getElementById('dh-animations')) {
   const s = document.createElement('style');
