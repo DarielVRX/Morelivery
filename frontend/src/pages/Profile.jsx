@@ -98,6 +98,9 @@ export default function ProfilePage() {
   const [highPriorityNotifs, setHighPriorityNotifs] = useState(() => {
     try { return localStorage.getItem('morelivery_notif_priority') === 'high'; } catch { return false; }
   });
+  const [notifEnabled, setNotifEnabled] = useState(() => {
+    try { return localStorage.getItem('morelivery_notif_enabled') !== '0'; } catch { return true; }
+  });
 
   async function enablePushNotifications() {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -108,11 +111,18 @@ export default function ProfilePage() {
       if ('serviceWorker' in navigator) {
         await navigator.serviceWorker.register('/sw.js');
       }
-      const permission = await Notification.requestPermission();
+      let permission = Notification.permission;
+      if (permission === 'default') {
+        permission = await Notification.requestPermission();
+      }
       setNotifStatus(permission);
       if (permission === 'granted') {
+        try { localStorage.setItem('morelivery_notif_enabled', '1'); } catch (_) {}
+        setNotifEnabled(true);
         setNotifMsg('Notificaciones activadas correctamente.');
       } else if (permission === 'denied') {
+        try { localStorage.setItem('morelivery_notif_enabled', '0'); } catch (_) {}
+        setNotifEnabled(false);
         setNotifMsg('Permiso bloqueado. Actívalo en ajustes del navegador/sitio.');
       } else {
         setNotifMsg('Solicitud cerrada sin cambios.');
@@ -127,6 +137,19 @@ export default function ProfilePage() {
     setHighPriorityNotifs(prev => {
       const next = !prev;
       try { localStorage.setItem('morelivery_notif_priority', next ? 'high' : 'normal'); } catch (_) {}
+      return next;
+    });
+  }
+
+  function toggleNotifEnabled() {
+    if (notifStatus !== 'granted') {
+      enablePushNotifications();
+      return;
+    }
+    setNotifEnabled(prev => {
+      const next = !prev;
+      try { localStorage.setItem('morelivery_notif_enabled', next ? '1' : '0'); } catch (_) {}
+      setNotifMsg(next ? 'Notificaciones activas.' : 'Notificaciones pausadas para este dispositivo.');
       return next;
     });
   }
@@ -452,11 +475,20 @@ export default function ProfilePage() {
 
           <div style={{ padding:'0.6rem 0.7rem', border:'1px solid var(--gray-200)', borderRadius:8, background:'#fafafa' }}>
             <div style={{ display:'flex', justifyContent:'space-between', gap:'0.5rem', alignItems:'center', flexWrap:'wrap' }}>
-              <span style={{ fontSize:'0.78rem', color:'var(--gray-600)' }}>
-                Notificaciones push: <strong>{notifStatus}</strong>
+            <span style={{ fontSize:'0.78rem', color:'var(--gray-600)' }}>
+                Notificaciones push:{' '}
+                <strong>
+                  {notifStatus === 'granted'
+                    ? (notifEnabled ? 'Activo' : 'Pausado')
+                    : notifStatus === 'denied'
+                      ? 'Bloqueado'
+                      : notifStatus === 'default'
+                        ? 'Pendiente'
+                        : 'No soportado'}
+                </strong>
               </span>
-              <button type="button" className="btn-sm" onClick={enablePushNotifications}>
-                Activar notificaciones
+              <button type="button" className="btn-sm" onClick={toggleNotifEnabled}>
+                {notifStatus === 'granted' && notifEnabled ? 'Pausar notificaciones' : 'Activar notificaciones'}
               </button>
             </div>
             {notifMsg && <div style={{ marginTop:'0.35rem', fontSize:'0.74rem', color:'var(--gray-500)' }}>{notifMsg}</div>}

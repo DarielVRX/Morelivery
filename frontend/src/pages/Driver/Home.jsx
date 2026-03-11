@@ -150,6 +150,8 @@ function DriverMap({
   const hasActiveOrderRef  = useRef(hasActiveOrder);     // OPT-7
   const navFollowRef       = useRef(navFollowEnabled);   // leído en watchPosition sin deps
   const onHeadingChangeRef = useRef(onHeadingChange);
+  const zoomCtrlRef        = useRef(null);
+  const zoomTimeoutRef     = useRef(null);
   const [showAttrib, setShowAttrib] = useState(false);
   const [hasGPS,     setHasGPS]     = useState(Boolean(driverPos));
 
@@ -273,6 +275,28 @@ function DriverMap({
         preserveDrawingBuffer: false,
       });
       map.addControl(new ml.NavigationControl({ showCompass: false }), 'top-right');
+      // Ocultar controles de zoom por defecto y solo mostrarlos tras interacción por 3s
+      const ctrl = containerRef.current.querySelector('.maplibregl-ctrl-top-right');
+      if (ctrl) {
+        zoomCtrlRef.current = ctrl;
+        ctrl.style.opacity = '0';
+        ctrl.style.pointerEvents = 'none';
+        ctrl.style.transition = 'opacity 0.18s ease';
+      }
+      const showZoomTemporarily = () => {
+        const el = zoomCtrlRef.current;
+        if (!el) return;
+        el.style.opacity = '1';
+        el.style.pointerEvents = 'auto';
+        if (zoomTimeoutRef.current) clearTimeout(zoomTimeoutRef.current);
+        zoomTimeoutRef.current = setTimeout(() => {
+          el.style.opacity = '0';
+          el.style.pointerEvents = 'none';
+        }, 3000);
+      };
+      ['mousedown','touchstart','wheel','dragstart'].forEach(ev => {
+        map.on(ev, showZoomTemporarily);
+      });
       // OPT-7: leer hasActiveOrder desde ref, no closure estático
       map.on('click', (e) => {
         if (hasActiveOrderRef.current) return;
@@ -281,7 +305,16 @@ function DriverMap({
       map.once('load', () => _buildDriverMarker(ml, map));
       mapRef.current = map;
     }).catch(() => onRouteError?.('No se pudo inicializar el mapa'));
-    return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
+    return () => {
+      if (zoomTimeoutRef.current) {
+        clearTimeout(zoomTimeoutRef.current);
+        zoomTimeoutRef.current = null;
+      }
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // OPT-5: efecto separado para cambios de modo follow — reconstruye marcador + centra
