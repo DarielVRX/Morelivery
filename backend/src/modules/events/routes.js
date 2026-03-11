@@ -4,6 +4,8 @@
 import { Router } from 'express';
 import { authenticate } from '../../middlewares/auth.js';
 import { sseHub } from './hub.js';
+import { getFirstAvailableOrderForDriver, hasActiveChain, offerNextDrivers, serializedOffer } from '../orders/assignment/index.js';
+import { offerCb } from './offerCallback.js';
 
 const router = Router();
 
@@ -32,6 +34,19 @@ router.get('/', (req, res, next) => {
 
   // Registrar cliente en el hub
   const clientId = sseHub.register(userId, role, res);
+
+  // Si un driver se conecta por SSE y está disponible, intentar despertar
+  // inmediatamente su primera orden elegible para evitar ofertas huérfanas.
+  if (role === 'driver') {
+    Promise.resolve()
+      .then(async () => {
+        const order = await getFirstAvailableOrderForDriver(userId);
+        if (!order) return;
+        if (hasActiveChain(order.id)) return;
+        await serializedOffer(order.id, offerNextDrivers, offerCb);
+      })
+      .catch(() => {});
+  }
 
   // Ping cada 25s para mantener conexi\u00f3n viva (Render cierra a los 30s sin actividad)
   const ping = setInterval(() => {

@@ -145,7 +145,7 @@ export default function RestaurantPage() {
 
   const isCustomer  = auth.user?.role === 'customer';
   const hasAddress  = Boolean(auth.user?.address && auth.user.address !== 'address-pending');
-  const hasHomePin  = Boolean(auth.user?.home_lat && auth.user?.home_lng);
+  const hasHomePin  = Number.isFinite(Number(auth.user?.home_lat)) && Number.isFinite(Number(auth.user?.home_lng));
 
   // Ubicación actual del customer via GPS
   const [currentPos,   setCurrentPos]   = useState(null);  // { lat, lng }
@@ -224,6 +224,12 @@ export default function RestaurantPage() {
     setOrdering(true);
     try {
       const orderBody = { restaurantId: id, items, payment_method: paymentMethod, tip_cents: tipCents };
+
+      if (deliveryMode === 'manual' && manualPos?.label) {
+        orderBody.delivery_address = manualPos.label;
+      } else if (deliveryMode === 'home' && auth.user?.address) {
+        orderBody.delivery_address = auth.user.address;
+      }
       // Elegir coordenadas según modo de entrega
       if (deliveryMode === 'home' && hasHomePin) {
         orderBody.delivery_lat = auth.user.home_lat;
@@ -254,15 +260,18 @@ export default function RestaurantPage() {
     currentPos;
 
   // Distancia customer→restaurant (solo cuando ambos tienen coords)
-  const restLat = restaurant?.lat ? Number(restaurant.lat) : null;
-  const restLng = restaurant?.lng ? Number(restaurant.lng) : null;
-  const distKm = (activeDeliveryPos && restLat && restLng)
+  const restLat = Number.isFinite(Number(restaurant?.lat)) ? Number(restaurant.lat) : null;
+  const restLng = Number.isFinite(Number(restaurant?.lng)) ? Number(restaurant.lng) : null;
+  const distKm = (activeDeliveryPos && restLat !== null && restLng !== null)
     ? haversineKm(activeDeliveryPos.lat, activeDeliveryPos.lng, restLat, restLng)
     : null;
   const tooFar = distKm !== null && distKm > 5;
   const distanceError = tooFar
     ? `Esta tienda está a ${distKm.toFixed(1)} km. Solo se aceptan pedidos dentro de 5 km.`
     : null;
+  const missingCoordsError = restLat === null || restLng === null
+    ? 'Esta tienda no tiene coordenadas configuradas. No se pueden calcular distancias por ahora.'
+    : (!activeDeliveryPos ? 'No se pudo obtener tu ubicación de entrega.' : null);
 
   // Logger de distancia — visible en consola del navegador
   if (typeof window !== 'undefined') {
@@ -273,7 +282,7 @@ export default function RestaurantPage() {
   }
 
   const isClosed = restaurant?.is_open === false;
-  const canOrder = isCustomer && hasAddress && !isClosed && !tooFar;
+  const canOrder = isCustomer && hasAddress && !isClosed && !tooFar && !missingCoordsError;
 
   return (
     <div style={{ backgroundColor:'#fff9f8', minHeight:'100vh', padding:'1rem' }}>
@@ -503,6 +512,11 @@ export default function RestaurantPage() {
           {distanceError && (
             <p style={{ fontSize:'0.82rem', color:'var(--error,#dc2626)', marginBottom:'0.4rem', fontWeight:600 }}>
               {distanceError}
+            </p>
+          )}
+          {missingCoordsError && (
+            <p style={{ fontSize:'0.82rem', color:'var(--error,#dc2626)', marginBottom:'0.4rem', fontWeight:600 }}>
+              {missingCoordsError}
             </p>
           )}
           {deliveryMode === 'manual' && !manualPos && (
