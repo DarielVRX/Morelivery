@@ -207,7 +207,7 @@ export default function ProfilePage() {
       // Centro: resultado de búsqueda, o home pin existente, o CDMX
       const center = pinMapResult
         ? [pinMapResult.lat, pinMapResult.lng]
-        : (homeLat && homeLng ? [homeLat, homeLng] : [20.6597, -103.3496]);
+        : (homeLat && homeLng ? [homeLat, homeLng] : [19.70595, -101.19498]);
 
       const map = L.map(pinMapRef.current, { center, zoom: pinMapResult ? 17 : 13 });
       pinMapInstance.current = map;
@@ -371,7 +371,7 @@ export default function ProfilePage() {
             </label>
             <label>
               Municipio / Ciudad
-              <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Guadalajara" />
+              <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Morelia" />
             </label>
           </div>
 
