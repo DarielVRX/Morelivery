@@ -442,6 +442,12 @@ button, a, [role="button"] {
   touch-action: manipulation;
 }
 
+/* Leaflet controles no deben heredar touch target global */
+.leaflet-container a {
+  min-height: 0;
+  touch-action: auto;
+}
+
 
 /* Zoom controls visibles solo tras interacción reciente */
 .driver-map-zoom-hidden .leaflet-control-zoom {
