@@ -85,7 +85,7 @@ router.get('/pending-assignment', authenticate, authorize(['driver']), async (re
 });
 
 router.post('/', authenticate, authorize(['customer']), validate(createOrderSchema), async (req, res, next) => {
-  const { restaurantId, items, payment_method, tip_cents } = req.validatedBody;
+  const { restaurantId, items, payment_method, tip_cents, delivery_lat, delivery_lng } = req.validatedBody;
   console.log(`📦 [pedido.nuevo] cliente=${req.user?.userId?.slice(0,8)} pago=${payment_method} propina=${tip_cents} productos=${items?.length}`);
   try {
     let deliveryAddress = 'address-pending';
@@ -94,6 +94,38 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       deliveryAddress = c.rows[0]?.address || 'address-pending';
     } catch (e) { if (!isMissingColumnError(e)) throw e; }
     if (!deliveryAddress || deliveryAddress === 'address-pending') return next(new AppError(400, 'Debes guardar tu dirección antes de hacer un pedido'));
+
+    const restCoords = await query('SELECT lat, lng FROM restaurants WHERE id=$1', [restaurantId]);
+    if (restCoords.rowCount === 0) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    const restaurantLat = restCoords.rows[0]?.lat != null ? Number(restCoords.rows[0].lat) : null;
+    const restaurantLng = restCoords.rows[0]?.lng != null ? Number(restCoords.rows[0].lng) : null;
+
+    const orderDeliveryLat = Number.isFinite(Number(delivery_lat)) ? Number(delivery_lat) : null;
+    const orderDeliveryLng = Number.isFinite(Number(delivery_lng)) ? Number(delivery_lng) : null;
+
+    if (orderDeliveryLat == null || orderDeliveryLng == null) {
+      return next(new AppError(400, 'Falta ubicación de entrega (lat/lng). Selecciona ubicación actual, casa o manual.'));
+    }
+    if (restaurantLat == null || restaurantLng == null) {
+      return next(new AppError(409, 'El restaurante no tiene coordenadas configuradas.'));
+    }
+
+    // Regla de cobertura backend: máximo 5 km entre restaurante y destino del pedido
+    const distResult = await query(
+      `SELECT (
+         6371 * acos(
+           cos(radians($1::float8)) * cos(radians($3::float8)) *
+           cos(radians($4::float8) - radians($2::float8)) +
+           sin(radians($1::float8)) * sin(radians($3::float8))
+         )
+       ) AS km`,
+      [orderDeliveryLat, orderDeliveryLng, restaurantLat, restaurantLng]
+    );
+    const distKm = Number(distResult.rows[0]?.km ?? Infinity);
+    if (!Number.isFinite(distKm) || distKm > 5) {
+      return next(new AppError(409, `Esta tienda está fuera de cobertura (${distKm.toFixed(1)} km). Máximo permitido: 5 km.`));
+    }
 
     let totalCents = 0;
     for (const item of items) {
@@ -109,9 +141,9 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
     const tipCents = Number(tip_cents) || 0;
 
     const orderResult = await query(
-      `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress]
+      `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address, delivery_lat, delivery_lng, restaurant_lat, restaurant_lng)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress, orderDeliveryLat, orderDeliveryLng, restaurantLat, restaurantLng]
     );
     const order = orderResult.rows[0];
     console.log(`📦 [pedido.creado] id=${order.id.slice(0,8)} total=${order.total_cents} rest=${restaurantId.slice(0,8)}`);
@@ -122,7 +154,7 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
         [order.id, item.menuItemId, item.quantity, m.rows[0].price_cents]);
     }
 
-    try { await offerNextDrivers(order.id); } catch (e) {
+    try { await serializedOffer(order.id, offerNextDrivers); } catch (e) {
       if (!isMissingRelationError(e) && !isMissingColumnError(e)) throw e;
     }
 
@@ -177,7 +209,7 @@ router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admi
         on_the_way:['ready'],
         delivered: ['on_the_way'],
       },
-      admin: { assigned:'*', accepted:'*', preparing:'*', ready:'*', on_the_way:'*', delivered:'*', cancelled:'*' },
+      admin: { cancelled: ['created','pending_driver','assigned','accepted','preparing','ready','on_the_way'] },
     };
     const STATUS_ES = {
       created:'Recibido', pending_driver:'Buscando conductor', assigned:'Asignado',

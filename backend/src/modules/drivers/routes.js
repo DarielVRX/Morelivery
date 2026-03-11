@@ -58,7 +58,8 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
                 r.name AS restaurant_name, r.address AS restaurant_address,
                 r.lat AS restaurant_lat, r.lng AS restaurant_lng,
                 COALESCE(c.address, o.delivery_address) AS customer_address,
-                c.lat AS customer_lat, c.lng AS customer_lng,
+                COALESCE(o.delivery_lat, c.lat) AS customer_lat,
+                COALESCE(o.delivery_lng, c.lng) AS customer_lng,
                 GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + (60::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
          FROM order_driver_offers od
          JOIN orders o ON o.id = od.order_id
