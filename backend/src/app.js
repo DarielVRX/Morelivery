@@ -13,6 +13,9 @@ import adminRoutes from './modules/admin/routes.js';
 import eventRoutes from './modules/events/routes.js';
 import routeModelRoutes from './modules/routes/routes.js';
 import paymentsRoutes from './modules/payments/routes.js';
+import navZonesRoutes    from './modules/nav/zones.js';
+import navRoadPrefsRoutes from './modules/nav/road-prefs.js';
+import navMapMatchRoutes  from './modules/nav/map-match.js';
 import { errorHandler, notFoundHandler } from './middlewares/errorHandler.js';
 import { checkDbConnection } from './config/db.js';
 
@@ -31,7 +34,7 @@ export function createApp() {
 
   app.use(cors({ origin: corsOrigin, credentials: true }));
   app.use(helmet());
-  // SSE no debe ser afectado por rate limit \u2014 excluir la ruta antes de aplicarlo
+  // SSE no debe ser afectado por rate limit — excluir la ruta antes de aplicarlo
   app.use((req, res, next) => {
     if (req.path === '/api/events' || req.path === '/events') return next();
     return apiRateLimit(req, res, next);
@@ -53,11 +56,14 @@ export function createApp() {
   app.use('/api/orders', orderRoutes);
   app.use('/api/drivers', driverRoutes);
   app.use('/api/admin', adminRoutes);
-  app.use('/api/events', eventRoutes);   // \u2190 SSE
+  app.use('/api/events', eventRoutes);   // ← SSE
   app.use('/api/routes', routeModelRoutes);
   app.use('/api/payments', paymentsRoutes);
+  app.use('/api/nav/zones',      navZonesRoutes);
+  app.use('/api/nav/road-prefs', navRoadPrefsRoutes);
+  app.use('/api/nav/map-match',  navMapMatchRoutes);
 
-  // Aliases sin /api/ para compatibilidad con c\u00f3digo existente
+  // Aliases sin /api/ para compatibilidad con código existente
   app.use('/auth', authRoutes);
   app.use('/restaurants', restaurantRoutes);
   app.use('/orders', orderRoutes);
@@ -66,6 +72,9 @@ export function createApp() {
   app.use('/events', eventRoutes);
   app.use('/routes', routeModelRoutes);
   app.use('/payments', paymentsRoutes);
+  app.use('/nav/zones',      navZonesRoutes);
+  app.use('/nav/road-prefs', navRoadPrefsRoutes);
+  app.use('/nav/map-match',  navMapMatchRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

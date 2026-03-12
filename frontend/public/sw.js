@@ -1,14 +1,14 @@
 // ── Precache del shell de la app ──────────────────────────────────────────────
 // Lista de assets que se cachean en install. Los archivos con hash (generados
 // por Vite) se agregan en runtime via fetch; aquí solo el shell estático.
-const SHELL_VERSION = 'v1'; // incrementar manualmente al desplegar cambios de shell
+const SHELL_VERSION = 'v2'; // incrementado: iconos cambiados a .png
 const SHELL_CACHE   = `morelivery-shell-${SHELL_VERSION}`;
 const SHELL_ASSETS  = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/icon-192.svg',
-  '/icon-512.svg',
+  '/icon-192.png',
+  '/icon-512.png',
   '/badge.svg',
   '/logo.svg',
 ];
@@ -41,6 +41,15 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// ── Caché de tiles vectoriales (stale-while-revalidate) ───────────────────────
+const TILES_CACHE   = 'morelivery-tiles-v1';
+const TILES_DOMAINS = ['tiles.openfreemap.org', 'tile.openfreemap.org'];
+
+// ── IndexedDB para última ruta/destino/posición ────────────────────────────────
+// Usado por el frontend para persistir contexto de navegación entre sesiones.
+// El SW no escribe aquí — solo gestiona el caché de tiles.
+// La app escribe directamente con indexedDB.open('morelivery-nav', 1).
+
 // ── Fetch: shell-first para navegación, network-first para API ────────────
 self.addEventListener('fetch', (event) => {
   const { request } = event;
@@ -51,6 +60,22 @@ self.addEventListener('fetch', (event) => {
 
   // Solo GET
   if (request.method !== 'GET') return;
+
+  // Tiles vectoriales: stale-while-revalidate
+  const isTile = TILES_DOMAINS.some(d => url.hostname.includes(d));
+  if (isTile) {
+    event.respondWith(
+      caches.open(TILES_CACHE).then(async cache => {
+        const cached = await cache.match(request);
+        const fetchPromise = fetch(request).then(res => {
+          if (res.ok) cache.put(request, res.clone());
+          return res;
+        }).catch(() => null);
+        return cached || fetchPromise;
+      })
+    );
+    return;
+  }
 
   // Estrategia: red primero, fallback a caché (shell assets)
   // Para assets con hash (JS/CSS de Vite), la red siempre gana.
@@ -97,7 +122,7 @@ async function showGroupedNotification({ group, title, body, url, priority, tag 
   await self.registration.showNotification(displayTitle, {
     body:              displayBody,
     tag,               // mismo tag = reemplaza la anterior del grupo
-    icon:              '/icon-192.svg',
+    icon:              '/icon-192.png',
     badge:             '/badge.svg',
     requireInteraction: isHigh,
     renotify:          true,   // vibrar/sonar aunque el tag sea el mismo
@@ -189,5 +214,3 @@ self.addEventListener('notificationclick', (event) => {
     })
   );
 });
-
-

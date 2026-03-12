@@ -4,6 +4,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 import { useDriverLocation } from '../../hooks/useDriverLocation';
 import OfferCountdown from '../../components/OfferCountdown';
+import { useNavFeatures } from '../../hooks/useNavFeatures';
+import ZoneLayer from '../../components/ZoneLayer';
 
 // ── CSS global de animaciones — inyectado UNA sola vez, completamente fuera del render ──
 if (typeof document !== 'undefined' && !document.getElementById('dh-animations')) {
@@ -139,6 +141,7 @@ function DriverMap({
   routeGeometry, onRouteError,
   navFollowEnabled, navHeadingDeg, onHeadingChange,
   centerSignal, onCenterDone,
+  onMapReady,
 }) {
   const containerRef       = useRef(null);
   const mapRef             = useRef(null);
@@ -304,6 +307,7 @@ function DriverMap({
       });
       map.once('load', () => _buildDriverMarker(ml, map));
       mapRef.current = map;
+      onMapReady?.(map);
     }).catch(() => onRouteError?.('No se pudo inicializar el mapa'));
     return () => {
       if (zoomTimeoutRef.current) {
@@ -588,6 +592,18 @@ export default function DriverHome() {
   const [centerSignal,   setCenterSignal]   = useState(null);
   const [centerActive,   setCenterActive]   = useState(false);
 
+  const [activeZones,     setActiveZones]     = useState([]);
+  const [showZoneForm,    setShowZoneForm]     = useState(false);
+  const [zoneFormPos,     setZoneFormPos]      = useState(null);
+  const [zoneType,        setZoneType]         = useState('traffic');
+  const [zoneRadius,      setZoneRadius]       = useState(100);
+  const [zoneHours,       setZoneHours]        = useState(2);
+  const [showImpassable,  setShowImpassable]   = useState(false);
+  const [impassableWayId, setImpassableWayId]  = useState('');
+  const [impDesc,         setImpDesc]          = useState('');
+  const [impDuration,     setImpDuration]      = useState('days');
+  const [mapInstance,     setMapInstance]      = useState(null);
+
   const loadDataRef     = useRef(null);
   const loadDebounceRef = useRef(null);
 
@@ -801,6 +817,26 @@ export default function DriverHome() {
 
   const handleRefresh = useCallback(() => loadData(), [loadData]);
 
+  const { voiceEnabled, setVoiceEnabled, wakeLockActive } =
+    useNavFeatures({
+      steps:       routeGeometry ? [] : [],
+      currentPos:  myPosition,
+      activeZones,
+      onVoice: (msg) => window.speechSynthesis?.speak(new SpeechSynthesisUtterance(msg)),
+    });
+
+  // Carga de zonas activas — cada 2 minutos
+  useEffect(() => {
+    function fetchZones() {
+      apiFetch('/nav/zones/active', {}, null)
+        .then(d => { if (Array.isArray(d?.zones)) setActiveZones(d.zones); })
+        .catch(() => {});
+    }
+    fetchZones();
+    const id = setInterval(fetchZones, 2 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   function handleCenterToggle() {
     const next = !centerActive;
     setCenterActive(next);
@@ -880,7 +916,12 @@ export default function DriverHome() {
               onHeadingChange={setNavHeadingDeg}
               centerSignal={centerSignal}
               onCenterDone={() => setCenterSignal(null)}
+              onMapReady={setMapInstance}
               />
+
+              {mapInstance && (
+                <ZoneLayer map={mapInstance} zones={activeZones} onZoneClick={(z) => setMsg(`Zona: ${z.type}`)} />
+              )}
 
               {/* Panel de pin */}
               {!hasActiveOrder && customPin && (
@@ -954,7 +995,116 @@ export default function DriverHome() {
                 </svg>
                 </button>
               )}
+
+              {/* Voz toggle FAB */}
+              <button onClick={() => setVoiceEnabled(v => !v)}
+              aria-label={voiceEnabled ? 'Desactivar voz' : 'Activar voz'}
+              className="dh-fab"
+              style={{
+                position:'absolute',
+                bottom: hasActiveOrder && routeGeometry?.length > 0
+                ? 'calc(16px + 196px + 8px + 36px + 8px + 44px + env(safe-area-inset-bottom,0px))'
+                : 'calc(16px + 44px + env(safe-area-inset-bottom,0px))',
+                right:12, zIndex:402,
+                width:36, height:36, borderRadius:'50%',
+                background:'#ffffff', color:'#111827',
+                border:'1px solid #d1d5db',
+                boxShadow:'0 2px 8px rgba(0,0,0,0.18)', cursor:'pointer',
+                display:'flex', alignItems:'center', justifyContent:'center',
+                fontSize:'1rem',
+              }}>{voiceEnabled ? '🔊' : '🔇'}</button>
+
               </div>{/* fin mapa */}
+
+              {/* ── Formulario de reporte de zona ──────────────────────── */}
+              {showZoneForm && zoneFormPos && (
+                  <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:50,
+                    background:'#fff', borderTop:'2px solid var(--brand)',
+                    padding:'0.75rem 1rem', boxShadow:'0 -4px 20px rgba(0,0,0,0.14)' }}>
+                    <div style={{ fontWeight:700, fontSize:'0.85rem', marginBottom:'0.5rem' }}>Reportar zona de alerta</div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+                      <label style={{ fontSize:'0.8rem' }}>Tipo de zona
+                        <select value={zoneType} onChange={e => setZoneType(e.target.value)}
+                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }}>
+                          <option value="traffic">Tráfico pesado</option>
+                          <option value="construction">Obra en construcción</option>
+                          <option value="accident">Accidente</option>
+                          <option value="flood">Inundación</option>
+                          <option value="blocked">Calle bloqueada</option>
+                          <option value="other">Otro</option>
+                        </select>
+                      </label>
+                      <label style={{ fontSize:'0.8rem' }}>Radio (metros)
+                        <input type="number" min={20} max={2000} value={zoneRadius}
+                          onChange={e => setZoneRadius(Number(e.target.value))}
+                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }} />
+                      </label>
+                      <label style={{ fontSize:'0.8rem' }}>Vigencia (horas)
+                        <select value={zoneHours} onChange={e => setZoneHours(Number(e.target.value))}
+                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }}>
+                          {[1,2,4,8,12,24,48,72].map(h => <option key={h} value={h}>{h}h</option>)}
+                        </select>
+                      </label>
+                    </div>
+                    <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.6rem' }}>
+                      <button className="btn-primary btn-sm" onClick={() => {
+                        apiFetch('/nav/zones', { method:'POST', body:JSON.stringify({
+                          lat: zoneFormPos.lat, lng: zoneFormPos.lng,
+                          radius_m: zoneRadius, type: zoneType, estimated_hours: zoneHours,
+                        })}, auth.token)
+                        .then(() => {
+                          setShowZoneForm(false); setZoneFormPos(null);
+                          apiFetch('/nav/zones/active', {}, null).then(d => { if (Array.isArray(d?.zones)) setActiveZones(d.zones); }).catch(() => {});
+                          setMsg('Zona reportada');
+                        })
+                        .catch(e => setMsg(e.message));
+                      }}>Guardar</button>
+                      <button className="btn-sm" onClick={() => { setShowZoneForm(false); setZoneFormPos(null); }}>Cancelar</button>
+                    </div>
+                  </div>
+              )}
+
+              {/* ── Formulario de calle no viable ─────────────────────── */}
+              {showImpassable && (
+                  <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:50,
+                    background:'#fff', borderTop:'2px solid var(--brand)',
+                    padding:'0.75rem 1rem', boxShadow:'0 -4px 20px rgba(0,0,0,0.14)' }}>
+                    <div style={{ fontWeight:700, fontSize:'0.85rem', marginBottom:'0.5rem' }}>Reportar calle no viable</div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+                      <label style={{ fontSize:'0.8rem' }}>ID de OSM way
+                        <input type="text" value={impassableWayId} onChange={e => setImpassableWayId(e.target.value)}
+                          placeholder="ID de OSM way"
+                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }} />
+                      </label>
+                      <label style={{ fontSize:'0.8rem' }}>Descripción (opcional)
+                        <textarea value={impDesc} onChange={e => setImpDesc(e.target.value)} rows={2}
+                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db', resize:'none', boxSizing:'border-box' }} />
+                      </label>
+                      <label style={{ fontSize:'0.8rem' }}>Duración estimada
+                        <select value={impDuration} onChange={e => setImpDuration(e.target.value)}
+                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }}>
+                          <option value="days">Días</option>
+                          <option value="weeks">Semanas</option>
+                          <option value="months">Meses</option>
+                          <option value="permanent">Permanente — error de mapa</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.6rem' }}>
+                      <button className="btn-primary btn-sm" onClick={() => {
+                        if (!impassableWayId.trim()) return setMsg('Ingresa el ID de OSM way');
+                        const pos = myPosition || { lat: 0, lng: 0 };
+                        apiFetch('/nav/road-prefs/impassable', { method:'POST', body:JSON.stringify({
+                          way_id: impassableWayId.trim(), lat: pos.lat, lng: pos.lng,
+                          description: impDesc || undefined, estimated_duration: impDuration,
+                        })}, auth.token)
+                        .then(() => { setShowImpassable(false); setImpassableWayId(''); setImpDesc(''); setMsg('Reporte enviado'); })
+                        .catch(e => setMsg(e.message));
+                      }}>Reportar</button>
+                      <button className="btn-sm" onClick={() => { setShowImpassable(false); setImpassableWayId(''); setImpDesc(''); }}>Cancelar</button>
+                    </div>
+                  </div>
+              )}
 
               {/* ── Panel de oferta ─────────────────────────────────────── */}
               {pendingOffer && (
