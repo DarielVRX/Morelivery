@@ -31,6 +31,39 @@ if (typeof document !== 'undefined' && !document.getElementById('dh-animations')
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
+function getNotifPriorityMode() {
+  try {
+    return localStorage.getItem('morelivery_notif_priority') === 'high' ? 'high' : 'normal';
+  } catch (_) {
+    return 'normal';
+  }
+}
+
+function playOfferAlertSound() {
+  if (typeof window === 'undefined') return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    const pulse = (offset, freq, duration = 0.12) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + offset + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + duration + 0.03);
+    };
+    pulse(0.00, 880);
+    pulse(0.18, 1180);
+    setTimeout(() => ctx.close().catch(() => {}), 600);
+  } catch (_) {}
+}
+
 const STATUS_LABELS = {
   created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
   preparing:'En preparación', ready:'Listo para retiro',
@@ -584,7 +617,12 @@ export default function DriverHome() {
   const [pinAddress,     setPinAddress]     = useState(null);
   const [loadingPin,     setLoadingPin]     = useState(false);
   const [routeGeometry,  setRouteGeometry]  = useState(null);
+  const [routeSteps,     setRouteSteps]     = useState([]);
   const [msg,            setMsg]            = useState('');
+  const [notifPermission, setNotifPermission] = useState(
+    (typeof window !== 'undefined' && 'Notification' in window) ? Notification.permission : 'unsupported'
+  );
+  const [notifPriorityMode, setNotifPriorityMode] = useState(getNotifPriorityMode);
   const [navFollowEnabled, setNavFollowEnabled] = useState(false);
   // OPT-12: heading como state solo para pasarlo a DriverMap como prop de fallback
   // El heading real se gestiona en DriverMap vía refs — este state solo actualiza 1 vez/segundo aprox.
@@ -664,7 +702,37 @@ export default function DriverHome() {
   }, [myPosition?.lat, myPosition?.lng]);
 
   const tokenRef = useRef(auth.token);
+  const lastOfferAlertRef = useRef(null);
   useEffect(() => { tokenRef.current = auth.token; }, [auth.token]);
+
+  useEffect(() => {
+    const refreshNotifState = () => {
+      if (typeof window === 'undefined') return;
+      setNotifPriorityMode(getNotifPriorityMode());
+      if ('Notification' in window) setNotifPermission(Notification.permission);
+    };
+    refreshNotifState();
+    window.addEventListener('focus', refreshNotifState);
+    window.addEventListener('storage', refreshNotifState);
+    return () => {
+      window.removeEventListener('focus', refreshNotifState);
+      window.removeEventListener('storage', refreshNotifState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pendingOffer?.id) return;
+    if (lastOfferAlertRef.current === pendingOffer.id) return;
+    lastOfferAlertRef.current = pendingOffer.id;
+
+    setMsg('Nueva oferta: revisa y responde antes de que expire.');
+    playOfferAlertSound();
+
+    const shouldUseHighPattern = notifPriorityMode === 'high' || notifPermission === 'granted';
+    if (navigator?.vibrate) {
+      navigator.vibrate(shouldUseHighPattern ? [300, 100, 300, 100, 300] : [180, 80, 180]);
+    }
+  }, [pendingOffer?.id, notifPriorityMode, notifPermission]);
 
   const announceListener = useCallback(async () => {
     if (!tokenRef.current) return;
@@ -793,8 +861,17 @@ export default function DriverHome() {
       method:'POST',
       body:JSON.stringify({ origin:start, destination:delivery, waypoints:[pickup], includeSteps:true }),
     }, auth.token)
-    .then(d => { if (!d?.geometry?.length) throw new Error(); setRouteGeometry(d.geometry); setMsg('Ruta trazada'); })
-    .catch(() => { setRouteGeometry(null); setMsg('No se pudo calcular la ruta'); });
+    .then(d => {
+      if (!d?.geometry?.length) throw new Error();
+      setRouteGeometry(d.geometry);
+      setRouteSteps(Array.isArray(d?.steps) ? d.steps : []);
+      setMsg('Ruta trazada');
+    })
+    .catch(() => {
+      setRouteGeometry(null);
+      setRouteSteps([]);
+      setMsg('No se pudo calcular la ruta');
+    });
   }
 
   function openGoogleNavigation() {
@@ -813,16 +890,21 @@ export default function DriverHome() {
     }
   }
 
-  useEffect(() => { if (!activeOrder) setRouteGeometry(null); }, [activeOrder]);
+  useEffect(() => {
+    if (!activeOrder) {
+      setRouteGeometry(null);
+      setRouteSteps([]);
+    }
+  }, [activeOrder]);
 
   const handleRefresh = useCallback(() => loadData(), [loadData]);
 
   const { voiceEnabled, setVoiceEnabled, wakeLockActive } =
     useNavFeatures({
-      steps:       routeGeometry ? [] : [],
+      steps:       routeSteps,
       currentPos:  myPosition,
       activeZones,
-      onVoice: (msg) => window.speechSynthesis?.speak(new SpeechSynthesisUtterance(msg)),
+      onVoice: (voiceMsg) => setMsg(voiceMsg),
     });
 
   // Carga de zonas activas — cada 2 minutos
@@ -869,6 +951,11 @@ export default function DriverHome() {
           {availability ? '● Disponible' : '○ No disponible'}
           </div>
           {myPosition && <div style={{ fontSize:'0.7rem', color:'rgba(255,255,255,0.8)' }}>GPS · ±{myPosition.accuracy}m</div>}
+          <div style={{ fontSize:'0.68rem', color:'rgba(255,255,255,0.86)' }}>
+            🔔 {notifPermission === 'granted' ? 'Notifs ON' : notifPermission === 'denied' ? 'Notifs bloqueadas' : 'Notifs pendientes'} ·
+            prioridad {notifPriorityMode === 'high' ? 'alta' : 'normal'}
+          </div>
+          {wakeLockActive && <div style={{ fontSize:'0.68rem', color:'rgba(255,255,255,0.85)' }}>Pantalla activa para navegación</div>}
           {gpsError   && <div style={{ fontSize:'0.7rem', color:'#ffb3b3', maxWidth:200 }}>{gpsError}</div>}
           </div>
           <button onClick={toggleAvailability}
