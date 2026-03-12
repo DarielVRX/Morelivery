@@ -622,7 +622,7 @@ export default function DriverHome() {
   const [notifPermission, setNotifPermission] = useState(
     (typeof window !== 'undefined' && 'Notification' in window) ? Notification.permission : 'unsupported'
   );
-  const [notifPriorityMode, setNotifPriorityMode] = useState(getNotifPriorityMode);
+  const [notifPriorityMode, setNotifPriorityMode] = useState('normal');
   const [navFollowEnabled, setNavFollowEnabled] = useState(false);
   // OPT-12: heading como state solo para pasarlo a DriverMap como prop de fallback
   // El heading real se gestiona en DriverMap vía refs — este state solo actualiza 1 vez/segundo aprox.
@@ -640,6 +640,9 @@ export default function DriverHome() {
   const [impassableWayId, setImpassableWayId]  = useState('');
   const [impDesc,         setImpDesc]          = useState('');
   const [impDuration,     setImpDuration]      = useState('days');
+  const [showRoadPref,    setShowRoadPref]     = useState(false);
+  const [roadPrefWayId,   setRoadPrefWayId]    = useState('');
+  const [roadPrefType,    setRoadPrefType]     = useState('preferred');
   const [mapInstance,     setMapInstance]      = useState(null);
 
   const loadDataRef     = useRef(null);
@@ -708,7 +711,11 @@ export default function DriverHome() {
   useEffect(() => {
     const refreshNotifState = () => {
       if (typeof window === 'undefined') return;
-      setNotifPriorityMode(getNotifPriorityMode());
+      try {
+        setNotifPriorityMode(localStorage.getItem('morelivery_notif_priority') === 'high' ? 'high' : 'normal');
+      } catch (_) {
+        setNotifPriorityMode('normal');
+      }
       if ('Notification' in window) setNotifPermission(Notification.permission);
     };
     refreshNotifState();
@@ -721,18 +728,10 @@ export default function DriverHome() {
   }, []);
 
   useEffect(() => {
-    if (!pendingOffer?.id) return;
-    if (lastOfferAlertRef.current === pendingOffer.id) return;
-    lastOfferAlertRef.current = pendingOffer.id;
-
-    setMsg('Nueva oferta: revisa y responde antes de que expire.');
-    playOfferAlertSound();
-
-    const shouldUseHighPattern = notifPriorityMode === 'high' || notifPermission === 'granted';
-    if (navigator?.vibrate) {
-      navigator.vibrate(shouldUseHighPattern ? [300, 100, 300, 100, 300] : [180, 80, 180]);
+    if (pendingOffer?.id) {
+      setMsg('Nueva oferta: revisa y responde antes de que expire.');
     }
-  }, [pendingOffer?.id, notifPriorityMode, notifPermission]);
+  }, [pendingOffer?.id]);
 
   const announceListener = useCallback(async () => {
     if (!tokenRef.current) return;
@@ -1046,6 +1045,26 @@ export default function DriverHome() {
 
               {/* ── FABs — columna derecha, sin solapamiento ──────────── */}
 
+              {/* Herramientas de ruta */}
+              {!showZoneForm && !showImpassable && !showRoadPref && (
+                <div style={{ position:'absolute', top:12, right:12, zIndex:406, display:'flex', flexDirection:'column', gap:6 }}>
+                  <button className="btn-sm" onClick={() => {
+                    const pos = myPosition || customPin;
+                    if (!pos) return setMsg('Marca tu ubicación para reportar una zona');
+                    setZoneFormPos({ lat: pos.lat, lng: pos.lng });
+                    setShowZoneForm(true);
+                  }} style={{ background:'#fff', border:'1px solid #d1d5db', borderRadius:8, fontSize:'0.72rem' }}>
+                    🚧 Reportar zona
+                  </button>
+                  <button className="btn-sm" onClick={() => setShowImpassable(true)} style={{ background:'#fff', border:'1px solid #d1d5db', borderRadius:8, fontSize:'0.72rem' }}>
+                    ⛔ Reportar ruta
+                  </button>
+                  <button className="btn-sm" onClick={() => setShowRoadPref(true)} style={{ background:'#fff', border:'1px solid #d1d5db', borderRadius:8, fontSize:'0.72rem' }}>
+                    ⭐ Marcar favorita
+                  </button>
+                </div>
+              )}
+
               {/* Centrar — toggle rosa/blanco */}
               <button onClick={handleCenterToggle}
               aria-label={centerActive ? 'Desactivar centrado' : 'Activar centrado'}
@@ -1189,6 +1208,45 @@ export default function DriverHome() {
                         .catch(e => setMsg(e.message));
                       }}>Reportar</button>
                       <button className="btn-sm" onClick={() => { setShowImpassable(false); setImpassableWayId(''); setImpDesc(''); }}>Cancelar</button>
+                    </div>
+                  </div>
+              )}
+
+              {showRoadPref && (
+                  <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:50,
+                    background:'#fff', borderTop:'2px solid #10b981',
+                    padding:'0.75rem 1rem', boxShadow:'0 -4px 20px rgba(0,0,0,0.14)' }}>
+                    <div style={{ fontWeight:700, fontSize:'0.85rem', marginBottom:'0.5rem' }}>Marcar preferencia de ruta</div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+                      <label style={{ fontSize:'0.8rem' }}>ID de vía (OSM way_id)
+                        <input type="text" value={roadPrefWayId} onChange={e => setRoadPrefWayId(e.target.value)}
+                          placeholder="Ej. 123456789"
+                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }} />
+                      </label>
+                      <label style={{ fontSize:'0.8rem' }}>Tipo
+                        <select value={roadPrefType} onChange={e => setRoadPrefType(e.target.value)}
+                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }}>
+                          <option value="preferred">Favorita</option>
+                          <option value="difficult">Difícil</option>
+                          <option value="avoid">Evitar</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.6rem' }}>
+                      <button className="btn-primary btn-sm" onClick={() => {
+                        if (!roadPrefWayId.trim()) return setMsg('Ingresa el ID de vía para guardar preferencia');
+                        apiFetch('/nav/road-prefs/preference', { method:'POST', body:JSON.stringify({
+                          way_id: roadPrefWayId.trim(), preference: roadPrefType,
+                        })}, auth.token)
+                        .then(() => {
+                          setShowRoadPref(false);
+                          setRoadPrefWayId('');
+                          setRoadPrefType('preferred');
+                          setMsg('Preferencia de ruta guardada');
+                        })
+                        .catch(e => setMsg(e.message));
+                      }}>Guardar</button>
+                      <button className="btn-sm" onClick={() => { setShowRoadPref(false); setRoadPrefWayId(''); setRoadPrefType('preferred'); }}>Cancelar</button>
                     </div>
                   </div>
               )}
