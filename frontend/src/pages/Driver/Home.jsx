@@ -584,6 +584,7 @@ export default function DriverHome() {
   const [pinAddress,     setPinAddress]     = useState(null);
   const [loadingPin,     setLoadingPin]     = useState(false);
   const [routeGeometry,  setRouteGeometry]  = useState(null);
+  const [routeSteps,     setRouteSteps]     = useState([]);
   const [msg,            setMsg]            = useState('');
   const [navFollowEnabled, setNavFollowEnabled] = useState(false);
   // OPT-12: heading como state solo para pasarlo a DriverMap como prop de fallback
@@ -793,8 +794,17 @@ export default function DriverHome() {
       method:'POST',
       body:JSON.stringify({ origin:start, destination:delivery, waypoints:[pickup], includeSteps:true }),
     }, auth.token)
-    .then(d => { if (!d?.geometry?.length) throw new Error(); setRouteGeometry(d.geometry); setMsg('Ruta trazada'); })
-    .catch(() => { setRouteGeometry(null); setMsg('No se pudo calcular la ruta'); });
+    .then(d => {
+      if (!d?.geometry?.length) throw new Error();
+      setRouteGeometry(d.geometry);
+      setRouteSteps(Array.isArray(d?.steps) ? d.steps : []);
+      setMsg('Ruta trazada');
+    })
+    .catch(() => {
+      setRouteGeometry(null);
+      setRouteSteps([]);
+      setMsg('No se pudo calcular la ruta');
+    });
   }
 
   function openGoogleNavigation() {
@@ -813,16 +823,21 @@ export default function DriverHome() {
     }
   }
 
-  useEffect(() => { if (!activeOrder) setRouteGeometry(null); }, [activeOrder]);
+  useEffect(() => {
+    if (!activeOrder) {
+      setRouteGeometry(null);
+      setRouteSteps([]);
+    }
+  }, [activeOrder]);
 
   const handleRefresh = useCallback(() => loadData(), [loadData]);
 
   const { voiceEnabled, setVoiceEnabled, wakeLockActive } =
     useNavFeatures({
-      steps:       routeGeometry ? [] : [],
+      steps:       routeSteps,
       currentPos:  myPosition,
       activeZones,
-      onVoice: (msg) => window.speechSynthesis?.speak(new SpeechSynthesisUtterance(msg)),
+      onVoice: (voiceMsg) => setMsg(voiceMsg),
     });
 
   // Carga de zonas activas — cada 2 minutos
@@ -869,6 +884,7 @@ export default function DriverHome() {
           {availability ? '● Disponible' : '○ No disponible'}
           </div>
           {myPosition && <div style={{ fontSize:'0.7rem', color:'rgba(255,255,255,0.8)' }}>GPS · ±{myPosition.accuracy}m</div>}
+          {wakeLockActive && <div style={{ fontSize:'0.68rem', color:'rgba(255,255,255,0.85)' }}>Pantalla activa para navegación</div>}
           {gpsError   && <div style={{ fontSize:'0.7rem', color:'#ffb3b3', maxWidth:200 }}>{gpsError}</div>}
           </div>
           <button onClick={toggleAvailability}
