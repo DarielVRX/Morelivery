@@ -1,6 +1,6 @@
 # Morelivery Beta (Delivery Marketplace)
 
-Beta minimo funcional
+Beta semiavanzado
 
 ## 1) Arquitectura del sistema
 
