@@ -70,7 +70,20 @@ async function notifyRealtime({ title, body, tag, group, url = '/' }) {
   // Fallback foreground
   try {
     const high = priority === 'high';
-    new Notification(title, { body, tag, renotify: true, requireInteraction: high });
+    if (high && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      navigator.vibrate([300, 100, 300, 100, 300]);
+    }
+    new Notification(title, {
+      body,
+      tag,
+      icon: '/icon-192.png',
+      badge: '/badge.svg',
+      renotify: true,
+      requireInteraction: high,
+      silent: false,
+      timestamp: Date.now(),
+      vibrate: high ? [300, 100, 300, 100, 300] : [180, 80, 180],
+    });
   } catch (_) {}
 }
 
