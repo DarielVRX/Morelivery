@@ -19,6 +19,39 @@ function shouldNotifyInBackground() {
   return document.visibilityState !== 'visible' || !document.hasFocus();
 }
 
+
+function playOfferPulse() {
+  if (typeof window === 'undefined') return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    const pulse = (offset, freq, duration = 0.11) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+      gain.gain.exponentialRampToValueAtTime(0.22, ctx.currentTime + offset + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + duration);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + duration + 0.02);
+    };
+    pulse(0.00, 900);
+    pulse(0.16, 1200);
+    setTimeout(() => ctx.close().catch(() => {}), 600);
+  } catch (_) {}
+}
+
+function alertOfferAttention(priority = 'high') {
+  const high = priority === 'high';
+  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    navigator.vibrate(high ? [300, 100, 300, 100, 300] : [180, 80, 180]);
+  }
+  playOfferPulse();
+}
+
 function notificationPriority(group) {
   try {
     const stored = localStorage.getItem('morelivery_notif_priority');
@@ -70,7 +103,20 @@ async function notifyRealtime({ title, body, tag, group, url = '/' }) {
   // Fallback foreground
   try {
     const high = priority === 'high';
-    new Notification(title, { body, tag, renotify: true, requireInteraction: high });
+    if (high && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      navigator.vibrate([300, 100, 300, 100, 300]);
+    }
+    new Notification(title, {
+      body,
+      tag,
+      icon: '/icon-192.png',
+      badge: '/badge.svg',
+      renotify: true,
+      requireInteraction: high,
+      silent: false,
+      timestamp: Date.now(),
+      vibrate: high ? [300, 100, 300, 100, 300] : [180, 80, 180],
+    });
   } catch (_) {}
 }
 
@@ -82,6 +128,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
   const reconnectTimer = useRef(null);
   const mountedRef     = useRef(true);
   const retryCount     = useRef(0);
+  const lastOfferPulse = useRef({ id: null, at: 0 });
 
   const cbUpdate   = useRef(onOrderUpdate);
   const cbLocation = useRef(onDriverLocation);
@@ -153,6 +200,17 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
         const data = JSON.parse(e.data);
         console.log(`[SSE] new_offer received orderId=${data.orderId} secondsLeft=${data.secondsLeft}`);
         cbOffer.current?.(data);
+
+        // Alerta local inmediata por evento SSE (no depende de render en Home)
+        const now = Date.now();
+        const sameOffer = lastOfferPulse.current.id && String(lastOfferPulse.current.id) === String(data?.orderId);
+        const tooSoon = now - (lastOfferPulse.current.at || 0) < 4000;
+        if (!sameOffer || !tooSoon) {
+          const priority = notificationPriority('offers');
+          alertOfferAttention(priority);
+          lastOfferPulse.current = { id: data?.orderId || null, at: now };
+        }
+
         notifyRealtime({
           title: 'Nueva oferta disponible',
           body:  'Tienes un pedido por aceptar.',
