@@ -9,27 +9,41 @@ const router = Router();
 const VALID_PREFERENCES = ['preferred', 'difficult', 'avoid'];
 const VALID_DURATIONS   = ['days', 'weeks', 'months', 'permanent'];
 
-// POST /preference — guardar preferencia de calle
+// POST /preference — guardar preferencia(s) de calle
+// Acepta objeto único { way_id, preference }
+// o array     { ways: [{ way_id, preference }] }
 router.post('/preference', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
-    const { way_id, preference } = req.body || {};
+    const body = req.body || {};
 
-    if (!way_id || !preference) {
-      throw new AppError(400, 'way_id y preference son obligatorios');
+    // Normalizar a array
+    let items = [];
+    if (Array.isArray(body.ways)) {
+      items = body.ways.map(w => ({
+        way_id:     String(w.way_id || w.id || ''),
+        preference: w.preference,
+      }));
+    } else {
+      items = [{ way_id: String(body.way_id || ''), preference: body.preference }];
     }
-    if (!VALID_PREFERENCES.includes(preference)) {
-      throw new AppError(400, `preference debe ser uno de: ${VALID_PREFERENCES.join(', ')}`);
+
+    if (!items.length) throw new AppError(400, 'Se requiere al menos un tramo');
+
+    for (const { way_id, preference } of items) {
+      if (!way_id) throw new AppError(400, 'way_id es obligatorio en cada tramo');
+      if (!VALID_PREFERENCES.includes(preference)) {
+        throw new AppError(400, `preference debe ser uno de: ${VALID_PREFERENCES.join(', ')}`);
+      }
+      await query(
+        `INSERT INTO road_preferences (driver_id, way_id, preference)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (driver_id, way_id) DO UPDATE
+           SET preference = EXCLUDED.preference, updated_at = NOW()`,
+        [req.user.userId, way_id, preference]
+      );
     }
 
-    await query(
-      `INSERT INTO road_preferences (driver_id, way_id, preference)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (driver_id, way_id) DO UPDATE
-         SET preference = EXCLUDED.preference, updated_at = NOW()`,
-      [req.user.userId, String(way_id), preference]
-    );
-
-    return res.json({ ok: true });
+    return res.json({ ok: true, saved: items.length });
   } catch (error) {
     return next(error);
   }
@@ -49,29 +63,60 @@ router.get('/preferences', authenticate, authorize(['driver']), async (req, res,
   }
 });
 
-// POST /impassable — reportar calle no viable
+// POST /impassable — reportar calle(s) no viable(s)
+// Acepta objeto único { way_id, lat, lng, description?, estimated_duration }
+// o array     { lat, lng, ways: [{ way_id, description?, estimated_duration }] }
 router.post('/impassable', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
-    const { way_id, lat, lng, description, estimated_duration } = req.body || {};
+    const body = req.body || {};
+    const baseLat = Number(body.lat ?? 0);
+    const baseLng = Number(body.lng ?? 0);
 
-    if (!way_id || lat == null || lng == null) {
-      throw new AppError(400, 'way_id, lat y lng son obligatorios');
-    }
-    if (!VALID_DURATIONS.includes(estimated_duration)) {
-      throw new AppError(400, `estimated_duration debe ser uno de: ${VALID_DURATIONS.join(', ')}`);
-    }
-    if (description && description.length > 500) {
-      throw new AppError(400, 'description no puede superar 500 caracteres');
+    // Normalizar a array
+    let items = [];
+    if (Array.isArray(body.ways)) {
+      items = body.ways.map(w => ({
+        way_id:             String(w.way_id || w.id || ''),
+        lat:                Number(w.lat ?? baseLat),
+        lng:                Number(w.lng ?? baseLng),
+        description:        w.description || body.description || null,
+        estimated_duration: w.estimated_duration || body.estimated_duration,
+      }));
+    } else {
+      items = [{
+        way_id:             String(body.way_id || ''),
+        lat:                baseLat,
+        lng:                baseLng,
+        description:        body.description || null,
+        estimated_duration: body.estimated_duration,
+      }];
     }
 
-    const result = await query(
-      `INSERT INTO impassable_reports (way_id, lat, lng, description, estimated_duration, reported_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
-      [String(way_id), Number(lat), Number(lng), description || null, estimated_duration, req.user.userId]
-    );
+    if (!items.length) throw new AppError(400, 'Se requiere al menos un tramo');
 
-    return res.status(201).json({ report: result.rows[0] });
+    const reports = [];
+    for (const { way_id, lat, lng, description, estimated_duration } of items) {
+      if (!way_id) throw new AppError(400, 'way_id es obligatorio en cada tramo');
+      if (!VALID_DURATIONS.includes(estimated_duration)) {
+        throw new AppError(400, `estimated_duration debe ser uno de: ${VALID_DURATIONS.join(', ')}`);
+      }
+      if (description && description.length > 500) {
+        throw new AppError(400, 'description no puede superar 500 caracteres');
+      }
+      try {
+        const result = await query(
+          `INSERT INTO impassable_reports (way_id, lat, lng, description, estimated_duration, reported_by)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING *`,
+          [way_id, lat, lng, description || null, estimated_duration, req.user.userId]
+        );
+        reports.push(result.rows[0]);
+      } catch (e) {
+        if (e?.code !== '23505') throw e; // ignorar duplicados (índice parcial único)
+      }
+    }
+
+    return res.status(201).json({ ok: true, reports });
   } catch (error) {
     return next(error);
   }

@@ -6,6 +6,8 @@ import { useDriverLocation } from '../../hooks/useDriverLocation';
 import OfferCountdown from '../../components/OfferCountdown';
 import { useNavFeatures } from '../../hooks/useNavFeatures';
 import ZoneLayer from '../../components/ZoneLayer';
+import ZonePlacer from '../../components/ZonePlacer';
+import WayPicker from '../../components/WayPicker';
 
 // ── CSS global de animaciones — inyectado UNA sola vez, completamente fuera del render ──
 if (typeof document !== 'undefined' && !document.getElementById('dh-animations')) {
@@ -622,7 +624,7 @@ export default function DriverHome() {
   const [notifPermission, setNotifPermission] = useState(
     (typeof window !== 'undefined' && 'Notification' in window) ? Notification.permission : 'unsupported'
   );
-  const [notifPriorityMode, setNotifPriorityMode] = useState('normal');
+  const [notifPriorityMode, setNotifPriorityMode] = useState(getNotifPriorityMode);
   const [navFollowEnabled, setNavFollowEnabled] = useState(false);
   // OPT-12: heading como state solo para pasarlo a DriverMap como prop de fallback
   // El heading real se gestiona en DriverMap vía refs — este state solo actualiza 1 vez/segundo aprox.
@@ -630,20 +632,10 @@ export default function DriverHome() {
   const [centerSignal,   setCenterSignal]   = useState(null);
   const [centerActive,   setCenterActive]   = useState(false);
 
-  const [activeZones,     setActiveZones]     = useState([]);
-  const [showZoneForm,    setShowZoneForm]     = useState(false);
-  const [zoneFormPos,     setZoneFormPos]      = useState(null);
-  const [zoneType,        setZoneType]         = useState('traffic');
-  const [zoneRadius,      setZoneRadius]       = useState(100);
-  const [zoneHours,       setZoneHours]        = useState(2);
-  const [showImpassable,  setShowImpassable]   = useState(false);
-  const [impassableWayId, setImpassableWayId]  = useState('');
-  const [impDesc,         setImpDesc]          = useState('');
-  const [impDuration,     setImpDuration]      = useState('days');
-  const [showRoadPref,    setShowRoadPref]     = useState(false);
-  const [roadPrefWayId,   setRoadPrefWayId]    = useState('');
-  const [roadPrefType,    setRoadPrefType]     = useState('preferred');
-  const [mapInstance,     setMapInstance]      = useState(null);
+  const [activeZones,  setActiveZones]  = useState([]);
+  // navMode: null | 'menu' | 'zone' | 'impassable' | 'preference'
+  const [navMode,      setNavMode]      = useState(null);
+  const [mapInstance,  setMapInstance]  = useState(null);
 
   const loadDataRef     = useRef(null);
   const loadDebounceRef = useRef(null);
@@ -711,11 +703,7 @@ export default function DriverHome() {
   useEffect(() => {
     const refreshNotifState = () => {
       if (typeof window === 'undefined') return;
-      try {
-        setNotifPriorityMode(localStorage.getItem('morelivery_notif_priority') === 'high' ? 'high' : 'normal');
-      } catch (_) {
-        setNotifPriorityMode('normal');
-      }
+      setNotifPriorityMode(getNotifPriorityMode());
       if ('Notification' in window) setNotifPermission(Notification.permission);
     };
     refreshNotifState();
@@ -728,10 +716,18 @@ export default function DriverHome() {
   }, []);
 
   useEffect(() => {
-    if (pendingOffer?.id) {
-      setMsg('Nueva oferta: revisa y responde antes de que expire.');
+    if (!pendingOffer?.id) return;
+    if (lastOfferAlertRef.current === pendingOffer.id) return;
+    lastOfferAlertRef.current = pendingOffer.id;
+
+    setMsg('Nueva oferta: revisa y responde antes de que expire.');
+    playOfferAlertSound();
+
+    const shouldUseHighPattern = notifPriorityMode === 'high' || notifPermission === 'granted';
+    if (navigator?.vibrate) {
+      navigator.vibrate(shouldUseHighPattern ? [300, 100, 300, 100, 300] : [180, 80, 180]);
     }
-  }, [pendingOffer?.id]);
+  }, [pendingOffer?.id, notifPriorityMode, notifPermission]);
 
   const announceListener = useCallback(async () => {
     if (!tokenRef.current) return;
@@ -1045,26 +1041,6 @@ export default function DriverHome() {
 
               {/* ── FABs — columna derecha, sin solapamiento ──────────── */}
 
-              {/* Herramientas de ruta */}
-              {!showZoneForm && !showImpassable && !showRoadPref && (
-                <div style={{ position:'absolute', top:12, right:12, zIndex:406, display:'flex', flexDirection:'column', gap:6 }}>
-                  <button className="btn-sm" onClick={() => {
-                    const pos = myPosition || customPin;
-                    if (!pos) return setMsg('Marca tu ubicación para reportar una zona');
-                    setZoneFormPos({ lat: pos.lat, lng: pos.lng });
-                    setShowZoneForm(true);
-                  }} style={{ background:'#fff', border:'1px solid #d1d5db', borderRadius:8, fontSize:'0.72rem' }}>
-                    🚧 Reportar zona
-                  </button>
-                  <button className="btn-sm" onClick={() => setShowImpassable(true)} style={{ background:'#fff', border:'1px solid #d1d5db', borderRadius:8, fontSize:'0.72rem' }}>
-                    ⛔ Reportar ruta
-                  </button>
-                  <button className="btn-sm" onClick={() => setShowRoadPref(true)} style={{ background:'#fff', border:'1px solid #d1d5db', borderRadius:8, fontSize:'0.72rem' }}>
-                    ⭐ Marcar favorita
-                  </button>
-                </div>
-              )}
-
               {/* Centrar — toggle rosa/blanco */}
               <button onClick={handleCenterToggle}
               aria-label={centerActive ? 'Desactivar centrado' : 'Activar centrado'}
@@ -1120,136 +1096,121 @@ export default function DriverHome() {
                 fontSize:'1rem',
               }}>{voiceEnabled ? '🔊' : '🔇'}</button>
 
+              {/* FAB reportar incidencia — solo sin pedido activo y sin modo activo */}
+              {!navMode && !hasActiveOrder && (
+                <button
+                  aria-label="Reportar incidencia de ruta"
+                  className="dh-fab"
+                  onClick={() => setNavMode('menu')}
+                  style={{
+                    position:'absolute',
+                    bottom:'calc(16px + 44px + 44px + env(safe-area-inset-bottom,0px))',
+                    right:12, zIndex:402,
+                    width:36, height:36, borderRadius:'50%',
+                    background:'#fff', color:'#374151',
+                    border:'1px solid #d1d5db',
+                    boxShadow:'0 2px 8px rgba(0,0,0,0.18)', cursor:'pointer',
+                    display:'flex', alignItems:'center', justifyContent:'center',
+                    fontSize:'1rem',
+                  }}>⚑</button>
+              )}
+
+              {/* Mini menú de tipo de reporte */}
+              {navMode === 'menu' && (
+                <div style={{
+                  position:'absolute',
+                  bottom:'calc(16px + 44px + 44px + 8px + env(safe-area-inset-bottom,0px))',
+                  right:12, zIndex:403,
+                  display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6,
+                }}>
+                  {[
+                    { mode:'zone',       label:'🚦 Zona de alerta',      bg:'#f97316' },
+                    { mode:'impassable', label:'⛔ Calle no viable',      bg:'#ef4444' },
+                    { mode:'preference', label:'⭐ Preferencia de calle', bg:'#16a34a' },
+                  ].map(opt => (
+                    <button key={opt.mode} onClick={() => setNavMode(opt.mode)} style={{
+                      padding:'0.32rem 0.75rem', borderRadius:20, fontSize:'0.76rem',
+                      fontWeight:600, cursor:'pointer', whiteSpace:'nowrap',
+                      background:opt.bg, color:'#fff', border:'none',
+                      boxShadow:'0 2px 8px rgba(0,0,0,0.2)',
+                    }}>{opt.label}</button>
+                  ))}
+                  <button onClick={() => setNavMode(null)} style={{
+                    padding:'0.28rem 0.65rem', borderRadius:20, fontSize:'0.72rem',
+                    background:'#f3f4f6', color:'#374151',
+                    border:'1px solid #e5e7eb', cursor:'pointer', fontWeight:600,
+                  }}>Cancelar</button>
+                </div>
+              )}
+
+              {/* ZonePlacer — círculo fijo en pantalla, el mapa se mueve debajo */}
+              {navMode === 'zone' && mapInstance && (
+                <ZonePlacer
+                  map={mapInstance}
+                  onConfirm={params => {
+                    apiFetch('/nav/zones', { method:'POST', body:JSON.stringify(params) }, auth.token)
+                      .then(() => {
+                        setNavMode(null);
+                        apiFetch('/nav/zones/active', {}, null)
+                          .then(d => { if (Array.isArray(d?.zones)) setActiveZones(d.zones); })
+                          .catch(() => {});
+                        setMsg('Zona reportada ✓');
+                      })
+                      .catch(e => setMsg(e.message));
+                  }}
+                  onCancel={() => setNavMode(null)}
+                />
+              )}
+
+              {/* WayPicker — seleccionar tramos de calle para impassable */}
+              {navMode === 'impassable' && mapInstance && (
+                <WayPicker
+                  map={mapInstance}
+                  mode="impassable"
+                  onConfirm={ways => {
+                    const pos = myPosition || { lat:0, lng:0 };
+                    apiFetch('/nav/road-prefs/impassable', {
+                      method:'POST',
+                      body: JSON.stringify({
+                        lat: pos.lat, lng: pos.lng,
+                        ways: ways.map(w => ({
+                          way_id:             w.way_id,
+                          estimated_duration: w.estimated_duration,
+                          description:        w.description,
+                        })),
+                      }),
+                    }, auth.token)
+                      .then(() => { setNavMode(null); setMsg(`${ways.length} calle(s) reportada(s) ✓`); })
+                      .catch(e => setMsg(e.message));
+                  }}
+                  onCancel={() => setNavMode(null)}
+                />
+              )}
+
+              {/* WayPicker — seleccionar tramos de calle para preference */}
+              {navMode === 'preference' && mapInstance && (
+                <WayPicker
+                  map={mapInstance}
+                  mode="preference"
+                  onConfirm={ways => {
+                    apiFetch('/nav/road-prefs/preference', {
+                      method:'POST',
+                      body: JSON.stringify({
+                        ways: ways.map(w => ({
+                          way_id:     w.way_id,
+                          preference: w.preference,
+                          description: w.description,
+                        })),
+                      }),
+                    }, auth.token)
+                      .then(() => { setNavMode(null); setMsg(`${ways.length} preferencia(s) guardada(s) ✓`); })
+                      .catch(e => setMsg(e.message));
+                  }}
+                  onCancel={() => setNavMode(null)}
+                />
+              )}
+
               </div>{/* fin mapa */}
-
-              {/* ── Formulario de reporte de zona ──────────────────────── */}
-              {showZoneForm && zoneFormPos && (
-                  <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:50,
-                    background:'#fff', borderTop:'2px solid var(--brand)',
-                    padding:'0.75rem 1rem', boxShadow:'0 -4px 20px rgba(0,0,0,0.14)' }}>
-                    <div style={{ fontWeight:700, fontSize:'0.85rem', marginBottom:'0.5rem' }}>Reportar zona de alerta</div>
-                    <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
-                      <label style={{ fontSize:'0.8rem' }}>Tipo de zona
-                        <select value={zoneType} onChange={e => setZoneType(e.target.value)}
-                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }}>
-                          <option value="traffic">Tráfico pesado</option>
-                          <option value="construction">Obra en construcción</option>
-                          <option value="accident">Accidente</option>
-                          <option value="flood">Inundación</option>
-                          <option value="blocked">Calle bloqueada</option>
-                          <option value="other">Otro</option>
-                        </select>
-                      </label>
-                      <label style={{ fontSize:'0.8rem' }}>Radio (metros)
-                        <input type="number" min={20} max={2000} value={zoneRadius}
-                          onChange={e => setZoneRadius(Number(e.target.value))}
-                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }} />
-                      </label>
-                      <label style={{ fontSize:'0.8rem' }}>Vigencia (horas)
-                        <select value={zoneHours} onChange={e => setZoneHours(Number(e.target.value))}
-                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }}>
-                          {[1,2,4,8,12,24,48,72].map(h => <option key={h} value={h}>{h}h</option>)}
-                        </select>
-                      </label>
-                    </div>
-                    <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.6rem' }}>
-                      <button className="btn-primary btn-sm" onClick={() => {
-                        apiFetch('/nav/zones', { method:'POST', body:JSON.stringify({
-                          lat: zoneFormPos.lat, lng: zoneFormPos.lng,
-                          radius_m: zoneRadius, type: zoneType, estimated_hours: zoneHours,
-                        })}, auth.token)
-                        .then(() => {
-                          setShowZoneForm(false); setZoneFormPos(null);
-                          apiFetch('/nav/zones/active', {}, null).then(d => { if (Array.isArray(d?.zones)) setActiveZones(d.zones); }).catch(() => {});
-                          setMsg('Zona reportada');
-                        })
-                        .catch(e => setMsg(e.message));
-                      }}>Guardar</button>
-                      <button className="btn-sm" onClick={() => { setShowZoneForm(false); setZoneFormPos(null); }}>Cancelar</button>
-                    </div>
-                  </div>
-              )}
-
-              {/* ── Formulario de calle no viable ─────────────────────── */}
-              {showImpassable && (
-                  <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:50,
-                    background:'#fff', borderTop:'2px solid var(--brand)',
-                    padding:'0.75rem 1rem', boxShadow:'0 -4px 20px rgba(0,0,0,0.14)' }}>
-                    <div style={{ fontWeight:700, fontSize:'0.85rem', marginBottom:'0.5rem' }}>Reportar calle no viable</div>
-                    <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
-                      <label style={{ fontSize:'0.8rem' }}>ID de OSM way
-                        <input type="text" value={impassableWayId} onChange={e => setImpassableWayId(e.target.value)}
-                          placeholder="ID de OSM way"
-                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }} />
-                      </label>
-                      <label style={{ fontSize:'0.8rem' }}>Descripción (opcional)
-                        <textarea value={impDesc} onChange={e => setImpDesc(e.target.value)} rows={2}
-                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db', resize:'none', boxSizing:'border-box' }} />
-                      </label>
-                      <label style={{ fontSize:'0.8rem' }}>Duración estimada
-                        <select value={impDuration} onChange={e => setImpDuration(e.target.value)}
-                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }}>
-                          <option value="days">Días</option>
-                          <option value="weeks">Semanas</option>
-                          <option value="months">Meses</option>
-                          <option value="permanent">Permanente — error de mapa</option>
-                        </select>
-                      </label>
-                    </div>
-                    <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.6rem' }}>
-                      <button className="btn-primary btn-sm" onClick={() => {
-                        if (!impassableWayId.trim()) return setMsg('Ingresa el ID de OSM way');
-                        const pos = myPosition || { lat: 0, lng: 0 };
-                        apiFetch('/nav/road-prefs/impassable', { method:'POST', body:JSON.stringify({
-                          way_id: impassableWayId.trim(), lat: pos.lat, lng: pos.lng,
-                          description: impDesc || undefined, estimated_duration: impDuration,
-                        })}, auth.token)
-                        .then(() => { setShowImpassable(false); setImpassableWayId(''); setImpDesc(''); setMsg('Reporte enviado'); })
-                        .catch(e => setMsg(e.message));
-                      }}>Reportar</button>
-                      <button className="btn-sm" onClick={() => { setShowImpassable(false); setImpassableWayId(''); setImpDesc(''); }}>Cancelar</button>
-                    </div>
-                  </div>
-              )}
-
-              {showRoadPref && (
-                  <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:50,
-                    background:'#fff', borderTop:'2px solid #10b981',
-                    padding:'0.75rem 1rem', boxShadow:'0 -4px 20px rgba(0,0,0,0.14)' }}>
-                    <div style={{ fontWeight:700, fontSize:'0.85rem', marginBottom:'0.5rem' }}>Marcar preferencia de ruta</div>
-                    <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
-                      <label style={{ fontSize:'0.8rem' }}>ID de vía (OSM way_id)
-                        <input type="text" value={roadPrefWayId} onChange={e => setRoadPrefWayId(e.target.value)}
-                          placeholder="Ej. 123456789"
-                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }} />
-                      </label>
-                      <label style={{ fontSize:'0.8rem' }}>Tipo
-                        <select value={roadPrefType} onChange={e => setRoadPrefType(e.target.value)}
-                          style={{ width:'100%', marginTop:'0.2rem', padding:'0.3rem', fontSize:'0.8rem', borderRadius:4, border:'1px solid #d1d5db' }}>
-                          <option value="preferred">Favorita</option>
-                          <option value="difficult">Difícil</option>
-                          <option value="avoid">Evitar</option>
-                        </select>
-                      </label>
-                    </div>
-                    <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.6rem' }}>
-                      <button className="btn-primary btn-sm" onClick={() => {
-                        if (!roadPrefWayId.trim()) return setMsg('Ingresa el ID de vía para guardar preferencia');
-                        apiFetch('/nav/road-prefs/preference', { method:'POST', body:JSON.stringify({
-                          way_id: roadPrefWayId.trim(), preference: roadPrefType,
-                        })}, auth.token)
-                        .then(() => {
-                          setShowRoadPref(false);
-                          setRoadPrefWayId('');
-                          setRoadPrefType('preferred');
-                          setMsg('Preferencia de ruta guardada');
-                        })
-                        .catch(e => setMsg(e.message));
-                      }}>Guardar</button>
-                      <button className="btn-sm" onClick={() => { setShowRoadPref(false); setRoadPrefWayId(''); setRoadPrefType('preferred'); }}>Cancelar</button>
-                    </div>
-                  </div>
-              )}
 
               {/* ── Panel de oferta ─────────────────────────────────────── */}
               {pendingOffer && (
