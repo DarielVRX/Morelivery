@@ -1,6 +1,6 @@
 # Morelivery Beta (Delivery Marketplace)
 
-Beta funcional enfocada en seguridad, modularidad y escalabilidad para marketplace de delivery con 4 roles.
+Beta minimo funcional
 
 ## 1) Arquitectura del sistema
 
