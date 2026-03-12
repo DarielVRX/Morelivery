@@ -31,6 +31,39 @@ if (typeof document !== 'undefined' && !document.getElementById('dh-animations')
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
+function getNotifPriorityMode() {
+  try {
+    return localStorage.getItem('morelivery_notif_priority') === 'high' ? 'high' : 'normal';
+  } catch (_) {
+    return 'normal';
+  }
+}
+
+function playOfferAlertSound() {
+  if (typeof window === 'undefined') return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    const pulse = (offset, freq, duration = 0.12) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + offset + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + duration + 0.03);
+    };
+    pulse(0.00, 880);
+    pulse(0.18, 1180);
+    setTimeout(() => ctx.close().catch(() => {}), 600);
+  } catch (_) {}
+}
+
 const STATUS_LABELS = {
   created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
   preparing:'En preparación', ready:'Listo para retiro',
@@ -672,6 +705,7 @@ export default function DriverHome() {
   }, [myPosition?.lat, myPosition?.lng]);
 
   const tokenRef = useRef(auth.token);
+  const lastOfferAlertRef = useRef(null);
   useEffect(() => { tokenRef.current = auth.token; }, [auth.token]);
 
   useEffect(() => {
