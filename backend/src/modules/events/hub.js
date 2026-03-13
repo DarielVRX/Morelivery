@@ -5,6 +5,26 @@ class SseHub {
   constructor() {
     // Map<clientId, { userId, role, res }>
     this._clients = new Map();
+
+    // Heartbeat cada 25 s — reinicia el timer de idle en Render (timeout: 55 s) y en
+    // proxies HTTP intermedios. Un comentario SSE (": ping\n\n") es ignorado por el
+    // cliente pero mantiene el socket TCP vivo. Si write() lanza, el cliente ya se fue
+    // (red caída, cambio de WiFi en el móvil) → se limpia del mapa inmediatamente.
+    this._heartbeat = setInterval(() => {
+      for (const [clientId, c] of this._clients) {
+        try {
+          c.res.write(': ping\n\n');
+        } catch (_) {
+          this._clients.delete(clientId);
+        }
+      }
+    }, 25_000);
+  }
+
+  /** Llamar en shutdown graceful para no dejar el interval colgado en tests/dev. */
+  destroy() {
+    clearInterval(this._heartbeat);
+    this._clients.clear();
   }
 
   register(userId, role, res) {
