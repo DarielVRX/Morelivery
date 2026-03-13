@@ -240,9 +240,9 @@ function DriverMap({
             const map = mapRef.current;
             const h   = liveHeadingRef.current;
             map.easeTo({
-              center: [next.lng, next.lat], bearing: h, pitch: 60, zoom: 19,
+              center: [next.lng, next.lat], bearing: h, pitch: 0, zoom: 19,
               duration: 250, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
-                       essential: true,
+              essential: true,
             });
           }
         }
@@ -258,8 +258,8 @@ function DriverMap({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Crear el SVG del marcador del driver — se llama al montar y al cambiar modo follow
-  // OPT-6: el SVG se crea con createElementNS (sin innerHTML) para no perder la referencia
+  // Crear el marcador del driver — diferente en modo drive (flecha 75%) vs normal (punto 25%)
+  // OPT-6: SVG creado con createElementNS para mantener referencia directa
   function _buildDriverMarker(ml, map) {
     if (markersRef.current.driver) {
       markersRef.current.driver.remove();
@@ -269,31 +269,42 @@ function DriverMap({
     const pos = livePosRef.current;
     if (!pos) return;
 
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('width', '80'); svg.setAttribute('height', '80');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    // Colores invertidos: relleno más sólido y borde ligeramente translúcido
-    const fillColor   = '#e3aaaa';
-    const strokeColor = 'rgba(227,170,170,0.85)';
-    svg.setAttribute('fill', fillColor);
-    svg.setAttribute('stroke', strokeColor);
-    svg.setAttribute('stroke-width', '1.4');
-    svg.setAttribute('stroke-linejoin', 'round');
-    svg.style.cssText = 'display:block;transform-origin:50% 55%;';
-    svg.style.transform = navFollowRef.current
-    ? `rotate(${liveHeadingRef.current}deg)` : 'rotate(0deg)';
+    const isDrive = navFollowRef.current;
+    const wrap    = document.createElement('div');
 
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', 'M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z');
-    svg.appendChild(path);
+    if (isDrive) {
+      // Modo drive: flecha de navegación al 75% (original 80px → 60px)
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('width', '60'); svg.setAttribute('height', '60');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('fill', '#e3aaaa');
+      svg.setAttribute('stroke', 'rgba(227,170,170,0.85)');
+      svg.setAttribute('stroke-width', '1.4');
+      svg.setAttribute('stroke-linejoin', 'round');
+      svg.style.cssText = 'display:block;transform-origin:50% 55%;';
+      svg.style.transform = `rotate(${liveHeadingRef.current}deg)`;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', 'M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z');
+      svg.appendChild(path);
+      wrap.style.cssText = 'width:60px;height:60px';
+      wrap.appendChild(svg);
+      markersRef.current.driverSvg = svg;
+    } else {
+      // Modo normal: punto genérico al 25% del original (80px → 20px)
+      const dot = document.createElement('div');
+      dot.style.cssText = [
+        'width:20px', 'height:20px', 'border-radius:50%',
+        'background:#e3aaaa',
+        'border:2.5px solid #fff',
+        'box-shadow:0 2px 8px rgba(227,170,170,0.55)',
+      ].join(';');
+      wrap.style.cssText = 'width:20px;height:20px';
+      wrap.appendChild(dot);
+      markersRef.current.driverSvg = null; // punto no necesita ref para rotar
+    }
 
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'width:80px;height:80px';
-    wrap.appendChild(svg);
-
-    markersRef.current.driverSvg = svg;
     markersRef.current.driver = new ml.Marker({ element: wrap, anchor: 'center' })
-    .setLngLat([pos.lng, pos.lat]).addTo(map);
+      .setLngLat([pos.lng, pos.lat]).addTo(map);
   }
 
   // Inicializar mapa UNA sola vez
@@ -307,11 +318,15 @@ function DriverMap({
         container: containerRef.current,
         style: 'https://tiles.openfreemap.org/styles/liberty',
         center: [start.lng, start.lat],
-        zoom: 14, pitch: 30, bearing: 0, maxZoom: 20,
+        zoom: 14, pitch: 0, bearing: 0, maxZoom: 20,
         attributionControl: false,
-        antialias: false,           // OPT-perf: reduce overdraw en gama media
+        antialias: false,
         preserveDrawingBuffer: false,
+        pitchWithRotate: false,
+        dragRotate: false,
       });
+      // Deshabilitar pitch por gestos táctiles
+      map.touchPitch.disable();
       map.addControl(new ml.NavigationControl({ showCompass: false }), 'top-right');
       // Ocultar controles de zoom por defecto y solo mostrarlos tras interacción por 3s
       const ctrl = containerRef.current.querySelector('.maplibregl-ctrl-top-right');
@@ -365,7 +380,7 @@ function DriverMap({
       const pos = livePosRef.current;
       if (!pos) return;
       const h = liveHeadingRef.current || navHeadingDeg || 0;
-      map.easeTo({ center:[pos.lng,pos.lat], bearing:h, pitch:60, zoom:19,
+      map.easeTo({ center:[pos.lng,pos.lat], bearing:h, pitch:0, zoom:19,
         duration:350, offset:[0, Math.round(map.getContainer().clientHeight * 0.18)], essential:true });
     }
   }, [navFollowEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -437,10 +452,10 @@ function DriverMap({
         if (centerSignal === 'follow') {
           const h = liveHeadingRef.current || navHeadingDeg || 0;
           const offsetY = Math.round(map.getContainer().clientHeight * 0.18);
-          map.easeTo({ center:[pos.lng,pos.lat], zoom:19, pitch:60, bearing:h,
+          map.easeTo({ center:[pos.lng,pos.lat], zoom:19, pitch:0, bearing:h,
             duration:350, offset:[0,offsetY], essential:true });
         } else {
-          map.easeTo({ center:[pos.lng,pos.lat], zoom:14, pitch:30, bearing:0, duration:350, essential:true });
+          map.easeTo({ center:[pos.lng,pos.lat], zoom:14, pitch:0, bearing:0, duration:350, essential:true });
         }
         onCenterDone?.();
       }, [centerSignal]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -894,12 +909,20 @@ export default function DriverHome() {
 
   const handleRefresh = useCallback(() => loadData(), [loadData]);
 
+  const ZONE_LABELS_MAP = {
+    traffic:'Tráfico pesado', construction:'Obra en construcción',
+    accident:'Accidente', flood:'Inundación', blocked:'Calle bloqueada', other:'Otro problema',
+  };
+
   const { voiceEnabled, setVoiceEnabled, wakeLockActive } =
     useNavFeatures({
-      steps:       routeSteps,
-      currentPos:  myPosition,
+      steps:          routeSteps,
+      currentPos:     myPosition,
       activeZones,
-      onVoice: (voiceMsg) => setMsg(voiceMsg),
+      impassableWays: [],       // TODO: cargar desde /nav/road-prefs/impassable cuando se implemente el endpoint GET
+      routeGeometry:  routeGeometry || [],
+      onVoice:        (voiceMsg) => setMsg(voiceMsg),
+      onZoneAlert:    (zone)     => setMsg(`⚠️ Zona de alerta cerca: ${ZONE_LABELS_MAP[zone?.type] || 'problema en la vía'}`),
     });
 
   // Carga de zonas activas — cada 2 minutos
@@ -1002,7 +1025,12 @@ export default function DriverHome() {
               />
 
               {mapInstance && (
-                <ZoneLayer map={mapInstance} zones={activeZones} onZoneClick={(z) => setMsg(`Zona: ${z.type}`)} />
+                <ZoneLayer
+                  map={mapInstance}
+                  zones={activeZones}
+                  token={auth.token}
+                  onZoneClick={(z) => setMsg(`Zona: ${ZONE_LABELS_MAP[z?.type] || z?.type}`)}
+                />
               )}
 
               {/* Panel de pin */}

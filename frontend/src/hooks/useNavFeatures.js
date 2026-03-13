@@ -1,13 +1,13 @@
 // frontend/src/hooks/useNavFeatures.js
 import { useEffect, useRef, useState } from 'react';
 
-const ZONE_MESSAGES = {
-  traffic:      'Aviso: tráfico pesado más adelante',
-  construction: 'Aviso: obra en construcción más adelante',
-  accident:     'Aviso: accidente reportado más adelante',
-  flood:        'Aviso: zona de inundación más adelante',
-  blocked:      'Aviso: calle bloqueada más adelante',
-  other:        'Aviso: problema reportado más adelante',
+const ZONE_LABELS = {
+  traffic:      'tráfico pesado',
+  construction: 'obra en construcción',
+  accident:     'accidente',
+  flood:        'zona de inundación',
+  blocked:      'calle bloqueada',
+  other:        'problema en la vía',
 };
 
 function euclideanMeters(lat1, lng1, lat2, lng2) {
@@ -16,111 +16,130 @@ function euclideanMeters(lat1, lng1, lat2, lng2) {
   return Math.sqrt(dlat * dlat + dlng * dlng);
 }
 
-/**
- * Hook de navegación: Wake Lock, voz turn-by-turn, alertas de zonas.
- *
- * @param {Object}   params
- * @param {Array}    params.steps       — pasos de la ruta [{instruction, distance_m, location}]
- * @param {Object}   params.currentPos  — posición actual {lat, lng}
- * @param {Array}    params.activeZones — zonas activas del backend
- * @param {Function} params.onVoice     — callback para reproducir mensaje de voz
- */
-export function useNavFeatures({ steps = [], currentPos, activeZones = [], onVoice }) {
-  const [voiceEnabled,  setVoiceEnabled]  = useState(true);
+// Verifica si algún punto de la ruta pasa cerca del waypoint impassable
+function routeUsesWay(routeCoords, wayCoords, thresholdM = 30) {
+  if (!routeCoords?.length || !wayCoords?.length) return false;
+  for (const rp of routeCoords) {
+    for (const wp of wayCoords) {
+      const d = euclideanMeters(rp.lat ?? rp[1], rp.lng ?? rp[0], wp[1], wp[0]);
+      if (d < thresholdM) return true;
+    }
+  }
+  return false;
+}
+
+export function useNavFeatures({
+  steps         = [],
+  currentPos,
+  activeZones   = [],
+  impassableWays = [],   // [{way_id, coords:[...]}] confirmados
+  routeGeometry  = [],   // coords de la ruta activa
+  onVoice,
+  onZoneAlert,           // callback (zone) cuando entra a 500m
+}) {
+  const [voiceEnabled,   setVoiceEnabled]   = useState(true);
   const [wakeLockActive, setWakeLockActive] = useState(false);
 
-  const wakeLockRef       = useRef(null);
-  const announcedSteps    = useRef(new Set());
-  const zoneAnnouncedMap  = useRef(new Map()); // zoneId → lastAnnouncedTimestamp
+  const wakeLockRef      = useRef(null);
+  const announcedSteps   = useRef(new Set());
+  const zoneAlertedMap   = useRef(new Map()); // zoneId → timestamp
+  const wayAlertedMap    = useRef(new Map()); // way_id  → timestamp
 
   // ── Wake Lock ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    async function requestWakeLock() {
+    async function req() {
       try {
         if (!('wakeLock' in navigator)) return;
         const lock = await navigator.wakeLock.request('screen');
         wakeLockRef.current = lock;
         setWakeLockActive(true);
         lock.addEventListener('release', () => setWakeLockActive(false));
-      } catch (_) {
-        // silencioso si no está disponible
-      }
+      } catch (_) {}
     }
-
-    requestWakeLock();
-
-    function onVisibilityChange() {
-      if (!document.hidden && wakeLockRef.current?.released !== false) {
-        requestWakeLock();
-      }
-    }
-    document.addEventListener('visibilitychange', onVisibilityChange);
-
+    req();
+    const onVis = () => { if (!document.hidden) req(); };
+    document.addEventListener('visibilitychange', onVis);
     return () => {
-      document.removeEventListener('visibilitychange', onVisibilityChange);
+      document.removeEventListener('visibilitychange', onVis);
       try { wakeLockRef.current?.release(); } catch (_) {}
     };
   }, []);
 
-  // ── Limpiar set de pasos anunciados cuando cambian los steps ──────────────
-  useEffect(() => {
-    announcedSteps.current = new Set();
-  }, [steps]);
+  // Limpiar steps al cambiar la ruta
+  useEffect(() => { announcedSteps.current = new Set(); }, [steps]);
 
   // ── Voz turn-by-turn ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!voiceEnabled || !currentPos || !steps.length) return;
     if (!window.speechSynthesis) return;
-
     steps.forEach((step, idx) => {
-      if (announcedSteps.current.has(idx)) return;
-      if (!step.location) return;
-
+      if (announcedSteps.current.has(idx) || !step.location) return;
       const dist = euclideanMeters(
         currentPos.lat, currentPos.lng,
         step.location.lat, step.location.lng
       );
-
       if (dist < 80) {
         announcedSteps.current.add(idx);
         const text = step.instruction || 'Continúa';
-        try {
-          window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
-        } catch (_) {}
+        try { window.speechSynthesis.speak(new SpeechSynthesisUtterance(text)); } catch (_) {}
         onVoice?.(text);
       }
     });
   }, [currentPos?.lat, currentPos?.lng, steps, voiceEnabled, onVoice]);
 
-  // ── Alertas de zonas ───────────────────────────────────────────────────────
+  // ── Alertas de zonas (500 m) ───────────────────────────────────────────────
   useEffect(() => {
-    if (!voiceEnabled || !currentPos || !activeZones.length) return;
-
-    const now = Date.now();
-    const COOLDOWN_MS = 60_000;
+    if (!currentPos || !activeZones.length) return;
+    const now       = Date.now();
+    const COOLDOWN  = 120_000; // 2 min entre alertas de la misma zona
+    const ALERT_M   = 500;
 
     for (const zone of activeZones) {
+      const dist = euclideanMeters(currentPos.lat, currentPos.lng, zone.lat, zone.lng);
+      if (dist > ALERT_M) continue;
+
+      const last = zoneAlertedMap.current.get(zone.id) || 0;
+      if (now - last < COOLDOWN) continue;
+      zoneAlertedMap.current.set(zone.id, now);
+
+      const msg = 'Se reportó una zona de alerta cerca, revisa el mapa';
+      if (voiceEnabled) {
+        try {
+          window.speechSynthesis?.speak(new SpeechSynthesisUtterance(msg));
+        } catch (_) {}
+      }
+      onVoice?.(msg);
+      onZoneAlert?.(zone);
+    }
+  }, [currentPos?.lat, currentPos?.lng, activeZones, voiceEnabled, onVoice, onZoneAlert]);
+
+  // ── Alertas de calles no viables (solo si la ruta pasa por ahí) ───────────
+  useEffect(() => {
+    if (!currentPos || !impassableWays.length || !routeGeometry.length) return;
+    const now      = Date.now();
+    const COOLDOWN = 180_000;
+
+    for (const way of impassableWays) {
+      if (!routeUsesWay(routeGeometry, way.coords)) continue;
+
       const dist = euclideanMeters(
         currentPos.lat, currentPos.lng,
-        zone.lat, zone.lng
+        way.coords[0]?.[1] ?? currentPos.lat,
+        way.coords[0]?.[0] ?? currentPos.lng
       );
+      if (dist > 300) continue;
 
-      if (dist < zone.radius_m + 50) {
-        const lastAnnounced = zoneAnnouncedMap.current.get(zone.id) || 0;
-        if (now - lastAnnounced < COOLDOWN_MS) continue;
+      const last = wayAlertedMap.current.get(way.way_id) || 0;
+      if (now - last < COOLDOWN) continue;
+      wayAlertedMap.current.set(way.way_id, now);
 
-        const message = ZONE_MESSAGES[zone.type] || ZONE_MESSAGES.other;
-        zoneAnnouncedMap.current.set(zone.id, now);
-
-        try {
-          if (window.speechSynthesis) {
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance(message));
-          }
-        } catch (_) {}
-        onVoice?.(message);
+      const msg = `Atención: la calle ${way.name || 'adelante'} está reportada como no viable`;
+      if (voiceEnabled) {
+        try { window.speechSynthesis?.speak(new SpeechSynthesisUtterance(msg)); } catch (_) {}
       }
+      onVoice?.(msg);
     }
-  }, [currentPos?.lat, currentPos?.lng, activeZones, voiceEnabled, onVoice]);
+  }, [currentPos?.lat, currentPos?.lng, impassableWays, routeGeometry, voiceEnabled, onVoice]);
 
   return { voiceEnabled, setVoiceEnabled, wakeLockActive };
 }
