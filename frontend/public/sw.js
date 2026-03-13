@@ -1,7 +1,7 @@
 // ── Precache del shell de la app ──────────────────────────────────────────────
 // Lista de assets que se cachean en install. Los archivos con hash (generados
 // por Vite) se agregan en runtime via fetch; aquí solo el shell estático.
-const SHELL_VERSION = 'v2'; // incrementado: iconos cambiados a .png
+const SHELL_VERSION = 'v3'; // v3: Background Sync
 const SHELL_CACHE   = `morelivery-shell-${SHELL_VERSION}`;
 const SHELL_ASSETS  = [
   '/',
@@ -13,7 +13,33 @@ const SHELL_ASSETS  = [
   '/logo.svg',
 ];
 
-// ── Instalar: cachear el shell ─────────────────────────────────────────────
+// ── Background Sync — cola de peticiones offline ──────────────────────────────
+// Cuando el conductor pulsa "Entregado" sin señal, la app envía ENQUEUE_REQUEST
+// al SW. El SW guarda la petición en Cache Storage y registra el tag de sync.
+// En cuanto el dispositivo recupera red, el navegador dispara el evento 'sync'
+// y el SW reintenta todas las peticiones encoladas.
+//
+// Se usa Cache Storage como key-value store liviano — evita añadir una dependencia
+// de IndexedDB y está disponible en el mismo contexto que los demás caches.
+const SYNC_QUEUE_KEY = 'morelivery-sync-queue';
+const SYNC_TAG       = 'morelivery-status-sync';
+
+async function readQueue() {
+  try {
+    const cache = await caches.open(SYNC_QUEUE_KEY);
+    const resp  = await cache.match('queue');
+    return resp ? await resp.json() : [];
+  } catch { return []; }
+}
+
+async function writeQueue(queue) {
+  const cache = await caches.open(SYNC_QUEUE_KEY);
+  await cache.put('queue', new Response(JSON.stringify(queue), {
+    headers: { 'Content-Type': 'application/json' },
+  }));
+}
+
+
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
@@ -94,7 +120,50 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// ── Contador por categoría en el SW ──────────────────────────────────────────
+// ── Background Sync — reenvío de peticiones al recuperar red ─────────────────
+self.addEventListener('sync', (event) => {
+  if (event.tag !== SYNC_TAG) return;
+
+  event.waitUntil(
+    (async () => {
+      const queue = await readQueue();
+      if (!queue.length) return;
+
+      const remaining = [];
+      for (const item of queue) {
+        try {
+          const headers = { 'Content-Type': 'application/json' };
+          if (item.token) headers['Authorization'] = `Bearer ${item.token}`;
+
+          const res = await fetch(item.url, {
+            method:  item.method || 'PATCH',
+            headers,
+            body:    item.body ?? undefined,
+          });
+
+          // 409 Conflict = el pedido ya fue procesado por otro medio → descartar
+          // 2xx = éxito → descartar
+          // Cualquier otro error de servidor (5xx) o red → reintentar
+          if (!res.ok && res.status !== 409) {
+            remaining.push(item);
+          }
+        } catch {
+          // Sin red todavía — volver a encolar
+          remaining.push(item);
+        }
+      }
+
+      await writeQueue(remaining);
+
+      // Avisar a la app si está abierta para que refresque datos
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const synced  = queue.length - remaining.length;
+      if (synced > 0) clients.forEach(c => c.postMessage({ type: 'SYNC_COMPLETE', synced }));
+    })()
+  );
+});
+
+
 // Mantener conteo acumulado de notificaciones no vistas por categoría.
 // Cuando llega una nueva del mismo tag-group, se reemplaza la notificación
 // existente (mismo tag) con un resumen actualizado en lugar de apilar.
@@ -163,6 +232,20 @@ self.addEventListener('message', (event) => {
         }
       });
     });
+    return;
+  }
+
+  // ENQUEUE_REQUEST: conductor tomó acción sin señal (ej. marcó entregado offline).
+  // La app detecta el error de red y delega al SW para garantizar la entrega.
+  if (type === 'ENQUEUE_REQUEST') {
+    const { url, method, body, token } = event.data;
+    (async () => {
+      const queue = await readQueue();
+      queue.push({ url, method, body, token, ts: Date.now() });
+      await writeQueue(queue);
+      // Registrar sync tag — el navegador nos despertará cuando haya red
+      try { await self.registration.sync.register(SYNC_TAG); } catch { /* API no disponible */ }
+    })();
     return;
   }
 
