@@ -1,0 +1,169 @@
+.
+|-- ./admin
+|   `-- ./admin/README.md
+|-- ./auth
+|   `-- ./auth/README.md
+|-- ./backend
+|   |-- ./backend/.env
+|   |-- ./backend/package.json
+|   |-- ./backend/src
+|   |   |-- ./backend/src/app.js
+|   |   |-- ./backend/src/config
+|   |   |   |-- ./backend/src/config/db.js
+|   |   |   |-- ./backend/src/config/env.js
+|   |   |   `-- ./backend/src/config/redis.js
+|   |   |-- ./backend/src/events
+|   |   |   `-- ./backend/src/events/orderEvents.js
+|   |   |-- ./backend/src/middlewares
+|   |   |   |-- ./backend/src/middlewares/auth.js
+|   |   |   |-- ./backend/src/middlewares/errorHandler.js
+|   |   |   |-- ./backend/src/middlewares/rateLimit.js
+|   |   |   `-- ./backend/src/middlewares/validate.js
+|   |   |-- ./backend/src/modules
+|   |   |   |-- ./backend/src/modules/admin
+|   |   |   |   |-- ./backend/src/modules/admin/routes.js
+|   |   |   |   `-- ./backend/src/modules/admin/schemas.js
+|   |   |   |-- ./backend/src/modules/auth
+|   |   |   |   |-- ./backend/src/modules/auth/routes.js
+|   |   |   |   |-- ./backend/src/modules/auth/schemas.js
+|   |   |   |   `-- ./backend/src/modules/auth/service.js
+|   |   |   |-- ./backend/src/modules/drivers
+|   |   |   |   |-- ./backend/src/modules/drivers/routes.js
+|   |   |   |   `-- ./backend/src/modules/drivers/schemas.js
+|   |   |   |-- ./backend/src/modules/events
+|   |   |   |   |-- ./backend/src/modules/events/hub.js
+|   |   |   |   |-- ./backend/src/modules/events/offerCallback.js
+|   |   |   |   `-- ./backend/src/modules/events/routes.js
+|   |   |   |-- ./backend/src/modules/nav
+|   |   |   |   |-- ./backend/src/modules/nav/map-match.js
+|   |   |   |   |-- ./backend/src/modules/nav/road-prefs.js
+|   |   |   |   `-- ./backend/src/modules/nav/zones.js
+|   |   |   |-- ./backend/src/modules/orders
+|   |   |   |   |-- ./backend/src/modules/orders/assignment
+|   |   |   |   |   |-- ./backend/src/modules/orders/assignment/constants.js
+|   |   |   |   |   |-- ./backend/src/modules/orders/assignment/cooldown.js
+|   |   |   |   |   |-- ./backend/src/modules/orders/assignment/core.js
+|   |   |   |   |   |-- ./backend/src/modules/orders/assignment/events.js
+|   |   |   |   |   |-- ./backend/src/modules/orders/assignment/index.js
+|   |   |   |   |   |-- ./backend/src/modules/orders/assignment/offer.js
+|   |   |   |   |   |-- ./backend/src/modules/orders/assignment/queries.js
+|   |   |   |   |   `-- ./backend/src/modules/orders/assignment/queue.js
+|   |   |   |   |-- ./backend/src/modules/orders/ratings.js
+|   |   |   |   |-- ./backend/src/modules/orders/routes.js
+|   |   |   |   `-- ./backend/src/modules/orders/schemas.js
+|   |   |   |-- ./backend/src/modules/payments
+|   |   |   |   `-- ./backend/src/modules/payments/routes.js
+|   |   |   |-- ./backend/src/modules/restaurants
+|   |   |   |   |-- ./backend/src/modules/restaurants/routes.js
+|   |   |   |   `-- ./backend/src/modules/restaurants/schemas.js
+|   |   |   `-- ./backend/src/modules/routes
+|   |   |       `-- ./backend/src/modules/routes/routes.js
+|   |   |-- ./backend/src/server.js
+|   |   `-- ./backend/src/utils
+|   |       |-- ./backend/src/utils/errors.js
+|   |       |-- ./backend/src/utils/logger.js
+|   |       `-- ./backend/src/utils/sanitize.js
+|   `-- ./backend/test-db.js
+|-- ./backup_full.sql
+|-- ./backups
+|   `-- ./backups/2026-03-11-routes-model
+|       |-- ./backups/2026-03-11-routes-model/app.js.bak
+|       `-- ./backups/2026-03-11-routes-model/Driver.Home.jsx.bak
+|-- ./database
+|   |-- ./database/init-db.js
+|   |-- ./database/migration_v10.sql
+|   |-- ./database/migration_v11.sql
+|   |-- ./database/migration_v12.sql
+|   |-- ./database/migration_v13.sql
+|   |-- ./database/migration_v14.1.sql
+|   |-- ./database/migration_v14_2.sql
+|   |-- ./database/migration_v14.sql
+|   |-- ./database/migration_v15.sql
+|   |-- ./database/migration_v16.sql
+|   |-- ./database/migration_v17.sql
+|   |-- ./database/migration_v18.sql
+|   |-- ./database/migration_v19.sql
+|   |-- ./database/migration_v20_ratings.sql
+|   |-- ./database/migration_v21_nav.sql
+|   |-- ./database/migration_v2.sql
+|   |-- ./database/migration_v4.sql
+|   |-- ./database/migration_v5.sql
+|   |-- ./database/migration_v6.sql
+|   |-- ./database/migration_v7.sql
+|   |-- ./database/migration_v8.sql
+|   |-- ./database/migration_v9.sql
+|   `-- ./database/schema.sql
+|-- ./drivers
+|   `-- ./drivers/README.md
+|-- ./frontend
+|   |-- ./frontend/.env
+|   |-- ./frontend/index.html
+|   |-- ./frontend/package.json
+|   |-- ./frontend/public
+|   |   |-- ./frontend/public/badge.svg
+|   |   |-- ./frontend/public/icon-192.ico
+|   |   |-- ./frontend/public/icon-192.png
+|   |   |-- ./frontend/public/icon-512.ico
+|   |   |-- ./frontend/public/icon-512.png
+|   |   |-- ./frontend/public/logo.svg
+|   |   |-- ./frontend/public/manifest.webmanifest
+|   |   `-- ./frontend/public/sw.js
+|   |-- ./frontend/src
+|   |   |-- ./frontend/src/api
+|   |   |   `-- ./frontend/src/api/client.js
+|   |   |-- ./frontend/src/App.jsx
+|   |   |-- ./frontend/src/components
+|   |   |   |-- ./frontend/src/components/Layout.jsx
+|   |   |   |-- ./frontend/src/components/OfferCountdown.jsx
+|   |   |   |-- ./frontend/src/components/OrderMap.jsx
+|   |   |   |-- ./frontend/src/components/ScheduleEditor.jsx
+|   |   |   |-- ./frontend/src/components/SplitLayout.jsx
+|   |   |   |-- ./frontend/src/components/WayPicker.jsx
+|   |   |   |-- ./frontend/src/components/ZoneLayer.jsx
+|   |   |   `-- ./frontend/src/components/ZonePlacer.jsx
+|   |   |-- ./frontend/src/contexts
+|   |   |   `-- ./frontend/src/contexts/AuthContext.jsx
+|   |   |-- ./frontend/src/hooks
+|   |   |   |-- ./frontend/src/hooks/useDriverLocation.js
+|   |   |   |-- ./frontend/src/hooks/useNavFeatures.js
+|   |   |   |-- ./frontend/src/hooks/useOfferCountdown.js
+|   |   |   `-- ./frontend/src/hooks/useRealtimeOrders.js
+|   |   |-- ./frontend/src/main.jsx
+|   |   |-- ./frontend/src/pages
+|   |   |   |-- ./frontend/src/pages/Admin
+|   |   |   |   `-- ./frontend/src/pages/Admin/Dashboard.jsx
+|   |   |   |-- ./frontend/src/pages/AuthPage.jsx
+|   |   |   |-- ./frontend/src/pages/Customer
+|   |   |   |   |-- ./frontend/src/pages/Customer/Home.jsx
+|   |   |   |   |-- ./frontend/src/pages/Customer/Orders.jsx
+|   |   |   |   |-- ./frontend/src/pages/Customer/.Orders.jsx.kate-swp
+|   |   |   |   |-- ./frontend/src/pages/Customer/Payments.jsx
+|   |   |   |   `-- ./frontend/src/pages/Customer/RestaurantPage.jsx
+|   |   |   |-- ./frontend/src/pages/Driver
+|   |   |   |   |-- ./frontend/src/pages/Driver/Dashboard.jsx
+|   |   |   |   |-- ./frontend/src/pages/Driver/Earnings.jsx
+|   |   |   |   |-- ./frontend/src/pages/Driver/Home.jsx
+|   |   |   |   `-- ./frontend/src/pages/Driver/Orders.jsx
+|   |   |   |-- ./frontend/src/pages/Profile.jsx
+|   |   |   `-- ./frontend/src/pages/Restaurant
+|   |   |       |-- ./frontend/src/pages/Restaurant/Dashboard.jsx
+|   |   |       |-- ./frontend/src/pages/Restaurant/Menu.jsx
+|   |   |       |-- ./frontend/src/pages/Restaurant/Orders.jsx
+|   |   |       `-- ./frontend/src/pages/Restaurant/Schedule.jsx
+|   |   `-- ./frontend/src/styles
+|   |       `-- ./frontend/src/styles/app.css
+|   |-- ./frontend/vercel.json
+|   `-- ./frontend/vite.config.js
+|-- ./.gitignore
+|-- ./LICENSE
+|-- ./Morelivery3.txt
+|-- ./orders
+|   `-- ./orders/README.md
+|-- ./package.json
+|-- ./README.md
+|-- ./render.yaml
+|-- ./restaurants
+|   `-- ./restaurants/README.md
+|-- ./supabase_data.sql
+`-- ./.vscode
+    `-- ./.vscode/settings.json

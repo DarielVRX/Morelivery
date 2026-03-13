@@ -25,9 +25,11 @@ router.post('/', authenticate, authorize(['driver', 'admin']), async (req, res, 
       throw new AppError(400, 'estimated_hours debe estar entre 1 y 72');
     }
 
+    // FIX 42P08: $5 no puede usarse con dos tipos distintos (double precision vs integer).
+    // Se usa $5::integer en el cálculo de expires_at para forzar el tipo correcto.
     const result = await query(
       `INSERT INTO road_zones (lat, lng, radius_m, type, estimated_hours, expires_at, created_by)
-       VALUES ($1, $2, $3, $4, $5, NOW() + ($5 * INTERVAL '1 hour'), $6)
+       VALUES ($1, $2, $3, $4, $5, NOW() + ($5::integer * INTERVAL '1 hour'), $6)
        RETURNING *`,
       [Number(lat), Number(lng), Number(radius_m), type, Number(estimated_hours), req.user.userId]
     );
