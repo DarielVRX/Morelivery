@@ -185,15 +185,17 @@ export default function RestaurantPage() {
     async function load() {
       setLoading(true);
       try {
-        const [listData, menuData] = await Promise.all([
-          apiFetch('/restaurants'),
-          apiFetch(`/restaurants/${id}/menu`)
+        const [restData, menuData] = await Promise.all([
+          apiFetch(`/restaurants/${id}`),
+                                                       apiFetch(`/restaurants/${id}/menu`)
         ]);
-        const found = (listData.restaurants || []).find(r => String(r.id) === String(id));
-        setRestaurant(found || { id, name: 'Tienda', is_open: true });
+        setRestaurant(restData.restaurant);
         setMenu((menuData.menu || []).filter(i => i.is_available !== false));
-      } catch (e) { setMsg('Error cargando la tienda'); }
-      finally { setLoading(false); }
+      } catch (e) {
+        setMsg('Error cargando la tienda');
+      } finally {
+        setLoading(false);
+      }
     }
     load();
   }, [id]);
