@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+import PullToRefresh    from '../../components/PullToRefresh';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 function fmtDate(ts) {
@@ -50,6 +51,7 @@ export default function DriverEarnings() {
   }
 
   return (
+    <PullToRefresh onRefresh={order.loadData}>
     <div style={{ backgroundColor:'#f0fdf4', minHeight:'100vh', padding:'1rem' }}>
       <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem',
         background:'linear-gradient(135deg,var(--brand) 0%,#c0546a 100%)', color:'#fff' }}>

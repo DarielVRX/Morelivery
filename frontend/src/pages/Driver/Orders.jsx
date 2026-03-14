@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
+import PullToRefresh    from '../../components/PullToRefresh';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
@@ -151,6 +152,7 @@ export default function DriverOrders() {
   });
 
   return (
+        <PullToRefresh onRefresh={order.loadData}>
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
       {/* ── Encabezado fijo ─────────────────────────────────────────── */}
       <div style={{
