@@ -152,7 +152,6 @@ export default function DriverOrders() {
   });
 
   return (
-        <PullToRefresh onRefresh={order.loadData}>
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
       {/* ── Encabezado fijo ─────────────────────────────────────────── */}
       <div style={{
@@ -433,6 +432,5 @@ export default function DriverOrders() {
 
       </div>
     </div>
-    </PullToRefresh>
   );
 }

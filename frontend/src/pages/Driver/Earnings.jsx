@@ -51,7 +51,6 @@ export default function DriverEarnings() {
   }
 
   return (
-    <PullToRefresh onRefresh={order.loadData}>
     <div style={{ backgroundColor:'#f0fdf4', minHeight:'100vh', padding:'1rem' }}>
       <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem',
         background:'linear-gradient(135deg,var(--brand) 0%,#c0546a 100%)', color:'#fff' }}>
@@ -137,6 +136,5 @@ export default function DriverEarnings() {
         </div>
       )}
     </div>
-    </PullToRefresh>
   );
 }
