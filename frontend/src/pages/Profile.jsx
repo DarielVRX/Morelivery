@@ -107,7 +107,7 @@ export default function ProfilePage() {
   );
   const [notifMsg, setNotifMsg] = useState('');
   const [highPriorityNotifs, setHighPriorityNotifs] = useState(() => {
-    try { return localStorage.getItem('morelivery_notif_priority') === 'high'; } catch { return false; }
+    try { localStorage.getItem('morelivery_notif_priority') === 'high'; } catch { return false; }
   });
   const [notifEnabled, setNotifEnabled] = useState(() => {
     try { return localStorage.getItem('morelivery_notif_enabled') !== '0'; } catch { return true; }
@@ -183,6 +183,8 @@ export default function ProfilePage() {
 
   useEffect(() => { coloniaRef.current = colonia; }, [colonia]);
 
+  const lastSearchedCp = useRef(user?.postal_code || '');
+
   // Buscar CP cuando cambia (debounce 600ms)
   useEffect(() => {
     const cp = postalCode.trim();
@@ -191,6 +193,9 @@ export default function ProfilePage() {
       setColoniasList([]);
       return;
     }
+
+    if (cp === lastSearchedCp.current) return;
+
     clearTimeout(cpTimerRef.current);
     cpTimerRef.current = setTimeout(async () => {
       setCpLoading(true);
@@ -429,6 +434,45 @@ export default function ProfilePage() {
   const avatarLetter = (alias[0] || '?').toUpperCase();
   const hasHomePin = homeLat && homeLng;
 
+  // ── Perf monitor — solo en dev, sin efecto en producción ──
+  useEffect(() => {
+    if (import.meta.env.PROD) return;
+
+    // Long Tasks API — detecta bloques del hilo principal > 50ms
+    let observer;
+    if ('PerformanceObserver' in window) {
+      try {
+        observer = new PerformanceObserver(list => {
+          for (const entry of list.getEntries()) {
+            console.warn(
+              `[perf] Long task ${Math.round(entry.duration)}ms`,
+                         entry.attribution?.[0]?.name || 'unknown'
+            );
+          }
+        });
+        observer.observe({ type: 'longtask', buffered: true });
+      } catch (_) {}
+    }
+
+    // Frame rate monitor — detecta drops por debajo de 30fps
+    let lastFrame = performance.now();
+    let rafId;
+    function checkFrame(now) {
+      const delta = now - lastFrame;
+      if (delta > 33) { // < 30fps
+        console.warn(`[perf] Frame drop: ${Math.round(delta)}ms (${Math.round(1000/delta)}fps)`);
+      }
+      lastFrame = now;
+      rafId = requestAnimationFrame(checkFrame);
+    }
+    rafId = requestAnimationFrame(checkFrame);
+
+    return () => {
+      observer?.disconnect();
+      cancelAnimationFrame(rafId);
+    };
+  }, []);
+
   return (
     <div>
     <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem' }}>Mi perfil</h2>
@@ -491,18 +535,48 @@ export default function ProfilePage() {
     {/* Colonia — dropdown si hay datos del CP, input manual si no */}
     <label>
     Colonia
+    <div style={{ position: 'relative' }}>
     <input
     value={colonia}
     onChange={e => setColonia(e.target.value)}
     placeholder="Ej: Col. Centro"
     list="colonias-list"
     disabled={cpLoading}
+    id="colonia-input"
+    style={{ paddingRight: '2rem' }}
     />
     {coloniasList.length > 0 && (
+      <>
+      <button
+      type="button"
+      tabIndex={-1}
+      disabled={cpLoading}
+      onClick={() => {
+        const inp = document.getElementById('colonia-input');
+        if (!inp) return;
+        // Truco: limpiar temporalmente el valor forza al datalist a mostrar todas las opciones
+        const prev = inp.value;
+        inp.value = '';
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.focus();
+        inp.value = prev;
+      }}
+      style={{
+        position: 'absolute', right: 0, top: 0, bottom: 0,
+        width: '2rem', border: 'none', background: 'transparent',
+        cursor: 'pointer', fontSize: '0.75rem', color: 'var(--gray-400)',
+                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                 minHeight: 0, padding: 0,
+      }}
+      >
+      ▾
+      </button>
       <datalist id="colonias-list">
       {coloniasList.map(c => <option key={c} value={c} />)}
       </datalist>
+      </>
     )}
+    </div>
     </label>
 
     {/* Calle y número — dos campos separados */}
