@@ -5,6 +5,8 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import SplitLayout from './components/SplitLayout';
 import { apiFetch } from './api/client';
+// En App.jsx — agregar este import
+import { useEffect } from 'react';
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const CustomerHome    = lazy(() => import('./pages/Customer/Home'));
@@ -263,6 +265,31 @@ const AuthScreen = memo(function AuthScreen({ mode = 'login' }) {
 
 // ─── Rutas protegidas ─────────────────────────────────────────────────────────
 function AppRoutes() {
+
+  // Dentro de AppRoutes(), antes del return:
+  useEffect(() => {
+    const load = () => import('leaflet').then(L => {
+      if (document.getElementById('leaflet-css')) return;
+      const lnk = document.createElement('link');
+      lnk.id = 'leaflet-css';
+      lnk.rel = 'stylesheet';
+      lnk.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(lnk);
+      delete L.Icon.Default.prototype._getIconUrl;
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+        iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+      });
+    });
+    if ('requestIdleCallback' in window) {
+      const id = requestIdleCallback(load);
+      return () => cancelIdleCallback(id);
+    } else {
+      const id = setTimeout(load, 1500);
+      return () => clearTimeout(id);
+    }
+  }, []);
   return (
     <Layout>
       <Suspense fallback={<Spinner />}>
