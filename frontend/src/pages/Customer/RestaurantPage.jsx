@@ -189,7 +189,7 @@ export default function RestaurantPage() {
           apiFetch('/restaurants'),
           apiFetch(`/restaurants/${id}/menu`)
         ]);
-        const found = (listData.restaurants || []).find(r => String(r.id) === String(id);
+        const found = (listData.restaurants || []).find(r => String(r.id) === String(id));
         setRestaurant(found || { id, name: 'Tienda', is_open: true });
         setMenu((menuData.menu || []).filter(i => i.is_available !== false));
       } catch (e) { setMsg('Error cargando la tienda'); }
@@ -280,7 +280,7 @@ export default function RestaurantPage() {
   const distKm = (activeDeliveryPos && restLat !== null && restLng !== null)
     ? haversineKm(activeDeliveryPos.lat, activeDeliveryPos.lng, restLat, restLng)
     : null;
-  const tooFar = distKm !== null && distKm > 500;
+  const tooFar = distKm !== null && distKm > 5;
   const distanceError = tooFar
     ? `Esta tienda está a ${distKm.toFixed(1)} km. Solo se aceptan pedidos dentro de 5 km.`
     : null;
