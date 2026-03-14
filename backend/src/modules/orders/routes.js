@@ -97,7 +97,7 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
     } catch (e) { if (!isMissingColumnError(e)) throw e; }
     if (!deliveryAddress || deliveryAddress === 'address-pending') return next(new AppError(400, 'Debes guardar tu dirección antes de hacer un pedido'));
 
-    const restCoords = await query(`SELECT COALESCE(u.lat, r.lat) AS lat, COALESCE(u.lng, r.lng) AS lng
+    const restCoords = await query(`SELECT COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
                                     FROM restaurants r
                                     LEFT JOIN users u ON u.id = r.owner_user_id
                                     WHERE r.id=$1`, [restaurantId]);
