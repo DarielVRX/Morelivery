@@ -1,113 +1,124 @@
-// components/PullToRefresh.jsx — componente genérico, sin conocimiento de pedidos
-// OPT-1: SIN setState en touchMove — manipula DOM directamente con refs
-// OPT-2: spinner con CSS animation puro, sin JS
-// OPT-3: posición con transform:translateY, nunca con `top` animado
+// usePullToRefresh.js  — o pegarlo directo en Layout
+import { useEffect, useRef } from 'react';
 
-import { useCallback, useRef, useState } from 'react';
+const HEADER_ZONE   = 64;   // px desde arriba donde se puede INICIAR el gesto
+const TRIGGER_DIST  = 72;   // px mínimos para ejecutar el reload
+const MAX_PULL      = 110;  // px máximo de desplazamiento visual
 
-const PTR_THRESHOLD  = 72;
-const PTR_RESISTANCE = 0.45;
-
-export default function PullToRefresh({ onRefresh, children }) {
-  const wrapRef      = useRef(null);
-  const contentRef   = useRef(null);
+export function usePullToRefresh(scrollContainerRef) {
+  const startY      = useRef(null);
+  const startScrollY = useRef(0);
+  const pulling     = useRef(false);
   const indicatorRef = useRef(null);
-  const arcRef       = useRef(null);
-  const startYRef    = useRef(null);
-  const pullRef      = useRef(0);
-  const loadingRef   = useRef(false);
-  const [loading, setLoading] = useState(false);
 
-  function _applyPull(px) {
-    pullRef.current = px;
-    const ind = indicatorRef.current, con = contentRef.current, arc = arcRef.current;
-    if (!ind || !con) return;
-    const indY = px > 4 ? Math.max(-36, px - 36) : -50;
-    ind.style.transform = `translateX(-50%) translateY(${indY}px)`;
-    con.style.transform = `translateY(${px}px)`;
-    if (arc) {
-      const p = Math.min(px / PTR_THRESHOLD, 1);
-      arc.setAttribute('stroke-dasharray', `${p * 56.5} 56.5`);
-      arc.style.transform = `rotate(${p * 270 - 90}deg)`;
+  useEffect(() => {
+    const el = scrollContainerRef?.current;
+    if (!el) return;
+
+    // Crear indicador visual si no existe
+    let indicator = document.getElementById('ptr-indicator');
+    if (!indicator) {
+      indicator = document.createElement('div');
+      indicator.id = 'ptr-indicator';
+  indicator.style.cssText = `
+  position: fixed;
+  top: 0; left: 50%;
+  transform: translateX(-50%) translateY(-100%);
+  z-index: 9999;
+  background: #fff;
+  border-radius: 0 0 20px 20px;
+  padding: 6px 18px 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #e3aaaa;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: transform 0.15s ease;
+  pointer-events: none;
+  `;
+  indicator.innerHTML = `<span id="ptr-spinner">↓</span> <span id="ptr-label">Jala para recargar</span>`;
+  document.body.appendChild(indicator);
     }
-  }
+    indicatorRef.current = indicator;
 
-  function _release() {
-    const con = contentRef.current, ind = indicatorRef.current;
-    ind?.classList.remove('pulling');
-    ind?.classList.add('releasing');
-    con?.classList.add('releasing');
-    _applyPull(0);
-    setTimeout(() => {
-      ind?.classList.remove('releasing');
-      con?.classList.remove('releasing');
-    }, 250);
-    if (arcRef.current) arcRef.current.setAttribute('stroke-dasharray', '0 56.5');
-    pullRef.current = 0;
-  }
+    function onTouchStart(e) {
+      const touch = e.touches[0];
 
-  const onTouchStart = useCallback((e) => {
-    if (loadingRef.current || (wrapRef.current?.scrollTop ?? 0) > 0) return;
-    startYRef.current = e.touches[0].clientY;
-    indicatorRef.current?.classList.add('pulling');
-    contentRef.current?.classList.remove('releasing');
-  }, []);
+      // ── CLAVE: solo iniciar si el touch empieza en la zona del header ──
+      if (touch.clientY > HEADER_ZONE) return;
 
-  const onTouchMove = useCallback((e) => {
-    if (startYRef.current == null || loadingRef.current) return;
-    if ((wrapRef.current?.scrollTop ?? 0) > 0) { startYRef.current = null; return; }
-    const dy = e.touches[0].clientY - startYRef.current;
-    if (dy <= 0) { if (pullRef.current > 0) _applyPull(0); return; }
-    _applyPull(Math.min(dy * PTR_RESISTANCE, PTR_THRESHOLD + 20));
-  }, []);
+      // Solo si el scroll está en el tope
+      if (el.scrollTop > 0) return;
 
-  const onTouchEnd = useCallback(() => {
-    if (startYRef.current == null) return;
-    startYRef.current = null;
-    const shouldRefresh = pullRef.current >= PTR_THRESHOLD && !loadingRef.current;
-    if (!shouldRefresh) { _release(); return; }
-    loadingRef.current = true;
-    setLoading(true);
-    Promise.resolve(onRefresh()).then(() => {
-      const con = contentRef.current;
-      if (con) {
-        con.style.transition = 'opacity 0.18s ease';
-        con.style.opacity = '0';
-        requestAnimationFrame(() => { con.style.opacity = '1'; });
+      startY.current = touch.clientY;
+      startScrollY.current = el.scrollTop;
+      pulling.current = false;
+    }
+
+    function onTouchMove(e) {
+      if (startY.current === null) return;
+      const touch  = e.touches[0];
+      const deltaY = touch.clientY - startY.current;
+
+      // Solo hacia abajo y sin scroll previo
+      if (deltaY <= 0 || el.scrollTop > 0) {
+        startY.current = null;
+        return;
       }
-    }).finally(() => {
-      loadingRef.current = false;
-      setLoading(false);
-      _release();
-    });
-  }, [onRefresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return (
-    <div ref={wrapRef} style={{ height:'100%', overflow:'hidden', position:'relative' }}
-      onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+      pulling.current = true;
+      const pull = Math.min(deltaY, MAX_PULL);
+      const ratio = pull / TRIGGER_DIST;
 
-      <div ref={indicatorRef} className="dh-ptr-indicator releasing">
-        <div style={{ width:36, height:36, borderRadius:'50%', background:'#fff',
-          boxShadow:'0 2px 12px rgba(0,0,0,0.18)', display:'flex',
-          alignItems:'center', justifyContent:'center' }}>
-          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-            <circle cx="11" cy="11" r="9" stroke="#e5e7eb" strokeWidth="2.5"/>
-            <circle ref={arcRef} cx="11" cy="11" r="9"
-              stroke="var(--brand)" strokeWidth="2.5"
-              strokeDasharray="0 56.5" strokeLinecap="round"
-              style={{
-                transformOrigin: '50% 50%',
-                ...(loading ? { animation:'dh-spin 0.75s linear infinite' } : {}),
-              }}
-            />
-          </svg>
-        </div>
-      </div>
+      // Mover indicador
+      const translateY = Math.min(pull * 0.6, 48);
+      indicator.style.transform = `translateX(-50%) translateY(${translateY - 100}%)`;
 
-      <div ref={contentRef} className="dh-ptr-content"
-        style={{ height:'100%', display:'flex', flexDirection:'column' }}>
-        {children}
-      </div>
-    </div>
-  );
+      // Cambiar texto según umbral
+      const label = indicator.querySelector('#ptr-label');
+      const spinner = indicator.querySelector('#ptr-spinner');
+      if (pull >= TRIGGER_DIST) {
+        label.textContent = 'Suelta para recargar';
+        spinner.textContent = '↺';
+      } else {
+        label.textContent = 'Jala para recargar';
+        spinner.textContent = '↓';
+      }
+
+      // Prevenir scroll nativo solo si estamos jalando activamente
+      if (deltaY > 8) e.preventDefault();
+    }
+
+    function onTouchEnd(e) {
+      if (startY.current === null || !pulling.current) {
+        startY.current = null;
+        return;
+      }
+
+      const touch  = e.changedTouches[0];
+      const deltaY = touch.clientY - startY.current;
+
+      // Resetear indicador
+      indicator.style.transform = `translateX(-50%) translateY(-100%)`;
+      startY.current = null;
+      pulling.current = false;
+
+      // Ejecutar reload si superó el umbral
+      if (deltaY >= TRIGGER_DIST) {
+        window.location.reload();
+      }
+    }
+
+    el.addEventListener('touchstart',  onTouchStart, { passive: true });
+    el.addEventListener('touchmove',   onTouchMove,  { passive: false });
+    el.addEventListener('touchend',    onTouchEnd,   { passive: true });
+
+    return () => {
+      el.removeEventListener('touchstart',  onTouchStart);
+      el.removeEventListener('touchmove',   onTouchMove);
+      el.removeEventListener('touchend',    onTouchEnd);
+    };
+  }, [scrollContainerRef]);
 }
