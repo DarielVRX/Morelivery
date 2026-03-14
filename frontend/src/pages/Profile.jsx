@@ -291,15 +291,52 @@ export default function ProfilePage() {
       const marker = L.marker(initPos, { icon, draggable: true }).addTo(map);
       pinMarkerRef.current = marker;
 
-      marker.on('dragend', () => {
+      // Dentro del useEffect del mapa, reemplaza los eventos dragend y click:
+      async function reverseGeocode(lat, lng) {
+        try {
+          const r = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&countrycodes=mx`,
+            { headers: { 'Accept-Language': 'es' } }
+          );
+          const data = await r.json();
+          const a = data.address || {};
+          return {
+            postalCode: a.postcode || null,
+            estado:     a.state || null,
+            ciudad:     a.city || a.town || a.municipality || a.county || null,
+            colonia:    a.suburb || a.neighbourhood || a.quarter || null,
+            calle:      [a.road, a.house_number].filter(Boolean).join(' ') || null,
+          };
+        } catch { return null; }
+      }
+
+      marker.on('dragend', async () => {
         const p = marker.getLatLng();
         setPinMapResult({ lat: p.lat, lng: p.lng });
+        const geo = await reverseGeocode(p.lat, p.lng);
+        if (geo) {
+          if (geo.postalCode) setPostalCode(geo.postalCode);
+          if (geo.estado)     setEstado(geo.estado);
+          if (geo.ciudad)     setCiudad(geo.ciudad);
+          if (geo.colonia)    setColonia(geo.colonia);
+          if (geo.calle)      setAddress(geo.calle);
+        }
       });
-      map.on('click', (e) => {
+
+      map.on('click', async (e) => {
         marker.setLatLng(e.latlng);
         setPinMapResult({ lat: e.latlng.lat, lng: e.latlng.lng });
+        const geo = await reverseGeocode(e.latlng.lat, e.latlng.lng);
+        if (geo) {
+          if (geo.postalCode) setPostalCode(geo.postalCode);
+          if (geo.estado)     setEstado(geo.estado);
+          if (geo.ciudad)     setCiudad(geo.ciudad);
+          if (geo.colonia)    setColonia(geo.colonia);
+          if (geo.calle)      setAddress(geo.calle);
+        }
       });
     };
+
     loadLeaflet();
     return () => {
       if (pinMapInstance.current) { pinMapInstance.current.remove(); pinMapInstance.current = null; }
@@ -353,14 +390,29 @@ export default function ProfilePage() {
     setProfileMsg('');
     setProfileErr(false);
     try {
+      const body = {
+        homeLat:    lat,
+        homeLng:    lng,
+        // Incluir dirección actualizada por reverse geocoding
+        postalCode: postalCode || undefined,
+        estado:     estado     || undefined,
+        ciudad:     ciudad     || undefined,
+        colonia:    colonia    || undefined,
+        address:    address    || undefined,
+      };
       const data = await apiFetch('/auth/profile', {
-        method:'PATCH',
-        body: JSON.stringify({ homeLat: lat, homeLng: lng })
+        method: 'PATCH',
+        body: JSON.stringify(body)
       }, auth.token);
 
       patchUser({
-        home_lat: data.profile?.home_lat ?? lat ?? null,
-        home_lng: data.profile?.home_lng ?? lng ?? null,
+        home_lat:    data.profile?.home_lat ?? lat ?? null,
+        home_lng:    data.profile?.home_lng ?? lng ?? null,
+        postal_code: data.profile?.postal_code,
+        estado:      data.profile?.estado,
+        ciudad:      data.profile?.ciudad,
+        colonia:     data.profile?.colonia,
+        address:     data.profile?.address,
       });
       setHomeLat(data.profile?.home_lat ?? lat ?? null);
       setHomeLng(data.profile?.home_lng ?? lng ?? null);
