@@ -97,7 +97,10 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
     } catch (e) { if (!isMissingColumnError(e)) throw e; }
     if (!deliveryAddress || deliveryAddress === 'address-pending') return next(new AppError(400, 'Debes guardar tu dirección antes de hacer un pedido'));
 
-    const restCoords = await query('SELECT lat, lng FROM restaurants WHERE id=$1', [restaurantId]);
+    const restCoords = await query(`SELECT COALESCE(u.lat, r.lat) AS lat, COALESCE(u.lng, r.lng) AS lng
+                                    FROM restaurants r
+                                    LEFT JOIN users u ON u.id = r.owner_user_id
+                                    WHERE r.id=$1`, [restaurantId]);
     if (restCoords.rowCount === 0) return next(new AppError(404, 'Restaurante no encontrado'));
 
     const restaurantLat = restCoords.rows[0]?.lat != null ? Number(restCoords.rows[0].lat) : null;
@@ -446,7 +449,7 @@ router.get('/my', authenticate, async (req, res, next) => {
     let result;
     try {
       result = await query(
-        `SELECT o.*, r.name AS restaurant_name, r.address AS restaurant_address,
+        `SELECT o.*, r.name AS restaurant_name, COALESCE(ru.address, r.address) AS restaurant_address,
                 COALESCE(c.alias, c.full_name) AS customer_first_name, c.full_name AS customer_display_name,
                 COALESCE(d.alias, d.full_name) AS driver_first_name,
                 COALESCE(o.delivery_address, c.address) AS customer_address,
@@ -457,6 +460,7 @@ router.get('/my', authenticate, async (req, res, next) => {
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id
          LEFT JOIN users d ON d.id = o.driver_id
+         LEFT JOIN users ru ON ru.id = r.owner_user_id
          ${whereClause}
          ORDER BY o.created_at DESC ${paginatedClause}`,
         [req.user.userId]
@@ -464,7 +468,7 @@ router.get('/my', authenticate, async (req, res, next) => {
     } catch (error) {
       if (!isMissingColumnError(error)) throw error;
       result = await query(
-        `SELECT o.*, r.name AS restaurant_name, NULL AS restaurant_address,
+        `SELECT o.*, r.name AS restaurant_name, COALESCE(ru.address, r.address) AS restaurant_address,
                 COALESCE(c.alias, c.full_name) AS customer_first_name, c.full_name AS customer_display_name,
                 COALESCE(d.alias, d.full_name) AS driver_first_name, o.delivery_address AS customer_address,
                 NULL::float8 AS customer_lat, NULL::float8 AS customer_lng
@@ -472,6 +476,7 @@ router.get('/my', authenticate, async (req, res, next) => {
          JOIN restaurants r ON r.id = o.restaurant_id
          JOIN users c ON c.id = o.customer_id
          LEFT JOIN users d ON d.id = o.driver_id
+         LEFT JOIN users ru ON ru.id = r.owner_user_id
          ${whereClause}
          ORDER BY o.created_at DESC ${paginatedClause}`,
         [req.user.userId]

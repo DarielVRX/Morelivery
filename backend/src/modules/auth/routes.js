@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { authenticate } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
-import { registerSchema, loginSchema } from './schemas.js';
+import { registerSchema, loginSchema, profileSchema } from './schemas.js';
 import { registerUser, loginUser, updateProfileAddress, changePassword, deleteAccount, updateLoginUsername } from './service.js';
 import { AppError } from '../../utils/errors.js';
 import { authRateLimit } from '../../middlewares/rateLimit.js';
@@ -87,9 +87,9 @@ router.get('/postal/:cp', authenticate, async (req, res, next) => {
 });
 
 /* ── PATCH /auth/profile ── */
-router.patch('/profile', authenticate, async (req, res, next) => {
+router.patch('/profile', authenticate, validate(profileSchema), async (req, res, next) => {
   try {
-    const { address, displayName, lat, lng, homeLat, homeLng, postalCode, colonia, estado, ciudad } = req.body || {};
+    const { address, displayName, lat, lng, homeLat, homeLng, postalCode, colonia, estado, ciudad } = req.validatedBody || {};
     const profile = await updateProfileAddress(req.user.userId, req.user.role, address, displayName, lat, lng, homeLat, homeLng, postalCode, colonia, estado, ciudad);
     return res.json({ profile });
   } catch (error) { return next(error); }
