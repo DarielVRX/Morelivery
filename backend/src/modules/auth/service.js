@@ -45,8 +45,8 @@ export async function registerUser(payload) {
   if (user.role === 'restaurant') {
     const restName = cleanRestaurantName(payload.displayName || username);
     try {
-      await query('INSERT INTO restaurants(owner_user_id, name, category, address) VALUES($1,$2,$3,$4)',
-        [user.id, restName, 'General', payload.address || null]);
+      await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1,$2,$3)',
+        [user.id, restName, 'General']);
     } catch (error) {
       if (error?.code === '42703') await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1,$2,$3)', [user.id, restName, 'General']);
       else throw error;
@@ -84,39 +84,30 @@ export async function loginUser(payload) {
 
   let profile = { address: user.address || null, alias: user.alias || user.full_name || username, needsAddress: false, lat: null, lng: null, home_lat: null, home_lng: null, postal_code: null, colonia: null, estado: null, ciudad: null };
 
+  // Todos los datos de perfil personal se leen desde users para evitar duplicados con restaurants.
+  try {
+    const r = await query('SELECT address, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM users WHERE id = $1', [user.id]);
+    profile.address     = r.rows[0]?.address      ?? profile.address;
+    profile.lat         = r.rows[0]?.lat          ?? null;
+    profile.lng         = r.rows[0]?.lng          ?? null;
+    profile.home_lat    = r.rows[0]?.home_lat     ?? null;
+    profile.home_lng    = r.rows[0]?.home_lng     ?? null;
+    profile.postal_code = r.rows[0]?.postal_code  ?? null;
+    profile.colonia     = r.rows[0]?.colonia      ?? null;
+    profile.estado      = r.rows[0]?.estado       ?? null;
+    profile.ciudad      = r.rows[0]?.ciudad       ?? null;
+  } catch (_) {}
+
   if (user.role === 'restaurant') {
     try {
-      const r = await query('SELECT id, name, address, is_open, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
-      profile.restaurant   = r.rows[0] || null;
-      profile.address      = r.rows[0]?.address     || null;
-      profile.lat          = r.rows[0]?.lat         ?? null;
-      profile.lng          = r.rows[0]?.lng         ?? null;
-      profile.home_lat     = r.rows[0]?.home_lat    ?? null;
-      profile.home_lng     = r.rows[0]?.home_lng    ?? null;
-      profile.postal_code  = r.rows[0]?.postal_code ?? null;
-      profile.colonia      = r.rows[0]?.colonia     ?? null;
-      profile.estado       = r.rows[0]?.estado      ?? null;
-      profile.ciudad       = r.rows[0]?.ciudad      ?? null;
+      const r = await query('SELECT id, name, category, is_open, profile_photo FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
+      profile.restaurant = r.rows[0] || null;
     } catch (error) {
       if (error?.code === '42703') {
-        const r = await query('SELECT id, name, address, is_open FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
+        const r = await query('SELECT id, name, is_open FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
         profile.restaurant = r.rows[0] || null;
-        profile.address    = r.rows[0]?.address || null;
       } else throw error;
     }
-  } else {
-    // customer / driver / admin: lat/lng viven en users
-    try {
-      const r = await query('SELECT lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM users WHERE id = $1', [user.id]);
-      profile.lat         = r.rows[0]?.lat         ?? null;
-      profile.lng         = r.rows[0]?.lng         ?? null;
-      profile.home_lat    = r.rows[0]?.home_lat    ?? null;
-      profile.home_lng    = r.rows[0]?.home_lng    ?? null;
-      profile.postal_code = r.rows[0]?.postal_code ?? null;
-      profile.colonia     = r.rows[0]?.colonia     ?? null;
-      profile.estado      = r.rows[0]?.estado      ?? null;
-      profile.ciudad      = r.rows[0]?.ciudad      ?? null;
-    } catch (_) {}
   }
 
   if (user.role === 'driver') {
@@ -137,147 +128,96 @@ export async function loginUser(payload) {
 }
 
 export async function updateProfileAddress(userId, role, address, displayName, lat, lng, homeLat, homeLng, postalCode, colonia, estado, ciudad) {
-  if (role === 'restaurant') {
-    // address, lat, lng y name van en restaurants; alias/full_name en users
-    const restUpdates = [];
-    const restVals    = [];
-    let ri = 1;
-    if (address    !== undefined && address    !== null) { restUpdates.push(`address=$${ri++}`);     restVals.push(address); }
-    if (lat        !== undefined && lat        !== null) { restUpdates.push(`lat=$${ri++}`);        restVals.push(lat); }
-    if (lng        !== undefined && lng        !== null) { restUpdates.push(`lng=$${ri++}`);        restVals.push(lng); }
-    if (homeLat    !== undefined && homeLat    !== null) { restUpdates.push(`home_lat=$${ri++}`);   restVals.push(homeLat); }
-    if (homeLng    !== undefined && homeLng    !== null) { restUpdates.push(`home_lng=$${ri++}`);   restVals.push(homeLng); }
-    if (postalCode !== undefined && postalCode !== null) { restUpdates.push(`postal_code=$${ri++}`);restVals.push(postalCode); }
-    if (colonia    !== undefined && colonia    !== null) { restUpdates.push(`colonia=$${ri++}`);    restVals.push(colonia); }
-    if (estado     !== undefined && estado     !== null) { restUpdates.push(`estado=$${ri++}`);     restVals.push(estado); }
-    if (ciudad     !== undefined && ciudad     !== null) { restUpdates.push(`ciudad=$${ri++}`);     restVals.push(ciudad); }
-    if (restUpdates.length > 0) {
-      restVals.push(userId);
-      try {
-        await query(`UPDATE restaurants SET ${restUpdates.join(',')} WHERE owner_user_id=$${ri}`, restVals);
-      } catch (e) {
-        if (e?.code !== '42703') {
-          // Reintentar solo con campos base si hay error de columna desconocida
-          const safeKeys = ['address','lat','lng','name'];
-          const safeU = []; const safeV = []; let si = 1;
-          restUpdates.forEach((upd, idx) => {
-            if (safeKeys.some(k => upd.startsWith(`${k}=`))) {
-              safeU.push(`${upd.split('=')[0]}=$${si++}`);
-              safeV.push(restVals[idx]);
-            }
-          });
-          if (safeU.length > 0) {
-            safeV.push(userId);
-            try { await query(`UPDATE restaurants SET ${safeU.join(',')} WHERE owner_user_id=$${si}`, safeV); }
-            catch (_) {}
-          }
-        }
-      }
-    }
-    if (displayName !== undefined && displayName !== null) {
-      const cleanName = cleanRestaurantName(displayName);
-      try { await query('UPDATE restaurants SET name=$1 WHERE owner_user_id=$2', [cleanName, userId]); }
-      catch (e) { if (e?.code !== '42703') throw e; }
-      try {
-        await query('UPDATE users SET full_name=$1, alias=$2 WHERE id=$3', [displayName.trim(), displayName.trim(), userId]);
-      } catch (e) {
-        if (e?.code === '42703') {
-          try { await query('UPDATE users SET full_name=$1 WHERE id=$2', [displayName.trim(), userId]); } catch (_) {}
-        } else throw e;
-      }
-    }
-    // Leer confirmado desde restaurants (lat/lng viven ahí para tienda)
-    let rRow = {};
-    try {
-      try {
-        const rc = await query('SELECT name, address, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM restaurants WHERE owner_user_id=$1', [userId]);
-        rRow = rc.rows[0] || {};
-      } catch (_) {
-        const rc = await query('SELECT name, address, lat, lng FROM restaurants WHERE owner_user_id=$1', [userId]);
-        rRow = rc.rows[0] || {};
-      }
-    } catch (_) {}
-    let uRow = {};
-    try {
-      const uc = await query('SELECT full_name, alias FROM users WHERE id=$1', [userId]);
-      uRow = uc.rows[0] || {};
-    } catch (_) {}
-    return {
-      address:     rRow.address      ?? address     ?? null,
-      displayName: uRow.alias        ?? uRow.full_name ?? displayName ?? null,
-      alias:       uRow.alias        ?? uRow.full_name ?? displayName ?? null,
-      lat:         rRow.lat          ?? null,
-      lng:         rRow.lng          ?? null,
-      home_lat:    rRow.home_lat     ?? null,
-      home_lng:    rRow.home_lng     ?? null,
-      postal_code: rRow.postal_code  ?? null,
-      colonia:     rRow.colonia      ?? null,
-      estado:      rRow.estado       ?? null,
-      ciudad:      rRow.ciudad       ?? null,
-    };
-  } else {
-    // customer / driver / admin: todo va en users
-    const updates = [];
-    const vals    = [];
-    let i = 1;
-    if (displayName !== undefined && displayName !== null) {
-      updates.push(`full_name=$${i++}`); vals.push(displayName.trim());
-      updates.push(`alias=$${i++}`);     vals.push(displayName.trim());
-    }
-    if (address    !== undefined && address    !== null) { updates.push(`address=$${i++}`);      vals.push(address); }
-    if (lat        !== undefined && lat        !== null) { updates.push(`lat=$${i++}`);         vals.push(lat); }
-    if (lng        !== undefined && lng        !== null) { updates.push(`lng=$${i++}`);         vals.push(lng); }
-    if (homeLat    !== undefined && homeLat    !== null) { updates.push(`home_lat=$${i++}`);    vals.push(homeLat); }
-    if (homeLng    !== undefined && homeLng    !== null) { updates.push(`home_lng=$${i++}`);    vals.push(homeLng); }
-    if (postalCode !== undefined && postalCode !== null) { updates.push(`postal_code=$${i++}`); vals.push(postalCode); }
-    if (colonia    !== undefined && colonia    !== null) { updates.push(`colonia=$${i++}`);     vals.push(colonia); }
-    if (estado     !== undefined && estado     !== null) { updates.push(`estado=$${i++}`);      vals.push(estado); }
-    if (ciudad     !== undefined && ciudad     !== null) { updates.push(`ciudad=$${i++}`);      vals.push(ciudad); }
-    if (updates.length > 0) {
-      vals.push(userId);
-      try {
-        await query(`UPDATE users SET ${updates.join(',')} WHERE id=$${i}`, vals);
-      } catch (e) {
-        if (e?.code === '42703') {
-          // Columnas lat/lng o alias pueden no existir — guardar solo las seguras
-          const safeUpdates = [];
-          const safeVals    = [];
-          let j = 1;
-          if (address     !== undefined && address     !== null) { safeUpdates.push(`address=$${j++}`);   safeVals.push(address); }
-          if (displayName !== undefined && displayName !== null) { safeUpdates.push(`full_name=$${j++}`); safeVals.push(displayName.trim()); }
-          if (lat         !== undefined && lat         !== null) { safeUpdates.push(`lat=$${j++}`);       safeVals.push(lat); }
-          if (lng         !== undefined && lng         !== null) { safeUpdates.push(`lng=$${j++}`);       safeVals.push(lng); }
-          if (safeUpdates.length > 0) {
-            safeVals.push(userId);
-            try { await query(`UPDATE users SET ${safeUpdates.join(',')} WHERE id=$${j}`, safeVals); } catch (_) {}
-          }
-        } else throw e;
-      }
-    }
-    let row = {};
-    try {
-      const confirmed = await query('SELECT full_name, alias, address, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM users WHERE id=$1', [userId]);
-      row = confirmed.rows[0] || {};
-    } catch (_) {
-      try {
-        const confirmed = await query('SELECT full_name, alias, address FROM users WHERE id=$1', [userId]);
-        row = confirmed.rows[0] || {};
-      } catch (_2) {}
-    }
-    return {
-      address:     row.address      ?? address     ?? null,
-      displayName: row.alias        ?? row.full_name ?? displayName ?? null,
-      alias:       row.alias        ?? row.full_name ?? displayName ?? null,
-      lat:         row.lat          ?? null,
-      lng:         row.lng          ?? null,
-      home_lat:    row.home_lat     ?? null,
-      home_lng:    row.home_lng     ?? null,
-      postal_code: row.postal_code  ?? null,
-      colonia:     row.colonia      ?? null,
-      estado:      row.estado       ?? null,
-      ciudad:      row.ciudad       ?? null,
-    };
+  const updates = [];
+  const vals = [];
+  let i = 1;
+
+  const pushUpdate = (column, value) => {
+    if (value === undefined) return;
+    updates.push(`${column}=$${i++}`);
+    vals.push(value);
+  };
+
+  if (displayName !== undefined && displayName !== null) {
+    pushUpdate('full_name', displayName.trim());
+    pushUpdate('alias', displayName.trim());
   }
+
+  pushUpdate('address', address);
+  pushUpdate('lat', lat);
+  pushUpdate('lng', lng);
+  pushUpdate('home_lat', homeLat);
+  pushUpdate('home_lng', homeLng);
+  pushUpdate('postal_code', postalCode);
+  pushUpdate('colonia', colonia);
+  pushUpdate('estado', estado);
+  pushUpdate('ciudad', ciudad);
+
+  if (updates.length > 0) {
+    vals.push(userId);
+    try {
+      await query(`UPDATE users SET ${updates.join(',')} WHERE id=$${i}`, vals);
+    } catch (e) {
+      if (e?.code === '42703') {
+        const safe = [];
+        const safeVals = [];
+        let j = 1;
+        const candidates = [
+          ['full_name', displayName !== undefined && displayName !== null ? displayName.trim() : undefined],
+          ['alias', displayName !== undefined && displayName !== null ? displayName.trim() : undefined],
+          ['address', address],
+          ['lat', lat],
+          ['lng', lng],
+          ['home_lat', homeLat],
+          ['home_lng', homeLng],
+          ['postal_code', postalCode],
+          ['colonia', colonia],
+          ['estado', estado],
+          ['ciudad', ciudad],
+        ];
+        for (const [col, val] of candidates) {
+          if (val === undefined) continue;
+          safe.push(`${col}=$${j++}`);
+          safeVals.push(val);
+        }
+        if (safe.length > 0) {
+          safeVals.push(userId);
+          try { await query(`UPDATE users SET ${safe.join(',')} WHERE id=$${j}`, safeVals); } catch (_) {}
+        }
+      } else throw e;
+    }
+  }
+
+  if (role === 'restaurant' && displayName !== undefined && displayName !== null) {
+    const cleanName = cleanRestaurantName(displayName);
+    try { await query('UPDATE restaurants SET name=$1 WHERE owner_user_id=$2', [cleanName, userId]); }
+    catch (e) { if (e?.code !== '42703') throw e; }
+  }
+
+  let row = {};
+  try {
+    const confirmed = await query('SELECT full_name, alias, address, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM users WHERE id=$1', [userId]);
+    row = confirmed.rows[0] || {};
+  } catch (_) {
+    try {
+      const confirmed = await query('SELECT full_name, alias, address FROM users WHERE id=$1', [userId]);
+      row = confirmed.rows[0] || {};
+    } catch (_2) {}
+  }
+
+  return {
+    address: row.address ?? address ?? null,
+    displayName: row.alias ?? row.full_name ?? displayName ?? null,
+    alias: row.alias ?? row.full_name ?? displayName ?? null,
+    lat: row.lat ?? null,
+    lng: row.lng ?? null,
+    home_lat: row.home_lat ?? null,
+    home_lng: row.home_lng ?? null,
+    postal_code: row.postal_code ?? null,
+    colonia: row.colonia ?? null,
+    estado: row.estado ?? null,
+    ciudad: row.ciudad ?? null,
+  };
 }
 
 export async function changePassword(userId, currentPassword, newPassword) {

@@ -68,8 +68,8 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
       result = await query(
         `SELECT o.id, o.total_cents, o.service_fee_cents, o.delivery_fee_cents,
                 o.tip_cents, o.payment_method, o.status,
-                r.name AS restaurant_name, r.address AS restaurant_address,
-                r.lat AS restaurant_lat, r.lng AS restaurant_lng,
+                r.name AS restaurant_name, COALESCE(ru.address, r.address) AS restaurant_address,
+                COALESCE(ru.lat, r.lat) AS restaurant_lat, COALESCE(ru.lng, r.lng) AS restaurant_lng,
                 COALESCE(o.delivery_address, c.address) AS customer_address,
                 COALESCE(o.delivery_lat, c.lat) AS customer_lat,
                 COALESCE(o.delivery_lng, c.lng) AS customer_lng,
@@ -77,6 +77,7 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
          FROM order_driver_offers od
          JOIN orders o ON o.id = od.order_id
          JOIN restaurants r ON r.id = o.restaurant_id
+         LEFT JOIN users ru ON ru.id = r.owner_user_id
          JOIN users c       ON c.id = o.customer_id
          WHERE od.driver_id=$1 AND od.status='pending' AND o.driver_id IS NULL
          ORDER BY od.created_at ASC`,

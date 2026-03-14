@@ -343,9 +343,9 @@ export async function getOfferPayload(orderId, driverId) {
             o.total_cents, o.service_fee_cents, o.delivery_fee_cents, o.tip_cents,
             o.payment_method,
             r.name    AS restaurant_name,
-            r.address AS restaurant_address,
-            r.lat     AS restaurant_lat,
-            r.lng     AS restaurant_lng,
+            COALESCE(ru.address, r.address) AS restaurant_address,
+            COALESCE(ru.lat, r.lat)     AS restaurant_lat,
+            COALESCE(ru.lng, r.lng)     AS restaurant_lng,
             -- Usar dirección fresca del cliente (puede haberse actualizado desde que se creó el pedido)
             COALESCE(o.delivery_address, c.address) AS customer_address,
             COALESCE(o.delivery_lat, c.lat) AS customer_lat,
@@ -355,6 +355,7 @@ export async function getOfferPayload(orderId, driverId) {
             )))::int AS seconds_left
      FROM orders o
      JOIN restaurants r ON r.id=o.restaurant_id
+     LEFT JOIN users ru ON ru.id=r.owner_user_id
      JOIN users c       ON c.id=o.customer_id
      JOIN order_driver_offers od ON od.order_id=o.id AND od.driver_id=$2
      WHERE o.id=$1`,
@@ -368,8 +369,8 @@ export async function getPendingAssignmentOrders(driverId) {
   const r = await query(
     `SELECT o.id, o.status, o.total_cents, o.service_fee_cents, o.delivery_fee_cents,
             o.tip_cents, o.payment_method, o.created_at,
-            r.name AS restaurant_name, r.address AS restaurant_address,
-            r.lat AS restaurant_lat, r.lng AS restaurant_lng,
+            r.name AS restaurant_name, COALESCE(ru.address, r.address) AS restaurant_address,
+            COALESCE(ru.lat, r.lat) AS restaurant_lat, COALESCE(ru.lng, r.lng) AS restaurant_lng,
             COALESCE(o.delivery_address, c.address) AS customer_address,
             COALESCE(o.delivery_lat, c.lat) AS customer_lat,
             COALESCE(o.delivery_lng, c.lng) AS customer_lng,
@@ -382,6 +383,7 @@ export async function getPendingAssignmentOrders(driverId) {
             )))::int AS cooldown_secs
      FROM orders o
      JOIN restaurants r ON r.id=o.restaurant_id
+     LEFT JOIN users ru ON ru.id=r.owner_user_id
      JOIN users c       ON c.id=o.customer_id
      LEFT JOIN order_driver_offers od
        ON od.order_id=o.id AND od.driver_id=$1
