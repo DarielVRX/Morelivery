@@ -189,7 +189,7 @@ export default function RestaurantPage() {
           apiFetch('/restaurants'),
           apiFetch(`/restaurants/${id}/menu`)
         ]);
-        const found = (listData.restaurants || []).find(r => r.id === id);
+        const found = (listData.restaurants || []).find(r => String(r.id) === String(id);
         setRestaurant(found || { id, name: 'Tienda', is_open: true });
         setMenu((menuData.menu || []).filter(i => i.is_available !== false));
       } catch (e) { setMsg('Error cargando la tienda'); }
@@ -275,8 +275,8 @@ export default function RestaurantPage() {
     currentPos;
 
   // Distancia customer→restaurant (solo cuando ambos tienen coords)
-  const restLat = Number.isFinite(Number(restaurant?.home_lat)) ? Number(restaurant.home_lat) : null;
-  const restLng = Number.isFinite(Number(restaurant?.home_lng)) ? Number(restaurant.home_lng) : null;
+  const restLat = Number.isFinite(Number(restaurant?.lat)) ? Number(restaurant.lat) : null;
+  const restLng = Number.isFinite(Number(restaurant?.lng)) ? Number(restaurant.lng) : null;
   const distKm = (activeDeliveryPos && restLat !== null && restLng !== null)
     ? haversineKm(activeDeliveryPos.lat, activeDeliveryPos.lng, restLat, restLng)
     : null;
@@ -291,7 +291,7 @@ export default function RestaurantPage() {
   // Logger de distancia — visible en consola del navegador
   if (typeof window !== 'undefined') {
     const tag = '[distancia]';
-    console.log(tag, 'restaurant.home_lat:', restaurant?.home_lat, '| restaurant.home_lng:', restaurant?.home_lng);
+    console.log(tag, 'restaurant.lat:', restaurant?.lat, '| restaurant.lng:', restaurant?.lng);
     console.log(tag, 'activeDeliveryPos:', activeDeliveryPos);
     console.log(tag, 'distKm:', distKm, '| tooFar:', tooFar);
   }
