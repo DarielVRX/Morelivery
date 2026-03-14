@@ -2,12 +2,23 @@
 import { Router } from 'express';
 import { authenticate } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
-import { registerSchema, loginSchema } from './schemas.js';
+import { registerSchema, loginSchema, profileSchema } from './schemas.js';
 import { registerUser, loginUser, updateProfileAddress, changePassword, deleteAccount, updateLoginUsername } from './service.js';
 import { AppError } from '../../utils/errors.js';
 import { authRateLimit } from '../../middlewares/rateLimit.js';
 
 const router = Router();
+
+async function fetchWithTimeout(url, timeoutMs = 1800) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 
 /* ── POST /auth/register ── */
 router.post('/register', authRateLimit, validate(registerSchema), async (req, res, next) => {
@@ -40,26 +51,12 @@ router.get('/postal/:cp', authenticate, async (req, res, next) => {
       colonias: [...new Set((colonias || []).filter(Boolean).map(c => String(c).trim()))].sort(),
     });
 
+    // Priorizar la API más rápida y aplicar timeout para no congelar la UI al esperar CP.
     try {
-      const r = await fetch(`https://api-sepomex.hckdrk.mx/query/info_cp/${cp}?type=simplified`);
-      if (r.ok) {
-        const data = await r.json();
-        const rows = Array.isArray(data?.response) ? data.response : [];
-        if (rows.length > 0) {
-          return res.json(normalize(
-            rows[0]?.estado || rows[0]?.d_estado || '',
-            rows[0]?.municipio || rows[0]?.ciudad || rows[0]?.D_mnpio || '',
-            rows.map(i => i?.asentamiento || i?.colonia || i?.d_asenta)
-          ));
-        }
-      }
-    } catch (_) {}
-
-    try {
-      const r2 = await fetch(`https://mexico-api.devaleff.com/api/codigo-postal/${cp}`);
-      if (r2.ok) {
-        const data2 = await r2.json();
-        const items = Array.isArray(data2?.data) ? data2.data : [];
+      const rFast = await fetchWithTimeout(`https://mexico-api.devaleff.com/api/codigo-postal/${cp}`, 1500);
+      if (rFast.ok) {
+        const dataFast = await rFast.json();
+        const items = Array.isArray(dataFast?.data) ? dataFast.data : [];
         if (items.length > 0) {
           return res.json(normalize(
             items[0]?.d_estado || '',
@@ -70,14 +67,29 @@ router.get('/postal/:cp', authenticate, async (req, res, next) => {
       }
     } catch (_) {}
 
+    try {
+      const rFallback = await fetchWithTimeout(`https://api-sepomex.hckdrk.mx/query/info_cp/${cp}?type=simplified`, 2200);
+      if (rFallback.ok) {
+        const dataFallback = await rFallback.json();
+        const rows = Array.isArray(dataFallback?.response) ? dataFallback.response : [];
+        if (rows.length > 0) {
+          return res.json(normalize(
+            rows[0]?.estado || rows[0]?.d_estado || '',
+            rows[0]?.municipio || rows[0]?.ciudad || rows[0]?.D_mnpio || '',
+            rows.map(i => i?.asentamiento || i?.colonia || i?.d_asenta)
+          ));
+        }
+      }
+    } catch (_) {}
+
     return next(new AppError(404, 'CP no encontrado'));
   } catch (error) { return next(error); }
 });
 
 /* ── PATCH /auth/profile ── */
-router.patch('/profile', authenticate, async (req, res, next) => {
+router.patch('/profile', authenticate, validate(profileSchema), async (req, res, next) => {
   try {
-    const { address, displayName, lat, lng, homeLat, homeLng, postalCode, colonia, estado, ciudad } = req.body || {};
+    const { address, displayName, lat, lng, homeLat, homeLng, postalCode, colonia, estado, ciudad } = req.validatedBody || {};
     const profile = await updateProfileAddress(req.user.userId, req.user.role, address, displayName, lat, lng, homeLat, homeLng, postalCode, colonia, estado, ciudad);
     return res.json({ profile });
   } catch (error) { return next(error); }

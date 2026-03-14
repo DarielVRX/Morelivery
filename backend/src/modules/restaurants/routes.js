@@ -58,8 +58,25 @@ async function computeIsOpen(restaurantId) {
 /* ── GET / — lista pública con is_open calculado en tiempo real ── */
 router.get('/', async (_req, res, next) => {
   try {
-    const result = await query('SELECT id, name, category, is_open, address, profile_photo, lat, lng, rating_avg, rating_count FROM restaurants WHERE is_active = true ORDER BY name').catch(() =>
-      query('SELECT id, name, category, is_open, address, profile_photo, lat, lng FROM restaurants WHERE is_active = true ORDER BY name')
+    const result = await query(
+      `SELECT r.id, r.name, r.category, r.is_open,
+              COALESCE(u.address, r.address) AS address,
+              r.profile_photo, COALESCE(u.lat, r.lat) AS lat, COALESCE(u.lng, r.lng) AS lng,
+              r.rating_avg, r.rating_count
+       FROM restaurants r
+       LEFT JOIN users u ON u.id = r.owner_user_id
+       WHERE r.is_active = true
+       ORDER BY r.name`
+    ).catch(() =>
+      query(
+        `SELECT r.id, r.name, r.category, r.is_open,
+                COALESCE(u.address, r.address) AS address,
+                r.profile_photo, COALESCE(u.lat, r.lat) AS lat, COALESCE(u.lng, r.lng) AS lng
+         FROM restaurants r
+         LEFT JOIN users u ON u.id = r.owner_user_id
+         WHERE r.is_active = true
+         ORDER BY r.name`
+      )
     );
     const restaurants = await Promise.all(result.rows.map(async r => ({ ...r, is_open: await computeIsOpen(r.id) })));
     return res.json({ restaurants });
@@ -73,7 +90,13 @@ router.get('/', async (_req, res, next) => {
 router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const result = await query(
-      'SELECT id, name, category, is_open, address, manual_open_override, profile_photo, lat, lng FROM restaurants WHERE owner_user_id=$1 LIMIT 1',
+      `SELECT r.id, r.name, r.category, r.is_open,
+              COALESCE(u.address, r.address) AS address,
+              r.manual_open_override, r.profile_photo,
+              COALESCE(u.lat, r.lat) AS lat, COALESCE(u.lng, r.lng) AS lng
+       FROM restaurants r
+       LEFT JOIN users u ON u.id = r.owner_user_id
+       WHERE r.owner_user_id=$1 LIMIT 1`,
       [req.user.userId]
     );
     if (result.rowCount === 0) return res.json({ restaurant: null });
