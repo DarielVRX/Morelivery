@@ -491,32 +491,17 @@ export default function ProfilePage() {
     {/* Colonia — dropdown si hay datos del CP, input manual si no */}
     <label>
     Colonia
-    {coloniasList.length > 0 ? (
-      <div style={{ display:'flex', gap:'0.4rem', alignItems:'center' }}>
-      <select
-      value={colonia}
-      onChange={e => setColonia(e.target.value)}
-      disabled={cpLoading}
-      style={{ flex:1 }}
-      >
-      <option value="">Seleccionar colonia…</option>
-      {coloniasList.map(c => <option key={c} value={c}>{c}</option>)}
-      </select>
-      </div>
-    ) : (
-      <input value={colonia} onChange={e => setColonia(e.target.value)} placeholder="Ej: Col. Centro" />
-    )}
+    <input
+    value={colonia}
+    onChange={e => setColonia(e.target.value)}
+    placeholder="Ej: Col. Centro"
+    list="colonias-list"
+    disabled={cpLoading}
+    />
     {coloniasList.length > 0 && (
-      <span style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.2rem', display:'block' }}>
-      O escribe directamente:
-      <input
-      value={colonia}
-      onChange={e => setColonia(e.target.value)}
-      disabled={cpLoading}
-      placeholder="Colonia manual"
-      style={{ marginTop:'0.25rem' }}
-      />
-      </span>
+      <datalist id="colonias-list">
+      {coloniasList.map(c => <option key={c} value={c} />)}
+      </datalist>
     )}
     </label>
 
