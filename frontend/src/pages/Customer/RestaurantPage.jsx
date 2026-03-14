@@ -158,7 +158,9 @@ export default function RestaurantPage() {
 
   const isCustomer  = auth.user?.role === 'customer';
   const hasAddress  = Boolean(auth.user?.address && auth.user.address !== 'address-pending');
-  const hasHomePin  = Number.isFinite(Number(auth.user?.home_lat)) && Number.isFinite(Number(auth.user?.home_lng));
+  const homeLatNum = Number(auth.user?.home_lat);
+  const homeLngNum = Number(auth.user?.home_lng);
+  const hasHomePin  = Number.isFinite(homeLatNum) && Number.isFinite(homeLngNum);
 
   // Ubicación actual del customer via GPS
   const [currentPos,   setCurrentPos]   = useState(null);  // { lat, lng }
@@ -245,8 +247,8 @@ export default function RestaurantPage() {
       }
       // Elegir coordenadas según modo de entrega
       if (deliveryMode === 'home' && hasHomePin) {
-        orderBody.delivery_lat = auth.user.home_lat;
-        orderBody.delivery_lng = auth.user.home_lng;
+        orderBody.delivery_lat = homeLatNum;
+        orderBody.delivery_lng = homeLngNum;
       } else if (currentPos) {
         orderBody.delivery_lat = currentPos.lat;
         orderBody.delivery_lng = currentPos.lng;
@@ -269,7 +271,7 @@ export default function RestaurantPage() {
   // Coordenadas de entrega activas según modo
   const activeDeliveryPos =
     deliveryMode === 'manual'  ? manualPos :
-    deliveryMode === 'home'    ? (hasHomePin ? { lat: auth.user.home_lat, lng: auth.user.home_lng } : null) :
+    deliveryMode === 'home'    ? (hasHomePin ? { lat: homeLatNum, lng: homeLngNum } : null) :
     currentPos;
 
   // Distancia customer→restaurant (solo cuando ambos tienen coords)
@@ -526,7 +528,7 @@ export default function RestaurantPage() {
             {/* Mini-mapa para ubicación manual */}
             {deliveryMode === 'manual' && showManualMap && (
               <ManualPinMap
-                initialPos={currentPos || (hasHomePin ? { lat: auth.user.home_lat, lng: auth.user.home_lng } : null)}
+                initialPos={currentPos || (hasHomePin ? { lat: homeLatNum, lng: homeLngNum } : null)}
                 mapRef={manualMapRef}
                 onConfirm={(pos) => { setManualPos(pos); setShowManualMap(false); }}
                 onCancel={() => { setShowManualMap(false); if (!manualPos) setDeliveryMode('current'); }}
