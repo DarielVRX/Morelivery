@@ -535,48 +535,19 @@ export default function ProfilePage() {
     {/* Colonia — dropdown si hay datos del CP, input manual si no */}
     <label>
     Colonia
-    <div style={{ position: 'relative' }}>
-    <input
-    value={colonia}
-    onChange={e => setColonia(e.target.value)}
-    placeholder="Ej: Col. Centro"
-    list="colonias-list"
-    disabled={cpLoading}
-    id="colonia-input"
-    style={{ paddingRight: '2rem' }}
-    />
-    {coloniasList.length > 0 && (
-      <>
-      <button
-      type="button"
-      tabIndex={-1}
+    {coloniasList.length > 0 ? (
+      <select value={colonia} onChange={e => setColonia(e.target.value)} disabled={cpLoading}>
+      <option value="">Seleccionar colonia…</option>
+      {coloniasList.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+    ) : (
+      <input
+      value={colonia}
+      onChange={e => setColonia(e.target.value)}
+      placeholder="Ej: Col. Centro"
       disabled={cpLoading}
-      onClick={() => {
-        const inp = document.getElementById('colonia-input');
-        if (!inp) return;
-        // Truco: limpiar temporalmente el valor forza al datalist a mostrar todas las opciones
-        const prev = inp.value;
-        inp.value = '';
-        inp.dispatchEvent(new Event('input', { bubbles: true }));
-        inp.focus();
-        inp.value = prev;
-      }}
-      style={{
-        position: 'absolute', right: 0, top: 0, bottom: 0,
-        width: '2rem', border: 'none', background: 'transparent',
-        cursor: 'pointer', fontSize: '0.75rem', color: 'var(--gray-400)',
-                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                 minHeight: 0, padding: 0,
-      }}
-      >
-      ▾
-      </button>
-      <datalist id="colonias-list">
-      {coloniasList.map(c => <option key={c} value={c} />)}
-      </datalist>
-      </>
+      />
     )}
-    </div>
     </label>
 
     {/* Calle y número — dos campos separados */}
