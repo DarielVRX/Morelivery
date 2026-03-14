@@ -4,13 +4,20 @@ import { useAuth } from '../contexts/AuthContext';
 
 function Collapsible({ title, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
-  // Mantener el árbol montado siempre — solo ocultar con CSS.
-  // Esto elimina el retraso de montar/desmontar nodos complejos (inputs, selects, mapa).
-  // content-visibility:hidden le dice al navegador que omita layout y paint del contenido oculto.
+  const [wasOpened, setWasOpened] = useState(defaultOpen);
+
+  function toggleOpen() {
+    setOpen(prev => {
+      const next = !prev;
+      if (next) setWasOpened(true);
+      return next;
+    });
+  }
+
   return (
     <div className="card" style={{ marginBottom:'0.75rem', padding:0, overflow:'hidden' }}>
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={toggleOpen}
         style={{
           width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center',
           padding:'0.85rem 1rem', background:'none', border:'none', cursor:'pointer',
@@ -24,15 +31,11 @@ function Collapsible({ title, defaultOpen = false, children }) {
           <path d="M6 9l6 6 6-6"/>
         </svg>
       </button>
-      <div style={{
-        padding: open ? '1rem' : 0,
-        // content-visibility:hidden omite layout/paint sin desmontar el árbol React
-        contentVisibility: open ? 'visible' : 'hidden',
-        // Reservar altura 0 cuando está oculto para evitar reflow al abrir
-        containIntrinsicSize: open ? 'auto' : '0 0',
-      }}>
-        {children}
-      </div>
+      {(open || wasOpened) && (
+        <div style={{ padding: open ? '1rem' : 0, display: open ? 'block' : 'none' }}>
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -66,6 +69,8 @@ async function fetchColoniasByPostal(cp, token) {
     return null;
   }
 }
+
+const BUSY_FIELD_STYLE = { opacity: 0.7, pointerEvents: 'none' };
 
 export default function ProfilePage() {
   const { auth, patchUser, logout } = useAuth();
@@ -207,6 +212,7 @@ export default function ProfilePage() {
   const [pinMapResult, setPinMapResult] = useState(null); // { lat, lng } encontrado
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError,   setSearchError]   = useState('');
+  const [pinSaving, setPinSaving] = useState(false);
   const pinMapRef = useRef(null);
   const pinMapInstance = useRef(null);
   const pinMarkerRef = useRef(null);
@@ -342,6 +348,34 @@ export default function ProfilePage() {
     } catch (e) { setProfileMsg(e.message); setProfileErr(true); }
   }
 
+  async function persistHomePin(lat, lng) {
+    setPinSaving(true);
+    setProfileMsg('');
+    setProfileErr(false);
+    try {
+      const data = await apiFetch('/auth/profile', {
+        method:'PATCH',
+        body: JSON.stringify({ homeLat: lat, homeLng: lng })
+      }, auth.token);
+
+      patchUser({
+        home_lat: data.profile?.home_lat ?? lat ?? null,
+        home_lng: data.profile?.home_lng ?? lng ?? null,
+      });
+      setHomeLat(data.profile?.home_lat ?? lat ?? null);
+      setHomeLng(data.profile?.home_lng ?? lng ?? null);
+      setProfileMsg('Ubicación de casa guardada');
+      setProfileErr(false);
+      return true;
+    } catch (e) {
+      setProfileMsg(e.message || 'No se pudo guardar el pin');
+      setProfileErr(true);
+      return false;
+    } finally {
+      setPinSaving(false);
+    }
+  }
+
   async function changePasswordAndLogin() {
     if (!currentPassword) { setPwdMsg('Ingresa tu contraseña actual'); setPwdErr(true); return; }
     const changingPwd  = !!newPassword;
@@ -406,7 +440,7 @@ export default function ProfilePage() {
           {/* Código postal */}
           <label>
             Código postal
-            <div style={{ position:'relative' }}>
+            <div style={{ position:'relative', ...(cpLoading ? BUSY_FIELD_STYLE : {}) }}>
               <input
                 value={postalCode}
                 onChange={e => setPostalCode(e.target.value.replace(/\D/g, '').slice(0, 5))}
@@ -427,11 +461,11 @@ export default function ProfilePage() {
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.55rem' }}>
             <label>
               Estado
-              <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Jalisco" />
+              <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Jalisco" disabled={cpLoading} />
             </label>
             <label>
               Municipio / Ciudad
-              <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Morelia" />
+              <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Morelia" disabled={cpLoading} />
             </label>
           </div>
 
@@ -443,6 +477,7 @@ export default function ProfilePage() {
                 <select
                   value={colonia}
                   onChange={e => setColonia(e.target.value)}
+                  disabled={cpLoading}
                   style={{ flex:1 }}
                 >
                   <option value="">Seleccionar colonia…</option>
@@ -458,6 +493,7 @@ export default function ProfilePage() {
                 <input
                   value={colonia}
                   onChange={e => setColonia(e.target.value)}
+                  disabled={cpLoading}
                   placeholder="Colonia manual"
                   style={{ marginTop:'0.25rem' }}
                 />
@@ -469,7 +505,7 @@ export default function ProfilePage() {
           <label>
             Calle y número
             <input value={address} onChange={e => setAddress(e.target.value)}
-              placeholder="Ej: Av. Revolución 1234" />
+              placeholder="Ej: Av. Revolución 1234" disabled={searchLoading} />
           </label>
 
 
@@ -507,7 +543,7 @@ export default function ProfilePage() {
               type="button"
               className="btn-sm btn-primary"
               onClick={searchPin}
-              disabled={searchLoading}
+              disabled={searchLoading || cpLoading || pinSaving}
               style={{ whiteSpace:'nowrap' }}
             >
               {searchLoading ? 'Buscando…' : '📍 Buscar en mapa'}
@@ -520,10 +556,11 @@ export default function ProfilePage() {
             {hasHomePin && (
               <button
                 type="button"
-                onClick={() => { setHomeLat(null); setHomeLng(null); }}
+                disabled={pinSaving}
+                onClick={async () => { await persistHomePin(null, null); }}
                 style={{ background:'none', border:'none', color:'var(--error)', cursor:'pointer', fontSize:'0.75rem', fontWeight:600, marginLeft:'auto' }}
               >
-                Borrar
+                {pinSaving ? 'Borrando…' : 'Borrar'}
               </button>
             )}
           </div>
@@ -543,14 +580,12 @@ export default function ProfilePage() {
                 <div ref={pinMapRef} style={{ height:320, width:'100%' }} />
                 <div style={{ padding:'0.75rem 1rem', display:'flex', gap:'0.5rem', justifyContent:'flex-end', borderTop:'1px solid var(--gray-200)' }}>
                   <button className="btn-sm" onClick={() => setShowPinMap(false)}>Cancelar</button>
-                  <button className="btn-sm btn-primary" onClick={() => {
-                    if (pinMapResult) {
-                      setHomeLat(pinMapResult.lat);
-                      setHomeLng(pinMapResult.lng);
-                    }
-                    setShowPinMap(false);
+                  <button className="btn-sm btn-primary" disabled={pinSaving} onClick={async () => {
+                    if (!pinMapResult) return;
+                    const saved = await persistHomePin(pinMapResult.lat, pinMapResult.lng);
+                    if (saved) setShowPinMap(false);
                   }}>
-                    Confirmar pin
+                    {pinSaving ? 'Guardando…' : 'Confirmar pin'}
                   </button>
                 </div>
               </div>
