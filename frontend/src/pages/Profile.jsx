@@ -16,26 +16,26 @@ function Collapsible({ title, defaultOpen = false, children }) {
 
   return (
     <div className="card" style={{ marginBottom:'0.75rem', padding:0, overflow:'hidden' }}>
-      <button
-        onClick={toggleOpen}
-        style={{
-          width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center',
-          padding:'0.85rem 1rem', background:'none', border:'none', cursor:'pointer',
-          fontWeight:700, fontSize:'0.9rem', color:'var(--gray-800)',
+    <button
+    onClick={toggleOpen}
+    style={{
+      width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center',
+      padding:'0.85rem 1rem', background:'none', border:'none', cursor:'pointer',
+      fontWeight:700, fontSize:'0.9rem', color:'var(--gray-800)',
           borderBottom: open ? '1px solid var(--gray-200)' : 'none',
-        }}
-      >
-        <span>{title}</span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-          style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition:'transform 0.2s' }}>
-          <path d="M6 9l6 6 6-6"/>
-        </svg>
-      </button>
-      {(open || wasOpened) && (
-        <div style={{ padding: open ? '1rem' : 0, display: open ? 'block' : 'none' }}>
-          {children}
-        </div>
-      )}
+    }}
+    >
+    <span>{title}</span>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition:'transform 0.2s' }}>
+    <path d="M6 9l6 6 6-6"/>
+    </svg>
+    </button>
+    {(open || wasOpened) && (
+      <div style={{ padding: open ? '1rem' : 0, display: open ? 'block' : 'none' }}>
+      {children}
+      </div>
+    )}
     </div>
   );
 }
@@ -78,7 +78,13 @@ export default function ProfilePage() {
 
   // Datos personales
   const [alias, setAlias]             = useState(user?.alias || user?.display_name || user?.full_name || '');
-  const [address, setAddress]         = useState(user?.address && user.address !== 'address-pending' ? user.address : '');
+  const [address, setAddress]         = useState('');
+  // Descomponer address guardado en calle + número al inicializar
+  const _savedAddress = user?.address && user.address !== 'address-pending' ? user.address : '';
+  const _calleInit    = _savedAddress.replace(/\s+\d+[a-zA-Z]?\s*$/, '').trim();
+  const _numInit      = _savedAddress.match(/\s+(\d+[a-zA-Z]?)\s*$/)?.[1] || '';
+  const [calle,   setCalle]   = useState(_calleInit);
+  const [numero,  setNumero]  = useState(_numInit);
   const [profileMsg, setProfileMsg]   = useState('');
   const [profileErr, setProfileErr]   = useState(false);
 
@@ -96,8 +102,8 @@ export default function ProfilePage() {
 
   const [notifStatus, setNotifStatus] = useState(
     (typeof window !== 'undefined' && 'Notification' in window)
-      ? Notification.permission
-      : 'unsupported'
+    ? Notification.permission
+    : 'unsupported'
   );
   const [notifMsg, setNotifMsg] = useState('');
   const [highPriorityNotifs, setHighPriorityNotifs] = useState(() => {
@@ -219,7 +225,8 @@ export default function ProfilePage() {
 
   // Buscar pin por dirección ingresada (Nominatim con countrycodes=mx)
   async function searchPin() {
-    const parts = [address, colonia, ciudad, estado, postalCode].filter(Boolean);
+    const streetAddress = [calle.trim(), numero.trim()].filter(Boolean).join(' ');
+    const parts = [streetAddress, colonia, ciudad, estado, postalCode].filter(Boolean);
     if (parts.length === 0) { setSearchError('Ingresa al menos calle o colonia para buscar'); return; }
     setSearchLoading(true);
     setSearchError('');
@@ -271,8 +278,8 @@ export default function ProfilePage() {
       }
       // Centro: resultado de búsqueda, o home pin existente, o CDMX
       const center = pinMapResult
-        ? [pinMapResult.lat, pinMapResult.lng]
-        : (homeLat && homeLng ? [homeLat, homeLng] : [19.70595, -101.19498]);
+      ? [pinMapResult.lat, pinMapResult.lng]
+      : (homeLat && homeLng ? [homeLat, homeLng] : [19.70595, -101.19498]);
 
       const map = L.map(pinMapRef.current, { center, zoom: pinMapResult ? 17 : 13 });
       pinMapInstance.current = map;
@@ -285,58 +292,21 @@ export default function ProfilePage() {
       // Pin draggable
       const icon = L.divIcon({
         html: '<div style="width:24px;height:24px;border-radius:50%;background:#dc2626;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4)"></div>',
-        iconSize: [24, 24], iconAnchor: [12, 12], className: ''
+                             iconSize: [24, 24], iconAnchor: [12, 12], className: ''
       });
       const initPos = pinMapResult ? [pinMapResult.lat, pinMapResult.lng] : center;
       const marker = L.marker(initPos, { icon, draggable: true }).addTo(map);
       pinMarkerRef.current = marker;
 
-      // Dentro del useEffect del mapa, reemplaza los eventos dragend y click:
-      async function reverseGeocode(lat, lng) {
-        try {
-          const r = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&countrycodes=mx`,
-            { headers: { 'Accept-Language': 'es' } }
-          );
-          const data = await r.json();
-          const a = data.address || {};
-          return {
-            postalCode: a.postcode || null,
-            estado:     a.state || null,
-            ciudad:     a.city || a.town || a.municipality || a.county || null,
-            colonia:    a.suburb || a.neighbourhood || a.quarter || null,
-            calle:      [a.road, a.house_number].filter(Boolean).join(' ') || null,
-          };
-        } catch { return null; }
-      }
-
-      marker.on('dragend', async () => {
+      marker.on('dragend', () => {
         const p = marker.getLatLng();
         setPinMapResult({ lat: p.lat, lng: p.lng });
-        const geo = await reverseGeocode(p.lat, p.lng);
-        if (geo) {
-          if (geo.postalCode) setPostalCode(geo.postalCode);
-          if (geo.estado)     setEstado(geo.estado);
-          if (geo.ciudad)     setCiudad(geo.ciudad);
-          if (geo.colonia)    setColonia(geo.colonia);
-          if (geo.calle)      setAddress(geo.calle);
-        }
       });
-
-      map.on('click', async (e) => {
+      map.on('click', (e) => {
         marker.setLatLng(e.latlng);
         setPinMapResult({ lat: e.latlng.lat, lng: e.latlng.lng });
-        const geo = await reverseGeocode(e.latlng.lat, e.latlng.lng);
-        if (geo) {
-          if (geo.postalCode) setPostalCode(geo.postalCode);
-          if (geo.estado)     setEstado(geo.estado);
-          if (geo.ciudad)     setCiudad(geo.ciudad);
-          if (geo.colonia)    setColonia(geo.colonia);
-          if (geo.calle)      setAddress(geo.calle);
-        }
       });
     };
-
     loadLeaflet();
     return () => {
       if (pinMapInstance.current) { pinMapInstance.current.remove(); pinMapInstance.current = null; }
@@ -346,8 +316,13 @@ export default function ProfilePage() {
   async function saveProfile() {
     if (!alias.trim()) { setProfileMsg('El nombre no puede estar vacío'); setProfileErr(true); return; }
     try {
+      // Combinar calle + número en un solo string de dirección
+      const calleVal  = calle.trim();
+      const numeroVal = numero.trim();
+      const streetAddress = [calleVal, numeroVal].filter(Boolean).join(' ');
+
       // Construir dirección compuesta si tenemos los campos estructurados
-      let finalAddress = address.trim();
+      let finalAddress = streetAddress;
       if (colonia && ciudad && estado) {
         const parts = [colonia, ciudad, estado, postalCode].filter(Boolean);
         finalAddress = finalAddress || parts.join(', ');
@@ -378,7 +353,14 @@ export default function ProfilePage() {
       });
       const newAlias = data.profile.alias ?? data.profile.displayName;
       if (newAlias)               setAlias(newAlias);
-      if (data.profile.address)   setAddress(data.profile.address);
+      if (data.profile.address) {
+        const saved  = data.profile.address;
+        const calleR = saved.replace(/\s+\d+[a-zA-Z]?\s*$/, '').trim();
+        const numR   = saved.match(/\s+(\d+[a-zA-Z]?)\s*$/)?.[1] || '';
+        setCalle(calleR);
+        setNumero(numR);
+        setAddress(saved);
+      }
       if (data.profile.home_lat)  setHomeLat(data.profile.home_lat);
       if (data.profile.home_lng)  setHomeLng(data.profile.home_lng);
       setProfileMsg('Perfil actualizado'); setProfileErr(false);
@@ -390,29 +372,14 @@ export default function ProfilePage() {
     setProfileMsg('');
     setProfileErr(false);
     try {
-      const body = {
-        homeLat:    lat,
-        homeLng:    lng,
-        // Incluir dirección actualizada por reverse geocoding
-        postalCode: postalCode || undefined,
-        estado:     estado     || undefined,
-        ciudad:     ciudad     || undefined,
-        colonia:    colonia    || undefined,
-        address:    address    || undefined,
-      };
       const data = await apiFetch('/auth/profile', {
-        method: 'PATCH',
-        body: JSON.stringify(body)
+        method:'PATCH',
+        body: JSON.stringify({ homeLat: lat, homeLng: lng })
       }, auth.token);
 
       patchUser({
-        home_lat:    data.profile?.home_lat ?? lat ?? null,
-        home_lng:    data.profile?.home_lng ?? lng ?? null,
-        postal_code: data.profile?.postal_code,
-        estado:      data.profile?.estado,
-        ciudad:      data.profile?.ciudad,
-        colonia:     data.profile?.colonia,
-        address:     data.profile?.address,
+        home_lat: data.profile?.home_lat ?? lat ?? null,
+        home_lng: data.profile?.home_lng ?? lng ?? null,
       });
       setHomeLat(data.profile?.home_lat ?? lat ?? null);
       setHomeLng(data.profile?.home_lng ?? lng ?? null);
@@ -464,241 +431,248 @@ export default function ProfilePage() {
 
   return (
     <div>
-      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem' }}>Mi perfil</h2>
+    <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem' }}>Mi perfil</h2>
 
-      {/* Tarjeta de cuenta */}
-      <div className="card" style={{ marginBottom:'0.75rem', display:'flex', gap:'0.75rem', alignItems:'center' }}>
-        <div style={{ width:44, height:44, borderRadius:'50%', background:'var(--brand-light)', border:'2px solid var(--brand)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-          <span style={{ fontWeight:800, fontSize:'1.1rem', color:'var(--brand)' }}>{avatarLetter}</span>
-        </div>
-        <div>
-          <div style={{ fontWeight:700 }}>{alias}</div>
-          <div style={{ fontSize:'0.8rem', color:'var(--gray-600)' }}>{ROLE_LABELS[user?.role] || user?.role}</div>
-        </div>
-      </div>
-
-      {/* Datos personales */}
-      <Collapsible title="Datos personales" defaultOpen={false}>
-        <p style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.65rem' }}>
-          Este nombre se muestra a otros usuarios en la plataforma.
-        </p>
-        <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
-
-          <label>
-            Nombre para mostrar
-            <input value={alias} onChange={e => setAlias(e.target.value)} placeholder="Ej: Juan García" />
-          </label>
-
-          {/* Código postal */}
-          <label>
-            Código postal
-            <div style={{ position:'relative', ...(cpLoading ? BUSY_FIELD_STYLE : {}) }}>
-              <input
-                value={postalCode}
-                onChange={e => setPostalCode(e.target.value.replace(/\D/g, '').slice(0, 5))}
-                placeholder="Ej: 44100"
-                maxLength={5}
-                inputMode="numeric"
-              />
-              {cpLoading && (
-                <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.75rem', color:'var(--gray-400)' }}>
-                  Buscando…
-                </span>
-              )}
-            </div>
-            {cpError && <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>{cpError}</span>}
-          </label>
-
-          {/* Estado y Ciudad — auto-rellenados o manuales */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.55rem' }}>
-            <label>
-              Estado
-              <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Jalisco" disabled={cpLoading} />
-            </label>
-            <label>
-              Municipio / Ciudad
-              <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Morelia" disabled={cpLoading} />
-            </label>
-          </div>
-
-          {/* Colonia — dropdown si hay datos del CP, input manual si no */}
-          <label>
-            Colonia
-            {coloniasList.length > 0 ? (
-              <div style={{ display:'flex', gap:'0.4rem', alignItems:'center' }}>
-                <select
-                  value={colonia}
-                  onChange={e => setColonia(e.target.value)}
-                  disabled={cpLoading}
-                  style={{ flex:1 }}
-                >
-                  <option value="">Seleccionar colonia…</option>
-                  {coloniasList.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-            ) : (
-              <input value={colonia} onChange={e => setColonia(e.target.value)} placeholder="Ej: Col. Centro" />
-            )}
-            {coloniasList.length > 0 && (
-              <span style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.2rem', display:'block' }}>
-                O escribe directamente:
-                <input
-                  value={colonia}
-                  onChange={e => setColonia(e.target.value)}
-                  disabled={cpLoading}
-                  placeholder="Colonia manual"
-                  style={{ marginTop:'0.25rem' }}
-                />
-              </span>
-            )}
-          </label>
-
-          {/* Calle y número */}
-          <label>
-            Calle y número
-            <input value={address} onChange={e => setAddress(e.target.value)}
-              placeholder="Ej: Av. Revolución 1234" disabled={searchLoading} />
-          </label>
-
-
-          <div style={{ padding:'0.6rem 0.7rem', border:'1px solid var(--gray-200)', borderRadius:8, background:'#fafafa' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', gap:'0.5rem', alignItems:'center', flexWrap:'wrap' }}>
-            <span style={{ fontSize:'0.78rem', color:'var(--gray-600)' }}>
-                Notificaciones push:{' '}
-                <strong>
-                  {notifStatus === 'granted'
-                    ? (notifEnabled ? 'Activo' : 'Pausado')
-                    : notifStatus === 'denied'
-                      ? 'Bloqueado'
-                      : notifStatus === 'default'
-                        ? 'Pendiente'
-                        : 'No soportado'}
-                </strong>
-              </span>
-              <button type="button" className="btn-sm" onClick={toggleNotifEnabled}>
-                {notifStatus === 'granted' && notifEnabled ? 'Pausar notificaciones' : 'Activar notificaciones'}
-              </button>
-            </div>
-            {notifMsg && <div style={{ marginTop:'0.35rem', fontSize:'0.74rem', color:'var(--gray-500)' }}>{notifMsg}</div>}
-
-          <div style={{ marginTop:'0.45rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-            <span style={{ fontSize:'0.76rem', color:'var(--gray-600)' }}>Notificaciones de alta prioridad</span>
-            <button type="button" className="btn-sm" onClick={toggleHighPriorityNotifs}>
-              {highPriorityNotifs ? 'Activadas' : 'Desactivadas'}
-            </button>
-          </div>
-          </div>
-
-          {/* Botón Buscar pin */}
-          <div style={{ display:'flex', gap:'0.4rem', alignItems:'center' }}>
-            <button
-              type="button"
-              className="btn-sm btn-primary"
-              onClick={searchPin}
-              disabled={searchLoading || cpLoading || pinSaving}
-              style={{ whiteSpace:'nowrap' }}
-            >
-              {searchLoading ? 'Buscando…' : '📍 Buscar en mapa'}
-            </button>
-            {hasHomePin && (
-              <span style={{ fontSize:'0.75rem', color:'var(--success)', fontWeight:600 }}>
-                🏠 Pin guardado
-              </span>
-            )}
-            {hasHomePin && (
-              <button
-                type="button"
-                disabled={pinSaving}
-                onClick={async () => { await persistHomePin(null, null); }}
-                style={{ background:'none', border:'none', color:'var(--error)', cursor:'pointer', fontSize:'0.75rem', fontWeight:600, marginLeft:'auto' }}
-              >
-                {pinSaving ? 'Borrando…' : 'Borrar'}
-              </button>
-            )}
-          </div>
-          {searchError && <span style={{ fontSize:'0.72rem', color:'var(--error)', display:'block' }}>{searchError}</span>}
-
-          {/* Modal mapa pin */}
-          {showPinMap && (
-            <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:9999, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'1rem' }}>
-              <div style={{ background:'#fff', borderRadius:12, width:'100%', maxWidth:480, overflow:'hidden', boxShadow:'0 8px 32px rgba(0,0,0,0.25)' }}>
-                <div style={{ padding:'0.75rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid var(--gray-200)' }}>
-                  <span style={{ fontWeight:700, fontSize:'0.9rem' }}>Confirmar ubicación</span>
-                  <button onClick={() => setShowPinMap(false)} style={{ background:'none', border:'none', cursor:'pointer', fontSize:'1.2rem', color:'var(--gray-400)' }}>✕</button>
-                </div>
-                <p style={{ fontSize:'0.78rem', color:'var(--gray-500)', margin:'0.5rem 1rem 0' }}>
-                  Arrastra el pin o toca el mapa para ajustar la ubicación exacta.
-                </p>
-                <div ref={pinMapRef} style={{ height:320, width:'100%' }} />
-                <div style={{ padding:'0.75rem 1rem', display:'flex', gap:'0.5rem', justifyContent:'flex-end', borderTop:'1px solid var(--gray-200)' }}>
-                  <button className="btn-sm" onClick={() => setShowPinMap(false)}>Cancelar</button>
-                  <button className="btn-sm btn-primary" disabled={pinSaving} onClick={async () => {
-                    if (!pinMapResult) return;
-                    const saved = await persistHomePin(pinMapResult.lat, pinMapResult.lng);
-                    if (saved) setShowPinMap(false);
-                  }}>
-                    {pinSaving ? 'Guardando…' : 'Confirmar pin'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-        <button className="btn-primary btn-sm" onClick={saveProfile}>Guardar cambios</button>
-        <Flash text={profileMsg} isError={profileErr} />
-      </Collapsible>
-
-      {/* Seguridad */}
-      <Collapsible title="Seguridad">
-        <p style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.65rem' }}>
-          El usuario de acceso es el que usas para iniciar sesión. Es distinto al nombre que ven otros usuarios.
-        </p>
-        <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
-          <label>
-            Usuario de acceso
-            <input value={loginUsername} onChange={e => setLoginUsername(e.target.value)}
-              placeholder="Ej: juangarcia91" autoComplete="username" />
-          </label>
-          <label>Contraseña actual (requerida)
-            <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
-              autoComplete="current-password" />
-          </label>
-          <label>Nueva contraseña (opcional)
-            <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
-              autoComplete="new-password" placeholder="Dejar vacío para no cambiar" />
-          </label>
-          {newPassword && (
-            <label>Confirmar nueva contraseña
-              <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
-                autoComplete="new-password" />
-            </label>
-          )}
-        </div>
-        <button className="btn-primary btn-sm" onClick={changePasswordAndLogin}>Guardar cambios</button>
-        <Flash text={pwdMsg} isError={pwdErr} />
-      </Collapsible>
-
-      {/* Cerrar sesión */}
-      <button
-        onClick={logout}
-        className="btn-sm"
-        style={{
-          width:'100%', padding:'0.7rem',
-          marginBottom:'0.75rem',
-          fontWeight:700, fontSize:'0.9rem',
-        }}
-      >
-        Cerrar sesión
-      </button>
-
-      {/* Administración */}
-      <Collapsible title="Administración de cuenta">
-        <p style={{ fontSize:'0.85rem', color:'var(--gray-600)', marginBottom:'0.75rem' }}>
-          Eliminar tu cuenta es permanente. No podrás recuperarla ni tienes pedidos activos pendientes.
-        </p>
-        <button className="btn-danger btn-sm" onClick={deleteAccount}>Eliminar cuenta</button>
-        <Flash text={deleteMsg} isError={deleteErr} />
-      </Collapsible>
+    {/* Tarjeta de cuenta */}
+    <div className="card" style={{ marginBottom:'0.75rem', display:'flex', gap:'0.75rem', alignItems:'center' }}>
+    <div style={{ width:44, height:44, borderRadius:'50%', background:'var(--brand-light)', border:'2px solid var(--brand)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+    <span style={{ fontWeight:800, fontSize:'1.1rem', color:'var(--brand)' }}>{avatarLetter}</span>
     </div>
+    <div>
+    <div style={{ fontWeight:700 }}>{alias}</div>
+    <div style={{ fontSize:'0.8rem', color:'var(--gray-600)' }}>{ROLE_LABELS[user?.role] || user?.role}</div>
+    </div>
+    </div>
+
+    {/* Datos personales */}
+    <Collapsible title="Datos personales" defaultOpen={false}>
+    <p style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.65rem' }}>
+    Este nombre se muestra a otros usuarios en la plataforma.
+    </p>
+    <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
+
+    <label>
+    Nombre para mostrar
+    <input value={alias} onChange={e => setAlias(e.target.value)} placeholder="Ej: Juan García" />
+    </label>
+
+    {/* Código postal */}
+    <label>
+    Código postal
+    <div style={{ position:'relative', ...(cpLoading ? BUSY_FIELD_STYLE : {}) }}>
+    <input
+    value={postalCode}
+    onChange={e => setPostalCode(e.target.value.replace(/\D/g, '').slice(0, 5))}
+    placeholder="Ej: 44100"
+    maxLength={5}
+    inputMode="numeric"
+    />
+    {cpLoading && (
+      <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.75rem', color:'var(--gray-400)' }}>
+      Buscando…
+      </span>
+    )}
+    </div>
+    {cpError && <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>{cpError}</span>}
+    </label>
+
+    {/* Estado y Ciudad — auto-rellenados o manuales */}
+    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.55rem' }}>
+    <label>
+    Estado
+    <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Jalisco" disabled={cpLoading} />
+    </label>
+    <label>
+    Municipio / Ciudad
+    <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Morelia" disabled={cpLoading} />
+    </label>
+    </div>
+
+    {/* Colonia — dropdown si hay datos del CP, input manual si no */}
+    <label>
+    Colonia
+    {coloniasList.length > 0 ? (
+      <div style={{ display:'flex', gap:'0.4rem', alignItems:'center' }}>
+      <select
+      value={colonia}
+      onChange={e => setColonia(e.target.value)}
+      disabled={cpLoading}
+      style={{ flex:1 }}
+      >
+      <option value="">Seleccionar colonia…</option>
+      {coloniasList.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+      </div>
+    ) : (
+      <input value={colonia} onChange={e => setColonia(e.target.value)} placeholder="Ej: Col. Centro" />
+    )}
+    {coloniasList.length > 0 && (
+      <span style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.2rem', display:'block' }}>
+      O escribe directamente:
+      <input
+      value={colonia}
+      onChange={e => setColonia(e.target.value)}
+      disabled={cpLoading}
+      placeholder="Colonia manual"
+      style={{ marginTop:'0.25rem' }}
+      />
+      </span>
+    )}
+    </label>
+
+    {/* Calle y número — dos campos separados */}
+    <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:'0.55rem', alignItems:'end' }}>
+    <label>
+    Calle
+    <input value={calle} onChange={e => setCalle(e.target.value)}
+    placeholder="Ej: Av. Revolución" disabled={searchLoading} />
+    </label>
+    <label style={{ width:90 }}>
+    Número
+    <input value={numero} onChange={e => setNumero(e.target.value)}
+    placeholder="1234" disabled={searchLoading} />
+    </label>
+    </div>
+
+
+    <div style={{ padding:'0.6rem 0.7rem', border:'1px solid var(--gray-200)', borderRadius:8, background:'#fafafa' }}>
+    <div style={{ display:'flex', justifyContent:'space-between', gap:'0.5rem', alignItems:'center', flexWrap:'wrap' }}>
+    <span style={{ fontSize:'0.78rem', color:'var(--gray-600)' }}>
+    Notificaciones push:{' '}
+    <strong>
+    {notifStatus === 'granted'
+      ? (notifEnabled ? 'Activo' : 'Pausado')
+      : notifStatus === 'denied'
+      ? 'Bloqueado'
+      : notifStatus === 'default'
+      ? 'Pendiente'
+  : 'No soportado'}
+  </strong>
+  </span>
+  <button type="button" className="btn-sm" onClick={toggleNotifEnabled}>
+  {notifStatus === 'granted' && notifEnabled ? 'Pausar notificaciones' : 'Activar notificaciones'}
+  </button>
+  </div>
+  {notifMsg && <div style={{ marginTop:'0.35rem', fontSize:'0.74rem', color:'var(--gray-500)' }}>{notifMsg}</div>}
+
+  <div style={{ marginTop:'0.45rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+  <span style={{ fontSize:'0.76rem', color:'var(--gray-600)' }}>Notificaciones de alta prioridad</span>
+  <button type="button" className="btn-sm" onClick={toggleHighPriorityNotifs}>
+  {highPriorityNotifs ? 'Activadas' : 'Desactivadas'}
+  </button>
+  </div>
+  </div>
+
+  {/* Botón Buscar pin */}
+  <div style={{ display:'flex', gap:'0.4rem', alignItems:'center' }}>
+  <button
+  type="button"
+  className="btn-sm btn-primary"
+  onClick={searchPin}
+  disabled={searchLoading || cpLoading || pinSaving}
+  style={{ whiteSpace:'nowrap' }}
+  >
+  {searchLoading ? 'Buscando…' : '📍 Buscar en mapa'}
+  </button>
+  {hasHomePin && (
+    <span style={{ fontSize:'0.75rem', color:'var(--success)', fontWeight:600 }}>
+    🏠 Pin guardado
+    </span>
+  )}
+  {hasHomePin && (
+    <button
+    type="button"
+    disabled={pinSaving}
+    onClick={async () => { await persistHomePin(null, null); }}
+    style={{ background:'none', border:'none', color:'var(--error)', cursor:'pointer', fontSize:'0.75rem', fontWeight:600, marginLeft:'auto' }}
+    >
+    {pinSaving ? 'Borrando…' : 'Borrar'}
+    </button>
+  )}
+  </div>
+  {searchError && <span style={{ fontSize:'0.72rem', color:'var(--error)', display:'block' }}>{searchError}</span>}
+
+  {/* Modal mapa pin */}
+  {showPinMap && (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:9999, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'1rem' }}>
+    <div style={{ background:'#fff', borderRadius:12, width:'100%', maxWidth:480, overflow:'hidden', boxShadow:'0 8px 32px rgba(0,0,0,0.25)' }}>
+    <div style={{ padding:'0.75rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid var(--gray-200)' }}>
+    <span style={{ fontWeight:700, fontSize:'0.9rem' }}>Confirmar ubicación</span>
+    <button onClick={() => setShowPinMap(false)} style={{ background:'none', border:'none', cursor:'pointer', fontSize:'1.2rem', color:'var(--gray-400)' }}>✕</button>
+    </div>
+    <p style={{ fontSize:'0.78rem', color:'var(--gray-500)', margin:'0.5rem 1rem 0' }}>
+    Arrastra el pin o toca el mapa para ajustar la ubicación exacta.
+    </p>
+    <div ref={pinMapRef} style={{ height:320, width:'100%' }} />
+    <div style={{ padding:'0.75rem 1rem', display:'flex', gap:'0.5rem', justifyContent:'flex-end', borderTop:'1px solid var(--gray-200)' }}>
+    <button className="btn-sm" onClick={() => setShowPinMap(false)}>Cancelar</button>
+    <button className="btn-sm btn-primary" disabled={pinSaving} onClick={async () => {
+      if (!pinMapResult) return;
+      const saved = await persistHomePin(pinMapResult.lat, pinMapResult.lng);
+      if (saved) setShowPinMap(false);
+    }}>
+    {pinSaving ? 'Guardando…' : 'Confirmar pin'}
+    </button>
+    </div>
+    </div>
+    </div>
+  )}
+  </div>
+  <button className="btn-primary btn-sm" onClick={saveProfile}>Guardar cambios</button>
+  <Flash text={profileMsg} isError={profileErr} />
+  </Collapsible>
+
+  {/* Seguridad */}
+  <Collapsible title="Seguridad">
+  <p style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.65rem' }}>
+  El usuario de acceso es el que usas para iniciar sesión. Es distinto al nombre que ven otros usuarios.
+  </p>
+  <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
+  <label>
+  Usuario de acceso
+  <input value={loginUsername} onChange={e => setLoginUsername(e.target.value)}
+  placeholder="Ej: juangarcia91" autoComplete="username" />
+  </label>
+  <label>Contraseña actual (requerida)
+  <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
+  autoComplete="current-password" />
+  </label>
+  <label>Nueva contraseña (opcional)
+  <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
+  autoComplete="new-password" placeholder="Dejar vacío para no cambiar" />
+  </label>
+  {newPassword && (
+    <label>Confirmar nueva contraseña
+    <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+    autoComplete="new-password" />
+    </label>
+  )}
+  </div>
+  <button className="btn-primary btn-sm" onClick={changePasswordAndLogin}>Guardar cambios</button>
+  <Flash text={pwdMsg} isError={pwdErr} />
+  </Collapsible>
+
+  {/* Cerrar sesión */}
+  <button
+  onClick={logout}
+  className="btn-sm"
+  style={{
+    width:'100%', padding:'0.7rem',
+    marginBottom:'0.75rem',
+    fontWeight:700, fontSize:'0.9rem',
+  }}
+  >
+  Cerrar sesión
+  </button>
+
+  {/* Administración */}
+  <Collapsible title="Administración de cuenta">
+  <p style={{ fontSize:'0.85rem', color:'var(--gray-600)', marginBottom:'0.75rem' }}>
+  Eliminar tu cuenta es permanente. No podrás recuperarla ni tienes pedidos activos pendientes.
+  </p>
+  <button className="btn-danger btn-sm" onClick={deleteAccount}>Eliminar cuenta</button>
+  <Flash text={deleteMsg} isError={deleteErr} />
+  </Collapsible>
+  </div>
   );
 }
