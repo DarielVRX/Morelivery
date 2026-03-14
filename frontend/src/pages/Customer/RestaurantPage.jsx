@@ -280,7 +280,7 @@ export default function RestaurantPage() {
   const distKm = (activeDeliveryPos && restLat !== null && restLng !== null)
     ? haversineKm(activeDeliveryPos.lat, activeDeliveryPos.lng, restLat, restLng)
     : null;
-  const tooFar = distKm !== null && distKm > 5;
+  const tooFar = distKm !== null && distKm > 500;
   const distanceError = tooFar
     ? `Esta tienda está a ${distKm.toFixed(1)} km. Solo se aceptan pedidos dentro de 5 km.`
     : null;
