@@ -51,34 +51,50 @@ router.get('/postal/:cp', authenticate, async (req, res, next) => {
       colonias: [...new Set((colonias || []).filter(Boolean).map(c => String(c).trim()))].sort(),
     });
 
-    // Priorizar la API más rápida y aplicar timeout para no congelar la UI al esperar CP.
+    // API 1 — Nominatim
     try {
-      const rFast = await fetchWithTimeout(`https://mexico-api.devaleff.com/api/codigo-postal/${cp}`, 1500);
-      if (rFast.ok) {
-        const dataFast = await rFast.json();
-        const items = Array.isArray(dataFast?.data) ? dataFast.data : [];
-        if (items.length > 0) {
+      const r = await fetchWithTimeout(
+        `https://nominatim.openstreetmap.org/search?postalcode=${cp}&country=mx&format=json&addressdetails=1&limit=10`,
+        4000
+      );
+      if (r.ok) {
+        const data = await r.json();
+        if (data?.length > 0) {
+          const a = data[0].address || {};
           return res.json(normalize(
-            items[0]?.d_estado || '',
-            items[0]?.D_mnpio || items[0]?.d_ciudad || '',
-            items.map(i => i?.d_asenta)
+            a.state || '',
+            a.city || a.town || a.municipality || a.county || '',
+            data.map(i => i.address?.suburb || i.address?.neighbourhood || i.address?.quarter).filter(Boolean)
           ));
         }
       }
     } catch (_) {}
 
+    // API 2 — Sepomex
     try {
-      const rFallback = await fetchWithTimeout(`https://api-sepomex.hckdrk.mx/query/info_cp/${cp}?type=simplified`, 2200);
-      if (rFallback.ok) {
-        const dataFallback = await rFallback.json();
-        const rows = Array.isArray(dataFallback?.response) ? dataFallback.response : [];
-        if (rows.length > 0) {
-          return res.json(normalize(
-            rows[0]?.estado || rows[0]?.d_estado || '',
-            rows[0]?.municipio || rows[0]?.ciudad || rows[0]?.D_mnpio || '',
-            rows.map(i => i?.asentamiento || i?.colonia || i?.d_asenta)
-          ));
-        }
+      const r = await fetchWithTimeout(`https://api-sepomex.hckdrk.mx/query/info_cp/${cp}?type=simplified`, 3000);
+      if (r.ok) {
+        const data = await r.json();
+        const rows = Array.isArray(data?.response) ? data.response : [];
+        if (rows.length > 0) return res.json(normalize(
+          rows[0]?.estado || rows[0]?.d_estado,
+          rows[0]?.municipio || rows[0]?.ciudad || rows[0]?.D_mnpio,
+          rows.map(i => i?.asentamiento || i?.colonia || i?.d_asenta)
+        ));
+      }
+    } catch (_) {}
+
+    // API 3 — devaleff
+    try {
+      const r = await fetchWithTimeout(`https://mexico-api.devaleff.com/api/codigo-postal/${cp}`, 3000);
+      if (r.ok) {
+        const data = await r.json();
+        const items = Array.isArray(data?.data) ? data.data : [];
+        if (items.length > 0) return res.json(normalize(
+          items[0]?.d_estado,
+          items[0]?.D_mnpio || items[0]?.d_ciudad,
+          items.map(i => i?.d_asenta)
+        ));
       }
     } catch (_) {}
 

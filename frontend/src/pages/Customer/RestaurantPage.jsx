@@ -72,19 +72,28 @@ function ManualPinMap({ initialPos, mapRef, onConfirm, onCancel }) {
     if (!mapRef.current || !pinMarkerRef.current) return;
     const ll = pinMarkerRef.current.getLatLng();
     if (!ll) return;
-    // Geocodificación inversa para obtener dirección aproximada
-    let label = null;
-    try {
-      const r = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${ll.lat}&lon=${ll.lng}&format=json&countrycodes=mx`,
-        { headers: { 'Accept-Language': 'es' } }
-      );
-      const data = await r.json();
-      const a = data.address || {};
-      const parts = [a.road, a.suburb || a.neighbourhood, a.city || a.town || a.municipality].filter(Boolean);
-      label = parts.join(', ') || data.display_name?.split(',').slice(0,3).join(',') || null;
-    } catch (_) {}
-    onConfirm({ lat: ll.lat, lng: ll.lng, label });
+
+    let result = { lat: ll.lat, lng: ll.lng, label: null,
+      postalCode: null, estado: null, ciudad: null,
+      colonia: null, calle: null };
+      try {
+        const r = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${ll.lat}&lon=${ll.lng}&format=json&addressdetails=1&countrycodes=mx`,
+          { headers: { 'Accept-Language': 'es' } }
+        );
+        const data = await r.json();
+        const a = data.address || {};
+
+        result.postalCode = a.postcode || null;
+        result.estado     = a.state || null;
+        result.ciudad     = a.city || a.town || a.municipality || a.county || null;
+        result.colonia    = a.suburb || a.neighbourhood || a.quarter || null;
+        result.calle      = [a.road, a.house_number].filter(Boolean).join(' ') || null;
+        result.label      = [result.calle, result.colonia, result.ciudad]
+        .filter(Boolean).join(', ') || data.display_name?.split(',').slice(0,3).join(',') || null;
+      } catch (_) {}
+
+      onConfirm(result);
   }
 
   return (
@@ -532,7 +541,15 @@ export default function RestaurantPage() {
               <ManualPinMap
                 initialPos={currentPos || (hasHomePin ? { lat: homeLatNum, lng: homeLngNum } : null)}
                 mapRef={manualMapRef}
-                onConfirm={(pos) => { setManualPos(pos); setShowManualMap(false); }}
+                onConfirm={(pos) => {
+                  setManualPos(pos);
+                  setShowManualMap(false);
+                  // Si quieres auto-rellenar el perfil:
+                  if (pos.postalCode) setPostalCode(pos.postalCode);
+                  if (pos.estado)     setEstado(pos.estado);
+                  if (pos.ciudad)     setCiudad(pos.ciudad);
+                  if (pos.colonia)    setColonia(pos.colonia);
+                }}
                 onCancel={() => { setShowManualMap(false); if (!manualPos) setDeliveryMode('current'); }}
               />
             )}
