@@ -137,5 +137,6 @@ export default function DriverEarnings() {
         </div>
       )}
     </div>
+    </PullToRefresh>
   );
 }
