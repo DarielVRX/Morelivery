@@ -61,7 +61,7 @@ router.get('/', async (_req, res, next) => {
     const result = await query(
       `SELECT r.id, r.name, r.category, r.is_open,
               COALESCE(u.address, r.address) AS address,
-              r.profile_photo, COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.lng, r.lng) AS lng,
+              r.profile_photo, COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng,
               r.rating_avg, r.rating_count
        FROM restaurants r
        LEFT JOIN users u ON u.id = r.owner_user_id
@@ -71,7 +71,7 @@ router.get('/', async (_req, res, next) => {
       query(
         `SELECT r.id, r.name, r.category, r.is_open,
                 COALESCE(u.address, r.address) AS address,
-                r.profile_photo, COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.lng, r.lng) AS lng
+                r.profile_photo, COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
          FROM restaurants r
          LEFT JOIN users u ON u.id = r.owner_user_id
          WHERE r.is_active = true
@@ -93,7 +93,7 @@ router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next
       `SELECT r.id, r.name, r.category, r.is_open,
               COALESCE(u.address, r.address) AS address,
               r.manual_open_override, r.profile_photo,
-              COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.lng, r.lng) AS lng
+              COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
        FROM restaurants r
        LEFT JOIN users u ON u.id = r.owner_user_id
        WHERE r.owner_user_id=$1 LIMIT 1`,
@@ -198,7 +198,7 @@ router.get('/:id', async (req, res, next) => {
       COALESCE(u.address, r.address) AS address,
                                r.profile_photo,
                                COALESCE(u.home_lat, r.lat)   AS lat,
-                               COALESCE(u.lng, r.lng)   AS lng,
+                               COALESCE(u.home_lng, r.lng)   AS lng,
                                r.rating_avg, r.rating_count
                                FROM restaurants r
                                LEFT JOIN users u ON u.id = r.owner_user_id
