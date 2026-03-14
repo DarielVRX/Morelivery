@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 
 const PTR_THRESHOLD  = 72;
 const PTR_RESISTANCE = 0.45;
-const HEADER_ZONE    = 150; // px desde el top — solo iniciar el gesto aquí
+const HEADER_ZONE    = 64; // px desde el top — solo iniciar el gesto aquí
 
 export default function PullToRefresh({ children }) {
   const wrapRef      = useRef(null);
@@ -61,7 +61,7 @@ export default function PullToRefresh({ children }) {
     function onTouchStart(e) {
       if (loadingRef.current) return;
       // Solo iniciar si el dedo empieza en la zona del header
-      if (e.touches[0].clientY > HEADER_ZONE) return;
+      if (e.touches[0].clientY > HEADER_ZONE + 86) return;
       // Solo si el contenido está en el tope
       if (_getScrollTop() > 0) return;
       startYRef.current = e.touches[0].clientY;
