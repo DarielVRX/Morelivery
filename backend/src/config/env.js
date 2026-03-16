@@ -1,6 +1,11 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+function readBool(value, defaultValue = false) {
+  if (value === undefined) return defaultValue;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
 /**
  * Construye allowedOrigins combinando:
  * - ALLOWED_ORIGINS explícito
@@ -36,5 +41,11 @@ export const env = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
   databaseUrl: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/morelivery',
   allowedOrigins: parseAllowedOrigins(),
-  redisUrl: process.env.REDIS_URL || ''
+  redisUrl: process.env.REDIS_URL || '',
+  allowUnsafeCors: readBool(process.env.ALLOW_UNSAFE_CORS, false)
 };
+
+const hasWeakJwtSecret = !process.env.JWT_SECRET || env.jwtSecret === 'change-me-in-production';
+if (env.nodeEnv === 'production' && hasWeakJwtSecret) {
+  throw new Error('JWT_SECRET must be set to a strong value in production');
+}

@@ -1,4 +1,5 @@
 import { AppError } from '../utils/errors.js';
+import { env } from '../config/env.js';
 
 export function notFoundHandler(_req, res) {
   res.status(404).json({ error: 'Route not found' });
@@ -11,6 +12,10 @@ export function errorHandler(err, _req, res, _next) {
 
   // PostgreSQL errors include SQLSTATE in err.code
   if (err?.code) {
+    if (env.nodeEnv === 'production') {
+      return res.status(500).json({ error: 'Database error' });
+    }
+
     return res.status(500).json({
       error: 'Database error',
       code: err.code,

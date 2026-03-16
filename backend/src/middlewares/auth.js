@@ -4,10 +4,11 @@ import { AppError } from '../utils/errors.js';
 
 export function authenticate(req, _res, next) {
   const header = req.headers.authorization || '';
-  // 1. Intenta sacar el token del header o de la query string (URL)
-  const token = header.startsWith('Bearer ') 
-    ? header.slice(7) 
-    : (req.query.token || null);
+  const isSseRequest = req.path === '/' && (req.baseUrl === '/api/events' || req.baseUrl === '/events');
+
+  const token = header.startsWith('Bearer ')
+    ? header.slice(7)
+    : (isSseRequest ? (req.query.token || null) : null);
 
   if (!token) return next(new AppError(401, 'Missing token'));
 

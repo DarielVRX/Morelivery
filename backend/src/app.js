@@ -21,10 +21,20 @@ import { checkDbConnection } from './config/db.js';
 
 function corsOrigin(origin, callback) {
   if (!origin) return callback(null, true);
-  if (env.allowedOrigins.length === 0 || env.allowedOrigins.includes('*')) return callback(null, true);
+
+  if (env.allowedOrigins.length === 0 || env.allowedOrigins.includes('*')) {
+    if (env.allowUnsafeCors) return callback(null, true);
+    return callback(new Error('CORS origin denied: wildcard allowlist disabled'));
+  }
+
   if (env.allowedOrigins.includes(origin)) return callback(null, true);
-  console.warn(`[cors] Origin not in allowlist, allowing for beta: ${origin}`);
-  return callback(null, true);
+
+  if (env.allowUnsafeCors) {
+    console.warn(`[cors] Origin not in allowlist, allowing because ALLOW_UNSAFE_CORS is enabled: ${origin}`);
+    return callback(null, true);
+  }
+
+  return callback(new Error('CORS origin denied'));
 }
 
 export function createApp() {
