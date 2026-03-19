@@ -107,8 +107,6 @@ function showNotificationPrompt() {
     document.body.appendChild(overlay);
     overlay.querySelector('#notif-yes').onclick = () => { document.body.removeChild(overlay); resolve(true); };
     overlay.querySelector('#notif-no').onclick  = () => { document.body.removeChild(overlay); resolve(false); };
-  });
-}
 
 // Suscripción Web Push VAPID (cuando esté implementado en backend)
 async function trySubscribePush() {
