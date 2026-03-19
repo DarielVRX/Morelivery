@@ -66,6 +66,8 @@ function playArrivalChime() {
     setTimeout(() => ctx.close().catch(() => {}), 800);
   } catch (_) {}
 }
+
+function playOfferPulse() {
   if (typeof window === 'undefined') return;
   const Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx) return;

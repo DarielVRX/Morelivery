@@ -5,7 +5,7 @@
 
 import { Router } from 'express';
 import { query } from '../../config/db.js';
-import { authenticate } from '../../middlewares/auth.js';
+import { authenticate, authorize } from '../../middlewares/auth.js';
 import { AppError } from '../../utils/errors.js';
 
 const router = Router({ mergeParams: true });
