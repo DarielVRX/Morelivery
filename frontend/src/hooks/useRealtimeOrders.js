@@ -20,7 +20,52 @@ function shouldNotifyInBackground() {
 }
 
 
-function playOfferPulse() {
+// Sonido urgente para restaurante — cancelación mientras preparaba
+function playUrgentAlert() {
+  if (typeof window === 'undefined') return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    // Tres pulsos descendentes — tono de alerta
+    [[0.00, 880], [0.22, 660], [0.44, 440]].forEach(([offset, freq]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+      gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + 0.18);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + 0.2);
+    });
+    setTimeout(() => ctx.close().catch(() => {}), 800);
+  } catch (_) {}
+}
+
+// Sonido suave para driver_arrival — ding amigable
+function playArrivalChime() {
+  if (typeof window === 'undefined') return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    [[0.00, 1047], [0.18, 1319], [0.36, 1568]].forEach(([offset, freq]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+      gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + offset + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + 0.25);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + 0.3);
+    });
+    setTimeout(() => ctx.close().catch(() => {}), 800);
+  } catch (_) {}
+}
   if (typeof window === 'undefined') return;
   const Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx) return;
@@ -302,9 +347,48 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
           notifyRealtime({
             title: `Mensaje de ${data.senderName || 'soporte'}`,
             body:  data.text || 'Tienes un nuevo mensaje.',
-            tag:   'chat',          // tag fijo = todos los chats en una notif
+            tag:   'chat',
             group: 'chat',
             url:   '/customer/pedidos',
+          });
+        }
+      } catch (_) {}
+    });
+
+    // ── Eventos específicos de restaurante ───────────────────────────────────
+    // driver_arrival: el driver recogió el pedido (= marcó on_the_way)
+    es.addEventListener('driver_arrival', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbKitchen.current?.({ type: 'driver_arrival', ...data });
+        playArrivalChime();
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: '🛵 Conductor llegó',
+            body:  `${data.driverName || 'El conductor'} recogió el pedido`,
+            tag:   'kitchen',
+            group: 'kitchen',
+            url:   '/restaurant',
+          });
+        }
+      } catch (_) {}
+    });
+
+    // order_cancelled_preparing: cliente canceló mientras el restaurante ya preparaba
+    es.addEventListener('order_cancelled_preparing', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbKitchen.current?.({ type: 'order_cancelled_preparing', ...data });
+        playUrgentAlert();
+        if ('vibrate' in navigator) navigator.vibrate([500, 200, 500, 200, 500]);
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: '⚠️ Pedido cancelado',
+            body:  'El cliente canceló mientras estabas preparando',
+            tag:   'kitchen_cancel',
+            group: 'kitchen',
+            url:   '/restaurant',
+            priority: 'high',
           });
         }
       } catch (_) {}

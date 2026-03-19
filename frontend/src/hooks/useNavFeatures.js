@@ -32,38 +32,59 @@ export function useNavFeatures({
   steps         = [],
   currentPos,
   activeZones   = [],
-  impassableWays = [],   // [{way_id, coords:[...]}] confirmados
-  routeGeometry  = [],   // coords de la ruta activa
+  impassableWays = [],
+  routeGeometry  = [],
+  hasActiveOrder = false,
   onVoice,
-  onZoneAlert,           // callback (zone) cuando entra a 500m
+  onZoneAlert,
 }) {
   const [voiceEnabled,   setVoiceEnabled]   = useState(true);
   const [wakeLockActive, setWakeLockActive] = useState(false);
 
   const wakeLockRef      = useRef(null);
   const announcedSteps   = useRef(new Set());
-  const zoneAlertedMap   = useRef(new Map()); // zoneId → timestamp
-  const wayAlertedMap    = useRef(new Map()); // way_id  → timestamp
+  const zoneAlertedMap   = useRef(new Map());
+  const wayAlertedMap    = useRef(new Map());
 
-  // ── Wake Lock ──────────────────────────────────────────────────────────────
+  // ── Wake Lock — solo activo con pedido activo Y ruta calculada ─────────────
   useEffect(() => {
-    async function req() {
+    const shouldLock = hasActiveOrder && routeGeometry?.length > 0;
+
+    async function acquire() {
       try {
         if (!('wakeLock' in navigator)) return;
+        if (wakeLockRef.current) return; // ya activo
         const lock = await navigator.wakeLock.request('screen');
         wakeLockRef.current = lock;
         setWakeLockActive(true);
-        lock.addEventListener('release', () => setWakeLockActive(false));
+        lock.addEventListener('release', () => {
+          wakeLockRef.current = null;
+          setWakeLockActive(false);
+        });
       } catch (_) {}
     }
-    req();
-    const onVis = () => { if (!document.hidden) req(); };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      document.removeEventListener('visibilitychange', onVis);
-      try { wakeLockRef.current?.release(); } catch (_) {}
-    };
-  }, []);
+
+    function release() {
+      try {
+        wakeLockRef.current?.release();
+        wakeLockRef.current = null;
+        setWakeLockActive(false);
+      } catch (_) {}
+    }
+
+    if (shouldLock) {
+      acquire();
+      // Re-adquirir al volver de background (iOS/Android liberan el lock al minimizar)
+      const onVis = () => { if (!document.hidden && shouldLock) acquire(); };
+      document.addEventListener('visibilitychange', onVis);
+      return () => {
+        document.removeEventListener('visibilitychange', onVis);
+        release();
+      };
+    } else {
+      release();
+    }
+  }, [hasActiveOrder, routeGeometry?.length]);
 
   // Limpiar steps al cambiar la ruta
   useEffect(() => { announcedSteps.current = new Set(); }, [steps]);

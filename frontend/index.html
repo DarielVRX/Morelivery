@@ -6,23 +6,143 @@
     <!-- Viewport: viewport-fit=cover es clave para safe-area en iPhone notch/dynamic island -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-    <!-- PWA / theme -->
-    <meta name="theme-color" content="#e3aaaa" />
+    <!-- PWA / theme — se actualiza dinámicamente via JS según tema activo -->
+    <meta name="theme-color" content="#a85c5c" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#c97f7f" media="(prefers-color-scheme: light)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Morelivery" />
     <meta name="mobile-web-app-capable" content="yes" />
 
     <!-- Manifest -->
     <link rel="manifest" href="/manifest.webmanifest" />
 
-    <!-- Apple touch icon (fallback para iOS) -->
-    <link rel="apple-touch-icon" href="/icon-192.svg" />
+    <!-- Apple touch icon -->
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+
+    <!-- iOS splash screens — generados para tamaños comunes de iPhone -->
+    <!-- iPhone 15 Pro Max / 14 Pro Max -->
+    <link rel="apple-touch-startup-image" href="/splash-1290x2796.png"
+      media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)" />
+    <!-- iPhone 15 / 14 Pro -->
+    <link rel="apple-touch-startup-image" href="/splash-1179x2556.png"
+      media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3)" />
+    <!-- iPhone 14 / 13 / 12 -->
+    <link rel="apple-touch-startup-image" href="/splash-1170x2532.png"
+      media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)" />
+    <!-- iPhone SE 3rd gen / 8 -->
+    <link rel="apple-touch-startup-image" href="/splash-750x1334.png"
+      media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2)" />
 
     <title>Morelivery</title>
+
+    <!-- Splash inline: previene flash de fondo blanco antes de que React monte -->
+    <!-- Aplica el tema guardado en localStorage ANTES del primer paint -->
+    <script>
+      (function() {
+        try {
+          var stored = localStorage.getItem('morelivery_theme');
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var isDark = stored === 'dark' || (!stored && prefersDark);
+          if (isDark) document.documentElement.setAttribute('data-theme', 'dark');
+
+          // Actualizar theme-color del navegador dinámicamente
+          var themeColorMeta = document.querySelector('meta[name="theme-color"][media*="light"]');
+          if (themeColorMeta && isDark) themeColorMeta.content = '#1a1a1a';
+        } catch(e) {}
+      })();
+    </script>
+
+    <!-- Splash screen CSS inline — muestra logo centrado mientras carga React -->
+    <!-- Se auto-oculta cuando #root tiene contenido (React montó) -->
+    <style>
+      #splash {
+        position: fixed; inset: 0; z-index: 9999;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 16px;
+        background: var(--splash-bg, #fff);
+        transition: opacity 0.35s ease;
+      }
+      [data-theme="dark"] #splash { --splash-bg: #0f0f0f; }
+
+      #splash-logo {
+        width: 72px; height: 72px;
+        border-radius: 18px;
+        background: linear-gradient(135deg, #a85c5c 0%, #c97f7f 100%);
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 8px 32px rgba(169, 92, 92, 0.35);
+        animation: splash-pulse 1.6s ease-in-out infinite;
+      }
+      [data-theme="dark"] #splash-logo {
+        box-shadow: 0 8px 32px rgba(227, 170, 170, 0.2);
+      }
+      #splash-logo svg { width: 40px; height: 40px; }
+
+      #splash-name {
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 22px; font-weight: 900; letter-spacing: -0.5px;
+        color: #c97f7f;
+      }
+      [data-theme="dark"] #splash-name { color: #e3aaaa; }
+
+      #splash-sub {
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 12px; font-weight: 500; letter-spacing: 0.05em;
+        color: #9ca3af; text-transform: uppercase;
+      }
+
+      @keyframes splash-pulse {
+        0%, 100% { transform: scale(1);    box-shadow: 0 8px 32px rgba(169,92,92,0.35); }
+        50%       { transform: scale(1.05); box-shadow: 0 12px 40px rgba(169,92,92,0.5); }
+      }
+
+      #splash.hidden { opacity: 0; pointer-events: none; }
+    </style>
   </head>
   <body>
+    <!-- Splash screen minimalista -->
+    <div id="splash">
+      <div id="splash-logo">
+        <!-- Ícono de entrega simplificado -->
+        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M8 14h16l4 8H8V14z" fill="rgba(255,255,255,0.9)" />
+          <circle cx="13" cy="26" r="3" fill="rgba(255,255,255,0.9)" />
+          <circle cx="25" cy="26" r="3" fill="rgba(255,255,255,0.9)" />
+          <path d="M28 18l4-4 4 4" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </div>
+      <div id="splash-name">Morelivery</div>
+      <div id="splash-sub">Cargando…</div>
+    </div>
+
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+
+    <!-- Ocultar splash cuando React termine de montar -->
+    <script>
+      (function() {
+        var splash = document.getElementById('splash');
+        var root   = document.getElementById('root');
+        if (!splash) return;
+
+        // MutationObserver: espera a que #root tenga hijos (React montó)
+        var observer = new MutationObserver(function() {
+          if (root.children.length > 0) {
+            splash.classList.add('hidden');
+            setTimeout(function() {
+              splash.remove();
+            }, 400);
+            observer.disconnect();
+          }
+        });
+        observer.observe(root, { childList: true });
+
+        // Fallback: ocultar después de 3s si algo falla
+        setTimeout(function() {
+          splash.classList.add('hidden');
+          setTimeout(function() { try { splash.remove(); } catch(e) {} }, 400);
+        }, 3000);
+      })();
+    </script>
   </body>
 </html>

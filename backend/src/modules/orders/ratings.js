@@ -5,7 +5,7 @@
 
 import { Router } from 'express';
 import { query } from '../../config/db.js';
-import { authenticate, authorize } from '../../middlewares/auth.js';
+import { authenticate } from '../../middlewares/auth.js';
 import { AppError } from '../../utils/errors.js';
 
 const router = Router({ mergeParams: true });
@@ -78,8 +78,6 @@ router.get('/', authenticate, async (req, res, next) => {
     return res.json({ rating: result.rows[0] || null });
   } catch (error) { return next(error); }
 });
-
-export default router;
 
 /* ── POST /orders/:id/rating/restaurant — restaurante califica driver ── */
 router.post('/restaurant', authenticate, async (req, res, next) => {
@@ -164,3 +162,5 @@ router.post('/driver', authenticate, authorize(['driver']), async (req, res, nex
     return res.status(201).json({ ok: true });
   } catch (error) { return next(error); }
 });
+
+export default router;
