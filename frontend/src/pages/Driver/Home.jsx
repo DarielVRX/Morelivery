@@ -55,6 +55,15 @@ export default function DriverHome() {
   const badgeCount = order.pendingOffer ? 1 : (order.hasActiveOrder ? 1 : 0);
   useAppBadge(badgeCount);
 
+  // ── Contadores de sesión ──────────────────────────────────────────────────────
+  const [counters, setCounters] = useState(null);
+  useEffect(() => {
+    if (!auth.token || !order.availability) return;
+    apiFetch('/drivers/me/counters', {}, auth.token)
+      .then(d => setCounters(d.counters))
+      .catch(() => {});
+  }, [auth.token, order.availability]);
+
   // ── Estado de UI (solo Home sabe de esto) ───────────────────────────────────
   const [msg,           setMsg]           = useState('');
   const [customPin,     setCustomPin]     = useState(null);
@@ -64,13 +73,13 @@ export default function DriverHome() {
   const [routeSteps,    setRouteSteps]    = useState([]);
   const [navHeadingDeg, setNavHeadingDeg] = useState(0);
   const [centerSignal,  setCenterSignal]  = useState(null);
-  const [centerActive,  setCenterActive]  = useState(false);
+  const [centerMode,    setCenterMode]    = useState('off'); // 'off' | 'follow' | 'overview'
   const [activeZones,   setActiveZones]   = useState([]);
   const [navMode,       setNavMode]       = useState(null);
   const [mapInstance,   setMapInstance]   = useState(null);
   const [navFollowEnabled] = useState(false);
 
-  const centerActiveRef = useRef(false);
+  const centerModeRef   = useRef('off');
   const autoCenterRef   = useRef(null);
 
   // ── GPS ──────────────────────────────────────────────────────────────────────
@@ -96,11 +105,12 @@ export default function DriverHome() {
   }, [order.activeOrder]);
 
   // ── Centrado automático tras interacción ────────────────────────────────────
+  // ── Auto-recenter after user pans (only in follow mode) ─────────────────────
   const scheduleAutoCenter = useCallback(() => {
     if (autoCenterRef.current) clearTimeout(autoCenterRef.current);
-    if (!centerActiveRef.current) return;
+    if (centerModeRef.current !== 'follow') return;
     autoCenterRef.current = setTimeout(() => {
-      if (centerActiveRef.current) setCenterSignal('follow');
+      if (centerModeRef.current === 'follow') setCenterSignal('follow');
     }, 5000);
   }, []);
 
@@ -111,13 +121,29 @@ export default function DriverHome() {
     return () => evs.forEach(ev => document.removeEventListener(ev, h));
   }, [scheduleAutoCenter]);
 
-  function handleCenterToggle() {
-    const next = !centerActive;
-    setCenterActive(next);
-    centerActiveRef.current = next;
-    setCenterSignal(next ? 'follow' : 'free');
-    if (next) scheduleAutoCenter();
-    else { clearTimeout(autoCenterRef.current); autoCenterRef.current = null; }
+  // ── 3-mode center cycle ───────────────────────────────────────────────────────
+  // off → follow (lock to driver position, high zoom) → overview (fit route + markers) → off
+  function handleCenterCycle() {
+    const modes = ['off', 'follow', 'overview'];
+    const next  = modes[(modes.indexOf(centerModeRef.current) + 1) % modes.length];
+
+    // overview only makes sense with a route — skip it if no route
+    const effective = (next === 'overview' && (!routeGeometry || !routeGeometry.length))
+      ? 'off'
+      : next;
+
+    setCenterMode(effective);
+    centerModeRef.current = effective;
+    clearTimeout(autoCenterRef.current);
+
+    if (effective === 'follow') {
+      setCenterSignal('follow');
+      scheduleAutoCenter();
+    } else if (effective === 'overview') {
+      setCenterSignal('overview');
+    } else {
+      setCenterSignal('free');
+    }
   }
 
   // ── Navegación ───────────────────────────────────────────────────────────────
@@ -147,24 +173,58 @@ export default function DriverHome() {
   // ── Ruta OSRM ────────────────────────────────────────────────────────────────
   function openRoadRouteApi() {
     if (!order.activeOrder) return;
-    const start    = myPosition || (order.activeOrder.restaurant_lat
-      ? { lat: Number(order.activeOrder.restaurant_lat), lng: Number(order.activeOrder.restaurant_lng) } : null);
+
     const pickup   = order.activeOrder.restaurant_lat
-      ? { lat: Number(order.activeOrder.restaurant_lat), lng: Number(order.activeOrder.restaurant_lng) } : null;
-    const delivery = order.activeOrder.customer_lat
-      ? { lat: Number(order.activeOrder.customer_lat),   lng: Number(order.activeOrder.customer_lng)   } : null;
-    if (!start || !pickup || !delivery) return setMsg('Faltan coordenadas para trazar la ruta');
-    apiFetch('/routes/model', {
-      method: 'POST',
-      body:   JSON.stringify({ origin: start, destination: delivery, waypoints: [pickup], includeSteps: true }),
-    }, auth.token)
-      .then(d => {
-        if (!d?.geometry?.length) throw new Error();
-        setRouteGeometry(d.geometry);
-        setRouteSteps(Array.isArray(d?.steps) ? d.steps : []);
-        setMsg('Ruta trazada');
-      })
-      .catch(() => { setRouteGeometry(null); setRouteSteps([]); setMsg('No se pudo calcular la ruta'); });
+      ? { lat: Number(order.activeOrder.restaurant_lat), lng: Number(order.activeOrder.restaurant_lng) }
+      : null;
+    const delivery = order.activeOrder.delivery_lat
+      ? { lat: Number(order.activeOrder.delivery_lat),   lng: Number(order.activeOrder.delivery_lng) }
+      : order.activeOrder.customer_lat
+        ? { lat: Number(order.activeOrder.customer_lat), lng: Number(order.activeOrder.customer_lng) }
+        : null;
+
+    if (!pickup || !delivery) return setMsg('Faltan coordenadas del pedido para trazar la ruta');
+
+    // Use current GPS position as origin if available, else start from pickup
+    const startPos = myPosition || pickup;
+
+    const callRoute = (origin) => {
+      apiFetch('/routes/model', {
+        method: 'POST',
+        body: JSON.stringify({
+          origin,
+          destination: delivery,
+          waypoints: origin !== pickup ? [pickup] : [],
+          includeSteps: true,
+        }),
+      }, auth.token)
+        .then(d => {
+          if (!d?.geometry?.length) throw new Error('Ruta vacía');
+          setRouteGeometry(d.geometry);
+          setRouteSteps(Array.isArray(d?.steps) ? d.steps : []);
+          setMsg(`Ruta: ${Math.round(d.distance_m / 1000 * 10) / 10} km · ~${Math.round(d.duration_s / 60)} min`);
+        })
+        .catch(e => {
+          setRouteGeometry(null);
+          setRouteSteps([]);
+          setMsg(e.message?.includes('502') ? 'Motor de rutas no disponible' : 'No se pudo calcular la ruta');
+        });
+    };
+
+    if (myPosition) {
+      callRoute(startPos);
+    } else {
+      // Request fresh GPS then calculate
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          pos => callRoute({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          ()  => callRoute(pickup), // fallback to starting from pickup
+          { timeout: 4000, maximumAge: 15000 }
+        );
+      } else {
+        callRoute(pickup);
+      }
+    }
   }
 
   // ── Google Maps nativo ───────────────────────────────────────────────────────
@@ -206,6 +266,14 @@ export default function DriverHome() {
             </div>
             {wakeLockActive && <div style={{ fontSize:'0.68rem', color:'rgba(255,255,255,0.85)' }}>Pantalla activa para navegación</div>}
             {gpsError && <div style={{ fontSize:'0.7rem', color:'#ffb3b3', maxWidth:200 }}>{gpsError}</div>}
+            {counters && (
+              <div style={{ fontSize:'0.65rem', color:'rgba(255,255,255,0.7)', marginTop:'0.1rem', display:'flex', gap:'0.6rem' }}>
+                {counters.session_releases   > 0 && <span>↩ {counters.session_releases} liberaciones</span>}
+                {counters.session_rebalances > 0 && <span>⇄ {counters.session_rebalances} rebalanceos</span>}
+                {counters.session_expires    > 0 && <span>⏱ {counters.session_expires} expiradas</span>}
+                {counters.session_cancels    > 0 && <span>✕ {counters.session_cancels} canceladas</span>}
+              </div>
+            )}
           </div>
           <button onClick={() => order.toggleAvailability(setMsg)}
             className={order.availability ? 'btn-primary btn-sm' : 'btn-sm'}>
@@ -310,10 +378,10 @@ export default function DriverHome() {
           <NavFABs
             hasActiveOrder={order.hasActiveOrder}
             routeGeometry={routeGeometry}
-            centerActive={centerActive}
+            centerMode={centerMode}
             voiceEnabled={voiceEnabled}
             navMode={navMode}
-            onCenterToggle={handleCenterToggle}
+            onCenterCycle={handleCenterCycle}
             onVoiceToggle={() => setVoiceEnabled(v => !v)}
             onGoogleNav={openGoogleNavigation}
             onNavMode={setNavMode}

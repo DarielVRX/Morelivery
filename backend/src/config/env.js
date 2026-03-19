@@ -36,5 +36,7 @@ export const env = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
   databaseUrl: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/morelivery',
   allowedOrigins: parseAllowedOrigins(),
-  redisUrl: process.env.REDIS_URL || ''
+  redisUrl: process.env.REDIS_URL || '',
+  // OSRM propio en Railway — fallback al servidor público si no está configurado
+  osrmUrl: process.env.OSRM_URL || 'https://router.project-osrm.org',
 };
