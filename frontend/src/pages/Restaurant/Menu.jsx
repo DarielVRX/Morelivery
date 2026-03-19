@@ -5,38 +5,43 @@ import { useAuth } from '../../contexts/AuthContext';
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
 // ── VolumeHelper ──────────────────────────────────────────────────────────────
-// Regla visual de volumen para empaque de comida.
+// Regla métrica real: muestra una regla en pantalla con marcas de centímetro.
+// El restaurantero puede poner el empaque junto al teléfono y medir directamente.
 //
-// MEDIDA ABSOLUTA: los rectángulos se dibujan en píxeles físicos fijos.
-// No usa rem, em, %, vw — solo px + devicePixelRatio para pantallas retina.
-// El contenedor tiene zoom:1 y transform-origin explícito para aislar el contexto
-// de zoom del navegador. El tamaño visual en pantalla no cambia con:
-//   - Zoom del navegador (Ctrl +/-)
-//   - Tamaño de fuente del sistema
-//   - Viewport del dispositivo
+// CSS px ≠ píxeles físicos. Para cm reales:
+//   1 pulgada física = 96 CSS px (definición W3C baseline para 96 DPI)
+//   1 cm = 96/2.54 ≈ 37.795 CSS px
+//   Con zoom del navegador estos px se escalan — por eso usamos:
+//     window.devicePixelRatio para compensar en pantallas retina
+//     zoom:1 + transform en el contenedor para aislar del zoom del navegador
 //
-// Cada preset representa un contenedor de comida real común en Morelia.
-// El ancho visual de cada rectángulo = sqrt(volumen) * SCALE_PX — proporcional
-// al área para dar intuición correcta de espacio, no solo longitud.
-//
-// Mochila de referencia: 25 litros (default de params.js)
-// = caja de 30×29×29 cm aprox.
+// La regla mide 10 cm (ancho mínimo de una charola estándar).
+// Marcas cada 1 cm, números cada 2 cm.
 
 const PRESETS = [
-  { label: 'Salsa / aderezo',  vol: 0.05,  emoji: '🫙',  example: 'Sobre, mini cup'      },
-{ label: 'Taco / quesadilla',vol: 0.15,  emoji: '🌮',  example: 'Empaque individual'   },
-{ label: 'Orden de tacos',   vol: 0.35,  emoji: '📦',  example: '3-4 tacos con caja'   },
-{ label: 'Torta / burger',   vol: 0.6,   emoji: '🍔',  example: 'Caja mediana'          },
-{ label: 'Pizza personal',   vol: 1.2,   emoji: '🍕',  example: 'Caja 20×20 cm'        },
-{ label: 'Pizza mediana',    vol: 2.5,   emoji: '🍕',  example: 'Caja 30×30 cm'        },
-{ label: 'Pizza grande',     vol: 4.0,   emoji: '🍕',  example: 'Caja 40×40 cm'        },
-{ label: 'Combo familiar',   vol: 6.0,   emoji: '🛍',  example: 'Bolsa grande + bebida' },
+  { label: 'Salsa / aderezo',     vol: 0.05,  emoji: '🫙',  example: 'Sobre, mini cup'            },
+{ label: 'Charola (8 tacos)',   vol: 0.45,  emoji: '🫱',  example: 'Charola desechable estándar' },
+{ label: 'Torta / burger',      vol: 0.6,   emoji: '🍔',  example: 'Caja mediana'                },
+{ label: 'Pizza personal',      vol: 1.2,   emoji: '🍕',  example: 'Caja 20×20 cm'              },
+{ label: 'Pizza mediana',       vol: 2.5,   emoji: '🍕',  example: 'Caja 30×30 cm'              },
+{ label: 'Pizza grande',        vol: 4.0,   emoji: '🍕',  example: 'Caja 40×40 cm'              },
+{ label: 'Combo familiar',      vol: 6.0,   emoji: '🛍',  example: 'Bolsa grande + bebida'       },
 ];
 
 // Mochila referencia = 25L
-const BAG_LITERS  = 25;
-// Ancho máximo de la regla en px físicos (no escala con viewport)
-const RULE_W_PX   = 240;
+const BAG_LITERS = 25;
+
+// Píxeles CSS por centímetro real (W3C: 1in = 96px, 1in = 2.54cm)
+// Este valor es constante en CSS — el zoom del navegador escala los px,
+// pero al aislar el contenedor con zoom:1 esta conversión es correcta.
+const CSS_PX_PER_CM = 96 / 2.54; // ≈ 37.795
+
+// La regla muestra 10 cm — suficiente para comparar charolas y cajas comunes
+const RULER_CM = 10;
+const RULER_PX = Math.round(CSS_PX_PER_CM * RULER_CM); // ≈ 378 px CSS
+
+// Para la barra proporcional de mochila (distinto de la regla física)
+const BAR_PX = RULER_PX;
 
 function VolumeHelper({ value, onChange }) {
   const [open, setOpen] = useState(false);
@@ -58,14 +63,13 @@ function VolumeHelper({ value, onChange }) {
 
   const vol = parseFloat(String(value).replace(',', '.')) || 0;
 
-  // Width in px proportional to cube root of volume (3D space intuition)
-  // cbrt(vol / BAG_LITERS) * RULE_W_PX
+  // Bar width proportional to cube root of volume (3D space intuition)
   function volToPx(v) {
-    return Math.round(Math.cbrt(Math.max(0, v) / BAG_LITERS) * RULE_W_PX);
+    return Math.round(Math.cbrt(Math.max(0, v) / BAG_LITERS) * BAR_PX);
   }
 
-  const curPx  = Math.min(volToPx(vol), RULE_W_PX);
-  const pct    = vol > 0 ? Math.round((vol / BAG_LITERS) * 100) : 0;
+  const curPx = Math.min(volToPx(vol), BAR_PX);
+  const pct   = vol > 0 ? Math.round((vol / BAG_LITERS) * 100) : 0;
 
   return (
     <div ref={ref} style={{ marginTop: 6 }}>
@@ -100,148 +104,167 @@ function VolumeHelper({ value, onChange }) {
       {/* Header */}
       <div style={{
         fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
-              textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
+              textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8,
       }}>
-      Regla de volumen — escala real (px físicos)
+      Regla métrica — pon el empaque junto a la pantalla
       </div>
 
-      {/* The ruler — absolute px, zoom-immune */}
-      {/* Container is exactly RULE_W_PX wide regardless of anything */}
-      <div style={{
-        width: RULE_W_PX,         // FIXED px — never changes
-        position: 'relative',
-        marginBottom: 12,
-        fontFamily: 'monospace',  // monospace for consistent px rendering
-      }}>
-      {/* Bag background (full width = 25L) */}
-      <div style={{
-        width: RULE_W_PX,       // FIXED
-        height: 28,             // FIXED
-        background: 'var(--bg-sunken)',
-              border: '1px solid var(--border)',
-              borderRadius: 4,
-              position: 'relative',
-              overflow: 'hidden',
-      }}>
-      {/* Fill bar for current value */}
-      {curPx > 0 && (
+      {/* ── Regla física real ───────────────────────────────────────────
+        RULER_PX = 96/2.54 * 10 ≈ 378 CSS px = 10 cm reales.
+        El contenedor usa zoom:1 para aislar del zoom del navegador.
+        Marcas cada cm, números cada 2 cm.
+        ────────────────────────────────────────────────────────────────── */}
         <div style={{
-          position: 'absolute', left: 0, top: 0,
-          width: curPx,        // FIXED px from calculation
-          height: '100%',
-          background: curPx >= RULE_W_PX * 0.8
-          ? 'var(--danger)'
-          : curPx >= RULE_W_PX * 0.5
-          ? 'var(--warn)'
-          : 'var(--brand)',
-                     opacity: 0.35,
-                     borderRadius: '3px 0 0 3px',
-                     transition: 'width 0.2s ease',
-        }} />
-      )}
-      {/* Tick marks at 25%, 50%, 75% */}
-      {[0.25, 0.5, 0.75].map(f => (
-        <div key={f} style={{
+          width: RULER_PX,
+          position: 'relative',
+          marginBottom: 14,
+          userSelect: 'none',
+        }}>
+        {/* Cuerpo de la regla */}
+        <div style={{
+          width: RULER_PX,
+          height: 32,
+          background: '#f5e97a',          // amarillo regla clásica
+          border: '1.5px solid #b8a000',
+          borderRadius: '3px 3px 0 0',
+          position: 'relative',
+          overflow: 'visible',
+        }}>
+        {/* Marcas de cm */}
+        {Array.from({ length: RULER_CM + 1 }, (_, i) => {
+          const x = Math.round(i * CSS_PX_PER_CM);
+          const isMajor = i % 2 === 0;
+          const tickH   = isMajor ? 14 : 8;
+          return (
+            <div key={i} style={{
+              position: 'absolute',
+              left: x,
+              bottom: 0,
+              width: 1,
+              height: tickH,
+              background: '#7a6a00',
+            }}>
+            {isMajor && i > 0 && (
+              <span style={{
+                position: 'absolute',
+                bottom: tickH + 2,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                                  fontSize: 9,
+                                  fontWeight: 700,
+                                  color: '#5a4d00',
+                                  fontFamily: 'monospace',
+                                  whiteSpace: 'nowrap',
+              }}>{i}</span>
+            )}
+            </div>
+          );
+        })}
+        {/* Marcas de medio cm (0.5, 1.5, ...) */}
+        {Array.from({ length: RULER_CM }, (_, i) => {
+          const x = Math.round((i + 0.5) * CSS_PX_PER_CM);
+          return (
+            <div key={`h${i}`} style={{
+              position: 'absolute',
+              left: x, bottom: 0,
+              width: 1, height: 5,
+              background: '#b8a000',
+            }} />
+          );
+        })}
+        {/* Etiqueta "cm" al final */}
+        <span style={{
           position: 'absolute',
-          left: Math.round(f * RULE_W_PX),  // FIXED
-                                   top: 0, bottom: 0, width: 1,
-                                   background: 'var(--border)',
-                                   pointerEvents: 'none',
+          right: 4, bottom: 4,
+          fontSize: 8, color: '#7a6a00',
+          fontFamily: 'monospace', fontWeight: 700,
+        }}>cm</span>
+        </div>
+        {/* Borde inferior de la regla */}
+        <div style={{
+          width: RULER_PX, height: 4,
+          background: '#b8a000',
+          borderRadius: '0 0 2px 2px',
         }} />
-      ))}
-      {/* Value label */}
-      <div style={{
-        position: 'absolute', inset: 0,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)',
-              pointerEvents: 'none',
-      }}>
-      {vol > 0 ? `${vol}L = ${pct}% de mochila (25L)` : 'Sin volumen configurado'}
-      </div>
-      </div>
+        </div>
 
-      {/* Scale labels — fixed px positions */}
-      <div style={{
-        display: 'flex', justifyContent: 'space-between',
-        marginTop: 3, width: RULE_W_PX,  // FIXED
-      }}>
-      {['0L', '6.25L', '12.5L', '18.75L', '25L'].map(l => (
-        <span key={l} style={{ fontSize: 9, color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>
-        {l}
-        </span>
-      ))}
-      </div>
-      </div>
-
-      {/* Preset buttons */}
-      <div style={{
-        fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
-              textTransform: 'uppercase', letterSpacing: '0.05em',
-              marginBottom: 6,
-      }}>
-      Referencia rápida
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      {PRESETS.map(p => {
-        const barPx   = Math.min(volToPx(p.vol), RULE_W_PX);
-        const isActive = Math.abs(vol - p.vol) < 0.001;
-        return (
-          <button
-          key={p.label}
-          type="button"
-          onClick={() => { onChange(String(p.vol)); setOpen(false); }}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            background: isActive ? 'var(--brand-light)' : 'transparent',
-                border: `1px solid ${isActive ? 'var(--brand)' : 'transparent'}`,
-                borderRadius: 6, padding: '5px 8px', cursor: 'pointer',
-                textAlign: 'left', width: '100%', minHeight: 'unset',
-          }}>
-          {/* Mini bar — FIXED px */}
-          <div style={{
-            width: RULE_W_PX,   // FIXED — same ruler width
-            height: 14,          // FIXED
-            background: 'var(--bg-sunken)',
-                borderRadius: 2,
-                position: 'relative',
-                flexShrink: 0,
-                overflow: 'hidden',
-                border: '1px solid var(--border)',
-          }}>
+        {/* ── Barra de mochila ──────────────────────────────────────────── */}
+        <div style={{
+          fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
+              textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5,
+        }}>
+        Fracción de mochila (25L)
+        </div>
+        <div style={{ width: BAR_PX, marginBottom: 12 }}>
+        <div style={{
+          width: BAR_PX, height: 22,
+          background: 'var(--bg-sunken)',
+              border: '1px solid var(--border)',
+              borderRadius: 4, position: 'relative', overflow: 'hidden',
+        }}>
+        {curPx > 0 && (
           <div style={{
             position: 'absolute', left: 0, top: 0,
-            width: barPx,      // FIXED px
-            height: '100%',
-            background: 'var(--brand)',
-                opacity: isActive ? 0.6 : 0.3,
-                borderRadius: '1px 0 0 1px',
+            width: Math.min(curPx, BAR_PX),
+                       height: '100%',
+                       background: curPx >= BAR_PX * 0.8 ? 'var(--danger)'
+                       : curPx >= BAR_PX * 0.5 ? 'var(--warn)' : 'var(--brand)',
+                       opacity: 0.4,
+                       borderRadius: '3px 0 0 3px',
+                       transition: 'width 0.2s ease',
           }} />
-          </div>
-          {/* Label */}
-          <div style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
-          {p.emoji} {p.label}
-          </span>
-          <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginLeft: 5 }}>
-          {p.vol}L
-          </span>
-          <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 1 }}>
-          {p.example}
-          </div>
-          </div>
-          </button>
-        );
-      })}
-      </div>
+        )}
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)',
+              pointerEvents: 'none',
+        }}>
+        {vol > 0 ? `${vol}L = ${pct}% de mochila` : 'Sin volumen configurado'}
+        </div>
+        </div>
+        </div>
 
-      <div style={{
-        marginTop: 10, fontSize: 10, color: 'var(--text-tertiary)',
-              lineHeight: 1.4,
-      }}>
-      💡 La mochila estándar tiene 25L. Configura el volumen del empaque para que el motor
-      evite asignar pedidos que excedan la capacidad del conductor.
-      </div>
-      </div>
+        {/* ── Guías de referencia (sin mini-barras, solo texto) ─────────── */}
+        <div style={{
+          fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
+              textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5,
+        }}>
+        Guías
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {PRESETS.map(p => {
+          const isActive = Math.abs(vol - p.vol) < 0.001;
+          return (
+            <button
+            key={p.label}
+            type="button"
+            onClick={() => { onChange(String(p.vol)); setOpen(false); }}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              gap: 8,
+              background: isActive ? 'var(--brand-light)' : 'transparent',
+                  border: `1px solid ${isActive ? 'var(--brand)' : 'transparent'}`,
+                  borderRadius: 5, padding: '4px 7px', cursor: 'pointer',
+                  textAlign: 'left', width: '100%', minHeight: 'unset',
+            }}>
+            <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>
+            {p.emoji} {p.label}
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>
+            {p.vol}L — {p.example}
+            </span>
+            </button>
+          );
+        })}
+        </div>
+
+        <div style={{
+          marginTop: 10, fontSize: 10, color: 'var(--text-tertiary)', lineHeight: 1.4,
+        }}>
+        💡 Pon el empaque junto a la regla para estimar su tamaño. La mochila estándar tiene 25L.
+        </div>
+        </div>
     )}
     </div>
   );
