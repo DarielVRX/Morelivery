@@ -156,16 +156,32 @@ export default function RestaurantPage() {
   const homeLngNum  = Number(auth.user?.home_lng);
   const hasHomePin  = Number.isFinite(homeLatNum) && Number.isFinite(homeLngNum);
 
-  // Delivery location
-  const [currentPos,    setCurrentPos]    = useState(null);
+  // Menu sort
+  const [sortBy, setSortBy] = useState('default'); // 'default' | 'asc' | 'desc'
+
+  // Delivery location — reads from Layout GPS panel or GPS/home fallback
+  const [currentPos,    setCurrentPos]    = useState(() => {
+    try {
+      const stored = sessionStorage.getItem('morelivery_delivery_pos');
+      if (stored) return JSON.parse(stored);
+    } catch (_) {}
+    return null;
+  });
   const [gpsError,      setGpsError]      = useState('');
-  const [deliveryMode,  setDeliveryMode]  = useState('current');
+  const [deliveryMode,  setDeliveryMode]  = useState(() => {
+    try { return sessionStorage.getItem('morelivery_delivery_pos') ? 'confirmed' : 'current'; }
+    catch (_) { return 'current'; }
+  });
   const [manualPos,     setManualPos]     = useState(null);
   const [showManualMap, setShowManualMap] = useState(false);
   const manualMapRef = useRef(null);
 
-  // GPS
+  // GPS — skip if Layout panel already provided a confirmed location
   useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('morelivery_delivery_pos');
+      if (stored) return; // GPS panel already confirmed a location
+    } catch (_) {}
     if (!isCustomer || !navigator.geolocation) { setGpsError('GPS no disponible'); return; }
     navigator.geolocation.getCurrentPosition(
       pos => setCurrentPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
@@ -272,9 +288,11 @@ export default function RestaurantPage() {
   // Distance checks
   const restLat = Number.isFinite(Number(restaurant?.lat)) ? Number(restaurant.lat) : null;
   const restLng = Number.isFinite(Number(restaurant?.lng)) ? Number(restaurant.lng) : null;
+  // Priority: GPS panel confirmed > manual > home > GPS
   const activePos =
-    deliveryMode === 'manual' ? manualPos :
-    deliveryMode === 'home'   ? (hasHomePin ? { lat: homeLatNum, lng: homeLngNum } : null) :
+    (deliveryMode === 'confirmed' && currentPos) ? currentPos :
+    deliveryMode === 'manual'  ? manualPos :
+    deliveryMode === 'home'    ? (hasHomePin ? { lat: homeLatNum, lng: homeLngNum } : null) :
     currentPos;
   const distKm = (activePos && restLat !== null && restLng !== null)
     ? haversineKm(activePos.lat, activePos.lng, restLat, restLng) : null;
@@ -424,8 +442,24 @@ export default function RestaurantPage() {
         {menu.length === 0 ? (
           <p style={{ color:'var(--text-tertiary)' }}>Sin productos disponibles.</p>
         ) : (
-          <ul style={{ listStyle:'none', padding:0, margin:0 }}>
-            {menu.map(item => {
+          {/* Sort controls */}
+        <div style={{ display:'flex', gap:'0.4rem', marginBottom:'0.6rem', alignItems:'center' }}>
+          <span style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', fontWeight:600 }}>Ordenar:</span>
+          {[['default','Por defecto'],['asc','Menor precio'],['desc','Mayor precio']].map(([val,label]) => (
+            <button key={val} onClick={() => setSortBy(val)}
+              className={`chip${sortBy===val?' active':''}`}
+              style={{ fontSize:'0.7rem', padding:'3px 9px' }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <ul style={{ listStyle:'none', padding:0, margin:0 }}>
+            {[...menu].sort((a,b) => {
+              if (sortBy === 'asc')  return (a.price_cents||0) - (b.price_cents||0);
+              if (sortBy === 'desc') return (b.price_cents||0) - (a.price_cents||0);
+              return 0;
+            }).map(item => {
               const qty = Number(selectedItems[item.id]) || 0;
               return (
                 <li key={item.id} className="card"
@@ -455,7 +489,7 @@ export default function RestaurantPage() {
                 </li>
               );
             })}
-          </ul>
+            </ul>
         )}
 
         {/* Order summary */}
@@ -540,6 +574,8 @@ export default function RestaurantPage() {
             <div style={{ display:'flex', gap:'0.35rem', flexWrap:'wrap' }}>
               {[
                 ['current', `📍 Actual${!currentPos && !gpsError ? ' (buscando…)' : gpsError ? ' (no disp.)' : ''}`],
+                ...(currentPos && deliveryMode !== 'confirmed' ? [['current', `📍 GPS`]] : []),
+                ...(deliveryMode === 'confirmed' ? [['confirmed', `✓ Confirmada`]] : []),
                 ...(hasHomePin ? [['home', '🏠 Casa']] : []),
                 ['manual', `📌 Manual${manualPos ? ' ✓' : ''}`],
               ].map(([mode, label]) => (

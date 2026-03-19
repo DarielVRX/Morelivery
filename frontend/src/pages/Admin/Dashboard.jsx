@@ -79,7 +79,7 @@ function OfferBar({ startedAt, total = 60 }) {
   const color = pct > 50 ? '#16a34a' : pct > 25 ? '#f59e0b' : '#dc2626';
   return (
     <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', minWidth:120 }}>
-      <div style={{ flex:1, height:6, background:'#e5e7eb', borderRadius:3, overflow:'hidden' }}>
+      <div style={{ flex:1, height:6, background:'var(--border)', borderRadius:3, overflow:'hidden' }}>
         <div style={{ width:`${pct}%`, height:'100%', background:color, borderRadius:3, transition:'width 1s linear' }} />
       </div>
       <span style={{ fontSize:'0.72rem', fontWeight:700, color, minWidth:28, textAlign:'right' }}>{left}s</span>
@@ -135,7 +135,7 @@ function DriversPanel({ drivers, orderId }) {
     <div style={{ marginTop:'0.5rem' }}>
       <button
         onClick={() => setOpen(o => !o)}
-        style={{ fontSize:'0.75rem', background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:6,
+        style={{ fontSize:'0.75rem', background:'var(--bg-raised)', border:'1px solid var(--border)', borderRadius:6,
           cursor:'pointer', padding:'0.25rem 0.65rem', fontWeight:600, display:'flex',
           alignItems:'center', gap:'0.35rem', marginTop:'0.25rem', color:'var(--text-primary)' }}>
         <span style={{ fontSize:'0.6rem' }}>{open ? '▲' : '▼'}</span>
@@ -159,15 +159,15 @@ function DriversPanel({ drivers, orderId }) {
                 const secsR = d.cooldownHere ? Math.max(0, Math.round((new Date(d.cooldownHere.wait_until) - Date.now()) / 1000)) : null;
                 let sitLabel, sitColor, rowBg;
                 if (d.isOfferingThisOrder) {
-                  sitLabel = '📤 Oferta activa'; sitColor = '#2563eb'; rowBg = '#eff6ff';
+                  sitLabel = '📤 Oferta activa'; sitColor = '#2563eb'; rowBg = 'rgba(37,99,235,0.1)';
                 } else if (d.priority === 1) {
-                  sitLabel = `✅ Disponible (${d.active_orders}/${MAX_ACTIVE})`; sitColor = '#16a34a'; rowBg = '#f0fdf4';
+                  sitLabel = `✅ Disponible (${d.active_orders}/${MAX_ACTIVE})`; sitColor = '#16a34a'; rowBg = 'rgba(22,163,74,0.1)';
                 } else if (d.priority === 2) {
-                  sitLabel = `⚡ Disponible + otra oferta`; sitColor = '#0d9488'; rowBg = '#f0fdfa';
+                  sitLabel = `⚡ Disponible + otra oferta`; sitColor = '#0d9488'; rowBg = 'rgba(13,148,136,0.1)';
                 } else if (d.hasPending && !d.isOfferingThisOrder && !d.cooldownHere) {
                   sitLabel = '⏸ Oferta en otro pedido'; sitColor = '#f59e0b'; rowBg = undefined;
                 } else if (d.cooldownHere) {
-                  sitLabel = `🕐 Cooldown ${fmtSecs(secsR)}`; sitColor = '#dc2626'; rowBg = '#fff7f7';
+                  sitLabel = `🕐 Cooldown ${fmtSecs(secsR)}`; sitColor = '#dc2626'; rowBg = 'rgba(220,38,38,0.1)';
                 } else if (!d.is_available) {
                   sitLabel = '🔴 Offline'; sitColor = '#9ca3af'; rowBg = undefined;
                 } else if (!d.hasCapacity) {
@@ -181,12 +181,12 @@ function DriversPanel({ drivers, orderId }) {
                     <Td><span style={{ fontWeight: d.priority <= 1 ? 700 : 400 }}>{d.full_name?.split('_')[0] || '—'}</span></Td>
                     <Td>
                       {d.is_available
-                        ? <span style={{ color:'#16a34a', fontWeight:600, fontSize:'0.72rem' }}>● Disp.</span>
-                        : <span style={{ color:'#9ca3af', fontSize:'0.72rem' }}>○ No</span>
+                        ? <span style={{ color:'var(--success)', fontWeight:600, fontSize:'0.72rem' }}>● Disp.</span>
+                        : <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>○ No</span>
                       }
                     </Td>
                     <Td style={{ textAlign:'center' }}>{d.active_orders}</Td>
-                    <Td>{(d.last_lat && d.last_lng) ? <span style={{ color:'#16a34a', fontSize:'0.7rem' }}>✓</span> : <span style={{ color:'#9ca3af', fontSize:'0.7rem' }}>—</span>}</Td>
+                    <Td>{(d.last_lat && d.last_lng) ? <span style={{ color:'var(--success)', fontSize:'0.7rem' }}>✓</span> : <span style={{ color:'#9ca3af', fontSize:'0.7rem' }}>—</span>}</Td>
                     <Td style={{ color:sitColor, fontWeight: d.priority<=1 ? 700 : 400 }}>
                       {sitLabel}
                       {d.cooldownHere && <CooldownBadge waitUntil={d.cooldownHere.wait_until} />}
@@ -213,7 +213,7 @@ function OrderRow({ order, drivers }) {
   return (
     <>
       <tr
-        style={{ cursor:'pointer', background: expanded ? '#f0f9ff' : undefined }}
+        style={{ cursor:'pointer', background: expanded ? 'rgba(37,99,235,0.07)' : undefined }}
         onClick={() => setExpanded(e => !e)}
       >
         <Td>
@@ -224,7 +224,7 @@ function OrderRow({ order, drivers }) {
         <Td>
           <Badge status={order.status} />
           {order.status === 'pending_driver' && (
-            <span style={{ fontSize:'0.68rem', color:'#dc2626', marginLeft:4 }}>
+            <span style={{ fontSize:'0.68rem', color:'var(--danger)', marginLeft:4 }}>
               (ronda {order.round})
             </span>
           )}
@@ -237,7 +237,7 @@ function OrderRow({ order, drivers }) {
         </Td>
         <Td>
           <span style={{ fontSize:'0.75rem' }}>{fmtTs(order.created_at)}</span>
-          <span style={{ fontSize:'0.68rem', color:'#9ca3af', marginLeft:4 }}>({ageMin}m)</span>
+          <span style={{ fontSize:'0.68rem', color:'var(--text-tertiary)', marginLeft:4 }}>({ageMin}m)</span>
         </Td>
         <Td>{fmt(order.total_cents)}</Td>
         <Td>
@@ -246,7 +246,7 @@ function OrderRow({ order, drivers }) {
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={7} style={{ padding:'0.75rem 1rem', background:'#f8fafc', borderBottom:'2px solid #e5e7eb' }}>
+          <td colSpan={7} style={{ padding:'0.75rem 1rem', background:'var(--bg-sunken)', borderBottom:'2px solid var(--border)' }}>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:'0.5rem', marginBottom:'0.75rem' }}>
               <Detail label="Hora de creación"     value={fmtDate(order.created_at)} />
               <Detail label="Última actualización" value={fmtDate(order.updated_at)} />
@@ -280,7 +280,7 @@ function OrderRow({ order, drivers }) {
 function Detail({ label, value, color }) {
   return (
     <div style={{ background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:7, padding:'0.4rem 0.6rem' }}>
-      <div style={{ fontSize:'0.68rem', color:'#9ca3af', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.03em' }}>{label}</div>
+      <div style={{ fontSize:'0.68rem', color:'var(--text-tertiary)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.03em' }}>{label}</div>
       <div style={{ fontSize:'0.82rem', fontWeight:700, color: color || '#1f2937', marginTop:'0.1rem' }}>{value || '—'}</div>
     </div>
   );
@@ -478,7 +478,7 @@ export default function AdminDashboard() {
         padding:'0.4rem 0.875rem', border:'none', cursor:'pointer', borderRadius:8,
         fontWeight: tab===key ? 700 : 400, fontSize:'0.85rem',
         background: tab===key ? 'var(--brand)' : 'transparent',
-        color: tab===key ? '#fff' : 'var(--gray-600)',
+        color: tab===key ? '#fff' : 'var(--text-secondary)',
       }}>
       {label}
     </button>
@@ -558,7 +558,7 @@ export default function AdminDashboard() {
 
           {/* Estado global de todos los drivers */}
           <div style={{ marginTop:'1.5rem', border:'1px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
-            <div style={{ padding:'0.65rem 1rem', background:'#f9fafb', fontWeight:700, fontSize:'0.875rem', borderBottom:'1px solid #e5e7eb' }}>
+            <div style={{ padding:'0.65rem 1rem', background:'var(--bg-sunken)', fontWeight:700, fontSize:'0.875rem', borderBottom:'1px solid var(--border)' }}>
               👥 Estado de todos los drivers
             </div>
             {liveData.drivers.length === 0 ? (
@@ -597,14 +597,14 @@ export default function AdminDashboard() {
                           <Td><span style={{ fontWeight:600 }}>{d.full_name?.split('_')[0] || '—'}</span></Td>
                           <Td>
                             {d.is_available
-                              ? <span style={{ color:'#16a34a', fontWeight:700, fontSize:'0.75rem' }}>● Sí</span>
-                              : <span style={{ color:'#9ca3af', fontSize:'0.75rem' }}>○ No</span>
+                              ? <span style={{ color:'var(--success)', fontWeight:700, fontSize:'0.75rem' }}>● Sí</span>
+                              : <span style={{ color:'var(--text-tertiary)', fontSize:'0.75rem' }}>○ No</span>
                             }
                           </Td>
                           <Td>
                             {d.active_orders > 0
                               ? <Badge status="on_the_way" label={`${d.active_orders} en entrega`} />
-                              : <span style={{ color:'#9ca3af', fontSize:'0.75rem' }}>0</span>
+                              : <span style={{ color:'var(--text-tertiary)', fontSize:'0.75rem' }}>0</span>
                             }
                           </Td>
                           <Td>
@@ -621,18 +621,18 @@ export default function AdminDashboard() {
                                   )}
                                 </div>
                               )
-                              : <span style={{ color:'#9ca3af', fontSize:'0.75rem' }}>—</span>
+                              : <span style={{ color:'var(--text-tertiary)', fontSize:'0.75rem' }}>—</span>
                             }
                           </Td>
                           <Td>
                             {(d.last_lat && d.last_lng)
-                              ? <span style={{ color:'#16a34a', fontSize:'0.75rem', fontWeight:600 }}>✓ {Number(d.last_lat).toFixed(3)},{Number(d.last_lng).toFixed(3)}</span>
-                              : <span style={{ color:'#9ca3af', fontSize:'0.72rem' }}>Sin GPS</span>
+                              ? <span style={{ color:'var(--success)', fontSize:'0.75rem', fontWeight:600 }}>✓ {Number(d.last_lat).toFixed(3)},{Number(d.last_lng).toFixed(3)}</span>
+                              : <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>Sin GPS</span>
                             }
                           </Td>
                           <Td>
                             {cooldowns.length === 0
-                              ? <span style={{ color:'#9ca3af', fontSize:'0.72rem' }}>—</span>
+                              ? <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>—</span>
                               : (
                                 <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
                                   {cooldowns.map((cd, i) => (
@@ -689,16 +689,16 @@ export default function AdminDashboard() {
                     <Td>{o.driver_name?.split('_')[0] || '—'}</Td>
                     <Td>{fmt(o.total_cents)}</Td>
                     <Td>{fmtDate(o.created_at)}</Td>
-                    <Td>{o.pending_offers > 0 ? <span style={{color:'#f59e0b',fontWeight:700}}>⏳{o.pending_offers}</span> : 0}</Td>
-                    <Td>{o.rejected_offers > 0 ? <span style={{color:'#dc2626'}}>{o.rejected_offers}</span> : 0}</Td>
-                    <Td>{o.expired_offers > 0 ? <span style={{color:'#9ca3af'}}>{o.expired_offers}</span> : 0}</Td>
+                    <Td>{o.pending_offers > 0 ? <span style={{color:'var(--warn)',fontWeight:700}}>⏳{o.pending_offers}</span> : 0}</Td>
+                    <Td>{o.rejected_offers > 0 ? <span style={{color:'var(--danger)'}}>{o.rejected_offers}</span> : 0}</Td>
+                    <Td>{o.expired_offers > 0 ? <span style={{color:'var(--text-tertiary)'}}>{o.expired_offers}</span> : 0}</Td>
                     <Td>
                       <button
                         disabled={actionLoading === o.id || ['delivered','cancelled'].includes(o.status)}
                         onClick={() => handleForceOrderStatus(o.id, o.status)}
                         style={{
                           padding:'0.2rem 0.5rem', fontSize:'0.72rem', fontWeight:700, borderRadius:6, cursor:'pointer',
-                          border:'1px solid #fde68a', background:'#fffbeb', color:'#92400e',
+                          border:'1px solid var(--warn-border)', background:'var(--warn-bg)', color:'var(--warn)',
                           opacity: ['delivered','cancelled'].includes(o.status) ? 0.35 : 1,
                         }}>
                         {actionLoading === o.id ? '…' : '✏️ Estado'}
@@ -764,7 +764,7 @@ export default function AdminDashboard() {
       {/* ── TAB: USUARIOS ───────────────────────────────────────────── */}
       {tab === 'users' && (
         <div>
-          <div style={{ border:'1px solid var(--border)', borderRadius:8, padding:'1rem', marginBottom:'1.25rem', background:'#f9fafb' }}>
+          <div style={{ border:'1px solid var(--border)', borderRadius:8, padding:'1rem', marginBottom:'1.25rem', background:'var(--bg-raised)' }}>
             <div style={{ fontWeight:700, marginBottom:'0.75rem', fontSize:'0.875rem' }}>Crear cuenta admin</div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr auto', gap:'0.5rem', alignItems:'end', flexWrap:'wrap' }}>
               {[['Usuario','username','username'],['Nombre','displayName','text'],['Contraseña','password','password']].map(([label,key,type]) => (
@@ -794,8 +794,8 @@ export default function AdminDashboard() {
                         onClick={() => handleToggleUserStatus(u)}
                         style={{
                           padding:'0.2rem 0.55rem', fontSize:'0.72rem', fontWeight:700, borderRadius:6, cursor:'pointer',
-                          border:`1px solid ${u.status==='active'?'#fca5a5':'#86efac'}`,
-                          background: u.status==='active'?'#fef2f2':'#f0fdf4',
+                          border:`1px solid ${u.status==='active'?'var(--danger-border)':'var(--success-border)'}`,
+                          background: u.status==='active'?'var(--danger-bg)':'var(--success-bg)',
                           color: u.status==='active'?'#dc2626':'#16a34a',
                           opacity: u.role==='admin' ? 0.4 : 1,
                         }}>
@@ -829,8 +829,8 @@ export default function AdminDashboard() {
           {paramMsg && (
             <div style={{
               padding:'0.45rem 0.75rem', borderRadius:6, marginBottom:'0.75rem', fontSize:'0.82rem',
-              background: paramMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2',
-              border: `1px solid ${paramMsg.startsWith('✓') ? '#16a34a' : '#dc2626'}`,
+              background: paramMsg.startsWith('✓') ? 'var(--success-bg)' : 'var(--danger-bg)',
+              border: `1px solid ${paramMsg.startsWith('✓') ? 'var(--success-border)' : 'var(--danger-border)'}`,
               color: paramMsg.startsWith('✓') ? '#15803d' : '#dc2626',
             }}>{paramMsg}</div>
           )}
@@ -855,9 +855,9 @@ export default function AdminDashboard() {
                       const isDirty    = isEditing && paramEditing[p.key] !== String(p.value);
                       const isModified = p.value !== p.default;
                       return (
-                        <tr key={p.key} style={{ background: isModified ? '#fffbeb' : undefined }}>
+                        <tr key={p.key} style={{ background: isModified ? 'rgba(217,119,6,0.1)' : undefined }}>
                           <Td>
-                            <code style={{ fontSize:'0.75rem', color:'var(--text-primary)', background:'#f3f4f6',
+                            <code style={{ fontSize:'0.75rem', color:'var(--text-primary)', background:'var(--bg-sunken)',
                               padding:'0.1rem 0.35rem', borderRadius:4 }}>{p.key}</code>
                           </Td>
                           <Td style={{ maxWidth:280, color:'var(--text-secondary)', fontSize:'0.75rem' }}>{p.description || '—'}</Td>
@@ -867,7 +867,7 @@ export default function AdminDashboard() {
                                 type="number" step="any"
                                 value={paramEditing[p.key]}
                                 onChange={e => setParamEditing(prev => ({ ...prev, [p.key]: e.target.value }))}
-                                style={{ width:90, padding:'0.2rem 0.4rem', border:'1px solid #3b82f6',
+                                style={{ width:90, padding:'0.2rem 0.4rem', border:'1px solid #60a5fa',
                                   borderRadius:4, fontSize:'0.82rem' }}
                                 onKeyDown={e => {
                                   if (e.key === 'Enter') saveEngineParam(p.key, paramEditing[p.key]);
@@ -877,26 +877,26 @@ export default function AdminDashboard() {
                               />
                             ) : (
                               <span style={{ fontWeight: isModified ? 700 : 400,
-                                color: isModified ? '#b45309' : '#374151', fontSize:'0.85rem' }}>
+                                color: isModified ? 'var(--warn)' : 'var(--text-primary)', fontSize:'0.85rem' }}>
                                 {p.value}
                               </span>
                             )}
                           </Td>
-                          <Td style={{ color:'#9ca3af', fontSize:'0.82rem' }}>{p.default ?? '—'}</Td>
+                          <Td style={{ color:'var(--text-tertiary)', fontSize:'0.82rem' }}>{p.default ?? '—'}</Td>
                           <Td>
                             {isEditing ? (
                               <div style={{ display:'flex', gap:'0.3rem' }}>
                                 <button
                                   disabled={paramSaving === p.key}
                                   onClick={() => saveEngineParam(p.key, paramEditing[p.key])}
-                                  style={{ padding:'0.2rem 0.55rem', background:'#16a34a', color:'#fff',
+                                  style={{ padding:'0.2rem 0.55rem', background:'var(--success)', color:'#fff',
                                     border:'none', borderRadius:4, cursor:'pointer', fontSize:'0.75rem',
                                     opacity: paramSaving === p.key ? 0.6 : 1 }}>
                                   {paramSaving === p.key ? '…' : 'Guardar'}
                                 </button>
                                 <button
                                   onClick={() => setParamEditing(prev => { const n={...prev}; delete n[p.key]; return n; })}
-                                  style={{ padding:'0.2rem 0.55rem', background:'#f3f4f6',
+                                  style={{ padding:'0.2rem 0.55rem', background:'var(--bg-raised)',
                                     border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', fontSize:'0.75rem' }}>
                                   Cancelar
                                 </button>
@@ -904,7 +904,7 @@ export default function AdminDashboard() {
                             ) : (
                               <button
                                 onClick={() => setParamEditing(prev => ({ ...prev, [p.key]: String(p.value) }))}
-                                style={{ padding:'0.2rem 0.55rem', background:'#f3f4f6', color:'var(--text-primary)',
+                                style={{ padding:'0.2rem 0.55rem', background:'var(--bg-raised)', color:'var(--text-primary)',
                                   border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', fontSize:'0.75rem' }}>
                                 Editar
                               </button>
@@ -949,7 +949,7 @@ export default function AdminDashboard() {
                           <Td>
                             <button
                               onClick={() => handlePenaltyEdit(d.id, d.disconnect_penalties ?? 0)}
-                              style={{ padding:'0.2rem 0.55rem', background:'#f3f4f6', border:'1px solid var(--border)',
+                              style={{ padding:'0.2rem 0.55rem', background:'var(--bg-raised)', border:'1px solid var(--border)',
                                 borderRadius:4, cursor:'pointer', fontSize:'0.75rem' }}>
                               Ajustar
                             </button>
@@ -1138,9 +1138,9 @@ export default function AdminDashboard() {
               .sort((a,b) => b.ts - a.ts)
               .map((e, i) => (
                 <div key={i} style={{ padding:'0.4rem 0.875rem', borderBottom:'1px solid var(--border-light)', fontSize:'0.78rem',
-                  background: e._t === 'offer' ? '#eff6ff' : '#f0fdf4', display:'flex', gap:'0.75rem' }}>
-                  <span style={{ color:'#9ca3af', fontFamily:'monospace' }}>{new Date(e.ts).toLocaleTimeString('es-MX')}</span>
-                  <span style={{ color: e._t==='offer'?'#3b82f6':'#16a34a', fontWeight:700 }}>{e._t==='offer'?'📤 OFERTA':'📦 PEDIDO'}</span>
+                  background: e._t === 'offer' ? 'rgba(37,99,235,0.1)' : 'rgba(22,163,74,0.1)', display:'flex', gap:'0.75rem' }}>
+                  <span style={{ color:'var(--text-tertiary)', fontFamily:'monospace' }}>{new Date(e.ts).toLocaleTimeString('es-MX')}</span>
+                  <span style={{ color: e._t==='offer'?'#60a5fa':'#4ade80', fontWeight:700 }}>{e._t==='offer'?'📤 OFERTA':'📦 PEDIDO'}</span>
                   <span style={{ color:'var(--text-primary)' }}>{e.orderId}</span>
                   <span style={{ color:'var(--text-secondary)' }}>{e.extra}</span>
                 </div>

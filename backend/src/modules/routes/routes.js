@@ -2,8 +2,12 @@ import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate } from '../../middlewares/auth.js';
 import { AppError } from '../../utils/errors.js';
+import { env } from '../../config/env.js';
 
 const router = Router();
+
+// OSRM base URL — Railway instance preferred, public fallback
+const OSRM_BASE = env.osrmUrl.replace(/\/$/, '');
 
 function isValidCoord(point) {
   if (!point) return false;
@@ -24,7 +28,7 @@ function buildOsrmUrl(points, includeSteps) {
     steps: includeSteps ? 'true' : 'false',
     alternatives: 'true',
   });
-  return `https://router.project-osrm.org/route/v1/driving/${coords}?${params.toString()}`;
+  return `${OSRM_BASE}/route/v1/driving/${coords}?${params.toString()}`;
 }
 
 function mapStep(step, idx) {

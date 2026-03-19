@@ -1,7 +1,7 @@
 // ── Precache del shell de la app ──────────────────────────────────────────────
 // Lista de assets que se cachean en install. Los archivos con hash (generados
 // por Vite) se agregan en runtime via fetch; aquí solo el shell estático.
-const SHELL_VERSION = 'v3'; // v3: Background Sync
+const SHELL_VERSION = 'v4'; // v4: Stadia Maps tile caching
 const SHELL_CACHE   = `morelivery-shell-${SHELL_VERSION}`;
 const SHELL_ASSETS  = [
   '/',
@@ -68,8 +68,13 @@ self.addEventListener('activate', (event) => {
 });
 
 // ── Caché de tiles vectoriales (stale-while-revalidate) ───────────────────────
-const TILES_CACHE   = 'morelivery-tiles-v1';
-const TILES_DOMAINS = ['tiles.openfreemap.org', 'tile.openfreemap.org'];
+const TILES_CACHE   = 'morelivery-tiles-v2'; // v2: adds Stadia Maps
+const TILES_DOMAINS = [
+  'tiles.openfreemap.org',
+  'tile.openfreemap.org',
+  'tiles.stadiamaps.com',    // Stadia vector tiles
+  'tile.stadiamaps.com',     // Stadia raster fallback
+];
 
 // ── IndexedDB para última ruta/destino/posición ────────────────────────────────
 // Usado por el frontend para persistir contexto de navegación entre sesiones.
