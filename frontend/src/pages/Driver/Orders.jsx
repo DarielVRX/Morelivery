@@ -18,7 +18,7 @@ function FeeBreakdown({ order }) {
   const grandTotal    = sub + svc + del_fee + tip;
   if (!svc && !del_fee) return null;
   return (
-    <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', borderTop:'1px solid var(--gray-100)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
+    <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)', borderTop:'1px solid var(--border-light)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
       {isCash && (
         <>
           <div style={{ display:'flex', justifyContent:'space-between', color:'var(--gray-700)' }}>
@@ -117,6 +117,65 @@ export default function DriverOrders() {
   const [releaseNote, setReleaseNote]     = useState('');
   const [releasingId, setReleasingId]     = useState(null);
   const [expanded, setExpanded]            = useState(null);
+  const [rebalancingId, setRebalancingId] = useState(null);
+
+  // Grace window ref: tracks last time driver was ≤100m from each reference point
+  const graceRef = useRef({});
+  const MAX_RADIUS_M = 100;
+  const GRACE_MS = 3 * 60 * 1000;
+
+  function haversineM(lat1, lng1, lat2, lng2) {
+    const toRad = x => x * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+    return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  async function getGpsBody(status, order) {
+    return new Promise(resolve => {
+      if (!navigator.geolocation) { resolve({}); return; }
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const body = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          const refLat = status === 'on_the_way' ? order?.restaurant_lat : order?.delivery_lat;
+          const refLng = status === 'on_the_way' ? order?.restaurant_lng : order?.delivery_lng;
+          if (refLat && refLng) {
+            const distM = haversineM(body.lat, body.lng, Number(refLat), Number(refLng));
+            if (distM <= MAX_RADIUS_M) {
+              graceRef.current[status] = Date.now();
+            } else {
+              const lastIn = graceRef.current[status];
+              if (lastIn && Date.now() - lastIn <= GRACE_MS) body.grace = true;
+            }
+          }
+          resolve(body);
+        },
+        () => resolve({}),
+        { timeout: 3000, maximumAge: 15000 }
+      );
+    });
+  }
+
+  async function changeStatusWithGps(orderId, status, order) {
+    setActionLoading(orderId);
+    try {
+      const gps = ['on_the_way','delivered'].includes(status) ? await getGpsBody(status, order) : {};
+      await apiFetch(`/orders/${orderId}/status`, { method:'PATCH', body: JSON.stringify({ status, ...gps }) }, auth.token);
+      loadData();
+    } catch(e) { setActionMsg(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  async function doRebalance(orderId) {
+    setRebalancingId(orderId);
+    try {
+      await apiFetch(`/drivers/orders/${orderId}/rebalance`, { method: 'POST' }, auth.token);
+      setActionMsg('Pedido en disputa — si alguien lo toma se te notifica.');
+      loadData();
+      setTimeout(() => setActionMsg(''), 5000);
+    } catch (e) { setActionMsg(e.message || 'Error al solicitar rebalanceo'); }
+    finally { setRebalancingId(null); }
+  }
 
   async function acceptDirectly(orderId) {
     setActionLoading(orderId);
@@ -155,14 +214,14 @@ export default function DriverOrders() {
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
       {/* ── Encabezado fijo ─────────────────────────────────────────── */}
       <div style={{
-        flexShrink:0, background:'#fff', borderBottom:'2px solid var(--brand-light)',
+        flexShrink:0, background:'var(--bg-card)', borderBottom:'2px solid var(--border)',
         padding:'0.65rem 1rem 0', zIndex:30,
         boxShadow:'0 1px 4px rgba(0,0,0,0.04)'
       }}>
         <div style={{ fontWeight:800, fontSize:'1rem', color:'var(--brand)', letterSpacing:'-0.01em', marginBottom:'0.4rem' }}>
           Mis pedidos
         </div>
-        <div style={{ display:'flex', gap:0, borderTop:'1px solid var(--gray-100)' }}>
+        <div style={{ display:'flex', gap:0, borderTop:'1px solid var(--border-light)' }}>
           {[
             ['active', 'Activos'],
             ['waiting', unoffered.length > 0 ? `En espera (${unoffered.length})` : 'En espera'],
@@ -190,7 +249,7 @@ export default function DriverOrders() {
       {/* ── En espera (sin oferta activa) ─────────────────────────────── */}
       {tab === 'waiting' && (
         <div style={{ marginBottom:'1.25rem' }}>
-          <p style={{ fontSize:'0.8rem', fontWeight:700, color:'var(--gray-500)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.5rem' }}>
+          <p style={{ fontSize:'0.8rem', fontWeight:700, color:'var(--text-tertiary)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.5rem' }}>
             Buscando conductor ({unoffered.length})
           </p>
           <ul style={{ listStyle:'none', padding:0 }}>
@@ -215,8 +274,8 @@ export default function DriverOrders() {
                         </span>
                       )}
                       {o.cooldown_secs > 0 && (
-                        <span style={{ fontSize:'0.65rem', background:'#f1f5f9', color:'var(--gray-500)',
-                          border:'1px solid var(--gray-200)', borderRadius:8, padding:'0.1rem 0.4rem' }}>
+                        <span style={{ fontSize:'0.65rem', background:'#f1f5f9', color:'var(--text-tertiary)',
+                          border:'1px solid var(--border)', borderRadius:8, padding:'0.1rem 0.4rem' }}>
                           CD {o.cooldown_secs}s
                         </span>
                       )}
@@ -224,11 +283,11 @@ export default function DriverOrders() {
                   </div>
                   <div style={{ fontSize:'0.82rem', color:'var(--gray-700)', marginBottom:'0.3rem' }}>
                     {o.restaurant_address && (
-                      <div><span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Tienda: </span>
+                      <div><span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>Tienda: </span>
                         <strong>{o.restaurant_address}</strong></div>
                     )}
                     {(o.customer_address||o.delivery_address) && (
-                      <div><span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Cliente: </span>
+                      <div><span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>Cliente: </span>
                         <strong>{o.customer_address||o.delivery_address}</strong></div>
                     )}
                   </div>
@@ -260,7 +319,7 @@ export default function DriverOrders() {
 
       {tab === 'active' && (
         active.length === 0
-          ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin pedidos activos.</p>
+          ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos activos.</p>
           : (
             <ul className="orders-tab-panel" style={{ listStyle:'none', padding:0 }}>
               {active.map(o => {
@@ -282,14 +341,22 @@ export default function DriverOrders() {
                             color: isActive ? 'var(--success)' : color }}>
                             {DRIVER_ST[o.status] || STATUS_LABELS[o.status]}
                           </span>
-                          {!isActive && <span style={{ fontSize:'0.68rem', color:'var(--gray-400)' }}>no activo en home</span>}
+                          {o.is_disputed && (
+                            <span style={{ fontSize:'0.65rem', fontWeight:700,
+                              background:'#fef9c3', color:'#854d0e',
+                              border:'1px solid #fde047', borderRadius:8,
+                              padding:'0.1rem 0.45rem' }}>
+                              🔄 En disputa
+                            </span>
+                          )}
+                          {!isActive && <span style={{ fontSize:'0.68rem', color:'var(--text-tertiary)' }}>no activo en home</span>}
                         </div>
                         {!isOnTheWay
                           ? <div style={{ fontSize:'0.8rem', fontWeight:600 }}>{o.restaurant_name}</div>
                           : <div style={{ fontSize:'0.8rem', fontWeight:600 }}>{o.customer_name || 'Cliente'}</div>
                         }
                       </div>
-                      <span style={{ color:'var(--gray-400)', fontSize:'0.8rem', flexShrink:0 }}>
+                      <span style={{ color:'var(--text-tertiary)', fontSize:'0.8rem', flexShrink:0 }}>
                         {expanded===o.id ? '▲' : '▼'}
                       </span>
                     </div>
@@ -299,22 +366,22 @@ export default function DriverOrders() {
                         maxHeight:260, overflowY:'auto' }}>
                         {!isOnTheWay ? (
                           <>
-                            {o.restaurant_address && <div style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>{o.restaurant_address}</div>}
+                            {o.restaurant_address && <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)' }}>{o.restaurant_address}</div>}
                             {isCash
                               ? <div style={{ fontSize:'0.8rem', fontWeight:700, color:'var(--brand)', marginTop:'0.2rem' }}>
                                   Cobrar al llegar: {fmt(grandTotal)}
                                 </div>
-                              : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.2rem' }}>
+                              : <div style={{ fontSize:'0.77rem', color:'var(--text-tertiary)', marginTop:'0.2rem' }}>
                                   {o.payment_method==='card' ? '💳 Pago con tarjeta — no cobrar' : '🏦 SPEI — no cobrar'}
                                 </div>
                             }
                           </>
                         ) : (
                           <>
-                            {(o.customer_address||o.delivery_address) && <div style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>{o.customer_address||o.delivery_address}</div>}
+                            {(o.customer_address||o.delivery_address) && <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)' }}>{o.customer_address||o.delivery_address}</div>}
                             {isCash
                               ? <div style={{ fontSize:'0.8rem', fontWeight:700, color:'var(--brand)', marginTop:'0.2rem' }}>Cobrar: {fmt(grandTotal)}</div>
-                              : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.2rem' }}>
+                              : <div style={{ fontSize:'0.77rem', color:'var(--text-tertiary)', marginTop:'0.2rem' }}>
                                   {o.payment_method==='card' ? '💳 Ya pagó con tarjeta' : '🏦 Ya pagó SPEI'}
                                 </div>
                             }
@@ -333,36 +400,44 @@ export default function DriverOrders() {
                               <button className="btn-sm"
                                 style={{ background:o.status==='ready'?'var(--brand)':'', color:o.status==='ready'?'#fff':'' }}
                                 disabled={actionLoading===o.id || o.status!=='ready'}
-                                onClick={async () => {
-                                  setActionLoading(o.id);
-                                  try { await apiFetch(`/orders/${o.id}/status`,{ method:'PATCH', body:JSON.stringify({status:'on_the_way'})}, auth.token); loadData(); }
-                                  catch(e) { setActionMsg(e.message); } finally { setActionLoading(null); }
-                                }}>En camino</button>
+                                onClick={() => changeStatusWithGps(o.id, 'on_the_way', o)}>En camino</button>
                               <button className="btn-sm"
                                 style={{ background:o.status==='on_the_way'?'var(--success)':'', color:o.status==='on_the_way'?'#fff':'' }}
                                 disabled={actionLoading===o.id || o.status!=='on_the_way'}
-                                onClick={async () => {
-                                  setActionLoading(o.id);
-                                  try { await apiFetch(`/orders/${o.id}/status`,{ method:'PATCH', body:JSON.stringify({status:'delivered'})}, auth.token); loadData(); }
-                                  catch(e) { setActionMsg(e.message); } finally { setActionLoading(null); }
-                                }}>Entregado</button>
+                                onClick={() => changeStatusWithGps(o.id, 'delivered', o)}>Entregado</button>
                             </div>
                             {!['on_the_way','delivered','cancelled'].includes(o.status) && (
-                              releasingId===o.id ? (
-                                <div style={{ display:'flex', gap:'0.3rem', alignItems:'center', flexWrap:'wrap' }}>
-                                  <input value={releaseNote} onChange={e=>setReleaseNote(e.target.value)}
-                                    placeholder="Motivo…" style={{ flex:1, fontSize:'0.78rem', minWidth:100 }} />
-                                  <button className="btn-sm" style={{ background:'var(--danger)', color:'#fff', borderColor:'var(--danger)', fontSize:'0.75rem' }}
-                                    disabled={actionLoading===o.id} onClick={() => releaseOrder(o.id)}>
-                                    {actionLoading===o.id ? '…' : 'Confirmar'}
-                                  </button>
-                                  <button className="btn-sm" style={{ fontSize:'0.75rem' }}
-                                    onClick={() => { setReleasingId(null); setReleaseNote(''); }}>Cancelar</button>
-                                </div>
-                              ) : (
-                                <button className="btn-sm" style={{ fontSize:'0.75rem', color:'var(--danger)', borderColor:'var(--danger)' }}
-                                  onClick={() => setReleasingId(o.id)}>Liberar</button>
-                              )
+                              <>
+                                {releasingId===o.id ? (
+                                  <div style={{ display:'flex', gap:'0.3rem', alignItems:'center', flexWrap:'wrap' }}>
+                                    <input value={releaseNote} onChange={e=>setReleaseNote(e.target.value)}
+                                      placeholder="Motivo…" style={{ flex:1, fontSize:'0.78rem', minWidth:100 }} />
+                                    <button className="btn-sm" style={{ background:'var(--danger)', color:'#fff', borderColor:'var(--danger)', fontSize:'0.75rem' }}
+                                      disabled={actionLoading===o.id} onClick={() => releaseOrder(o.id)}>
+                                      {actionLoading===o.id ? '…' : 'Confirmar'}
+                                    </button>
+                                    <button className="btn-sm" style={{ fontSize:'0.75rem' }}
+                                      onClick={() => { setReleasingId(null); setReleaseNote(''); }}>Cancelar</button>
+                                  </div>
+                                ) : (
+                                  <div style={{ display:'flex', gap:'0.35rem', flexWrap:'wrap' }}>
+                                    {!o.is_disputed ? (
+                                      <button className="btn-sm"
+                                        style={{ fontSize:'0.75rem', color:'#854d0e', borderColor:'#fde047', background:'#fef9c3' }}
+                                        disabled={rebalancingId === o.id}
+                                        onClick={() => doRebalance(o.id)}>
+                                        {rebalancingId === o.id ? '…' : '🔄 Rebalancear'}
+                                      </button>
+                                    ) : (
+                                      <span style={{ fontSize:'0.72rem', color:'#854d0e', fontStyle:'italic' }}>
+                                        En disputa — buscando conductor…
+                                      </span>
+                                    )}
+                                    <button className="btn-sm" style={{ fontSize:'0.75rem', color:'var(--danger)', borderColor:'var(--danger)' }}
+                                      onClick={() => setReleasingId(o.id)}>Liberar</button>
+                                  </div>
+                                )}
+                              </>
                             )}
                           </div>
                         )}
@@ -377,7 +452,7 @@ export default function DriverOrders() {
 
       {tab === 'past' && (
         past.length === 0
-          ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
+          ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
           : (
             <ul className="orders-tab-panel reverse" style={{ listStyle:'none', padding:0 }}>
               {past.slice(0, 50).map(o => {
@@ -396,12 +471,12 @@ export default function DriverOrders() {
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
                         <span style={{ fontWeight:700 }}>{fmt(grandTotal)}</span>
-                        <span style={{ color:'var(--gray-400)', fontSize:'0.8rem' }}>{isHExp?'▲':'▼'}</span>
+                        <span style={{ color:'var(--text-tertiary)', fontSize:'0.8rem' }}>{isHExp?'▲':'▼'}</span>
                       </div>
                     </div>
                     {isHExp && (
                       <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
-                        <div style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginBottom:'0.3rem' }}>{fmtDate(o.created_at)}</div>
+                        <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)', marginBottom:'0.3rem' }}>{fmtDate(o.created_at)}</div>
                         {(o.items || []).length > 0 && (
                           <ul style={{ fontSize:'0.82rem', margin:'0.2rem 0 0.35rem 1rem' }}>
                             {o.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}

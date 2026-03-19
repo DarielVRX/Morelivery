@@ -30,7 +30,8 @@ async function loadDriverStops(driverId) {
        o.delivery_lat    AS cust_lat,
        o.delivery_lng    AS cust_lng,
        COALESCE(ru.home_lat, rest.lat) AS rest_lat,
-       COALESCE(ru.home_lng, rest.lng) AS rest_lng
+       COALESCE(ru.home_lng, rest.lng) AS rest_lng,
+       COALESCE(o.estimated_volume_liters, 0) AS volume_liters
      FROM orders o
      JOIN restaurants rest ON rest.id = o.restaurant_id
      LEFT JOIN users ru ON ru.id = rest.owner_user_id
@@ -46,19 +47,21 @@ async function loadDriverStops(driverId) {
     // Pickup pendiente (no recogido aún)
     if (row.status !== 'on_the_way' && row.rest_lat && row.rest_lng) {
       stops.push({
-        type:      'pickup',
-        orderId:   row.id,
-        pos:       { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
-        pickedUpAt: null,
+        type:         'pickup',
+        orderId:      row.id,
+        pos:          { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
+        pickedUpAt:   null,
+        volumeLiters: Number(row.volume_liters) || 0,
       });
     }
     // Delivery pendiente
     if (row.cust_lat && row.cust_lng) {
       stops.push({
-        type:       'delivery',
-        orderId:    row.id,
-        pos:        { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
-        pickedUpAt: row.picked_up_at ? new Date(row.picked_up_at) : null,
+        type:         'delivery',
+        orderId:      row.id,
+        pos:          { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
+        pickedUpAt:   row.picked_up_at ? new Date(row.picked_up_at) : null,
+        volumeLiters: Number(row.volume_liters) || 0,
       });
     }
   }
@@ -86,6 +89,13 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
   const driverObj   = { speed_kmh: driver.speedKmh };
   const maxSla      = getParam('max_delivery_time_s', 1800);
 
+  // Capacidad de mochila del driver (con fallback al default del param)
+  const bagCapacityLiters = Number(driver.bagCapacityLiters)
+    || getParam('default_bag_capacity_liters', 25);
+
+  // Volumen del nuevo pedido
+  const newOrderVolume = Number(order.estimated_volume_liters) || 0;
+
   // Estado de simulación: orderId → { status, pickedUpAtSec }
   const simState = {};
 
@@ -111,6 +121,18 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
   let simNow     = nowSec;
   let etaToNewCustomer = Infinity;
   let pickupDone = false;
+
+  // ── Volumen de mochila ────────────────────────────────────────────────────
+  // currentVolume: volumen ocupado en cada momento de la simulación.
+  // Sube en cada pickup, baja en cada delivery.
+  // Se inicializa con los pedidos que ya están en 'on_the_way' (ya recogidos).
+  let currentVolume = 0;
+  for (const stop of existingStops) {
+    if (stop.type === 'delivery' && stop.pickedUpAt !== null) {
+      currentVolume += stop.volumeLiters;
+    }
+  }
+  let peakVolume = currentVolume; // pico máximo en cualquier punto de la ruta
 
   const maxIter = (existingStops.length + 1) * 6 + 10;
 
@@ -180,11 +202,20 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
       state.status      = 'on_the_way';
       state.pickedUpAtSec = simNow;
 
+      // Subir volumen al recoger
+      const vol = nextStop.orderId === order.id ? newOrderVolume : (nextStop.volumeLiters || 0);
+      currentVolume += vol;
+      if (currentVolume > peakVolume) peakVolume = currentVolume;
+
       if (nextStop.orderId === order.id) {
         pickupDone = true;
       }
     } else {
       state.status = 'delivered';
+
+      // Bajar volumen al entregar
+      const vol = nextStop.orderId === order.id ? newOrderVolume : (nextStop.volumeLiters || 0);
+      currentVolume = Math.max(0, currentVolume - vol);
 
       if (nextStop.orderId === order.id) {
         etaToNewCustomer = simNow - nowSec;
@@ -213,6 +244,13 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
 
   const validExisting = slaBreaches.length === 0;
 
+  // ── Volumen de mochila ────────────────────────────────────────────────────
+  // bagOverflowPct > 100 significa que en algún punto de la ruta la mochila
+  // se llenaría por encima de su capacidad (incluye pickups futuros).
+  const bagOverflowPct = bagCapacityLiters > 0
+    ? Math.round((peakVolume / bagCapacityLiters) * 100)
+    : 0;
+
   return {
     ...candidate,
     etaToNewCustomer,
@@ -221,5 +259,9 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
     slaBreaches,
     newOrderDelay: delay,
     totalCost:     etaToNewCustomer + delay,
+    // Volumen
+    bagCapacityLiters,
+    peakVolumeLiters:  Math.round(peakVolume * 1000) / 1000,
+    bagOverflowPct,
   };
 }

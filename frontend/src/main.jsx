@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
 import './styles/app.css';
+import { ThemeProvider } from './contexts/ThemeContext.jsx';
 
 // ── Service Worker ─────────────────────────────────────────────────────────
 async function registerServiceWorker() {
@@ -60,39 +61,49 @@ async function requestNotificationPermission() {
 // Diálogo propio — explicativo, más conversión que el nativo directo
 function showNotificationPrompt() {
   return new Promise(resolve => {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const bg    = isDark ? '#1a1a1a' : '#ffffff';
+    const text  = isDark ? '#f3f4f6' : '#1f2937';
+    const sub   = isDark ? '#9ca3af' : '#6b7280';
+    const brand = '#c97f7f';
     const overlay = document.createElement('div');
     overlay.style.cssText = `
       position:fixed;inset:0;z-index:9999;
-      background:rgba(0,0,0,0.45);
+      background:rgba(0,0,0,0.55);
       display:flex;align-items:flex-end;justify-content:center;
       padding:0 0 env(safe-area-inset-bottom,0px) 0;
       font-family:system-ui,-apple-system,sans-serif;
     `;
     overlay.innerHTML = `
       <div style="
-        background:#fff;border-radius:18px 18px 0 0;
+        background:${bg};border-radius:18px 18px 0 0;
         padding:1.5rem 1.25rem 1.75rem;width:100%;max-width:480px;
-        box-shadow:0 -4px 32px rgba(0,0,0,0.18);
+        box-shadow:0 -4px 32px rgba(0,0,0,0.3);
       ">
         <div style="font-size:2rem;text-align:center;margin-bottom:0.5rem">🔔</div>
-        <h3 style="font-size:1.05rem;font-weight:800;text-align:center;margin:0 0 0.4rem;color:#1f2937">
+        <h3 style="font-size:1.05rem;font-weight:800;text-align:center;margin:0 0 0.4rem;color:${text}">
           Activar notificaciones
         </h3>
-        <p style="font-size:0.875rem;color:#6b7280;text-align:center;margin:0 0 1.25rem;line-height:1.5">
+        <p style="font-size:0.875rem;color:${sub};text-align:center;margin:0 0 1.25rem;line-height:1.5">
           Recibe alertas de pedidos nuevos, actualizaciones de estado y mensajes en tiempo real — incluso cuando la app está en segundo plano.
         </p>
         <div style="display:flex;flex-direction:column;gap:0.6rem">
           <button id="notif-yes" style="
-            background:#e3aaaa;color:#fff;border:none;border-radius:10px;
+            background:${brand};color:#fff;border:none;border-radius:10px;
             padding:0.75rem;font-size:0.95rem;font-weight:700;cursor:pointer;
           ">Activar notificaciones</button>
           <button id="notif-no" style="
-            background:none;border:none;color:#9ca3af;
+            background:none;border:none;color:${sub};
             padding:0.5rem;font-size:0.875rem;cursor:pointer;
           ">Ahora no</button>
         </div>
       </div>
     `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#notif-yes').onclick = () => { document.body.removeChild(overlay); resolve(true); };
+    overlay.querySelector('#notif-no').onclick  = () => { document.body.removeChild(overlay); resolve(false); };
+  });
+}
     document.body.appendChild(overlay);
     overlay.querySelector('#notif-yes').onclick = () => { document.body.removeChild(overlay); resolve(true); };
     overlay.querySelector('#notif-no').onclick  = () => { document.body.removeChild(overlay); resolve(false); };
@@ -140,7 +151,9 @@ if (typeof window !== 'undefined') {
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
-      <App />
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

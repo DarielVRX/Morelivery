@@ -86,6 +86,7 @@ async function loadTransferableOrders(driverId) {
      WHERE o.driver_id = $1
        AND o.status = 'assigned'
        AND o.picked_up_at IS NULL
+       AND o.is_disputed = false
        AND (o.last_transferred_at IS NULL
             OR o.last_transferred_at < NOW() - ($2 * INTERVAL '1 second'))
      ORDER BY o.accepted_at DESC
@@ -98,6 +99,7 @@ async function loadTransferableOrders(driverId) {
     restaurantPos: { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
     customerPos:   { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
   }));
+}
 }
 
 /**
@@ -145,6 +147,39 @@ async function estimateRouteEta(driver) {
 }
 
 /**
+ * Carga pedidos en disputa (rebalanceo manual solicitado por el driver).
+ * Criterio: assignment inicial — solo ETA al restaurante, sin minGain ni maxRouteEta.
+ * El created_at original se preserva para no sacrificar el SLA.
+ */
+async function loadDisputedOrders() {
+  const r = await query(
+    `SELECT o.id, o.driver_id, o.created_at,
+            COALESCE(ru.home_lat, rest.lat) AS rest_lat,
+            COALESCE(ru.home_lng, rest.lng) AS rest_lng,
+            o.delivery_lat  AS cust_lat,
+            o.delivery_lng  AS cust_lng,
+            o.disputed_by
+     FROM orders o
+     JOIN restaurants rest ON rest.id = o.restaurant_id
+     LEFT JOIN users ru ON ru.id = rest.owner_user_id
+     WHERE o.is_disputed = true
+       AND o.disputed_until > NOW()
+       AND o.picked_up_at IS NULL
+     ORDER BY o.disputed_until ASC`,
+    []
+  );
+
+  return r.rows.map(row => ({
+    id:            row.id,
+    driverId:      row.driver_id,
+    disputedBy:    row.disputed_by,
+    createdAt:     row.created_at,
+    restaurantPos: { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
+    customerPos:   { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
+  }));
+}
+
+/**
  * Motor de rebalanceo principal.
  * Retorna el número de transferencias aplicadas.
  *
@@ -161,7 +196,87 @@ export async function runRebalancer(onOffer) {
 
   try {
     const drivers = await loadActiveDrivers();
+    const maxActive = getParam('max_active_orders_per_driver', 4);
+    const driverObj = (d) => ({ speed_kmh: d.speedKmh });
 
+    // ── Pase 1: pedidos en disputa (rebalanceo manual) ────────────────────────
+    // Criterio: assignment inicial — el mejor driver por ETA al restaurante.
+    // Sin minGain ni maxRouteEta — el driver que solicitó la disputa ya aceptó
+    // que el pedido sigue en su ruta si nadie lo toma.
+    if (Date.now() - startMs <= MAX_EXEC_MS) {
+      const disputed = await loadDisputedOrders();
+
+      for (const order of disputed) {
+        if (Date.now() - startMs > MAX_EXEC_MS) break;
+
+        // Receptores: cualquier driver disponible excepto el que tiene el pedido
+        // y el que solicitó la disputa (ya tiene cooldown largo para este pedido)
+        const recipients = drivers.filter(d =>
+          d.id !== order.driverId &&
+          d.id !== order.disputedBy &&
+          d.activeOrders < maxActive
+        );
+
+        if (recipients.length === 0) continue;
+
+        // Evaluar por ETA al restaurante — criterio puro de assignment inicial
+        const evaluations = await Promise.all(
+          recipients.map(async d => ({
+            driver:       d,
+            etaToPickup:  await etaEstimator.estimate(d.pos, order.restaurantPos, driverObj(d)),
+          }))
+        );
+
+        const best = evaluations.sort((a, b) => a.etaToPickup - b.etaToPickup)[0];
+        if (!best) continue;
+
+        // Guard de race condition
+        const stillDisputed = await query(
+          `SELECT id FROM orders
+           WHERE id=$1 AND is_disputed=true AND picked_up_at IS NULL AND driver_id=$2`,
+          [order.id, order.driverId]
+        );
+        if (stillDisputed.rowCount === 0) continue;
+
+        // Transferir y limpiar disputa
+        await query(
+          `UPDATE orders
+           SET driver_id=$1, last_driver_id=$2, last_transferred_at=NOW(),
+               is_disputed=false, disputed_until=NULL, disputed_by=NULL,
+               updated_at=NOW()
+           WHERE id=$3`,
+          [best.driver.id, order.driverId, order.id]
+        );
+
+        console.log(`[rebalancer:disputa] order=${shortId(order.id)} ${shortId(order.driverId)} → ${shortId(best.driver.id)} (eta ~${Math.round(best.etaToPickup)}s)`);
+
+        sseHub.sendToUser(order.driverId, 'order_transferred_away', {
+          orderId:  order.id,
+          disputed: true,
+          message:  'Tu pedido en disputa fue tomado por otro conductor.',
+        });
+        sseHub.sendToUser(best.driver.id, 'order_transferred_in', {
+          orderId: order.id,
+          message: 'Se te asignó un pedido en disputa.',
+        });
+
+        // Actualizar estado local
+        const sourceLocal = drivers.find(d => d.id === order.driverId);
+        if (sourceLocal) {
+          sourceLocal.orderIds    = sourceLocal.orderIds.filter(id => id !== order.id);
+          sourceLocal.activeOrders = Math.max(0, sourceLocal.activeOrders - 1);
+        }
+        const recipientLocal = drivers.find(d => d.id === best.driver.id);
+        if (recipientLocal) {
+          recipientLocal.orderIds.push(order.id);
+          recipientLocal.activeOrders++;
+        }
+
+        totalTransfers++;
+      }
+    }
+
+    // ── Pase 2: rebalanceo automático normal ──────────────────────────────────
     for (let iter = 0; iter < maxIterations; iter++) {
       // Timeout de seguridad
       if (Date.now() - startMs > MAX_EXEC_MS) {
@@ -191,7 +306,6 @@ export async function runRebalancer(onOffer) {
         if (Date.now() - startMs > MAX_EXEC_MS) break;
 
         for (const order of transferableOrders) {
-          // Buscar mejor receptor: driver con capacidad y menor ETA al restaurante
           const maxActive = getParam('max_active_orders_per_driver', 4);
           const recipients = drivers.filter(d =>
             d.id !== sourceDriver.id && d.activeOrders < maxActive

@@ -625,7 +625,7 @@ export default function ProfilePage() {
   {/* Modal mapa pin */}
   {showPinMap && (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:9999, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'1rem' }}>
-    <div style={{ background:'#fff', borderRadius:12, width:'100%', maxWidth:480, overflow:'hidden', boxShadow:'0 8px 32px rgba(0,0,0,0.25)' }}>
+    <div style={{ background:'var(--bg-card)', borderRadius:12, width:'100%', maxWidth:480, overflow:'hidden', boxShadow:'0 8px 32px rgba(0,0,0,0.25)' }}>
     <div style={{ padding:'0.75rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid var(--gray-200)' }}>
     <span style={{ fontWeight:700, fontSize:'0.9rem' }}>Confirmar ubicación</span>
     <button onClick={() => setShowPinMap(false)} style={{ background:'none', border:'none', cursor:'pointer', fontSize:'1.2rem', color:'var(--gray-400)' }}>✕</button>

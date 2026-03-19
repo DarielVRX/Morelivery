@@ -258,14 +258,17 @@ router.post('/menu-items', authenticate, authorize(['restaurant']), validate(cre
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
-    const { name, description, priceCents } = req.validatedBody;
+    const { name, description, priceCents, pkgUnits, pkgVolumeLiters } = req.validatedBody;
     // priceCents validado: entero entre $1 y $10,000
     if (!Number.isInteger(priceCents) || priceCents < 100 || priceCents > 1_000_000) {
       return next(new AppError(400, 'El precio debe estar entre $1.00 y $10,000.00'));
     }
+    const safeUnits  = pkgUnits        != null ? Math.max(1, Math.round(Number(pkgUnits)))  : 1;
+    const safeVolume = pkgVolumeLiters != null ? Math.max(0, Number(pkgVolumeLiters))        : 0;
     const result = await query(
-      'INSERT INTO menu_items(restaurant_id, name, description, price_cents, is_available) VALUES($1,$2,$3,$4,true) RETURNING *',
-      [restaurantId, name, description, priceCents]
+      `INSERT INTO menu_items(restaurant_id, name, description, price_cents, is_available, pkg_units, pkg_volume_liters)
+       VALUES($1,$2,$3,$4,true,$5,$6) RETURNING *`,
+      [restaurantId, name, description, priceCents, safeUnits, safeVolume]
     );
     return res.status(201).json({ menuItem: result.rows[0] });
   } catch (error) { return next(error); }
@@ -292,8 +295,20 @@ router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), async (
       }
     }
     const result = await query(
-      'UPDATE menu_items SET name=$1, description=$2, price_cents=$3, is_available=$4, image_url=$5 WHERE id=$6 RETURNING *',
-      [p.name ?? cur.name, p.description ?? cur.description ?? '', (p.priceCents != null ? Math.round(Number(p.priceCents)) : null) ?? cur.price_cents, p.isAvailable ?? cur.is_available, imageUrl, req.params.id]
+      `UPDATE menu_items
+       SET name=$1, description=$2, price_cents=$3, is_available=$4, image_url=$5,
+           pkg_units=$6, pkg_volume_liters=$7
+       WHERE id=$8 RETURNING *`,
+      [
+        p.name        ?? cur.name,
+        p.description ?? cur.description ?? '',
+        (p.priceCents != null ? Math.round(Number(p.priceCents)) : null) ?? cur.price_cents,
+        p.isAvailable ?? cur.is_available,
+        imageUrl,
+        p.pkgUnits        != null ? Math.max(1, Math.round(Number(p.pkgUnits)))       : (cur.pkg_units         ?? 1),
+        p.pkgVolumeLiters != null ? Math.max(0, Number(p.pkgVolumeLiters))            : (cur.pkg_volume_liters ?? 0),
+        req.params.id,
+      ]
     );
     return res.json({ menuItem: result.rows[0] });
   } catch (error) { return next(error); }

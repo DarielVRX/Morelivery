@@ -1,7 +1,7 @@
 import http from 'http';
 import { createApp } from './app.js';
 import { env } from './config/env.js';
-import { expireTimedOutOffers } from './modules/orders/assignment/index.js';
+import { expireTimedOutOffers, expireDisputedOrders } from './modules/orders/assignment/index.js';
 import { offerCb } from './modules/events/offerCallback.js';
 import { ensureParamsLoaded, getParam } from './engine/params.js';
 import { tickKitchen } from './engine/kitchen.js';
@@ -23,6 +23,7 @@ let assignmentTimer   = null;
 async function runAssignmentLoop() {
   try {
     await expireTimedOutOffers(offerCb);
+    await expireDisputedOrders();
     assignmentDelayMs = 2_000;
   } catch (e) {
     assignmentDelayMs = Math.min(assignmentDelayMs * 2, 15_000);

@@ -133,21 +133,34 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       return next(new AppError(409, `Esta tienda está fuera de cobertura (${distKm.toFixed(1)} km). Máximo permitido: 5 km.`));
     }
 
-    // Batch: traer todos los precios en una sola query
+    // Batch: traer todos los precios Y volúmenes en una sola query
     const menuIds = items.map(i => i.menuItemId);
     const priceRows = await query(
-      `SELECT id, price_cents FROM menu_items WHERE id = ANY($1::uuid[]) AND restaurant_id = $2`,
+      `SELECT id, price_cents,
+              COALESCE(pkg_units, 1)           AS pkg_units,
+              COALESCE(pkg_volume_liters, 0)   AS pkg_volume_liters
+       FROM menu_items WHERE id = ANY($1::uuid[]) AND restaurant_id = $2`,
       [menuIds, restaurantId]
     );
     if (priceRows.rowCount !== menuIds.length) {
       return next(new AppError(400, 'Uno o más productos no pertenecen a este restaurante'));
     }
-    const priceMap = new Map(priceRows.rows.map(r => [r.id, r.price_cents]));
+    const priceMap = new Map(priceRows.rows.map(r => [r.id, {
+      price_cents:        r.price_cents,
+      pkg_units:          Number(r.pkg_units)          || 1,
+      pkg_volume_liters:  Number(r.pkg_volume_liters)  || 0,
+    }]));
 
     let totalCents = 0;
+    let estimatedVolumeLiters = 0;
     for (const item of items) {
-      totalCents += priceMap.get(item.menuItemId) * item.quantity;
+      const meta = priceMap.get(item.menuItemId);
+      totalCents += meta.price_cents * item.quantity;
+      // Empaques necesarios = ceil(quantity / pkg_units), cada uno ocupa pkg_volume_liters
+      const packs = Math.ceil(item.quantity / meta.pkg_units);
+      estimatedVolumeLiters += packs * meta.pkg_volume_liters;
     }
+    estimatedVolumeLiters = Math.round(estimatedVolumeLiters * 1000) / 1000;
 
     const serviceFee     = Math.round(totalCents * SERVICE_FEE_PCT);
     const deliveryFee    = Math.round(totalCents * DELIVERY_FEE_PCT);
@@ -156,9 +169,9 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
     const tipCents = Number(tip_cents) || 0;
 
     const orderResult = await query(
-      `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address, delivery_lat, delivery_lng, restaurant_lat, restaurant_lng)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
-      [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress, orderDeliveryLat, orderDeliveryLng, restaurantLat, restaurantLng]
+      `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address, delivery_lat, delivery_lng, restaurant_lat, restaurant_lng, estimated_volume_liters)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+      [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress, orderDeliveryLat, orderDeliveryLng, restaurantLat, restaurantLng, estimatedVolumeLiters]
     );
     const order = orderResult.rows[0];
     console.log(`📦 [pedido.creado] id=${order.id.slice(0,8)} total=${order.total_cents} rest=${restaurantId.slice(0,8)}`);
@@ -245,6 +258,45 @@ router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admi
     if (!allowed) return next(new AppError(403, `El rol '${req.user.role}' no puede establecer el estado '${STATUS_ES[nextStatus] || nextStatus}'`));
     if (allowed !== '*' && !allowed.includes(order.status))
       return next(new AppError(409, `No se puede cambiar de '${STATUS_ES[order.status] || order.status}' a '${STATUS_ES[nextStatus] || nextStatus}'`));
+
+    // ── Validación de distancia para transiciones críticas del driver ────────
+    // on_the_way = driver está en el restaurante recogiendo
+    // delivered  = driver está en la ubicación del cliente
+    if (req.user.role === 'driver' && ['on_the_way', 'delivered'].includes(nextStatus)) {
+      const driverLat = Number(req.body.lat);
+      const driverLng = Number(req.body.lng);
+      const MAX_RADIUS_M = 100; // 100m — configurable vía engine_params en el futuro
+      const GRACE_SECS   = 180; // 3 min de tolerancia temporal
+
+      if (Number.isFinite(driverLat) && Number.isFinite(driverLng)) {
+        // Elegir punto de referencia según la transición
+        const refLat = nextStatus === 'on_the_way'
+          ? Number(order.restaurant_lat)
+          : Number(order.delivery_lat);
+        const refLng = nextStatus === 'on_the_way'
+          ? Number(order.restaurant_lng)
+          : Number(order.delivery_lng);
+
+        if (Number.isFinite(refLat) && Number.isFinite(refLng)) {
+          // Haversine en metros
+          const toRad = x => x * Math.PI / 180;
+          const dLat = toRad(refLat - driverLat);
+          const dLng = toRad(refLng - driverLng);
+          const a = Math.sin(dLat/2)**2 + Math.cos(toRad(driverLat)) * Math.cos(toRad(refLat)) * Math.sin(dLng/2)**2;
+          const distM = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+          if (distM > MAX_RADIUS_M) {
+            // Tolerancia temporal: si el driver estuvo dentro del radio en los últimos GRACE_SECS
+            // (cubierto en frontend — backend solo rechaza si no hay gracia)
+            const gracePassed = req.body.grace !== true;
+            if (gracePassed) {
+              return next(new AppError(409, `Debes estar a menos de ${MAX_RADIUS_M}m del ${nextStatus === 'on_the_way' ? 'restaurante' : 'cliente'} para marcar este estado. Distancia actual: ${Math.round(distM)}m`));
+            }
+          }
+        }
+      }
+      // Si no hay coords en el body — permitir (degradación elegante para GPS sin señal)
+    }
 
     let driverNote     = order.driver_note;
     let restaurantNote = order.restaurant_note;

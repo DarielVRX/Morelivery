@@ -186,7 +186,7 @@ export default function DriverHome() {
 
         {/* Encabezado */}
         <div style={{ flexShrink:0,
-          background:'linear-gradient(135deg,var(--brand) 0%,#c0546a 100%)',
+          background:'var(--promo-gradient)',
           padding:'0.65rem 1rem', display:'flex', justifyContent:'space-between',
           alignItems:'center', gap:8, zIndex:10 }}>
           <div>
@@ -221,17 +221,17 @@ export default function DriverHome() {
         {order.transferBanner && (
           <div style={{
             flexShrink: 0, zIndex: 25,
-            background: order.transferBanner.type === 'order_transferred_in' ? '#f0fdf4' : '#fff7ed',
-            borderBottom: `2px solid ${order.transferBanner.type === 'order_transferred_in' ? '#16a34a' : '#f97316'}`,
+            background: order.transferBanner.type === 'order_transferred_in' ? 'var(--success-bg)' : 'var(--warn-bg)',
+            borderBottom: `2px solid ${order.transferBanner.type === 'order_transferred_in' ? 'var(--success)' : 'var(--warn)'}`,
             padding: '0.6rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)' }}>
               {order.transferBanner.type === 'order_transferred_in'
                 ? '📦 Se te asignó un pedido transferido'
                 : '↩️ Un pedido fue reasignado a otro conductor'}
             </span>
             <button onClick={() => order.setTransferBanner(null)}
-              style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#9ca3af', fontWeight: 700 }}>✕</button>
+              style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontWeight: 700, minHeight:'unset' }}>✕</button>
           </div>
         )}
 
@@ -280,23 +280,23 @@ export default function DriverHome() {
           {/* Panel de pin personalizado */}
           {!order.hasActiveOrder && customPin && (
             <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)',
-              background:'#fff', borderRadius:10, padding:'0.5rem 0.875rem',
-              boxShadow:'0 2px 12px #0003', maxWidth:'calc(100% - 2rem)',
+              background:'var(--bg-card)', borderRadius:10, padding:'0.5rem 0.875rem',
+              boxShadow:'var(--panel-shadow)', maxWidth:'calc(100% - 2rem)',
               zIndex:10, display:'flex', alignItems:'center', gap:'0.5rem', minWidth:180 }}>
               <span style={{ fontSize:'1rem', flexShrink:0 }}>📍</span>
               <div style={{ flex:1, minWidth:0 }}>
                 {loadingPin
-                  ? <span style={{ fontSize:'0.78rem', color:'var(--gray-400)' }}>Buscando dirección…</span>
-                  : <span style={{ fontSize:'0.78rem', color:'var(--gray-700)', fontWeight:600,
+                  ? <span style={{ fontSize:'0.78rem', color:'var(--text-tertiary)' }}>Buscando dirección…</span>
+                  : <span style={{ fontSize:'0.78rem', color:'var(--text-primary)', fontWeight:600,
                       overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block' }}>
                       {pinAddress}
                     </span>
                 }
-                <span style={{ fontSize:'0.7rem', color:'var(--gray-400)' }}>Toca el mapa para mover</span>
+                <span style={{ fontSize:'0.7rem', color:'var(--text-tertiary)' }}>Toca el mapa para mover</span>
               </div>
               <button onClick={() => { setCustomPin(null); setPinAddress(null); }}
                 style={{ border:'none', background:'none', cursor:'pointer',
-                  color:'var(--gray-400)', fontSize:'1rem', lineHeight:1, padding:'0.15rem', flexShrink:0 }}>✕</button>
+                  color:'var(--text-tertiary)', fontSize:'1rem', lineHeight:1, padding:'0.15rem', flexShrink:0, minHeight:'unset' }}>✕</button>
             </div>
           )}
 
@@ -400,6 +400,7 @@ export default function DriverHome() {
           onToggleRelease={() => order.setShowRelease(s => !s)}
           onReleaseNoteChange={order.setReleaseNote}
           onConfirmRelease={() => order.doRelease(setMsg)}
+          onRebalance={() => order.doRebalance(setMsg)}
           onRoute={openRoadRouteApi}
         />
 
