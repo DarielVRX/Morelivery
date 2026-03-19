@@ -49,6 +49,7 @@ export default function DriverMap({
   centerSignal, onCenterDone,
   onMapReady,
 }) {
+  onst { isDark } = useTheme();
   const containerRef      = useRef(null);
   const mapRef            = useRef(null);
   const markersRef        = useRef({ driver: null, driverSvg: null, custom: null, pickup: null, delivery: null });
@@ -67,11 +68,6 @@ export default function DriverMap({
   const [hasGPS,     setHasGPS]     = useState(Boolean(driverPos));
 
   useEffect(() => { isDarkRef.current = isDark; }, [isDark]);
-
-  // Dark mode
-  // With Stadia key: swap style (native dark/light, no filter)
-  // Without Stadia key: CSS filter workaround on the canvas
-  const { isDark } = useTheme();
 
   function applyDarkFilter(dark) {
     // Apply to the map container div — catches the canvas and all tile elements
