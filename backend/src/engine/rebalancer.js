@@ -100,7 +100,6 @@ async function loadTransferableOrders(driverId) {
     customerPos:   { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
   }));
 }
-}
 
 /**
  * Estima ETA total de la ruta del driver (suma de segments a todos sus stops).
