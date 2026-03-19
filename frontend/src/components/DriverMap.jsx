@@ -14,7 +14,7 @@ import { useTheme } from '../contexts/ThemeContext';
 // Stadia Maps styles — professional tiles with CDN SLA
 // API key read from VITE_STADIA_KEY env var; falls back to OpenFreeMap if not set.
 // Stadia has native dark/light pairs — no CSS filter hack needed.
-const STADIA_KEY = import.meta.env?.VITE_STADIA_KEY || '';
+var STADIA_KEY = import.meta.env?.VITE_STADIA_KEY || '';
 
 function stadiaStyle(name) {
   const base = `https://tiles.stadiamaps.com/styles/${name}.json`;
@@ -24,22 +24,22 @@ function stadiaStyle(name) {
 // Light: alidade_smooth — cleaner than bright, less visual noise, routes stand out more
 // Dark:  alidade_smooth_dark — native dark, no color inversion needed
 // Fallback: OpenFreeMap (no key required)
-const STYLE_LIGHT = STADIA_KEY
-? stadiaStyle('alidade_smooth')
-: 'https://tiles.openfreemap.org/styles/bright';
-const STYLE_DARK = STADIA_KEY
-? stadiaStyle('alidade_smooth_dark')
-: 'https://tiles.openfreemap.org/styles/bright'; // fallback still uses filter
+var STYLE_LIGHT = STADIA_KEY
+  ? stadiaStyle('alidade_smooth')
+  : 'https://tiles.openfreemap.org/styles/bright';
+var STYLE_DARK = STADIA_KEY
+  ? stadiaStyle('alidade_smooth_dark')
+  : 'https://tiles.openfreemap.org/styles/bright'; // fallback still uses filter
 
 // OPT-4: singleton — se asigna una vez cuando la lib carga y se reutiliza
-let _ml = null;
+var _ml = null;
 
 // ── Constantes de Morelia ─────────────────────────────────────────────────────
-const DEFAULT_POS    = { lat: 19.70595, lng: -101.19498 };
+var DEFAULT_POS    = { lat: 19.70595, lng: -101.19498 };
 // Bounding box del Área Metropolitana de Morelia.
 // Cubre Morelia + Tarímbaro, Charo, Jesús del Monte, Cuto del Porvenir.
 // MapLibre no carga tiles fuera de este rectángulo → ~40% menos memoria GPU.
-const MORELIA_BOUNDS = [[-101.42, 19.57], [-100.98, 19.84]];
+var MORELIA_BOUNDS = [[-101.42, 19.57], [-100.98, 19.84]];
 
 export default function DriverMap({
   driverPos, customPin, onCustomPin, hasActiveOrder,
@@ -79,8 +79,8 @@ export default function DriverMap({
     const el = containerRef.current;
     if (el) {
       el.style.filter = dark
-      ? 'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)'
-      : '';
+        ? 'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)'
+        : '';
     }
   }
 
@@ -156,13 +156,13 @@ export default function DriverMap({
             map.easeTo({
               center: [next.lng, next.lat], bearing: h, pitch: 0, zoom: 19,
               duration: 250, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
-                       essential: true,
+              essential: true,
             });
           }
         }
       },
       () => {},
-                                                             { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
     );
     return () => {
       if (watchIdRef.current != null) {
@@ -227,7 +227,7 @@ export default function DriverMap({
     }
 
     markersRef.current.driver = new ml.Marker({ element: wrap, anchor: 'center' })
-    .setLngLat([pos.lng, pos.lat]).addTo(map);
+      .setLngLat([pos.lng, pos.lat]).addTo(map);
   }
 
   // ── Inicializar mapa UNA sola vez ────────────────────────────────────────────
@@ -298,7 +298,7 @@ export default function DriverMap({
         if (!STADIA_KEY && document.documentElement.getAttribute('data-theme') === 'dark') {
           if (containerRef.current) {
             containerRef.current.style.filter =
-            'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)';
+              'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)';
           }
         }
       });
@@ -323,7 +323,7 @@ export default function DriverMap({
       const h = liveHeadingRef.current || navHeadingDeg || 0;
       map.easeTo({ center: [pos.lng, pos.lat], bearing: h, pitch: 0, zoom: 19,
         duration: 350, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
-                 essential: true });
+        essential: true });
     }
   }, [navFollowEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -332,7 +332,7 @@ export default function DriverMap({
     const svg = markersRef.current.driverSvg;
     if (!svg) return;
     svg.style.transform = navFollowEnabled
-    ? `rotate(${navHeadingDeg}deg)` : 'rotate(0deg)';
+      ? `rotate(${navHeadingDeg}deg)` : 'rotate(0deg)';
   }, [navHeadingDeg, navFollowEnabled]);
 
   // Pin personalizado
@@ -344,7 +344,7 @@ export default function DriverMap({
       const el = document.createElement('div');
       el.style.cssText = 'width:16px;height:16px;border-radius:999px;background:var(--brand);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35)';
       markersRef.current.custom = new _ml.Marker({ element: el })
-      .setLngLat([customPin.lng, customPin.lat]).addTo(map);
+        .setLngLat([customPin.lng, customPin.lat]).addTo(map);
     }
   }, [customPin?.lat, customPin?.lng, hasActiveOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -359,7 +359,7 @@ export default function DriverMap({
       el.style.cssText = `width:28px;height:28px;border-radius:50%;background:${color};display:grid;place-items:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);font-size:15px`;
       el.textContent = emoji;
       return new _ml.Marker({ element: el }).setLngLat([pos.lng, pos.lat])
-      .setPopup(new _ml.Popup({ closeButton: false }).setText(label));
+        .setPopup(new _ml.Popup({ closeButton: false }).setText(label));
     };
     if (pickupPos)   markersRef.current.pickup   = mkr(pickupPos,   '🏪', '#16a34a', pickupLabel   || 'Tienda').addTo(map);
     if (deliveryPos) markersRef.current.delivery = mkr(deliveryPos, '📦', '#f97316', deliveryLabel || 'Cliente').addTo(map);
@@ -450,7 +450,7 @@ export default function DriverMap({
         try {
           const bounds = pts.reduce(
             (b, pt) => b.extend(pt),
-                                    new _ml.LngLatBounds(pts[0], pts[0])
+            new _ml.LngLatBounds(pts[0], pts[0])
           );
           map.fitBounds(bounds, {
             padding: { top: 80, bottom: 160, left: 40, right: 60 },
@@ -479,39 +479,39 @@ export default function DriverMap({
 
   return (
     <div style={{ height: '100%', width: '100%', position: 'relative' }}>
-    <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
+      <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
 
-    {showAttrib && (
-      <div style={{ position: 'absolute', bottom: 52, left: 8, zIndex: 10,
-        background: 'rgba(255,255,255,0.92)', borderRadius: 6,
-                    padding: '0.3rem 0.6rem', fontSize: '0.65rem', color: '#444',
-                    boxShadow: '0 1px 6px #0002', maxWidth: 260, pointerEvents: 'none' }}>
-                    © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer"
-                    style={{ color: '#2563eb' }}>OpenStreetMap</a> contributors ·{' '}
-                    {STADIA_KEY
-                      ? <><a href="https://stadiamaps.com" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>Stadia Maps</a> · </>
-                      : <><a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>OpenFreeMap</a> · </>
-                    }
-                    <a href="https://maplibre.org" target="_blank" rel="noopener noreferrer"
-                    style={{ color: '#2563eb' }}>MapLibre</a>
-                    </div>
-    )}
+      {showAttrib && (
+        <div style={{ position: 'absolute', bottom: 52, left: 8, zIndex: 10,
+          background: 'rgba(255,255,255,0.92)', borderRadius: 6,
+          padding: '0.3rem 0.6rem', fontSize: '0.65rem', color: '#444',
+          boxShadow: '0 1px 6px #0002', maxWidth: 260, pointerEvents: 'none' }}>
+          © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer"
+            style={{ color: '#2563eb' }}>OpenStreetMap</a> contributors ·{' '}
+          {STADIA_KEY
+            ? <><a href="https://stadiamaps.com" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>Stadia Maps</a> · </>
+            : <><a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>OpenFreeMap</a> · </>
+          }
+          <a href="https://maplibre.org" target="_blank" rel="noopener noreferrer"
+            style={{ color: '#2563eb' }}>MapLibre</a>
+        </div>
+      )}
 
-    <button onClick={() => setShowAttrib(v => !v)} title="Atribuciones"
-    style={{ position: 'absolute', bottom: 8, left: 8, zIndex: 10,
-      background: 'rgba(255,255,255,0.82)', border: '1px solid #ccc',
+      <button onClick={() => setShowAttrib(v => !v)} title="Atribuciones"
+        style={{ position: 'absolute', bottom: 8, left: 8, zIndex: 10,
+          background: 'rgba(255,255,255,0.82)', border: '1px solid #ccc',
           borderRadius: 4, width: 22, height: 22, cursor: 'pointer',
           fontSize: '0.65rem', display: 'flex', alignItems: 'center',
           justifyContent: 'center', color: '#555', padding: 0 }}>ℹ</button>
 
-          {!hasGPS && (
-            <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
-              background: 'rgba(0,0,0,0.5)', color: '#fff', borderRadius: 20,
-                       padding: '0.2rem 0.75rem', fontSize: '0.72rem', zIndex: 5,
-                       pointerEvents: 'none', whiteSpace: 'nowrap' }}>
-                       📍 Sin GPS — toca el mapa para marcar posición
-                       </div>
-          )}
-          </div>
+      {!hasGPS && (
+        <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(0,0,0,0.5)', color: '#fff', borderRadius: 20,
+          padding: '0.2rem 0.75rem', fontSize: '0.72rem', zIndex: 5,
+          pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+          📍 Sin GPS — toca el mapa para marcar posición
+        </div>
+      )}
+    </div>
   );
 }

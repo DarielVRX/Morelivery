@@ -6,7 +6,7 @@
 // - Stack vertical derecho, separado del ActiveOrderPanel
 // - Centrar: 3 modos (ver handleCenterToggle en DriverHome)
 
-const NAV_MENU_OPTIONS = [
+var NAV_MENU_OPTIONS = [
   { mode: 'zone',       label: '🚦 Zona de alerta',      bg: '#f97316' },
   { mode: 'impassable', label: '⛔ Calle no viable',      bg: '#ef4444' },
   { mode: 'preference', label: '⭐ Preferencia de calle', bg: '#16a34a' },

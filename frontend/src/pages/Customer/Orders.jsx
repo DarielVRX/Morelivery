@@ -39,13 +39,13 @@ function FeeBreakdown({ order }) {
 }
 
 
-const STATUS_LABELS = {
+var STATUS_LABELS = {
   created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
   preparing:'En preparación', ready:'Listo para retiro',
   on_the_way:'En camino', delivered:'Entregado',
   cancelled:'Cancelado', pending_driver:'Buscando conductor',
 };
-const STATUS_COLOR = {
+var STATUS_COLOR = {
   created:'#f59e0b', assigned:'#3b82f6', accepted:'#8b5cf6',
   preparing:'#f97316', ready:'#16a34a', on_the_way:'#0891b2',
   delivered:'#16a34a', cancelled:'#dc2626', pending_driver:'#ef4444',
@@ -139,6 +139,8 @@ export default function CustomerOrders() {
   const [suggDrafts, setSuggDrafts]       = useState({});
   const [reportingId, setReportingId]     = useState(null);
   const [reportText, setReportText]       = useState('');
+  const [complaintId, setComplaintId]     = useState(null);
+  const [complaintText, setComplaintText] = useState('');
   const [msg, setMsg] = useState('');
   const loadDataRef = useRef(null);
 
@@ -214,6 +216,17 @@ export default function CustomerOrders() {
     () => orders.filter(o => o.suggestion_status==='pending_customer' && (o.suggestion_items||[]).length>0),
     [orders]
   );
+
+  async function sendComplaint(orderId) {
+    if (!complaintText.trim()) return;
+    try {
+      await apiFetch(`/orders/${orderId}/complaint`,
+        { method:'POST', body: JSON.stringify({ text: complaintText.trim() }) }, auth.token);
+      setMsg('Queja enviada. La revisaremos pronto.');
+      setComplaintId(null); setComplaintText('');
+      setTimeout(() => setMsg(''), 4000);
+    } catch (e) { setMsg(e.message); }
+  }
 
   async function cancelOrder(orderId) {
     const note = window.prompt('Motivo de cancelación (obligatorio):');
@@ -411,8 +424,8 @@ export default function CustomerOrders() {
                           const previewTip   = tipDraft[order.id];
                           const previewTotal = sub + svc + del_fee + previewTip;
                           return (
-                            <div style={{ fontSize:'0.78rem', background:'#f0fdf4', border:'1px solid #bbf7d0',
-                              borderRadius:6, padding:'0.25rem 0.6rem', marginTop:'0.25rem', color:'#166534' }}>
+                            <div style={{ fontSize:'0.78rem', background:'var(--success-bg)', border:'1px solid var(--success-border)',
+                              borderRadius:6, padding:'0.25rem 0.6rem', marginTop:'0.25rem', color:'var(--success)' }}>
                               Total con agradecimiento: <strong>{fmt(previewTotal)}</strong>
                               {previewTip > 0 && <span style={{ fontWeight:400, marginLeft:'0.3rem' }}>(incl. {fmt(previewTip)})</span>}
                             </div>
@@ -586,6 +599,19 @@ export default function CustomerOrders() {
                               <button className="btn-sm" onClick={()=>{ setReportingId(null); setReportText(''); }}>Cancelar</button>
                             </div>
                           </div>
+                        ) : complaintId===o.id ? (
+                          <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginTop:'0.3rem' }}>
+                            <div style={{ fontSize:'0.78rem', color:'var(--danger)', fontWeight:600, marginBottom:'0.1rem' }}>
+                              Queja formal — se envía al equipo de soporte
+                            </div>
+                            <textarea value={complaintText} onChange={e=>setComplaintText(e.target.value)}
+                              placeholder="Describe el problema con detalle…" rows={3}
+                              style={{ fontSize:'0.82rem', width:'100%', boxSizing:'border-box' }} />
+                            <div style={{ display:'flex', gap:'0.3rem' }}>
+                              <button className="btn-sm btn-danger" onClick={()=>sendComplaint(o.id)}>Enviar queja</button>
+                              <button className="btn-sm" onClick={()=>{ setComplaintId(null); setComplaintText(''); }}>Cancelar</button>
+                            </div>
+                          </div>
                         ) : (
                           <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginTop:'0.3rem' }}>
                             {o.status === 'delivered' && !ratedOrders.has(o.id) && (
@@ -599,6 +625,12 @@ export default function CustomerOrders() {
                               <span style={{ fontSize:'0.75rem', color:'var(--success)', fontWeight:600 }}>✓ Calificado</span>
                             )}
                             <button className="btn-sm" style={{ fontSize:'0.78rem' }} onClick={()=>setReportingId(o.id)}>Reportar problema</button>
+                            {o.status === 'delivered' && (
+                              <button className="btn-sm" style={{ fontSize:'0.78rem', color:'var(--danger)', borderColor:'var(--danger-border)' }}
+                                onClick={()=>{ setComplaintId(o.id); setReportingId(null); }}>
+                                Queja formal
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>

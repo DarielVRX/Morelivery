@@ -18,25 +18,25 @@ function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 // La regla mide 10 cm (ancho mínimo de una charola estándar).
 // Marcas cada 1 cm, números cada 2 cm.
 
-const PRESETS = [
+var PRESETS = [
   { label: 'Salsa / aderezo',     vol: 0.05,  emoji: '🫙',  example: 'Sobre, mini cup'            },
-{ label: 'Charola (8 tacos)',   vol: 0.45,  emoji: '🫱',  example: 'Charola desechable estándar' },
-{ label: 'Torta / burger',      vol: 0.6,   emoji: '🍔',  example: 'Caja mediana'                },
-{ label: 'Pizza personal',      vol: 1.2,   emoji: '🍕',  example: 'Caja 20×20 cm'              },
-{ label: 'Pizza mediana',       vol: 2.5,   emoji: '🍕',  example: 'Caja 30×30 cm'              },
-{ label: 'Pizza grande',        vol: 4.0,   emoji: '🍕',  example: 'Caja 40×40 cm'              },
-{ label: 'Combo familiar',      vol: 6.0,   emoji: '🛍',  example: 'Bolsa grande + bebida'       },
+  { label: 'Charola (8 tacos)',   vol: 0.45,  emoji: '🫱',  example: 'Charola desechable estándar' },
+  { label: 'Torta / burger',      vol: 0.6,   emoji: '🍔',  example: 'Caja mediana'                },
+  { label: 'Pizza personal',      vol: 1.2,   emoji: '🍕',  example: 'Caja 20×20 cm'              },
+  { label: 'Pizza mediana',       vol: 2.5,   emoji: '🍕',  example: 'Caja 30×30 cm'              },
+  { label: 'Pizza grande',        vol: 4.0,   emoji: '🍕',  example: 'Caja 40×40 cm'              },
+  { label: 'Combo familiar',      vol: 6.0,   emoji: '🛍',  example: 'Bolsa grande + bebida'       },
 ];
 
 // Mochila referencia = 25L (para guías)
-const BAG_LITERS = 25;
+var BAG_LITERS = 25;
 
 // Píxeles CSS por centímetro real (W3C: 1in = 96px, 1in = 2.54cm)
-const CSS_PX_PER_CM = 96 / 2.54; // ≈ 37.795
+var CSS_PX_PER_CM = 96 / 2.54; // ≈ 37.795
 
 // La regla muestra 10 cm
-const RULER_CM = 10;
-const RULER_PX = Math.round(CSS_PX_PER_CM * RULER_CM); // ≈ 378 px CSS
+var RULER_CM = 10;
+var RULER_PX = Math.round(CSS_PX_PER_CM * RULER_CM); // ≈ 378 px CSS
 
 function VolumeHelper({ value, onChange }) {
   const [open, setOpen] = useState(false);
@@ -78,162 +78,162 @@ function VolumeHelper({ value, onChange }) {
 
   return (
     <div ref={ref} style={{ marginTop: 6 }}>
-    {/* Trigger button */}
-    <button
-    type="button"
-    onClick={() => setOpen(v => !v)}
-    style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5,
-      background: 'none', border: 'none', padding: 0,
-      fontSize: 12, color: 'var(--brand)', cursor: 'pointer',
+      {/* Trigger button */}
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          background: 'none', border: 'none', padding: 0,
+          fontSize: 12, color: 'var(--brand)', cursor: 'pointer',
           fontWeight: 600, minHeight: 'unset', textDecoration: 'underline',
           textUnderlineOffset: 2,
-    }}>
-    📐 {open ? 'Cerrar regla' : 'Ver regla de volumen'}
-    </button>
-
-    {open && (
-      <div style={{
-        marginTop: 8,
-        padding: '12px 14px',
-        background: 'var(--bg-raised)',
-              border: '1px solid var(--border)',
-              borderRadius: 10,
-      }}>
-
-      {/* Header */}
-      <div style={{
-        fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
-              textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8,
-      }}>
-      Regla métrica — pon el empaque junto a la pantalla
-      </div>
-
-      {/* ── Regla física real ───────────────────────────────────────────
-        Compensa el zoom del navegador leyendo window.devicePixelRatio
-        en tiempo de ejecución. La regla siempre mide 10 cm físicos.
-        Técnica: leer el zoom actual con screen.width/window.innerWidth,
-        luego aplicar scale(1/zoomFactor) al contenedor via transform.
-        ────────────────────────────────────────────────────────────────── */}
-        <div style={{
-          width: RULER_PX,
-          position: 'relative',
-          userSelect: 'none',
-          transformOrigin: 'top left',
-          transform: `scale(${(1 / zoomFactor).toFixed(6)})`,
-              // Reserve actual visual height after scaling so layout doesn't collapse
-              height: Math.round(36 / zoomFactor),
-              marginBottom: 14,
         }}>
-        {/* Cuerpo de la regla */}
+        📐 {open ? 'Cerrar regla' : 'Ver regla de volumen'}
+      </button>
+
+      {open && (
         <div style={{
-          width: RULER_PX,
-          height: 32,
-          background: '#f5e97a',          // amarillo regla clásica
-          border: '1.5px solid #b8a000',
-          borderRadius: '3px 3px 0 0',
-          position: 'relative',
-          overflow: 'visible',
+          marginTop: 8,
+          padding: '12px 14px',
+          background: 'var(--bg-raised)',
+          border: '1px solid var(--border)',
+          borderRadius: 10,
         }}>
-        {/* Marcas de cm */}
-        {Array.from({ length: RULER_CM + 1 }, (_, i) => {
-          const x = Math.round(i * CSS_PX_PER_CM);
-          const isMajor = i % 2 === 0;
-          const tickH   = isMajor ? 14 : 8;
-          return (
-            <div key={i} style={{
-              position: 'absolute',
-              left: x,
-              bottom: 0,
-              width: 1,
-              height: tickH,
-              background: '#7a6a00',
+
+          {/* Header */}
+          <div style={{
+            fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
+            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8,
+          }}>
+            Regla métrica — pon el empaque junto a la pantalla
+          </div>
+
+          {/* ── Regla física real ───────────────────────────────────────────
+               Compensa el zoom del navegador leyendo window.devicePixelRatio
+               en tiempo de ejecución. La regla siempre mide 10 cm físicos.
+               Técnica: leer el zoom actual con screen.width/window.innerWidth,
+               luego aplicar scale(1/zoomFactor) al contenedor via transform.
+          ────────────────────────────────────────────────────────────────── */}
+          <div style={{
+            width: RULER_PX,
+            position: 'relative',
+            userSelect: 'none',
+            transformOrigin: 'top left',
+            transform: `scale(${(1 / zoomFactor).toFixed(6)})`,
+            // Reserve actual visual height after scaling so layout doesn't collapse
+            height: Math.round(36 / zoomFactor),
+            marginBottom: 14,
+          }}>
+            {/* Cuerpo de la regla */}
+            <div style={{
+              width: RULER_PX,
+              height: 32,
+              background: '#f5e97a',          // amarillo regla clásica
+              border: '1.5px solid #b8a000',
+              borderRadius: '3px 3px 0 0',
+              position: 'relative',
+              overflow: 'visible',
             }}>
-            {isMajor && i > 0 && (
+              {/* Marcas de cm */}
+              {Array.from({ length: RULER_CM + 1 }, (_, i) => {
+                const x = Math.round(i * CSS_PX_PER_CM);
+                const isMajor = i % 2 === 0;
+                const tickH   = isMajor ? 14 : 8;
+                return (
+                  <div key={i} style={{
+                    position: 'absolute',
+                    left: x,
+                    bottom: 0,
+                    width: 1,
+                    height: tickH,
+                    background: '#7a6a00',
+                  }}>
+                    {isMajor && i > 0 && (
+                      <span style={{
+                        position: 'absolute',
+                        bottom: tickH + 2,
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: '#5a4d00',
+                        fontFamily: 'monospace',
+                        whiteSpace: 'nowrap',
+                      }}>{i}</span>
+                    )}
+                  </div>
+                );
+              })}
+              {/* Marcas de medio cm (0.5, 1.5, ...) */}
+              {Array.from({ length: RULER_CM }, (_, i) => {
+                const x = Math.round((i + 0.5) * CSS_PX_PER_CM);
+                return (
+                  <div key={`h${i}`} style={{
+                    position: 'absolute',
+                    left: x, bottom: 0,
+                    width: 1, height: 5,
+                    background: '#b8a000',
+                  }} />
+                );
+              })}
+              {/* Etiqueta "cm" al final */}
               <span style={{
                 position: 'absolute',
-                bottom: tickH + 2,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                                  fontSize: 9,
-                                  fontWeight: 700,
-                                  color: '#5a4d00',
-                                  fontFamily: 'monospace',
-                                  whiteSpace: 'nowrap',
-              }}>{i}</span>
-            )}
+                right: 4, bottom: 4,
+                fontSize: 8, color: '#7a6a00',
+                fontFamily: 'monospace', fontWeight: 700,
+              }}>cm</span>
             </div>
-          );
-        })}
-        {/* Marcas de medio cm (0.5, 1.5, ...) */}
-        {Array.from({ length: RULER_CM }, (_, i) => {
-          const x = Math.round((i + 0.5) * CSS_PX_PER_CM);
-          return (
-            <div key={`h${i}`} style={{
-              position: 'absolute',
-              left: x, bottom: 0,
-              width: 1, height: 5,
+            {/* Borde inferior de la regla */}
+            <div style={{
+              width: RULER_PX, height: 4,
               background: '#b8a000',
+              borderRadius: '0 0 2px 2px',
             }} />
-          );
-        })}
-        {/* Etiqueta "cm" al final */}
-        <span style={{
-          position: 'absolute',
-          right: 4, bottom: 4,
-          fontSize: 8, color: '#7a6a00',
-          fontFamily: 'monospace', fontWeight: 700,
-        }}>cm</span>
-        </div>
-        {/* Borde inferior de la regla */}
-        <div style={{
-          width: RULER_PX, height: 4,
-          background: '#b8a000',
-          borderRadius: '0 0 2px 2px',
-        }} />
-        </div>
+          </div>
 
-        {/* ── Guías de referencia (sin mini-barras, solo texto) ─────────── */}
-        <div style={{
-          fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
-              textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5,
-        }}>
-        Guías
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {PRESETS.map(p => {
-          const isActive = Math.abs(vol - p.vol) < 0.001;
-          return (
-            <button
-            key={p.label}
-            type="button"
-            onClick={() => { onChange(String(p.vol)); setOpen(false); }}
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              gap: 8,
-              background: isActive ? 'var(--brand-light)' : 'transparent',
-                  border: `1px solid ${isActive ? 'var(--brand)' : 'transparent'}`,
-                  borderRadius: 5, padding: '4px 7px', cursor: 'pointer',
-                  textAlign: 'left', width: '100%', minHeight: 'unset',
-            }}>
-            <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>
-            {p.emoji} {p.label}
-            </span>
-            <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>
-            {p.vol}L — {p.example}
-            </span>
-            </button>
-          );
-        })}
-        </div>
+          {/* ── Guías de referencia (sin mini-barras, solo texto) ─────────── */}
+          <div style={{
+            fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
+            textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5,
+          }}>
+            Guías
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {PRESETS.map(p => {
+              const isActive = Math.abs(vol - p.vol) < 0.001;
+              return (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => { onChange(String(p.vol)); setOpen(false); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    gap: 8,
+                    background: isActive ? 'var(--brand-light)' : 'transparent',
+                    border: `1px solid ${isActive ? 'var(--brand)' : 'transparent'}`,
+                    borderRadius: 5, padding: '4px 7px', cursor: 'pointer',
+                    textAlign: 'left', width: '100%', minHeight: 'unset',
+                  }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>
+                    {p.emoji} {p.label}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>
+                    {p.vol}L — {p.example}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
-        <div style={{
-          marginTop: 10, fontSize: 10, color: 'var(--text-tertiary)', lineHeight: 1.4,
-        }}>
-        💡 Pon el empaque junto a la regla para estimar su tamaño en centímetros.
+          <div style={{
+            marginTop: 10, fontSize: 10, color: 'var(--text-tertiary)', lineHeight: 1.4,
+          }}>
+            💡 Pon el empaque junto a la regla para estimar su tamaño en centímetros.
+          </div>
         </div>
-        </div>
-    )}
+      )}
     </div>
   );
 }
@@ -241,11 +241,11 @@ function VolumeHelper({ value, onChange }) {
 function ProductImagePlaceholder({ size = 68 }) {
   return (
     <div style={{ width:size, height:size, borderRadius:6, background:'var(--gray-100)', border:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-    <svg width={size*0.5} height={size*0.5} viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="1.5">
-    <circle cx="12" cy="12" r="9"/>
-    <path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
-    <circle cx="12" cy="10" r="2"/>
-    </svg>
+      <svg width={size*0.5} height={size*0.5} viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="1.5">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
+        <circle cx="12" cy="10" r="2"/>
+      </svg>
     </div>
   );
 }
@@ -255,7 +255,7 @@ function ProductImage({ src, size = 68 }) {
   if (!src || err) return <ProductImagePlaceholder size={size} />;
   return (
     <img src={src} alt="" width={size} height={size} onError={() => setErr(true)}
-    style={{ width:size, height:size, borderRadius:6, objectFit:'cover', border:'1px solid var(--border)', flexShrink:0 }} />
+      style={{ width:size, height:size, borderRadius:6, objectFit:'cover', border:'1px solid var(--border)', flexShrink:0 }} />
   );
 }
 
@@ -320,7 +320,7 @@ export default function RestaurantMenu() {
     try {
       const [menuData, myData] = await Promise.all([
         apiFetch('/restaurants/my/menu', {}, auth.token),
-                                                   apiFetch('/restaurants/my', {}, auth.token),
+        apiFetch('/restaurants/my', {}, auth.token),
       ]);
       setProducts(menuData.menu || []);
       if (myData?.restaurant?.profile_photo) setProfilePhoto(myData.restaurant.profile_photo);
@@ -406,262 +406,262 @@ export default function RestaurantMenu() {
 
   return (
     <div style={{ backgroundColor: 'var(--bg-base)', minHeight:'100vh', padding:'1rem' }}>
-    {/* ── Encabezado Gestión de menú ─────────────────────────────────── */}
-    <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'var(--promo-gradient)', color:'#fff' }}>
-    <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>📋 Gestión de menú</div>
-    <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Productos, precios e imagen de tu tienda</div>
-    </div>
-
-    {/* ── Alerta coordenadas faltantes ─────────────────────────────────── */}
-    {restaurantData && !Number.isFinite(Number(restaurantData.lat)) && (
-      <div style={{
-        display:'flex', alignItems:'flex-start', gap:'0.6rem',
-        background:'#fffbeb', border:'1px solid #fde68a',
-        borderRadius:8, padding:'0.7rem 0.875rem', marginBottom:'1rem',
-      }}>
-      <span style={{ fontSize:'1.1rem', flexShrink:0 }}>⚠️</span>
-      <div style={{ flex:1, fontSize:'0.82rem', color:'#92400e' }}>
-      <strong>Tu tienda no tiene ubicación configurada.</strong>
-      <span> Los clientes a más de 5 km no podrán hacerte pedidos.</span>
-      <br />
-      <a href="/profile" style={{ color:'#b45309', fontWeight:700, textDecoration:'underline' }}>
-      Ir a Perfil → configurar ubicación
-      </a>
+      {/* ── Encabezado Gestión de menú ─────────────────────────────────── */}
+      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'var(--promo-gradient)', color:'#fff' }}>
+        <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>📋 Gestión de menú</div>
+        <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Productos, precios e imagen de tu tienda</div>
       </div>
-      </div>
-    )}
 
-    {/* ── Foto de perfil de la tienda ── */}
-    <div style={{ display:'flex', alignItems:'center', gap:'0.875rem', marginBottom:'1.25rem',
-      padding:'0.875rem 1rem', background:'var(--bg-card)', borderRadius:10, border:'1px solid var(--border)' }}>
-      <div style={{ position:'relative', flexShrink:0 }}>
-      {profilePhoto
-        ? <img src={profilePhoto} alt="Foto de tienda"
-        style={{ width:64, height:64, borderRadius:'50%', objectFit:'cover', border:'2px solid #e3aaaa' }} />
-        : <div style={{ width:64, height:64, borderRadius:'50%', background:'var(--gray-100)',
-          border:'2px solid #e3aaaa', display:'flex', alignItems:'center', justifyContent:'center' }}>
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#e3aaaa" strokeWidth="1.5">
-          <circle cx="12" cy="12" r="9"/><path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
-          <circle cx="12" cy="10" r="2"/>
-          </svg>
+      {/* ── Alerta coordenadas faltantes ─────────────────────────────────── */}
+      {restaurantData && !Number.isFinite(Number(restaurantData.lat)) && (
+        <div style={{
+          display:'flex', alignItems:'flex-start', gap:'0.6rem',
+          background:'#fffbeb', border:'1px solid #fde68a',
+          borderRadius:8, padding:'0.7rem 0.875rem', marginBottom:'1rem',
+        }}>
+          <span style={{ fontSize:'1.1rem', flexShrink:0 }}>⚠️</span>
+          <div style={{ flex:1, fontSize:'0.82rem', color:'#92400e' }}>
+            <strong>Tu tienda no tiene ubicación configurada.</strong>
+            <span> Los clientes a más de 5 km no podrán hacerte pedidos.</span>
+            <br />
+            <a href="/profile" style={{ color:'#b45309', fontWeight:700, textDecoration:'underline' }}>
+              Ir a Perfil → configurar ubicación
+            </a>
           </div>
-      }
-      <button onClick={() => { setEditingPP(e => !e); ppClear(); }}
-      style={{ position:'absolute', bottom:-4, right:-4, width:24, height:24, borderRadius:'50%',
-        background:'var(--brand)', border:'2px solid #fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:0 }}>
-        <span style={{ color:'#fff', fontSize:'1rem', lineHeight:1, fontWeight:300, marginTop:'-1px' }}>+</span>
-        </button>
+        </div>
+      )}
+
+      {/* ── Foto de perfil de la tienda ── */}
+      <div style={{ display:'flex', alignItems:'center', gap:'0.875rem', marginBottom:'1.25rem',
+        padding:'0.875rem 1rem', background:'var(--bg-card)', borderRadius:10, border:'1px solid var(--border)' }}>
+        <div style={{ position:'relative', flexShrink:0 }}>
+          {profilePhoto
+            ? <img src={profilePhoto} alt="Foto de tienda"
+                style={{ width:64, height:64, borderRadius:'50%', objectFit:'cover', border:'2px solid #e3aaaa' }} />
+            : <div style={{ width:64, height:64, borderRadius:'50%', background:'var(--gray-100)',
+                border:'2px solid #e3aaaa', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#e3aaaa" strokeWidth="1.5">
+                  <circle cx="12" cy="12" r="9"/><path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
+                  <circle cx="12" cy="10" r="2"/>
+                </svg>
+              </div>
+          }
+          <button onClick={() => { setEditingPP(e => !e); ppClear(); }}
+            style={{ position:'absolute', bottom:-4, right:-4, width:24, height:24, borderRadius:'50%',
+              background:'var(--brand)', border:'2px solid #fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:0 }}>
+            <span style={{ color:'#fff', fontSize:'1rem', lineHeight:1, fontWeight:300, marginTop:'-1px' }}>+</span>
+          </button>
         </div>
         <div>
-        <div style={{ fontWeight:700, fontSize:'0.9rem', color:'#8a5e5e' }}>
-        {auth.user?.restaurant?.name || 'Mi tienda'}
-        </div>
+          <div style={{ fontWeight:700, fontSize:'0.9rem', color:'#8a5e5e' }}>
+            {auth.user?.restaurant?.name || 'Mi tienda'}
+          </div>
 
         </div>
-        </div>
+      </div>
 
-        {/* Editor de foto de tienda */}
-        {editingProfilePhoto && (
-          <div style={{ marginBottom:'1rem', padding:'0.875rem 1rem', background:'var(--bg-card)',
-            borderRadius:10, border:'1px solid #e3aaaa' }}>
-            <p style={{ fontWeight:700, fontSize:'0.85rem', color:'#8a5e5e', marginBottom:'0.5rem' }}>
+      {/* Editor de foto de tienda */}
+      {editingProfilePhoto && (
+        <div style={{ marginBottom:'1rem', padding:'0.875rem 1rem', background:'var(--bg-card)',
+          borderRadius:10, border:'1px solid #e3aaaa' }}>
+          <p style={{ fontWeight:700, fontSize:'0.85rem', color:'#8a5e5e', marginBottom:'0.5rem' }}>
             Cambiar foto de perfil
-            </p>
-            <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+          </p>
+          <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
             <button className="btn-sm" style={{ borderColor:'#e3aaaa', color:'#8a5e5e' }}
-            onClick={() => ppFileRef.current?.click()}>
-            Seleccionar archivo
+              onClick={() => ppFileRef.current?.click()}>
+              Seleccionar archivo
             </button>
             <input ref={ppFileRef} type="file" accept="image/*" style={{ display:'none' }}
-            onChange={e => ppPick(e.target.files?.[0])} />
+              onChange={e => ppPick(e.target.files?.[0])} />
             {ppPreview && (
               <img src={ppPreview} alt="Preview"
-              style={{ width:44, height:44, borderRadius:'50%', objectFit:'cover', border:'2px solid #e3aaaa' }} />
+                style={{ width:44, height:44, borderRadius:'50%', objectFit:'cover', border:'2px solid #e3aaaa' }} />
             )}
             <button className="btn-primary btn-sm"
-            style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}
-            disabled={savingPP || !ppPreview}
-            onClick={saveProfilePhoto}>
-            {savingPP ? 'Guardando…' : 'Guardar foto'}
+              style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}
+              disabled={savingPP || !ppPreview}
+              onClick={saveProfilePhoto}>
+              {savingPP ? 'Guardando…' : 'Guardar foto'}
             </button>
             <button className="btn-sm"
-            onClick={() => { setEditingPP(false); ppClear(); }}>
-            Cancelar
+              onClick={() => { setEditingPP(false); ppClear(); }}>
+              Cancelar
             </button>
-            </div>
-            </div>
-        )}
+          </div>
+        </div>
+      )}
 
-        {/* Lista de productos */}
-        {products.length === 0
-          ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin productos en el menú.</p>
-          : (
-            <ul style={{ listStyle:'none', padding:0, marginBottom:'1rem' }}>
+      {/* Lista de productos */}
+      {products.length === 0
+        ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin productos en el menú.</p>
+        : (
+          <ul style={{ listStyle:'none', padding:0, marginBottom:'1rem' }}>
             {products.map(product => (
               <li key={product.id} className="card" style={{ marginBottom:'0.5rem', padding:'0.75rem',
                 border: editingId===product.id ? '2px solid #e3aaaa' : '1px solid var(--gray-200)' }}>
                 {/* ── Modo edición inline ── */}
                 {editingId === product.id ? (
                   <div>
-                  <div style={{ fontWeight:700, fontSize:'0.82rem', color:'var(--brand)', marginBottom:'0.6rem' }}>
-                  ✏️ Editando: <span style={{ color:'var(--gray-700)' }}>{product.name}</span>
-                  </div>
-                  <div className="row">
-                  <label>Nombre<input value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre del producto" /></label>
-                  <label>Descripción<input value={description} onChange={e=>setDesc(e.target.value)} placeholder="Descripción (opcional)" /></label>
-                  <label>Precio (MXN)<input type="number" value={price} onChange={e=>setPrice(e.target.value)} step="0.01" min="0" placeholder="0.00" /></label>
-                  </div>
-                  <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.4rem' }}>
-                  <label style={{ flex:1 }}>
-                  Unidades por empaque
-                  <input type="number" value={pkgUnits} onChange={e=>setPkgUnits(e.target.value)}
-                  min="1" step="1" placeholder="1"
-                  title="Cuántas unidades incluye un empaque (ej: 6 nuggets = 6)" />
-                  </label>
-                  <label style={{ flex:1 }}>
-                  Volumen empaque (L)
-                  <input type="number" value={pkgVolume} onChange={e=>setPkgVolume(e.target.value)}
-                  min="0" step="0.01" placeholder="0.00"
-                  title="Litros que ocupa un empaque en la mochila (ej: 0.5 = medio litro)" />
-                  </label>
-                  </div>
-                  <VolumeHelper value={pkgVolume} onChange={setPkgVolume} />
-                  <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
-                  <button className="btn-primary btn-sm" onClick={handleSubmit} disabled={!name.trim()||!price}>
-                  Guardar cambios
-                  </button>
-                  <button className="btn-sm" onClick={resetForm}>Cancelar</button>
-                  </div>
-                  {msg && <p className="flash flash-error" style={{ marginTop:'0.4rem' }}>{msg}</p>}
+                    <div style={{ fontWeight:700, fontSize:'0.82rem', color:'var(--brand)', marginBottom:'0.6rem' }}>
+                      ✏️ Editando: <span style={{ color:'var(--gray-700)' }}>{product.name}</span>
+                    </div>
+                    <div className="row">
+                      <label>Nombre<input value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre del producto" /></label>
+                      <label>Descripción<input value={description} onChange={e=>setDesc(e.target.value)} placeholder="Descripción (opcional)" /></label>
+                      <label>Precio (MXN)<input type="number" value={price} onChange={e=>setPrice(e.target.value)} step="0.01" min="0" placeholder="0.00" /></label>
+                    </div>
+                    <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.4rem' }}>
+                      <label style={{ flex:1 }}>
+                        Unidades por empaque
+                        <input type="number" value={pkgUnits} onChange={e=>setPkgUnits(e.target.value)}
+                          min="1" step="1" placeholder="1"
+                          title="Cuántas unidades incluye un empaque (ej: 6 nuggets = 6)" />
+                      </label>
+                      <label style={{ flex:1 }}>
+                        Volumen empaque (L)
+                        <input type="number" value={pkgVolume} onChange={e=>setPkgVolume(e.target.value)}
+                          min="0" step="0.01" placeholder="0.00"
+                          title="Litros que ocupa un empaque en la mochila (ej: 0.5 = medio litro)" />
+                      </label>
+                    </div>
+                    <VolumeHelper value={pkgVolume} onChange={setPkgVolume} />
+                    <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
+                      <button className="btn-primary btn-sm" onClick={handleSubmit} disabled={!name.trim()||!price}>
+                        Guardar cambios
+                      </button>
+                      <button className="btn-sm" onClick={resetForm}>Cancelar</button>
+                    </div>
+                    {msg && <p className="flash flash-error" style={{ marginTop:'0.4rem' }}>{msg}</p>}
                   </div>
                 ) : (
-                  <div style={{ display:'flex', gap:'0.75rem', alignItems:'flex-start' }}>
+                <div style={{ display:'flex', gap:'0.75rem', alignItems:'flex-start' }}>
                   <ProductImage src={product.image_url} size={68} />
                   <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'0.5rem', flexWrap:'wrap' }}>
-                  <span style={{ fontWeight:700, fontSize:'0.95rem' }}>{product.name}</span>
-                  <span style={{ fontWeight:700, color:'#8a5e5e', flexShrink:0 }}>{fmt(product.price_cents)}</span>
-                  </div>
-                  {product.description && (
-                    <p style={{ fontSize:'0.82rem', color:'var(--text-secondary)', margin:'0.15rem 0 0' }}>{product.description}</p>
-                  )}
-                  <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
-                  <button className="btn-sm" onClick={() => startEdit(product)}>Editar</button>
-                  <button className="btn-sm" onClick={() => toggleAvailable(product)}>
-                  {product.is_available ? 'Desactivar' : 'Activar'}
-                  </button>
-                  <button className="btn-sm" onClick={() => {
-                    setEditingImg(product.id);
-                    setImgUrl(product.image_url && !product.image_url.startsWith('data:') ? product.image_url : '');
-                    clear();
-                  }}>
-                  {product.image_url ? 'Cambiar imagen' : 'Agregar imagen'}
-                  </button>
-                  {confirmDelete === product.id ? (
-                    <div style={{ display:'flex', gap:'0.3rem', alignItems:'center' }}>
-                    <span style={{ fontSize:'0.72rem', color:'var(--danger)', fontWeight:700 }}>¿Eliminar?</span>
-                    <button className="btn-sm" onClick={() => deleteProduct(product.id)}
-                    style={{ background:'var(--danger)', color:'#fff', borderColor:'var(--danger)', fontSize:'0.72rem' }}>
-                    Sí
-                    </button>
-                    <button className="btn-sm" onClick={() => setConfirmDelete(null)}
-                    style={{ fontSize:'0.72rem' }}>No</button>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'0.5rem', flexWrap:'wrap' }}>
+                      <span style={{ fontWeight:700, fontSize:'0.95rem' }}>{product.name}</span>
+                      <span style={{ fontWeight:700, color:'#8a5e5e', flexShrink:0 }}>{fmt(product.price_cents)}</span>
                     </div>
-                  ) : (
-                    <button className="btn-sm" onClick={() => setConfirmDelete(product.id)}
-                    style={{ color:'var(--danger)', borderColor:'var(--danger)' }}>
-                    Eliminar
-                    </button>
-                  )}
-                  </div>
-
-                  {/* Editor de imagen */}
-                  {editingImg === product.id && (
-                    <div style={{ marginTop:'0.5rem', display:'flex', flexDirection:'column', gap:'0.4rem' }}>
-                    {/* Opción 1: desde local */}
-                    <div style={{ display:'flex', alignItems:'center', gap:'0.4rem' }}>
-                    <button className="btn-sm" onClick={() => fileRef.current?.click()}>
-                    Seleccionar archivo
-                    </button>
-                    <input
-                    ref={fileRef} type="file" accept="image/*"
-                    style={{ display:'none' }}
-                    onChange={e => pick(e.target.files?.[0])}
-                    />
-                    {preview && (
-                      <img src={preview} alt="Preview"
-                      style={{ width:40, height:40, borderRadius:4, objectFit:'cover', border:'1px solid var(--border)' }} />
+                    {product.description && (
+                      <p style={{ fontSize:'0.82rem', color:'var(--text-secondary)', margin:'0.15rem 0 0' }}>{product.description}</p>
                     )}
+                    <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
+                      <button className="btn-sm" onClick={() => startEdit(product)}>Editar</button>
+                      <button className="btn-sm" onClick={() => toggleAvailable(product)}>
+                        {product.is_available ? 'Desactivar' : 'Activar'}
+                      </button>
+                      <button className="btn-sm" onClick={() => {
+                        setEditingImg(product.id);
+                        setImgUrl(product.image_url && !product.image_url.startsWith('data:') ? product.image_url : '');
+                        clear();
+                      }}>
+                        {product.image_url ? 'Cambiar imagen' : 'Agregar imagen'}
+                      </button>
+                      {confirmDelete === product.id ? (
+                        <div style={{ display:'flex', gap:'0.3rem', alignItems:'center' }}>
+                          <span style={{ fontSize:'0.72rem', color:'var(--danger)', fontWeight:700 }}>¿Eliminar?</span>
+                          <button className="btn-sm" onClick={() => deleteProduct(product.id)}
+                            style={{ background:'var(--danger)', color:'#fff', borderColor:'var(--danger)', fontSize:'0.72rem' }}>
+                            Sí
+                          </button>
+                          <button className="btn-sm" onClick={() => setConfirmDelete(null)}
+                            style={{ fontSize:'0.72rem' }}>No</button>
+                        </div>
+                      ) : (
+                        <button className="btn-sm" onClick={() => setConfirmDelete(product.id)}
+                          style={{ color:'var(--danger)', borderColor:'var(--danger)' }}>
+                          Eliminar
+                        </button>
+                      )}
                     </div>
-                    <div style={{ display:'flex', gap:'0.4rem' }}>
-                    <button className="btn-primary btn-sm" disabled={savingImg || !preview}
-                    onClick={() => saveImage(product.id)}
-                    style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}>
-                    {savingImg ? '...' : 'Guardar'}
-                    </button>
-                    <button className="btn-sm" onClick={() => { setEditingImg(null); setImgUrl(''); clear(); }}>
-                    Cancelar
-                    </button>
-                    </div>
-                    </div>
-                  )}
+
+                    {/* Editor de imagen */}
+                    {editingImg === product.id && (
+                      <div style={{ marginTop:'0.5rem', display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+                        {/* Opción 1: desde local */}
+                        <div style={{ display:'flex', alignItems:'center', gap:'0.4rem' }}>
+                          <button className="btn-sm" onClick={() => fileRef.current?.click()}>
+                            Seleccionar archivo
+                          </button>
+                          <input
+                            ref={fileRef} type="file" accept="image/*"
+                            style={{ display:'none' }}
+                            onChange={e => pick(e.target.files?.[0])}
+                          />
+                          {preview && (
+                            <img src={preview} alt="Preview"
+                              style={{ width:40, height:40, borderRadius:4, objectFit:'cover', border:'1px solid var(--border)' }} />
+                          )}
+                        </div>
+                        <div style={{ display:'flex', gap:'0.4rem' }}>
+                          <button className="btn-primary btn-sm" disabled={savingImg || !preview}
+                            onClick={() => saveImage(product.id)}
+                            style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}>
+                            {savingImg ? '...' : 'Guardar'}
+                          </button>
+                          <button className="btn-sm" onClick={() => { setEditingImg(null); setImgUrl(''); clear(); }}>
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <span style={{ fontSize:'0.72rem', fontWeight:700, color: product.is_available ? 'var(--success)':'var(--gray-400)', flexShrink:0 }}>
-                  {product.is_available ? 'Activo':'Inactivo'}
+                    {product.is_available ? 'Activo':'Inactivo'}
                   </span>
-                  </div>
+                </div>
                 )}{/* fin ternario edición */}
-                </li>
+              </li>
             ))}
-            </ul>
-          )
-        }
+          </ul>
+        )
+      }
 
-        {/* Formulario colapsable al fondo */}
-        <div className="card" style={{ border: formOpen ? '2px solid #e3aaaa' : '1px solid var(--gray-200)', padding:0, overflow:'hidden' }}>
+      {/* Formulario colapsable al fondo */}
+      <div className="card" style={{ border: formOpen ? '2px solid #e3aaaa' : '1px solid var(--gray-200)', padding:0, overflow:'hidden' }}>
         <button
-        onClick={() => { setFormOpen(o => !o); if (editingId) resetForm(); }}
-        style={{ width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.85rem 1rem', background:'none', border:'none', cursor:'pointer', fontWeight:700, fontSize:'0.88rem', borderBottom: formOpen ? '1px solid var(--gray-200)':'none' }}
+          onClick={() => { setFormOpen(o => !o); if (editingId) resetForm(); }}
+          style={{ width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.85rem 1rem', background:'none', border:'none', cursor:'pointer', fontWeight:700, fontSize:'0.88rem', borderBottom: formOpen ? '1px solid var(--gray-200)':'none' }}
         >
-        <span>{editingId ? 'Modo Edición' : '+ Agregar producto'}</span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-        style={{ transform: formOpen ? 'rotate(180deg)':'rotate(0)', transition:'transform 0.2s' }}>
-        <path d="M6 9l6 6 6-6"/>
-        </svg>
+          <span>{editingId ? 'Modo Edición' : '+ Agregar producto'}</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            style={{ transform: formOpen ? 'rotate(180deg)':'rotate(0)', transition:'transform 0.2s' }}>
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
         </button>
         {formOpen && (
           <div style={{ padding:'1rem' }}>
-          <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
-          <label>Nombre del producto<input value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Taco de pastor" /></label>
-          <label>Descripción (opcional)<input value={description} onChange={e => setDesc(e.target.value)} placeholder="Ej: Con cebolla y cilantro" /></label>
-          <label>Precio (pesos)<input value={price} onChange={e => setPrice(e.target.value)} placeholder="Ej: 35.00" inputMode="decimal" /></label>
-          <div style={{ display:'flex', gap:'0.5rem' }}>
-          <label style={{ flex:1 }}>
-          Unidades por empaque
-          <input type="number" value={pkgUnits} onChange={e => setPkgUnits(e.target.value)}
-          min="1" step="1" placeholder="1"
-          title="Cuántas unidades incluye un empaque" />
-          </label>
-          <label style={{ flex:1 }}>
-          Volumen empaque (L)
-          <input type="number" value={pkgVolume} onChange={e => setPkgVolume(e.target.value)}
-          min="0" step="0.01" placeholder="0.00"
-          title="Litros que ocupa un empaque en la mochila" />
-          </label>
-          </div>
-          <VolumeHelper value={pkgVolume} onChange={setPkgVolume} />
-          </div>
-          {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
-          <div style={{ display:'flex', gap:'0.5rem' }}>
-          <button className="btn-primary btn-sm" onClick={handleSubmit}
-          style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}>
-          {editingId ? 'Guardar cambios' : 'Agregar'}
-          </button>
-          {editingId && <button className="btn-sm" onClick={resetForm}>Cancelar</button>}
-          </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
+              <label>Nombre del producto<input value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Taco de pastor" /></label>
+              <label>Descripción (opcional)<input value={description} onChange={e => setDesc(e.target.value)} placeholder="Ej: Con cebolla y cilantro" /></label>
+              <label>Precio (pesos)<input value={price} onChange={e => setPrice(e.target.value)} placeholder="Ej: 35.00" inputMode="decimal" /></label>
+              <div style={{ display:'flex', gap:'0.5rem' }}>
+                <label style={{ flex:1 }}>
+                  Unidades por empaque
+                  <input type="number" value={pkgUnits} onChange={e => setPkgUnits(e.target.value)}
+                    min="1" step="1" placeholder="1"
+                    title="Cuántas unidades incluye un empaque" />
+                </label>
+                <label style={{ flex:1 }}>
+                  Volumen empaque (L)
+                  <input type="number" value={pkgVolume} onChange={e => setPkgVolume(e.target.value)}
+                    min="0" step="0.01" placeholder="0.00"
+                    title="Litros que ocupa un empaque en la mochila" />
+                </label>
+              </div>
+              <VolumeHelper value={pkgVolume} onChange={setPkgVolume} />
+            </div>
+            {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
+            <div style={{ display:'flex', gap:'0.5rem' }}>
+              <button className="btn-primary btn-sm" onClick={handleSubmit}
+                style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}>
+                {editingId ? 'Guardar cambios' : 'Agregar'}
+              </button>
+              {editingId && <button className="btn-sm" onClick={resetForm}>Cancelar</button>}
+            </div>
           </div>
         )}
-        </div>
-        </div>
+      </div>
+    </div>
   );
 }

@@ -31,12 +31,12 @@ function fmtSecs(s) {
   return `${s}s`;
 }
 
-const STATUS_LABEL = {
+var STATUS_LABEL = {
   created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
   preparing:'Preparando', ready:'Listo p/ retiro', on_the_way:'En camino',
   delivered:'Entregado', cancelled:'Cancelado', pending_driver:'Sin driver',
 };
-const STATUS_COLOR = {
+var STATUS_COLOR = {
   created:'#f59e0b', assigned:'#3b82f6', accepted:'#8b5cf6',
   preparing:'#f97316', ready:'#10b981', on_the_way:'#06b6d4',
   delivered:'#16a34a', cancelled:'#dc2626', pending_driver:'#ef4444',
