@@ -25,6 +25,10 @@ import {
 } from './queries.js';
 import { upsertOffer } from './offer.js';
 import { applyOrderCooldownReduction } from './cooldown.js';
+import { findCandidates } from '../../../engine/candidate-finder.js';
+import { simulateDriverWithOrder } from '../../../engine/route-simulator.js';
+import { scoreCandidate } from '../../../engine/scoring.js';
+import { query } from '../../../config/db.js';
 
 /**
  * Intenta enviar oferta(s) para el pedido dado.
@@ -102,16 +106,85 @@ export async function offerNextDrivers(orderId, onOffer) {
     eligible.push(...immediateEligible);
   }
 
-  // ── 5. Wraparound circular ────────────────────────────────────────────────
-  // Cuántos drivers hemos "visitado" ya en rondas anteriores.
-  // Determinamos el offset como pastCount % eligible.length.
-  const offset    = eligible.length > 0 ? pastCount % eligible.length : 0;
-  const totalElg  = eligible.length;
-  // Tomar batchSize drivers empezando en offset (circular)
+  // ── 5. Scoring + Wraparound circular ─────────────────────────────────────
+  // El scoring del motor (ETA + fairness + SLA + penalizaciones) ordena los
+  // candidatos elegibles antes de aplicar el wraparound de rondas.
+  // Así el wraparound distribuye equitativamente entre los mejores candidatos,
+  // no simplemente por driver_number.
+  let scoredEligible = eligible; // fallback: orden original por driver_number
+
+  try {
+    const coordsRow = await query(
+      `SELECT restaurant_lat, restaurant_lng, delivery_lat, delivery_lng,
+              o.customer_id,
+              COALESCE(o.delivery_lat, cu.lat)  AS cust_lat,
+              COALESCE(o.delivery_lng, cu.lng)  AS cust_lng
+       FROM orders o
+       JOIN users cu ON cu.id = o.customer_id
+       WHERE o.id = $1`,
+      [orderId]
+    );
+
+    if (coordsRow.rowCount > 0) {
+      const coord = coordsRow.rows[0];
+      const restaurantPos = {
+        lat: Number(coord.restaurant_lat),
+        lng: Number(coord.restaurant_lng),
+      };
+      const customerPos = {
+        lat: Number(coord.cust_lat),
+        lng: Number(coord.cust_lng),
+      };
+
+      if (
+        Number.isFinite(restaurantPos.lat) && Number.isFinite(customerPos.lat)
+      ) {
+        // Obtener candidatos con envelope de ETA del motor
+        const { topDrivers } = await findCandidates(orderId, restaurantPos, customerPos);
+
+        if (topDrivers.length > 0) {
+          // Mapear user_id de eligible a envelope del motor para obtener score
+          const envelopeByDriverId = new Map(
+            topDrivers.map(c => [c.driver.id, c])
+          );
+
+          // Reordenar eligible según score del motor
+          // Los que no tienen envelope (raros) van al final con score Infinity
+          scoredEligible = [...eligible].sort((a, b) => {
+            const envA = envelopeByDriverId.get(a.user_id);
+            const envB = envelopeByDriverId.get(b.user_id);
+
+            if (!envA && !envB) return 0;
+            if (!envA) return 1;
+            if (!envB) return -1;
+
+            // Score simple basado en ETA estimada (sin simulación completa en ronda 1-5)
+            const scoreA = (envA.etaToNewCustomer ?? Infinity) +
+              (envA.loadPenalty ?? 0) +
+              (envA.disconnectPenalties ?? 0) * 300;
+            const scoreB = (envB.etaToNewCustomer ?? Infinity) +
+              (envB.loadPenalty ?? 0) +
+              (envB.disconnectPenalties ?? 0) * 300;
+
+            return scoreA - scoreB;
+          });
+
+          log(`order=${orderId}`, `scoring aplicado — ${topDrivers.length} candidatos del motor`);
+        }
+      }
+    }
+  } catch (e) {
+    // Si el scoring falla, seguimos con el orden original (degradación elegante)
+    log(`order=${orderId}`, `scoring fallback a driver_number: ${e.message}`);
+  }
+
+  // Wraparound circular sobre la lista ya ordenada por score
+  const offset    = scoredEligible.length > 0 ? pastCount % scoredEligible.length : 0;
+  const totalElg  = scoredEligible.length;
   const realBatch = Math.min(batchSize, totalElg);
   const batch     = [];
   for (let i = 0; i < realBatch; i++) {
-    batch.push(eligible[(offset + i) % totalElg]);
+    batch.push(scoredEligible[(offset + i) % totalElg]);
   }
 
   log(`order=${orderId}`, `batch final: ${batch.length}`, {

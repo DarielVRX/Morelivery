@@ -8,7 +8,11 @@ import { ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER, OFFER_TIMEOUT_SECONDS } 
 /** Pedido abierto sin driver asignado */
 export async function getOpenOrder(orderId) {
   const r = await query(
-    `SELECT id, created_at, offer_cooldown_triggered FROM orders
+    `SELECT id, created_at, offer_cooldown_triggered,
+            restaurant_lat, restaurant_lng,
+            delivery_lat, delivery_lng,
+            last_driver_id
+     FROM orders
      WHERE id=$1 AND driver_id IS NULL
        AND status NOT IN ('delivered','cancelled')`,
     [orderId]
@@ -136,7 +140,8 @@ export async function assignDriverToOrder(orderId, driverId) {
          AND status NOT IN ('delivered','cancelled')
        FOR UPDATE SKIP LOCKED
      )
-     UPDATE orders SET driver_id=$2, status='assigned', updated_at=NOW()
+     UPDATE orders
+       SET driver_id=$2, status='assigned', last_driver_id=$2, updated_at=NOW()
      FROM lock WHERE orders.id=lock.id RETURNING orders.id`,
     [orderId, driverId]
   );

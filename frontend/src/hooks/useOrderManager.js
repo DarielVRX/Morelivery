@@ -129,12 +129,22 @@ export function useOrderManager(token, patchUser, userDriver) {
     return () => clearInterval(id);
   }, [announceListener]);
 
+  const [transferBanner, setTransferBanner] = useState(null); // { type, message, orderId }
+
   const handleNewOffer = useCallback((data) => {
     setPendingOffer(prev => prev ? prev : { id: data.orderId, ...data, seconds_left: data.secondsLeft ?? 60 });
     setTimeout(() => loadDataRef.current?.(), 600);
   }, []);
 
-  useRealtimeOrders(token, () => scheduleLoad(), () => {}, handleNewOffer);
+  const handleTransferEvent = useCallback((data) => {
+    setTransferBanner(data);
+    // Auto-dismiss después de 8 segundos
+    setTimeout(() => setTransferBanner(null), 8_000);
+    // Recargar para reflejar el cambio
+    setTimeout(() => loadDataRef.current?.(), 800);
+  }, []);
+
+  useRealtimeOrders(token, () => scheduleLoad(), () => {}, handleNewOffer, undefined, undefined, undefined, handleTransferEvent);
 
   // Acciones
   async function toggleAvailability(onError) {
@@ -203,8 +213,10 @@ export function useOrderManager(token, patchUser, userDriver) {
     activeOrder, availability, pendingOffer, offerMinimized, loadingOffer,
     loadingStatus, releaseNote, showRelease, orderExpanded,
     notifPermission, notifPriorityMode, hasActiveOrder,
+    transferBanner,
     // Setters de UI
     setOfferMinimized, setOrderExpanded, setShowRelease, setReleaseNote,
+    setTransferBanner,
     // Acciones
     loadData, toggleAvailability, acceptOffer, rejectOffer,
     changeStatus, doRelease, handleOfferExpired,

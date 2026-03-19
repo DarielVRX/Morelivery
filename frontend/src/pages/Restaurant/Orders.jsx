@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
@@ -53,9 +53,23 @@ export default function RestaurantOrders() {
   const [reportMsg, setReportMsg]     = useState('');
   const [expanded, setExpanded]       = useState(null);
   const [suggestionFor, setSuggestionFor]   = useState('');
-  const [readyCooldown, setReadyCooldown]   = useState({}); // orderId → secsRemaining
+  const [readyCooldown, setReadyCooldown]   = useState({});
   const [suggDrafts, setSuggDrafts]         = useState({});
+  // ── Banners del motor de cocina ───────────────────────────────────────────
+  const [kitchenBanners, setKitchenBanners] = useState([]); // [{ id, type, message, orderId }]
   const loadDataRef = useRef(null);
+
+  // Handler para eventos SSE del motor de cocina
+  const handleKitchenEvent = useCallback((data) => {
+    const bannerId = `${data.type}-${Date.now()}`;
+    setKitchenBanners(prev => [...prev, { ...data, bannerId }]);
+    // Auto-dismiss después de 12 segundos
+    setTimeout(() => {
+      setKitchenBanners(prev => prev.filter(b => b.bannerId !== bannerId));
+    }, 12_000);
+    // Recargar pedidos para reflejar el cambio
+    loadDataRef.current?.();
+  }, []);
 
   async function loadData() {
     if (!auth.token) return;
@@ -77,7 +91,18 @@ export default function RestaurantOrders() {
     const id = setInterval(() => loadDataRef.current?.(), 5000);
     return () => clearInterval(id);
   }, [auth.token]);
-  useRealtimeOrders(auth.token, () => loadDataRef.current?.(), () => {});
+  useRealtimeOrders(auth.token, () => loadDataRef.current?.(), () => {}, undefined, undefined, undefined, handleKitchenEvent);
+
+  async function updatePrepEstimate(minutes) {
+    const secs = Math.round(minutes * 60);
+    try {
+      await apiFetch('/restaurants/my/prep-estimate',
+        { method: 'PATCH', body: JSON.stringify({ prep_time_estimate_s: secs }) },
+        auth.token
+      );
+      loadData();
+    } catch (e) { setMsg(e.message); }
+  }
 
   useEffect(() => {
     setSuggDrafts(prev => {
@@ -188,6 +213,42 @@ export default function RestaurantOrders() {
 
       {reportMsg && <p className="flash flash-ok" style={{ marginBottom:'0.5rem' }}>{reportMsg}</p>}
       {msg && <p className="flash flash-error">{msg}</p>}
+
+      {/* ── Banners del motor de cocina ─────────────────────────────────── */}
+      {kitchenBanners.map(banner => (
+        <div key={banner.bannerId} style={{
+          background: banner.type === 'prep_estimate_updated' ? '#fffbeb' : '#f0fdf4',
+          border: `1px solid ${banner.type === 'prep_estimate_updated' ? '#f59e0b' : '#16a34a'}`,
+          borderRadius: 8, padding: '0.65rem 0.875rem', marginBottom: '0.5rem',
+          fontSize: '0.82rem', lineHeight: 1.4,
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: '0.2rem' }}>
+            {banner.type === 'kitchen_auto_ready' ? '🍳 Pedido marcado como listo automáticamente' : '⏱️ Estimado de preparación actualizado'}
+          </div>
+          <div style={{ color: '#374151' }}>{banner.message}</div>
+          {banner.type === 'prep_estimate_updated' && banner.newEstimate && (
+            <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                Nuevo estimado: <strong>{Math.round(banner.newEstimate / 60)} min</strong>
+              </span>
+              <button className="btn-sm" style={{ fontSize: '0.72rem' }}
+                onClick={() => updatePrepEstimate(Math.round(banner.newEstimate / 60))}>
+                Confirmar
+              </button>
+              <button className="btn-sm" style={{ fontSize: '0.72rem' }}
+                onClick={() => {
+                  const mins = window.prompt('Corregir estimado (minutos):', String(Math.round(banner.newEstimate / 60)));
+                  if (mins && Number(mins) > 0) updatePrepEstimate(Number(mins));
+                }}>
+                Corregir
+              </button>
+            </div>
+          )}
+          <button onClick={() => setKitchenBanners(prev => prev.filter(b => b.bannerId !== banner.bannerId))}
+            style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer',
+              fontSize: '0.85rem', color: '#9ca3af', marginTop: '-1.5rem' }}>✕</button>
+        </div>
+      ))}
 
       {/* Activos */}
       {tab === 'active' && (

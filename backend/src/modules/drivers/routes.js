@@ -30,6 +30,19 @@ router.patch('/availability', authenticate, authorize(['driver']), async (req, r
     if (result.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
 
     if (isAvailable) {
+      // Driver reconectándose: borrar reconnect_deadline en sus pedidos on_the_way
+      // para que cleanStaleEntities no los cancele mientras el driver está activo.
+      try {
+        await query(
+          `UPDATE orders
+           SET reconnect_deadline = NULL, updated_at = NOW()
+           WHERE driver_id = $1
+             AND status = 'on_the_way'
+             AND reconnect_deadline IS NOT NULL`,
+          [driverId]
+        );
+      } catch (_) {}
+
       // Push: buscar todos los pedidos abiertos sin driver y disparar assignment.
       // serializedOffer es idempotente — si ya tiene cadena activa la ignora.
       try {

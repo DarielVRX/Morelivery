@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
+import { resetPrepEstimateOnOpen } from '../../engine/kitchen.js';
 import { createMenuItemSchema, updateMenuItemSchema } from './schemas.js';
 import { AppError } from '../../utils/errors.js';
 
@@ -187,6 +188,11 @@ router.patch('/my/toggle', authenticate, authorize(['restaurant']), async (req, 
     const isOpen = await computeIsOpen(restaurantId);
     await query('UPDATE restaurants SET is_open=$1 WHERE id=$2', [isOpen, restaurantId]);
 
+    // Al abrir el restaurante, registrar hora de apertura para el ciclo de prep
+    if (isOpen) {
+      resetPrepEstimateOnOpen(restaurantId).catch(() => {});
+    }
+
     return res.json({ is_open: isOpen, manual_open_override: value });
   } catch (error) { return next(error); }
 });
@@ -314,4 +320,26 @@ router.delete('/menu-items/:id', authenticate, authorize(['restaurant']), async 
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
+/* ── PATCH /my/prep-estimate — restaurante actualiza su estimado de preparación ── */
+router.patch('/my/prep-estimate', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    const val = Number(req.body.prep_time_estimate_s);
+    if (!Number.isFinite(val) || val < 30 || val > 7200) {
+      return next(new AppError(400, 'El estimado debe estar entre 30 segundos y 2 horas'));
+    }
+
+    const r = await query(
+      `UPDATE restaurants
+       SET prep_time_estimate_s = $1, prep_estimate_updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, prep_time_estimate_s`,
+      [val, restaurantId]
+    );
+    return res.json({ restaurant: r.rows[0] });
+  } catch (error) { return next(error); }
+});
+
 export default router;

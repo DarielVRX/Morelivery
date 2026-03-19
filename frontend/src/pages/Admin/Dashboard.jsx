@@ -303,6 +303,50 @@ export default function AdminDashboard() {
   const [orderLog, setOrderLog]     = useState([]);
   const [actionLoading, setActionLoading] = useState(''); // id de la entidad en operación
 
+  // ── Engine params ─────────────────────────────────────────────────────────
+  const [engineParams, setEngineParams]   = useState([]);
+  const [paramEditing, setParamEditing]   = useState({}); // key → draft string value
+  const [paramSaving,  setParamSaving]    = useState(''); // key being saved
+  const [paramMsg,     setParamMsg]       = useState('');
+
+  async function loadEngineParams() {
+    try {
+      const r = await apiFetch('/admin/engine-params', {}, auth.token);
+      setEngineParams(r.params || []);
+    } catch (e) { setParamMsg(e.message); }
+  }
+
+  async function saveEngineParam(key, value) {
+    setParamSaving(key);
+    setParamMsg('');
+    try {
+      const r = await apiFetch(`/admin/engine-params/${key}`, {
+        method: 'PATCH', body: JSON.stringify({ value: Number(value) }),
+      }, auth.token);
+      setEngineParams(r.params || []);
+      setParamEditing(prev => { const n = { ...prev }; delete n[key]; return n; });
+      setParamMsg('✓ Guardado');
+      setTimeout(() => setParamMsg(''), 2500);
+    } catch (e) { setParamMsg(e.message); }
+    finally { setParamSaving(''); }
+  }
+
+  async function handlePenaltyEdit(driverId, current) {
+    const val = window.prompt(`Penalizaciones actuales: ${current}\nNuevo valor (0-10):`, String(current));
+    if (val === null) return;
+    const n = Number(val);
+    if (!Number.isFinite(n) || n < 0 || n > 10) { setMsg('Valor inválido'); return; }
+    try {
+      await apiFetch(`/admin/drivers/${driverId}/penalties`, {
+        method: 'PATCH', body: JSON.stringify({ disconnect_penalties: n }),
+      }, auth.token);
+      setLiveData(prev => ({
+        ...prev,
+        drivers: prev.drivers.map(d => d.id === driverId ? { ...d, disconnect_penalties: n } : d),
+      }));
+    } catch (e) { setMsg(e.message); }
+  }
+
   // Registro nuevo admin
   const [newUser, setNewUser] = useState({ username:'', password:'', displayName:'' });
 
@@ -358,6 +402,8 @@ export default function AdminDashboard() {
       } else if (tab === 'users') {
         const d = await apiFetch('/admin/users', {}, auth.token);
         setUsers(d.users || []);
+      } else if (tab === 'engine') {
+        await loadEngineParams();
       }
     } catch (e) {
       setMsg(e.message);
@@ -432,6 +478,7 @@ export default function AdminDashboard() {
         {tabBtn('orders', '📦 Pedidos')}
         {tabBtn('metrics', '📊 Métricas')}
         {tabBtn('users', '👥 Usuarios')}
+        {tabBtn('engine', '⚙️ Motor')}
         {tabBtn('feed', `📡 Feed${liveOffers.length + orderLog.length > 0 ? ` (${liveOffers.length + orderLog.length})` : ''}`)}
         <button onClick={load} style={{ marginLeft:'auto', padding:'0.4rem 0.75rem', border:'1px solid var(--gray-200)', borderRadius:8, cursor:'pointer', fontSize:'0.8rem', background:'#fff' }}>
           ↻ Actualizar
@@ -736,6 +783,161 @@ export default function AdminDashboard() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB: MOTOR ──────────────────────────────────────────────────── */}
+      {tab === 'engine' && (
+        <div>
+          <div style={{ marginBottom:'1rem', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <div>
+              <div style={{ fontWeight:700, fontSize:'0.95rem', color:'var(--gray-800)' }}>⚙️ Parámetros del motor de asignación</div>
+              <div style={{ fontSize:'0.75rem', color:'var(--gray-500)', marginTop:'0.1rem' }}>
+                Los cambios se aplican en el siguiente tick (~60s). Los valores por defecto están en gris.
+              </div>
+            </div>
+            <button onClick={loadEngineParams}
+              style={{ padding:'0.35rem 0.75rem', border:'1px solid var(--gray-200)', borderRadius:8, cursor:'pointer', fontSize:'0.78rem', background:'#fff' }}>
+              ↻ Recargar
+            </button>
+          </div>
+
+          {paramMsg && (
+            <div style={{
+              padding:'0.45rem 0.75rem', borderRadius:6, marginBottom:'0.75rem', fontSize:'0.82rem',
+              background: paramMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2',
+              border: `1px solid ${paramMsg.startsWith('✓') ? '#16a34a' : '#dc2626'}`,
+              color: paramMsg.startsWith('✓') ? '#15803d' : '#dc2626',
+            }}>{paramMsg}</div>
+          )}
+
+          {engineParams.length === 0
+            ? <div style={{ color:'var(--gray-400)', fontSize:'0.85rem', padding:'2rem 0' }}>Cargando parámetros…</div>
+            : (
+              <div style={{ border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                  <thead>
+                    <tr>
+                      <Th>Parámetro</Th>
+                      <Th>Descripción</Th>
+                      <Th>Valor actual</Th>
+                      <Th>Default</Th>
+                      <Th>Acción</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {engineParams.map(p => {
+                      const isEditing  = paramEditing[p.key] !== undefined;
+                      const isDirty    = isEditing && paramEditing[p.key] !== String(p.value);
+                      const isModified = p.value !== p.default;
+                      return (
+                        <tr key={p.key} style={{ background: isModified ? '#fffbeb' : undefined }}>
+                          <Td>
+                            <code style={{ fontSize:'0.75rem', color:'#374151', background:'#f3f4f6',
+                              padding:'0.1rem 0.35rem', borderRadius:4 }}>{p.key}</code>
+                          </Td>
+                          <Td style={{ maxWidth:280, color:'#6b7280', fontSize:'0.75rem' }}>{p.description || '—'}</Td>
+                          <Td>
+                            {isEditing ? (
+                              <input
+                                type="number" step="any"
+                                value={paramEditing[p.key]}
+                                onChange={e => setParamEditing(prev => ({ ...prev, [p.key]: e.target.value }))}
+                                style={{ width:90, padding:'0.2rem 0.4rem', border:'1px solid #3b82f6',
+                                  borderRadius:4, fontSize:'0.82rem' }}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') saveEngineParam(p.key, paramEditing[p.key]);
+                                  if (e.key === 'Escape') setParamEditing(prev => { const n={...prev}; delete n[p.key]; return n; });
+                                }}
+                                autoFocus
+                              />
+                            ) : (
+                              <span style={{ fontWeight: isModified ? 700 : 400,
+                                color: isModified ? '#b45309' : '#374151', fontSize:'0.85rem' }}>
+                                {p.value}
+                              </span>
+                            )}
+                          </Td>
+                          <Td style={{ color:'#9ca3af', fontSize:'0.82rem' }}>{p.default ?? '—'}</Td>
+                          <Td>
+                            {isEditing ? (
+                              <div style={{ display:'flex', gap:'0.3rem' }}>
+                                <button
+                                  disabled={paramSaving === p.key}
+                                  onClick={() => saveEngineParam(p.key, paramEditing[p.key])}
+                                  style={{ padding:'0.2rem 0.55rem', background:'#16a34a', color:'#fff',
+                                    border:'none', borderRadius:4, cursor:'pointer', fontSize:'0.75rem',
+                                    opacity: paramSaving === p.key ? 0.6 : 1 }}>
+                                  {paramSaving === p.key ? '…' : 'Guardar'}
+                                </button>
+                                <button
+                                  onClick={() => setParamEditing(prev => { const n={...prev}; delete n[p.key]; return n; })}
+                                  style={{ padding:'0.2rem 0.55rem', background:'#f3f4f6',
+                                    border:'1px solid #e5e7eb', borderRadius:4, cursor:'pointer', fontSize:'0.75rem' }}>
+                                  Cancelar
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setParamEditing(prev => ({ ...prev, [p.key]: String(p.value) }))}
+                                style={{ padding:'0.2rem 0.55rem', background:'#f3f4f6', color:'#374151',
+                                  border:'1px solid #e5e7eb', borderRadius:4, cursor:'pointer', fontSize:'0.75rem' }}>
+                                Editar
+                              </button>
+                            )}
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )
+          }
+
+          {/* ── Panel de penalizaciones de drivers ─────────────────────────── */}
+          <div style={{ marginTop:'1.5rem' }}>
+            <div style={{ fontWeight:700, fontSize:'0.9rem', marginBottom:'0.6rem', color:'var(--gray-800)' }}>
+              🚦 Penalizaciones de drivers por desconexión
+            </div>
+            {liveData.drivers.length === 0
+              ? <div style={{ color:'var(--gray-400)', fontSize:'0.82rem' }}>Sin datos. Carga la pestaña Asignaciones primero.</div>
+              : (
+                <div style={{ border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                    <thead>
+                      <tr><Th>#</Th><Th>Driver</Th><Th>Penalizaciones</Th><Th>Acción</Th></tr>
+                    </thead>
+                    <tbody>
+                      {liveData.drivers.map(d => (
+                        <tr key={d.id}>
+                          <Td>{d.driver_number || '—'}</Td>
+                          <Td style={{ fontWeight:500 }}>{d.full_name || '—'}</Td>
+                          <Td>
+                            <span style={{
+                              fontWeight:700, fontSize:'0.85rem',
+                              color: (d.disconnect_penalties||0) >= 3 ? '#dc2626'
+                                   : (d.disconnect_penalties||0) > 0 ? '#f59e0b' : '#16a34a',
+                            }}>
+                              {d.disconnect_penalties ?? 0}
+                            </span>
+                          </Td>
+                          <Td>
+                            <button
+                              onClick={() => handlePenaltyEdit(d.id, d.disconnect_penalties ?? 0)}
+                              style={{ padding:'0.2rem 0.55rem', background:'#f3f4f6', border:'1px solid #e5e7eb',
+                                borderRadius:4, cursor:'pointer', fontSize:'0.75rem' }}>
+                              Ajustar
+                            </button>
+                          </Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            }
           </div>
         </div>
       )}
