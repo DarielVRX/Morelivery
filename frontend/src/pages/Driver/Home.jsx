@@ -9,6 +9,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDriverLocation } from '../../hooks/useDriverLocation';
 import { useNavFeatures } from '../../hooks/useNavFeatures';
 import { useOrderManager } from '../../hooks/useOrderManager';
+import { useAppBadge } from '../../hooks/useAppBadge';
 
 import PullToRefresh    from '../../components/PullToRefresh';
 import DriverMap        from '../../components/DriverMap';
@@ -49,6 +50,10 @@ export default function DriverHome() {
 
   // ── Lógica de pedidos ────────────────────────────────────────────────────────
   const order = useOrderManager(auth.token, patchUser, auth.user?.driver);
+
+  // Badge del ícono: 1 si hay oferta pendiente, o número de pedidos activos
+  const badgeCount = order.pendingOffer ? 1 : (order.hasActiveOrder ? 1 : 0);
+  useAppBadge(badgeCount);
 
   // ── Estado de UI (solo Home sabe de esto) ───────────────────────────────────
   const [msg,           setMsg]           = useState('');
@@ -120,9 +125,10 @@ export default function DriverHome() {
     steps:      routeSteps,
     currentPos: myPosition,
     activeZones,
+    hasActiveOrder: order.hasActiveOrder,
     onVoice:      msg => setMsg(msg),
     onZoneAlert:  zone => setMsg(`⚠️ Zona de alerta cerca: ${ZONE_LABELS[zone?.type] || zone?.type}`),
-    impassableWays:  [],   // TODO: cargar de GET /nav/road-prefs/impassable
+    impassableWays:  [],
     routeGeometry:   routeGeometry || [],
   });
 

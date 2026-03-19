@@ -327,7 +327,26 @@ router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admi
       );
       const waitSec = waitResult.rows[0]?.wait_s ?? 0;
       if (waitSec > 0) recordPickupWait(updated.id, waitSec).catch(() => {});
+
+      // Notificar al restaurante que el driver llegó y recogió
+      try {
+        const restOwner = await query(
+          `SELECT r.owner_user_id, u.full_name AS driver_name
+           FROM orders o
+           JOIN restaurants r ON r.id = o.restaurant_id
+           JOIN users u ON u.id = o.driver_id
+           WHERE o.id = $1`, [updated.id]
+        );
+        if (restOwner.rowCount > 0) {
+          sseHub.sendToUser(restOwner.rows[0].owner_user_id, 'driver_arrival', {
+            orderId:    updated.id,
+            driverName: restOwner.rows[0].driver_name,
+            action:     'picked_up',
+          });
+        }
+      } catch (_) {}
     }
+
     // delivered: evaluar si hay que ajustar el estimado de prep del restaurante
     if (nextStatus === 'delivered') {
       evaluatePrepEstimate(updated.id).catch(() => {});
@@ -360,6 +379,24 @@ router.patch('/:id/cancel', authenticate, authorize(['customer']), async (req, r
       [req.params.id, req.user.userId, `[CANCELADO POR CLIENTE] ${note.trim()}`]
     );
     await notifyOrderParties(req.params.id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
+
+    // Notificación urgente al restaurante si ya estaba en aceptado/preparando
+    const prevStatus = check.rows[0].status;
+    if (['accepted', 'preparing'].includes(prevStatus)) {
+      try {
+        const ri = await query(
+          `SELECT r.owner_user_id FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
+          [req.params.id]
+        );
+        if (ri.rowCount > 0) {
+          sseHub.sendToUser(ri.rows[0].owner_user_id, 'order_cancelled_preparing', {
+            orderId:    req.params.id,
+            prevStatus,
+            note:       note.trim(),
+          });
+        }
+      } catch (_) {}
+    }
     return res.json({ order: result.rows[0] });
   } catch (error) { return next(error); }
 });
