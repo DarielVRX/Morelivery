@@ -41,13 +41,13 @@ function FeeBreakdown({ order }) {
 
 function fmtDate(iso) { return iso ? new Date(iso).toLocaleString('es', { dateStyle:'short', timeStyle:'short' }) : '—'; }
 
-const STATUS_LABELS = {
+var STATUS_LABELS = {
   created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
   preparing:'En preparación', ready:'Listo para retiro',
   on_the_way:'En camino', delivered:'Entregado',
   cancelled:'Cancelado', pending_driver:'Sin conductor',
 };
-const STATUS_COLOR = {
+var STATUS_COLOR = {
   created:'#f59e0b', assigned:'#3b82f6', accepted:'#8b5cf6',
   preparing:'#f97316', ready:'#16a34a', on_the_way:'#0891b2',
   delivered:'#16a34a', cancelled:'#dc2626', pending_driver:'#ef4444',
