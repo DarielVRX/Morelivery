@@ -16,7 +16,7 @@ function FeeBreakdown({ order }) {
   const grandTotal = sub + svc + del_fee + tip;
   if (!svc && !del_fee && !tip) return null;
   return (
-    <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', borderTop:'1px solid var(--gray-100)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
+    <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)', borderTop:'1px solid var(--border-light)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
       <div style={{ display:'flex', justifyContent:'space-between' }}>
         <span>Subtotal</span><span>{fmt(sub)}</span>
       </div>
@@ -97,7 +97,7 @@ function DriverMap({ lat, lng, driverName }) {
     mapRef.current.map?.panTo([lat,lng],{animate:true,duration:0.5});
   }, [lat,lng]);
 
-  return <div ref={ref} style={{ height:180, borderRadius:8, border:'1px solid var(--gray-200)', marginTop:'0.5rem' }} />;
+  return <div ref={ref} style={{ height:180, borderRadius:8, border:'1px solid var(--border)', marginTop:'0.5rem' }} />;
 }
 
 function toDraft(items=[]) {
@@ -122,7 +122,7 @@ function TipInput({ onValidAmount }) {
           if (cents > 0) onValidAmount(cents);
           else if (raw === '') onValidAmount(0);
         }}
-        style={{ width:62, fontSize:'0.75rem', padding:'0.2rem 0.4rem', border:'1px solid var(--gray-200)', borderRadius:6 }}
+        style={{ width:62, fontSize:'0.75rem', padding:'0.2rem 0.4rem', border:'1px solid var(--border)', borderRadius:6 }}
       />
     </div>
   );
@@ -171,7 +171,7 @@ export default function CustomerOrders() {
   function StarPicker({ value, onChange, label }) {
     return (
       <div style={{ marginBottom:'0.6rem' }}>
-        <div style={{ fontSize:'0.78rem', fontWeight:600, color:'var(--gray-600)', marginBottom:'0.3rem' }}>{label}</div>
+        <div style={{ fontSize:'0.78rem', fontWeight:600, color:'var(--text-secondary)', marginBottom:'0.3rem' }}>{label}</div>
         <div style={{ display:'flex', gap:'0.3rem' }}>
           {[1,2,3,4,5].map(s => (
             <button key={s} onClick={() => onChange(s)}
@@ -302,10 +302,10 @@ export default function CustomerOrders() {
           display:'flex', alignItems:'flex-end', justifyContent:'center',
           padding:`0 0 env(safe-area-inset-bottom,0px)`,
         }}>
-          <div style={{ background:'#fff', borderRadius:'18px 18px 0 0', padding:'1.5rem 1.25rem 1.75rem',
+          <div style={{ background:'var(--bg-card)', borderRadius:'18px 18px 0 0', padding:'1.5rem 1.25rem 1.75rem',
             width:'100%', maxWidth:480, boxShadow:'0 -4px 32px rgba(0,0,0,0.18)' }}>
             <div style={{ fontWeight:800, fontSize:'1rem', marginBottom:'0.25rem' }}>⭐ Calificar pedido</div>
-            <div style={{ fontSize:'0.82rem', color:'var(--gray-500)', marginBottom:'1rem' }}>
+            <div style={{ fontSize:'0.82rem', color:'var(--text-tertiary)', marginBottom:'1rem' }}>
               {ratingOrder.restaurant_name}
             </div>
             <StarPicker value={ratingRestStar} onChange={setRatingRestStar} label="Tienda / Restaurante" />
@@ -313,7 +313,7 @@ export default function CustomerOrders() {
               <StarPicker value={ratingDrvStar} onChange={setRatingDrvStar} label="Conductor (opcional)" />
             )}
             <div style={{ marginBottom:'0.75rem' }}>
-              <div style={{ fontSize:'0.78rem', fontWeight:600, color:'var(--gray-600)', marginBottom:'0.3rem' }}>Comentario (opcional)</div>
+              <div style={{ fontSize:'0.78rem', fontWeight:600, color:'var(--text-secondary)', marginBottom:'0.3rem' }}>Comentario (opcional)</div>
               <textarea value={ratingComment} onChange={e => setRatingComment(e.target.value)}
                 placeholder="¿Qué tal estuvo tu experiencia?" rows={2}
                 style={{ width:'100%', fontSize:'0.85rem', resize:'none', boxSizing:'border-box' }} />
@@ -326,7 +326,7 @@ export default function CustomerOrders() {
                 {ratingLoading ? 'Enviando…' : 'Enviar calificación'}
               </button>
               <button onClick={() => setRatingOrder(null)}
-                style={{ background:'none', border:'none', color:'var(--gray-400)', padding:'0.4rem', cursor:'pointer', fontSize:'0.875rem' }}>
+                style={{ background:'none', border:'none', color:'var(--text-tertiary)', padding:'0.4rem', cursor:'pointer', fontSize:'0.875rem' }}>
                 Ahora no
               </button>
             </div>
@@ -335,14 +335,14 @@ export default function CustomerOrders() {
       )}
       {/* ── Encabezado fijo ─────────────────────────────────────────── */}
       <div style={{
-        flexShrink:0, background:'#fff', borderBottom:'2px solid var(--brand-light)',
+        flexShrink:0, background:'var(--bg-card)', borderBottom:'2px solid var(--border)',
         padding:'0.65rem 1rem 0', zIndex:30,
         boxShadow:'0 1px 4px rgba(0,0,0,0.04)'
       }}>
         <div style={{ fontWeight:800, fontSize:'1rem', color:'var(--brand)', letterSpacing:'-0.01em', marginBottom:'0.4rem' }}>
           Mis pedidos
         </div>
-        <div style={{ display:'flex', gap:0, borderTop:'1px solid var(--gray-100)' }}>
+        <div style={{ display:'flex', gap:0, borderTop:'1px solid var(--border-light)' }}>
           {[['active','Activos'],['past','Historial']].map(([val, label]) => (
             <button key={val} onClick={() => setTab(val)}
               style={{
@@ -372,7 +372,7 @@ export default function CustomerOrders() {
       {/* Activos */}
       {tab==='active' && (
         active.length===0
-          ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin pedidos activos.</p>
+          ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos activos.</p>
           : (
             <ul className="orders-tab-panel" style={{ listStyle:'none', padding:0 }}>
               {active.map(order => {
@@ -391,14 +391,14 @@ export default function CustomerOrders() {
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
                         <span style={{ fontWeight:700 }}>{fmt((order.total_cents||0)+(order.service_fee_cents||0)+(order.delivery_fee_cents||0)+(order.tip_cents||0))}</span>
-                        <span style={{ color:'var(--gray-400)', fontSize:'0.8rem' }}>{isExp?'▲':'▼'}</span>
+                        <span style={{ color:'var(--text-tertiary)', fontSize:'0.8rem' }}>{isExp?'▲':'▼'}</span>
                       </div>
                     </div>
                     {isExp && (
                       <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
                         {/* Método de pago */}
                         {order.payment_method && (
-                          <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.3rem', marginTop:'0.35rem' }}>
+                          <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)', marginBottom:'0.3rem', marginTop:'0.35rem' }}>
                             Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[order.payment_method]||order.payment_method}</strong>
                           </div>
                         )}
@@ -420,7 +420,7 @@ export default function CustomerOrders() {
                         })()}
                         {/* Agradecimiento editable en activos */}
                         <div style={{ marginTop:'0.4rem', display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-                          <span style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>Agradecimiento:</span>
+                          <span style={{ fontSize:'0.78rem', color:'var(--text-tertiary)' }}>Agradecimiento:</span>
                           <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap' }}>
                             {(() => {
                               const sub = order.total_cents || 0;
@@ -454,11 +454,11 @@ export default function CustomerOrders() {
                             </button>
                           )}
                         {order.customer_address && (
-                          <div style={{ fontSize:'0.8rem', color:'var(--gray-600)', marginBottom:'0.3rem', marginTop:'0.35rem' }}>
+                          <div style={{ fontSize:'0.8rem', color:'var(--text-secondary)', marginBottom:'0.3rem', marginTop:'0.35rem' }}>
                             Dirección: <strong>{order.customer_address}</strong>
                           </div>
                         )}
-                        <div style={{ fontSize:'0.83rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>
+                        <div style={{ fontSize:'0.83rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>
                           Conductor: <strong>{order.driver_first_name||'Buscando…'}</strong>
                         </div>
                         {(order.items||[]).length>0 && (
@@ -471,7 +471,7 @@ export default function CustomerOrders() {
                           <DriverMap lat={pos.lat} lng={pos.lng} driverName={order.driver_first_name} />
                         )}
                         {order.status==='on_the_way' && !pos && (
-                          <p style={{ fontSize:'0.8rem', color:'var(--gray-400)', fontStyle:'italic', marginTop:'0.4rem' }}>
+                          <p style={{ fontSize:'0.8rem', color:'var(--text-tertiary)', fontStyle:'italic', marginTop:'0.4rem' }}>
                             Actualizando ubicación del conductor…
                           </p>
                         )}
@@ -492,7 +492,7 @@ export default function CustomerOrders() {
       {/* Historial */}
       {tab==='past' && (
         past.length===0
-          ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
+          ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
           : (
             <ul className="orders-tab-panel reverse" style={{ listStyle:'none', padding:0 }}>
               {past.slice(0,50).map(o => {
@@ -511,14 +511,14 @@ export default function CustomerOrders() {
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
                         <span style={{ fontWeight:700 }}>{fmt(grandTotal)}</span>
-                        <span style={{ color:'var(--gray-400)', fontSize:'0.8rem' }}>{isHExp?'▲':'▼'}</span>
+                        <span style={{ color:'var(--text-tertiary)', fontSize:'0.8rem' }}>{isHExp?'▲':'▼'}</span>
                       </div>
                     </div>
                     {isHExp && (
                       <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
                         {/* Método de pago */}
                         {o.payment_method && (
-                          <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.3rem' }}>
+                          <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)', marginBottom:'0.3rem' }}>
                             Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[o.payment_method]||o.payment_method}</strong>
                           </div>
                         )}
@@ -537,7 +537,7 @@ export default function CustomerOrders() {
                           return (
                             <div style={{ marginTop:'0.35rem' }}>
                               <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-                                <span style={{ fontSize:'0.78rem', color:'var(--gray-500)' }}>Agradecimiento:</span>
+                                <span style={{ fontSize:'0.78rem', color:'var(--text-tertiary)' }}>Agradecimiento:</span>
                                 <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', alignItems:'center' }}>
                                   {[{pct:0,label:'—'},{pct:5,label:'5%'},{pct:10,label:'10%'},{pct:20,label:'20%'}].map(({pct,label}) => {
                                     const sub = o.total_cents || 0;
@@ -560,7 +560,7 @@ export default function CustomerOrders() {
                                 </div>
                               </div>
                               {minTip > 0 && (
-                                <div style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.15rem' }}>
+                                <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.15rem' }}>
                                   Mínimo al entregar: {fmt(minTip)}
                                 </div>
                               )}

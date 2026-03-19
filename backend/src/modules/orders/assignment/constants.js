@@ -3,6 +3,9 @@ export const MAX_ACTIVE_ORDERS_PER_DRIVER = 4;
 export const OFFER_TIMEOUT_SECONDS        = 60;   // segundos para expirar una oferta sin respuesta
 export const COOLDOWN_SECONDS             = 300;  // cooldown por driver tras rechazar/expirar
 export const COOLDOWN_DIVISOR             = 5;    // divisor para reducción de cooldown cuando no hay candidatos
+export const REBALANCE_COOLDOWN_SECONDS   = 900;  // cooldown largo tras rebalanceo manual (15 min)
+export const REBALANCE_DISPUTE_TIMEOUT_S  = 300;  // si nadie toma el pedido en disputa en 5 min, vuelve a ruta normal
+export const SESSION_REBALANCE_LIMIT      = 5;    // max rebalanceos manuales por sesión
 
 // Statuses que cuentan como pedido "activo" para el límite de carga del driver
 export const ACTIVE_STATUSES = ['assigned','accepted','preparing','ready','on_the_way'];

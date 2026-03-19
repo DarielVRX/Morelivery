@@ -107,18 +107,18 @@ export async function offerNextDrivers(orderId, onOffer) {
   }
 
   // ── 5. Scoring + Wraparound circular ─────────────────────────────────────
-  // El scoring del motor (ETA + fairness + SLA + penalizaciones) ordena los
-  // candidatos elegibles antes de aplicar el wraparound de rondas.
-  // Así el wraparound distribuye equitativamente entre los mejores candidatos,
-  // no simplemente por driver_number.
-  let scoredEligible = eligible; // fallback: orden original por driver_number
+  // Usa scoreCandidate() del motor para ordenar — corrige la inconsistencia
+  // anterior donde se calculaba un score ad-hoc aquí en lugar de reutilizar
+  // la función dedicada con todos sus parámetros configurables.
+  let scoredEligible = eligible.map(d => ({ ...d, bagOverflowPct: 0 })); // fallback
 
   try {
     const coordsRow = await query(
       `SELECT restaurant_lat, restaurant_lng, delivery_lat, delivery_lng,
               o.customer_id,
               COALESCE(o.delivery_lat, cu.lat)  AS cust_lat,
-              COALESCE(o.delivery_lng, cu.lng)  AS cust_lng
+              COALESCE(o.delivery_lng, cu.lng)  AS cust_lng,
+              o.estimated_volume_liters
        FROM orders o
        JOIN users cu ON cu.id = o.customer_id
        WHERE o.id = $1`,
@@ -135,46 +135,66 @@ export async function offerNextDrivers(orderId, onOffer) {
         lat: Number(coord.cust_lat),
         lng: Number(coord.cust_lng),
       };
+      const orderForSim = {
+        id: orderId,
+        estimated_volume_liters: Number(coord.estimated_volume_liters) || 0,
+      };
 
       if (
         Number.isFinite(restaurantPos.lat) && Number.isFinite(customerPos.lat)
       ) {
-        // Obtener candidatos con envelope de ETA del motor
         const { topDrivers } = await findCandidates(orderId, restaurantPos, customerPos);
 
         if (topDrivers.length > 0) {
-          // Mapear user_id de eligible a envelope del motor para obtener score
-          const envelopeByDriverId = new Map(
-            topDrivers.map(c => [c.driver.id, c])
+          // Para rondas con batch > 1 correr simulación completa para obtener
+          // bagOverflowPct y score definitivo. Para ronda 1-5 (batch=1) usar
+          // scoreCandidate() sobre el envelope — más rápido, suficientemente preciso.
+          const useFullSim = batchSize > 1;
+          const nowSec = Date.now() / 1000;
+
+          const scored = await Promise.all(
+            topDrivers.map(async (env) => {
+              try {
+                let candidate = env;
+                if (useFullSim) {
+                  candidate = await simulateDriverWithOrder(
+                    env, orderForSim, restaurantPos, customerPos, nowSec
+                  );
+                }
+                const { totalCost } = scoreCandidate(
+                  candidate,
+                  { max_delivery_time_s: null },
+                  candidate.driver?.disconnectPenalties ?? env.disconnectPenalties ?? 0
+                );
+                return {
+                  driverId:       env.driver.id,
+                  totalCost,
+                  bagOverflowPct: candidate.bagOverflowPct ?? 0,
+                };
+              } catch {
+                return { driverId: env.driver.id, totalCost: Infinity, bagOverflowPct: 0 };
+              }
+            })
           );
 
-          // Reordenar eligible según score del motor
-          // Los que no tienen envelope (raros) van al final con score Infinity
-          scoredEligible = [...eligible].sort((a, b) => {
-            const envA = envelopeByDriverId.get(a.user_id);
-            const envB = envelopeByDriverId.get(b.user_id);
+          const scoreMap = new Map(scored.map(s => [s.driverId, s]));
 
-            if (!envA && !envB) return 0;
-            if (!envA) return 1;
-            if (!envB) return -1;
+          scoredEligible = [...eligible]
+            .map(d => ({
+              ...d,
+              bagOverflowPct: scoreMap.get(d.user_id)?.bagOverflowPct ?? 0,
+            }))
+            .sort((a, b) => {
+              const sA = scoreMap.get(a.user_id)?.totalCost ?? Infinity;
+              const sB = scoreMap.get(b.user_id)?.totalCost ?? Infinity;
+              return sA - sB;
+            });
 
-            // Score simple basado en ETA estimada (sin simulación completa en ronda 1-5)
-            const scoreA = (envA.etaToNewCustomer ?? Infinity) +
-              (envA.loadPenalty ?? 0) +
-              (envA.disconnectPenalties ?? 0) * 300;
-            const scoreB = (envB.etaToNewCustomer ?? Infinity) +
-              (envB.loadPenalty ?? 0) +
-              (envB.disconnectPenalties ?? 0) * 300;
-
-            return scoreA - scoreB;
-          });
-
-          log(`order=${orderId}`, `scoring aplicado — ${topDrivers.length} candidatos del motor`);
+          log(`order=${orderId}`, `scoreCandidate aplicado — ${topDrivers.length} candidatos`);
         }
       }
     }
   } catch (e) {
-    // Si el scoring falla, seguimos con el orden original (degradación elegante)
     log(`order=${orderId}`, `scoring fallback a driver_number: ${e.message}`);
   }
 
@@ -196,7 +216,7 @@ export async function offerNextDrivers(orderId, onOffer) {
   // ── 6. Enviar ofertas ─────────────────────────────────────────────────────
   let sent = 0;
   for (const row of batch) {
-    const ok = await upsertOffer(orderId, row.user_id, onOffer);
+    const ok = await upsertOffer(orderId, row.user_id, onOffer, row.bagOverflowPct ?? 0);
     if (ok) sent++;
   }
 

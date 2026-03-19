@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
-import { acceptOffer, rejectOffer, releaseOrder, offerNextDrivers, getQueuedOrders, serializedOffer } from '../orders/assignment/index.js';
+import { acceptOffer, rejectOffer, releaseOrder, offerNextDrivers, getQueuedOrders, serializedOffer, requestRebalance } from '../orders/assignment/index.js';
 import { sseHub } from '../events/hub.js';
 import { offerCb } from '../events/offerCallback.js';
 import { AppError } from '../../utils/errors.js';
@@ -30,6 +30,20 @@ router.patch('/availability', authenticate, authorize(['driver']), async (req, r
     if (result.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
 
     if (isAvailable) {
+      // Resetear contadores de sesión al activarse (nueva sesión operativa)
+      try {
+        await query(
+          `UPDATE driver_profiles
+           SET session_rebalances = 0,
+               session_releases   = 0,
+               session_cancels    = 0,
+               session_expires    = 0,
+               session_started_at = NOW()
+           WHERE user_id = $1`,
+          [driverId]
+        );
+      } catch (_) {}
+
       // Driver reconectándose: borrar reconnect_deadline en sus pedidos on_the_way
       // para que cleanStaleEntities no los cancele mientras el driver está activo.
       try {
@@ -229,6 +243,43 @@ router.post('/offers/:orderId/reject', authenticate, authorize(['driver']), asyn
   } catch (error) { return next(error); }
 });
 
+/* ── POST /drivers/orders/:orderId/rebalance — rebalanceo manual ────────────── */
+router.post('/orders/:orderId/rebalance', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+    const driverId    = req.user.userId;
+
+    const result = await requestRebalance(orderId, driverId);
+    if (!result.ok) return next(new AppError(409, result.reason));
+
+    // Notificar al driver vía SSE que su pedido está en disputa
+    sseHub.sendToUser(driverId, 'order_update', {
+      orderId,
+      status:      'disputed',
+      isDisputed:  true,
+      message:     'Tu pedido está en disputa. Si nadie lo toma, sigue en tu ruta.',
+    });
+
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+
+/* ── GET /drivers/me/counters — contadores de sesión e histórico ────────────── */
+router.get('/me/counters', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const r = await query(
+      `SELECT
+         session_rebalances, session_releases, session_cancels, session_expires,
+         session_started_at,
+         total_rebalances,  total_releases,  total_cancels,  total_expires
+       FROM driver_profiles WHERE user_id = $1`,
+      [req.user.userId]
+    );
+    if (r.rowCount === 0) return next(new AppError(404, 'Perfil no encontrado'));
+    return res.json({ counters: r.rows[0] });
+  } catch (error) { return next(error); }
+});
+
 /* ── POST /drivers/orders/:orderId/release ──────────────────────────────────── */
 router.post('/orders/:orderId/release', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
@@ -240,6 +291,16 @@ router.post('/orders/:orderId/release', authenticate, authorize(['driver']), asy
       catch (_) {}
     }
     await releaseOrder(orderId, driverId, offerCb);
+    // Contadores
+    try {
+      await query(
+        `UPDATE driver_profiles
+         SET session_releases = session_releases + 1,
+             total_releases   = total_releases + 1
+         WHERE user_id = $1`,
+        [driverId]
+      );
+    } catch (_) {}
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });

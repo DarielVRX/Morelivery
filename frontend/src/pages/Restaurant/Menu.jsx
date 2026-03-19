@@ -6,7 +6,7 @@ function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
 function ProductImagePlaceholder({ size = 68 }) {
   return (
-    <div style={{ width:size, height:size, borderRadius:6, background:'var(--gray-100)', border:'1px solid var(--gray-200)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+    <div style={{ width:size, height:size, borderRadius:6, background:'var(--gray-100)', border:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
       <svg width={size*0.5} height={size*0.5} viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="1.5">
         <circle cx="12" cy="12" r="9"/>
         <path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
@@ -21,7 +21,7 @@ function ProductImage({ src, size = 68 }) {
   if (!src || err) return <ProductImagePlaceholder size={size} />;
   return (
     <img src={src} alt="" width={size} height={size} onError={() => setErr(true)}
-      style={{ width:size, height:size, borderRadius:6, objectFit:'cover', border:'1px solid var(--gray-200)', flexShrink:0 }} />
+      style={{ width:size, height:size, borderRadius:6, objectFit:'cover', border:'1px solid var(--border)', flexShrink:0 }} />
   );
 }
 
@@ -45,6 +45,8 @@ export default function RestaurantMenu() {
   const [name, setName]         = useState('');
   const [description, setDesc]  = useState('');
   const [price, setPrice]       = useState('');
+  const [pkgUnits, setPkgUnits]           = useState('1');
+  const [pkgVolume, setPkgVolume]         = useState('0');
   const [msg, setMsg]           = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editingIsAvailable, setEditingIsAvailable] = useState(true);
@@ -99,7 +101,13 @@ export default function RestaurantMenu() {
     const cents = Math.round(parseFloat(price.toString().replace(',', '.')) * 100);
     if (isNaN(cents) || cents <= 0) return setMsg('Precio inválido');
     try {
-      const payload = { name: name.trim(), description: description.trim(), priceCents: cents };
+      const payload = {
+        name: name.trim(),
+        description: description.trim(),
+        priceCents: cents,
+        pkgUnits:        Math.max(1, parseInt(pkgUnits,  10) || 1),
+        pkgVolumeLiters: Math.max(0, parseFloat(pkgVolume.toString().replace(',', '.')) || 0),
+      };
       if (editingId) {
         payload.isAvailable = editingIsAvailable;
         await apiFetch(`/restaurants/menu-items/${editingId}`, { method:'PATCH', body: JSON.stringify(payload) }, auth.token);
@@ -117,13 +125,16 @@ export default function RestaurantMenu() {
     setName(product.name);
     setDesc(product.description || '');
     setPrice((product.price_cents / 100).toFixed(2));
+    setPkgUnits(String(product.pkg_units ?? 1));
+    setPkgVolume(String(product.pkg_volume_liters ?? 0));
     setMsg('');
-    // No abrir el form colapsado — ahora el form es inline en la lista
   }
 
   function resetForm() {
-    setEditingId(null); setEditingIsAvailable(true); setName(''); setDesc(''); setPrice(''); setMsg('');
-    setFormOpen(false);
+    setEditingId(null); setEditingIsAvailable(true);
+    setName(''); setDesc(''); setPrice('');
+    setPkgUnits('1'); setPkgVolume('0');
+    setMsg(''); setFormOpen(false);
   }
 
   async function toggleAvailable(product) {
@@ -160,9 +171,9 @@ export default function RestaurantMenu() {
   }
 
   return (
-    <div style={{ backgroundColor: '#fff9f8', minHeight:'100vh', padding:'1rem' }}>
+    <div style={{ backgroundColor: 'var(--bg-base)', minHeight:'100vh', padding:'1rem' }}>
       {/* ── Encabezado Gestión de menú ─────────────────────────────────── */}
-      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg,#c0546a 0%,#8a3a4e 100%)', color:'#fff' }}>
+      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'var(--promo-gradient)', color:'#fff' }}>
         <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>📋 Gestión de menú</div>
         <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Productos, precios e imagen de tu tienda</div>
       </div>
@@ -188,7 +199,7 @@ export default function RestaurantMenu() {
 
       {/* ── Foto de perfil de la tienda ── */}
       <div style={{ display:'flex', alignItems:'center', gap:'0.875rem', marginBottom:'1.25rem',
-        padding:'0.875rem 1rem', background:'#fff', borderRadius:10, border:'1px solid var(--gray-200)' }}>
+        padding:'0.875rem 1rem', background:'var(--bg-card)', borderRadius:10, border:'1px solid var(--border)' }}>
         <div style={{ position:'relative', flexShrink:0 }}>
           {profilePhoto
             ? <img src={profilePhoto} alt="Foto de tienda"
@@ -217,7 +228,7 @@ export default function RestaurantMenu() {
 
       {/* Editor de foto de tienda */}
       {editingProfilePhoto && (
-        <div style={{ marginBottom:'1rem', padding:'0.875rem 1rem', background:'#fff',
+        <div style={{ marginBottom:'1rem', padding:'0.875rem 1rem', background:'var(--bg-card)',
           borderRadius:10, border:'1px solid #e3aaaa' }}>
           <p style={{ fontWeight:700, fontSize:'0.85rem', color:'#8a5e5e', marginBottom:'0.5rem' }}>
             Cambiar foto de perfil
@@ -249,7 +260,7 @@ export default function RestaurantMenu() {
 
       {/* Lista de productos */}
       {products.length === 0
-        ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin productos en el menú.</p>
+        ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin productos en el menú.</p>
         : (
           <ul style={{ listStyle:'none', padding:0, marginBottom:'1rem' }}>
             {products.map(product => (
@@ -265,6 +276,20 @@ export default function RestaurantMenu() {
                       <label>Nombre<input value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre del producto" /></label>
                       <label>Descripción<input value={description} onChange={e=>setDesc(e.target.value)} placeholder="Descripción (opcional)" /></label>
                       <label>Precio (MXN)<input type="number" value={price} onChange={e=>setPrice(e.target.value)} step="0.01" min="0" placeholder="0.00" /></label>
+                    </div>
+                    <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.4rem' }}>
+                      <label style={{ flex:1 }}>
+                        Unidades por empaque
+                        <input type="number" value={pkgUnits} onChange={e=>setPkgUnits(e.target.value)}
+                          min="1" step="1" placeholder="1"
+                          title="Cuántas unidades incluye un empaque (ej: 6 nuggets = 6)" />
+                      </label>
+                      <label style={{ flex:1 }}>
+                        Volumen empaque (L)
+                        <input type="number" value={pkgVolume} onChange={e=>setPkgVolume(e.target.value)}
+                          min="0" step="0.01" placeholder="0.00"
+                          title="Litros que ocupa un empaque en la mochila (ej: 0.5 = medio litro)" />
+                      </label>
                     </div>
                     <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
                       <button className="btn-primary btn-sm" onClick={handleSubmit} disabled={!name.trim()||!price}>
@@ -283,7 +308,7 @@ export default function RestaurantMenu() {
                       <span style={{ fontWeight:700, color:'#8a5e5e', flexShrink:0 }}>{fmt(product.price_cents)}</span>
                     </div>
                     {product.description && (
-                      <p style={{ fontSize:'0.82rem', color:'var(--gray-600)', margin:'0.15rem 0 0' }}>{product.description}</p>
+                      <p style={{ fontSize:'0.82rem', color:'var(--text-secondary)', margin:'0.15rem 0 0' }}>{product.description}</p>
                     )}
                     <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
                       <button className="btn-sm" onClick={() => startEdit(product)}>Editar</button>
@@ -330,7 +355,7 @@ export default function RestaurantMenu() {
                           />
                           {preview && (
                             <img src={preview} alt="Preview"
-                              style={{ width:40, height:40, borderRadius:4, objectFit:'cover', border:'1px solid var(--gray-200)' }} />
+                              style={{ width:40, height:40, borderRadius:4, objectFit:'cover', border:'1px solid var(--border)' }} />
                           )}
                         </div>
                         <div style={{ display:'flex', gap:'0.4rem' }}>
@@ -375,6 +400,20 @@ export default function RestaurantMenu() {
               <label>Nombre del producto<input value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Taco de pastor" /></label>
               <label>Descripción (opcional)<input value={description} onChange={e => setDesc(e.target.value)} placeholder="Ej: Con cebolla y cilantro" /></label>
               <label>Precio (pesos)<input value={price} onChange={e => setPrice(e.target.value)} placeholder="Ej: 35.00" inputMode="decimal" /></label>
+              <div style={{ display:'flex', gap:'0.5rem' }}>
+                <label style={{ flex:1 }}>
+                  Unidades por empaque
+                  <input type="number" value={pkgUnits} onChange={e => setPkgUnits(e.target.value)}
+                    min="1" step="1" placeholder="1"
+                    title="Cuántas unidades incluye un empaque" />
+                </label>
+                <label style={{ flex:1 }}>
+                  Volumen empaque (L)
+                  <input type="number" value={pkgVolume} onChange={e => setPkgVolume(e.target.value)}
+                    min="0" step="0.01" placeholder="0.00"
+                    title="Litros que ocupa un empaque en la mochila" />
+                </label>
+              </div>
             </div>
             {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
             <div style={{ display:'flex', gap:'0.5rem' }}>

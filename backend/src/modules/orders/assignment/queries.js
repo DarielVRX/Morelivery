@@ -250,13 +250,13 @@ export async function getPendingOffer(orderId) {
 }
 
 /** Upsert a pending — inserta o actualiza a pending con wait_until=NULL */
-export async function upsertPendingOffer(orderId, driverId) {
+export async function upsertPendingOffer(orderId, driverId, bagOverflowPct = 0) {
   await query(
-    `INSERT INTO order_driver_offers(order_id,driver_id,status,wait_until)
-     VALUES($1,$2,'pending',NULL)
+    `INSERT INTO order_driver_offers(order_id,driver_id,status,wait_until,bag_overflow_pct)
+     VALUES($1,$2,'pending',NULL,$3)
      ON CONFLICT(order_id,driver_id)
-     DO UPDATE SET status='pending', updated_at=NOW(), wait_until=NULL`,
-    [orderId, driverId]
+     DO UPDATE SET status='pending', updated_at=NOW(), wait_until=NULL, bag_overflow_pct=$3`,
+    [orderId, driverId, bagOverflowPct]
   );
 }
 
@@ -355,6 +355,7 @@ export async function getOfferPayload(orderId, driverId) {
             COALESCE(o.delivery_address, c.address) AS customer_address,
             COALESCE(o.delivery_lat, c.lat) AS customer_lat,
             COALESCE(o.delivery_lng, c.lng) AS customer_lng,
+            od.bag_overflow_pct,
             GREATEST(0, EXTRACT(EPOCH FROM (
               od.updated_at + ($3::int * INTERVAL '1 second') - NOW()
             )))::int AS seconds_left

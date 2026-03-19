@@ -179,11 +179,60 @@ export function useOrderManager(token, patchUser, userDriver) {
     finally { setLoadingOffer(false); }
   }
 
+  // GPS grace window: track last time driver was within radius
+  const graceTimestampRef = useRef({}); // { 'on_the_way': epochMs, 'delivered': epochMs }
+  const GRACE_MS = 3 * 60 * 1000; // 3 min
+  const MAX_RADIUS_M = 100;
+
+  function haversineM(lat1, lng1, lat2, lng2) {
+    const toRad = x => x * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+    return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
   async function changeStatus(orderId, status, onError) {
     setLoadingStatus(status);
     try {
+      const body = { status };
+
+      // For critical driver transitions, attach GPS + grace flag
+      if (['on_the_way', 'delivered'].includes(status)) {
+        await new Promise(resolve => {
+          if (!navigator.geolocation) { resolve(); return; }
+          navigator.geolocation.getCurrentPosition(
+            pos => {
+              body.lat = pos.coords.latitude;
+              body.lng = pos.coords.longitude;
+
+              // Check grace window: if driver was within radius recently, set grace=true
+              const order = activeOrder;
+              const refLat = status === 'on_the_way' ? order?.restaurant_lat : order?.delivery_lat;
+              const refLng = status === 'on_the_way' ? order?.restaurant_lng : order?.delivery_lng;
+
+              if (refLat && refLng) {
+                const distM = haversineM(body.lat, body.lng, Number(refLat), Number(refLng));
+                if (distM <= MAX_RADIUS_M) {
+                  // Within radius now — update grace timestamp
+                  graceTimestampRef.current[status] = Date.now();
+                } else {
+                  // Outside — check if was within radius recently
+                  const lastIn = graceTimestampRef.current[status];
+                  if (lastIn && Date.now() - lastIn <= GRACE_MS) {
+                    body.grace = true;
+                  }
+                }
+              }
+              resolve();
+            },
+            () => resolve(), // GPS error — let backend decide (no coords = graceful degrade)
+            { timeout: 3000, maximumAge: 15000 }
+          );
+        });
+      }
+
       await apiFetch(`/orders/${orderId}/status`,
-        { method: 'PATCH', body: JSON.stringify({ status }) }, token);
+        { method: 'PATCH', body: JSON.stringify(body) }, token);
       loadData();
     } catch (e) { onError?.(e.message); }
     finally { setLoadingStatus(''); }
@@ -195,6 +244,16 @@ export function useOrderManager(token, patchUser, userDriver) {
       await apiFetch(`/drivers/orders/${activeOrder.id}/release`,
         { method: 'POST', body: JSON.stringify({ note: releaseNote }) }, token);
       setShowRelease(false); setReleaseNote(''); loadData();
+    } catch (e) { onError?.(e.message); }
+  }
+
+  async function doRebalance(onError) {
+    if (!activeOrder || activeOrder.picked_up_at) return;
+    try {
+      await apiFetch(`/drivers/orders/${activeOrder.id}/rebalance`,
+        { method: 'POST' }, token);
+      // Refrescar para mostrar badge "En disputa"
+      loadData();
     } catch (e) { onError?.(e.message); }
   }
 
@@ -219,6 +278,6 @@ export function useOrderManager(token, patchUser, userDriver) {
     setTransferBanner,
     // Acciones
     loadData, toggleAvailability, acceptOffer, rejectOffer,
-    changeStatus, doRelease, handleOfferExpired,
+    changeStatus, doRelease, doRebalance, handleOfferExpired,
   };
 }

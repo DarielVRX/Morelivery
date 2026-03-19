@@ -15,9 +15,9 @@ export default function RestaurantSchedule() {
   }, [auth.token]);
 
   return (
-    <div style={{ backgroundColor:'#fff9f8', minHeight:'100vh', padding:'1rem' }}>
+    <div style={{ backgroundColor:'var(--bg-base)', minHeight:'100vh', padding:'1rem' }}>
       {/* ── Encabezado Horario ─────────────────────────────────────────── */}
-      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg,#c0546a 0%,#8a3a4e 100%)', color:'#fff' }}>
+      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'var(--promo-gradient)', color:'#fff' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <div>
             <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>🕐 Horario de atención</div>

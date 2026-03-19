@@ -81,7 +81,7 @@ export default function DriverEarnings() {
             { label:'Propinas', value: fmt(summary.total_tips), color:'#f59e0b' },
           ].map(({ label, value, color }) => (
             <div key={label} className="card" style={{ textAlign:'center', padding:'0.75rem 0.5rem' }}>
-              <div style={{ fontSize:'0.68rem', color:'var(--gray-500)', marginBottom:'0.2rem', fontWeight:600, textTransform:'uppercase' }}>{label}</div>
+              <div style={{ fontSize:'0.68rem', color:'var(--text-tertiary)', marginBottom:'0.2rem', fontWeight:600, textTransform:'uppercase' }}>{label}</div>
               <div style={{ fontSize:'1.1rem', fontWeight:800, color }}>{value}</div>
             </div>
           ))}
@@ -89,12 +89,12 @@ export default function DriverEarnings() {
       )}
 
       {loading && orders.length === 0 ? (
-        <div style={{ padding:'2rem', textAlign:'center', color:'var(--gray-400)' }}>Cargando…</div>
+        <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)' }}>Cargando…</div>
       ) : orders.length === 0 ? (
-        <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin entregas en este período.</p>
+        <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin entregas en este período.</p>
       ) : (
         <div>
-          <h3 style={{ fontSize:'0.8rem', fontWeight:700, color:'var(--gray-500)', marginBottom:'0.6rem', textTransform:'uppercase', letterSpacing:'0.4px' }}>
+          <h3 style={{ fontSize:'0.8rem', fontWeight:700, color:'var(--text-tertiary)', marginBottom:'0.6rem', textTransform:'uppercase', letterSpacing:'0.4px' }}>
             Por entrega
           </h3>
           <ul style={{ listStyle:'none', padding:0 }}>
@@ -111,13 +111,13 @@ export default function DriverEarnings() {
                     <span style={{ fontWeight:700, fontSize:'0.875rem' }}>{o.restaurant_name}</span>
                     <span style={{ fontWeight:800, color:'var(--success)' }}>{fmt(earning)}</span>
                   </div>
-                  <div style={{ fontSize:'0.77rem', color:'var(--gray-500)' }}>
+                  <div style={{ fontSize:'0.77rem', color:'var(--text-tertiary)' }}>
                     {fmtDate(o.delivered_at || o.created_at)}
                     {' · '}{{ cash:'Efectivo', card:'Tarjeta', spei:'SPEI' }[o.payment_method] || 'Efectivo'}
                     {tip > 0 && <span style={{ color:'#f59e0b' }}> · Propina +{fmt(tip)}</span>}
                   </div>
                   {isCash && (
-                    <div style={{ fontSize:'0.77rem', color:'var(--gray-500)', marginTop:'0.15rem' }}>
+                    <div style={{ fontSize:'0.77rem', color:'var(--text-tertiary)', marginTop:'0.15rem' }}>
                       Cobrar: <strong style={{ color:'var(--brand)' }}>{fmt(grandTotal)}</strong>
                       <span style={{ marginLeft:'0.5rem' }}>· Pagar tienda: <strong>{fmt(o.total_cents || 0)}</strong></span>
                     </div>
@@ -128,8 +128,8 @@ export default function DriverEarnings() {
           </ul>
           {hasMore && (
             <button onClick={loadMore} disabled={loading}
-              style={{ width:'100%', padding:'0.6rem', background:'#fff', border:'1px solid #e5e7eb',
-                borderRadius:10, cursor:'pointer', fontSize:'0.85rem', color:'var(--gray-600)', marginTop:'0.25rem' }}>
+              style={{ width:'100%', padding:'0.6rem', background:'var(--bg-card)', border:'1px solid #e5e7eb',
+                borderRadius:10, cursor:'pointer', fontSize:'0.85rem', color:'var(--text-secondary)', marginTop:'0.25rem' }}>
               {loading ? 'Cargando…' : 'Cargar más'}
             </button>
           )}

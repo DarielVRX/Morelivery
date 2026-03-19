@@ -59,7 +59,7 @@ function LandingScreen() {
 
   return (
     <div style={{
-      minHeight:'100dvh', background:'#fff',
+      minHeight:'100dvh', background:'var(--bg-card)',
       display:'flex', flexDirection:'column',
       alignItems:'center', justifyContent:'center',
       padding:'2rem 1.25rem',
@@ -67,10 +67,10 @@ function LandingScreen() {
       {/* Marca */}
       <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'0.5rem', marginBottom:'2.5rem' }}>
         <img src="/logo.svg" alt="Morelivery" style={{ width:60, height:60 }} />
-        <h1 style={{ fontSize:'2rem', fontWeight:900, color:'var(--gray-800)', margin:0, letterSpacing:'-0.02em' }}>
+        <h1 style={{ fontSize:'2rem', fontWeight:900, color:'var(--text-primary)', margin:0, letterSpacing:'-0.02em' }}>
           Morelivery
         </h1>
-        <p style={{ color:'var(--gray-600)', fontSize:'0.95rem', margin:0 }}>
+        <p style={{ color:'var(--text-secondary)', fontSize:'0.95rem', margin:0 }}>
           ¿Cómo quieres acceder?
         </p>
       </div>
@@ -86,15 +86,15 @@ function LandingScreen() {
               display:'flex', alignItems:'center', gap:'1rem',
               padding:'0.875rem 1.25rem',
               background:'var(--brand-light)',
-              border:'1.5px solid #e3aaaa',
+              border:'1.5px solid var(--border)',
               borderRadius:14,
               cursor:'pointer',
               transition:'transform 0.15s, box-shadow 0.15s',
             }} className="landing-btn">
               <span style={{ fontSize:'1.5rem', lineHeight:1 }}>{app.icon}</span>
               <div>
-                <div style={{ fontWeight:700, fontSize:'0.95rem', color:'var(--gray-800)' }}>{app.label}</div>
-                <div style={{ fontSize:'0.78rem', color:'var(--gray-600)' }}>{app.description}</div>
+                <div style={{ fontWeight:700, fontSize:'0.95rem', color:'var(--text-primary)' }}>{app.label}</div>
+                <div style={{ fontSize:'0.78rem', color:'var(--text-secondary)' }}>{app.description}</div>
               </div>
               <span style={{ marginLeft:'auto', color:'#e3aaaa', fontSize:'1.1rem' }}>›</span>
             </div>
@@ -181,12 +181,12 @@ const AuthScreen = memo(function AuthScreen({ mode = 'login' }) {
   const isOk = message.startsWith('Registro exitoso');
 
   return (
-    <div style={{ minHeight:'100dvh', background:'#fff', display:'flex', flexDirection:'column' }}>
+    <div style={{ minHeight:'100dvh', background:'var(--bg-card)', display:'flex', flexDirection:'column' }}>
       {/* Header con botón atrás */}
       <header style={{
         display:'flex', alignItems:'center', justifyContent:'space-between',
         padding:'0.75rem 1.25rem', borderBottom:'1px solid var(--gray-200)',
-        background:'#fff', position:'sticky', top:0, zIndex:10,
+        background:'var(--bg-card)', position:'sticky', top:0, zIndex:10,
       }}>
         <Link to="/" style={{ display:'flex', alignItems:'center', gap:'0.3rem', color:'var(--brand)', fontSize:'0.875rem', fontWeight:600, textDecoration:'none' }}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -194,7 +194,7 @@ const AuthScreen = memo(function AuthScreen({ mode = 'login' }) {
           </svg>
           Inicio
         </Link>
-        <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', color:'var(--gray-800)' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', color:'var(--text-primary)' }}>
           <img src="/logo.svg" alt="" style={{ width:24, height:24 }} />
           <strong style={{ fontSize:'0.95rem' }}>Morelivery</strong>
         </div>

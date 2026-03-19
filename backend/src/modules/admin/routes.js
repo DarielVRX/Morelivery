@@ -382,4 +382,80 @@ router.patch('/drivers/:id/penalties', authenticate, authorize(['admin']), async
   } catch (error) { return next(error); }
 });
 
+// ── GET /admin/reports — reportes pendientes de revisión ─────────────────────
+router.get('/reports', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const reviewed = req.query.reviewed === 'true';
+    const r = await query(
+      `SELECT rp.id, rp.order_id, rp.reporter_role, rp.reason, rp.text, rp.reviewed, rp.created_at,
+              u.full_name AS reporter_name,
+              o.status AS order_status,
+              rest.name AS restaurant_name
+       FROM order_reports rp
+       JOIN users u ON u.id = rp.reporter_id
+       JOIN orders o ON o.id = rp.order_id
+       JOIN restaurants rest ON rest.id = o.restaurant_id
+       WHERE rp.reviewed = $1
+       ORDER BY rp.created_at DESC
+       LIMIT 100`,
+      [reviewed]
+    );
+    return res.json({ reports: r.rows });
+  } catch (error) { return next(error); }
+});
+
+// ── PATCH /admin/reports/:id/review — marcar reporte como revisado ────────────
+router.patch('/reports/:id/review', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    await query('UPDATE order_reports SET reviewed=true WHERE id=$1', [req.params.id]);
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+
+// ── GET /admin/order-notes — notas de cancelación y liberación ───────────────
+router.get('/order-notes', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const r = await query(
+      `SELECT o.id, o.status, o.driver_note, o.restaurant_note, o.cancelled_at,
+              o.created_at, o.updated_at,
+              rest.name AS restaurant_name,
+              c.full_name AS customer_name,
+              d.full_name AS driver_name
+       FROM orders o
+       JOIN restaurants rest ON rest.id = o.restaurant_id
+       JOIN users c ON c.id = o.customer_id
+       LEFT JOIN users d ON d.id = o.driver_id
+       WHERE (o.driver_note IS NOT NULL OR o.restaurant_note IS NOT NULL)
+         AND o.status IN ('cancelled', 'delivered')
+       ORDER BY o.updated_at DESC
+       LIMIT 100`,
+      []
+    );
+    return res.json({ notes: r.rows });
+  } catch (error) { return next(error); }
+});
+
+// ── GET /admin/ratings — todas las calificaciones ─────────────────────────────
+router.get('/ratings', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const r = await query(
+      `SELECT rt.id, rt.order_id, rt.restaurant_stars, rt.driver_stars,
+              rt.restaurant_rates_driver, rt.driver_rates_restaurant,
+              rt.comment, rt.driver_comment, rt.restaurant_comment,
+              rt.created_at,
+              rest.name AS restaurant_name,
+              c.full_name AS customer_name,
+              d.full_name AS driver_name
+       FROM order_ratings rt
+       JOIN restaurants rest ON rest.id = rt.restaurant_id
+       JOIN users c ON c.id = rt.customer_id
+       LEFT JOIN users d ON d.id = rt.driver_id
+       ORDER BY rt.created_at DESC
+       LIMIT 200`,
+      []
+    ).catch(() => ({ rows: [] }));
+    return res.json({ ratings: r.rows });
+  } catch (error) { return next(error); }
+});
+
 export default router;

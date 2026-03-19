@@ -19,6 +19,9 @@ export default function OfferPanel({
     + (offer.tip_cents || 0)
     || offer.driverEarning || 0;
 
+  const bagOverflow = offer.bagOverflowPct ?? 0;
+  const showBagWarning = bagOverflow > 100;
+
   return (
     <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:30,
       pointerEvents: minimized ? 'none' : 'auto' }}>
@@ -42,26 +45,26 @@ export default function OfferPanel({
           Oferta
         </button>
 
-        <div style={{ background:'#fff', borderTop:'1px solid #e8c8d4',
+        <div style={{ background:'var(--bg-card)', borderTop:'1px solid var(--border)',
           boxShadow:'0 -4px 20px rgba(0,0,0,0.14)', overflow:'hidden', pointerEvents:'auto' }}>
           <div style={{ padding:'0.6rem 1rem 0.75rem', overflowY:'auto' }}>
 
-            <div style={{ fontSize:'0.82rem', color:'var(--gray-700)', marginBottom:'0.3rem' }}>
+            <div style={{ fontSize:'0.82rem', color:'var(--text-primary)', marginBottom:'0.3rem' }}>
               {(offer.restaurant_name || offer.restaurantAddress) && (
                 <div style={{ marginBottom:'0.1rem' }}>
-                  <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Tienda: </span>
+                  <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>Tienda: </span>
                   <strong>{offer.restaurant_name || offer.restaurantAddress}</strong>
                 </div>
               )}
               {(offer.restaurant_address || offer.restaurantAddress) && (
                 <div style={{ marginBottom:'0.1rem' }}>
-                  <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Dir. tienda: </span>
+                  <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>Dir. tienda: </span>
                   <strong>{offer.restaurant_address || offer.restaurantAddress}</strong>
                 </div>
               )}
               {(offer.customer_address || offer.customerAddress || offer.delivery_address) && (
                 <div style={{ marginBottom:'0.1rem' }}>
-                  <span style={{ color:'var(--gray-400)', fontSize:'0.72rem' }}>Entrega: </span>
+                  <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>Entrega: </span>
                   <strong>{offer.customer_address || offer.customerAddress || offer.delivery_address}</strong>
                 </div>
               )}
@@ -70,6 +73,20 @@ export default function OfferPanel({
             {earn > 0 && (
               <div style={{ fontSize:'0.9rem', fontWeight:800, color:'var(--success)', marginBottom:'0.35rem' }}>
                 Tu ganancia: {fmt(earn)}
+              </div>
+            )}
+
+            {showBagWarning && (
+              <div style={{
+                background:'var(--warn-bg)', border:'1.5px solid var(--warn-border)',
+                borderRadius:8, padding:'0.5rem 0.75rem',
+                marginBottom:'0.4rem', display:'flex', alignItems:'flex-start', gap:'0.5rem',
+              }}>
+                <span style={{ fontSize:'1.2rem', lineHeight:1 }}>🎒</span>
+                <div style={{ fontSize:'0.78rem', color:'var(--warn)', lineHeight:1.4 }}>
+                  <strong>Mochila al {bagOverflow}%</strong> — con este pedido tu capacidad
+                  se excede en algún punto de la ruta. Puedes aceptarlo igual.
+                </div>
               </div>
             )}
 
@@ -87,8 +104,8 @@ export default function OfferPanel({
               </button>
               <button
                 style={{ flex:1, padding:'0.65rem 0', fontSize:'0.95rem', fontWeight:700, borderRadius:10,
-                  background:'var(--gray-100)', color:'var(--gray-700)',
-                  border:'1px solid var(--gray-200)', cursor:'pointer' }}
+                  background:'var(--bg-raised)', color:'var(--text-primary)',
+                  border:'1px solid var(--border)', cursor:'pointer' }}
                 disabled={loading} onClick={onReject}>
                 ✕ Rechazar
               </button>

@@ -54,10 +54,10 @@ function Badge({ status, label }) {
 
 function Th({ children }) {
   return <th style={{ padding:'0.4rem 0.65rem', textAlign:'left', whiteSpace:'nowrap', fontWeight:700,
-    borderBottom:'2px solid #e5e7eb', background:'#f9fafb', fontSize:'0.75rem', color:'#374151' }}>{children}</th>;
+    borderBottom:'2px solid var(--border)', background:'var(--bg-sunken)', fontSize:'0.75rem', color:'var(--text-secondary)' }}>{children}</th>;
 }
 function Td({ children, style={} }) {
-  return <td style={{ padding:'0.4rem 0.65rem', borderBottom:'1px solid #f3f4f6', fontSize:'0.8rem', verticalAlign:'middle', ...style }}>{children}</td>;
+  return <td style={{ padding:'0.4rem 0.65rem', borderBottom:'1px solid var(--border-light)', fontSize:'0.8rem', verticalAlign:'middle', color:'var(--text-primary)', ...style }}>{children}</td>;
 }
 
 // ── Tiempo real: ticker que re-renderiza cada segundo ─────────────────────────
@@ -137,12 +137,12 @@ function DriversPanel({ drivers, orderId }) {
         onClick={() => setOpen(o => !o)}
         style={{ fontSize:'0.75rem', background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:6,
           cursor:'pointer', padding:'0.25rem 0.65rem', fontWeight:600, display:'flex',
-          alignItems:'center', gap:'0.35rem', marginTop:'0.25rem', color:'#374151' }}>
+          alignItems:'center', gap:'0.35rem', marginTop:'0.25rem', color:'var(--text-primary)' }}>
         <span style={{ fontSize:'0.6rem' }}>{open ? '▲' : '▼'}</span>
         {open ? 'Ocultar drivers' : `👥 Drivers — ${classified.filter(d=>d.priority===0).length} con oferta, ${classified.filter(d=>d.priority<=2).length} elegibles`}
       </button>
       {open && (
-        <div style={{ marginTop:'0.4rem', border:'1px solid #e5e7eb', borderRadius:8, overflow:'hidden' }}>
+        <div style={{ marginTop:'0.4rem', border:'1px solid var(--border)', borderRadius:8, overflow:'hidden' }}>
           <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'auto' }}>
             <thead>
               <tr>
@@ -217,7 +217,7 @@ function OrderRow({ order, drivers }) {
         onClick={() => setExpanded(e => !e)}
       >
         <Td>
-          <span style={{ fontFamily:'monospace', fontSize:'0.72rem', color:'#6b7280' }}>
+          <span style={{ fontFamily:'monospace', fontSize:'0.72rem', color:'var(--text-secondary)' }}>
             {order.id.slice(0,8)}
           </span>
         </Td>
@@ -241,7 +241,7 @@ function OrderRow({ order, drivers }) {
         </Td>
         <Td>{fmt(order.total_cents)}</Td>
         <Td>
-          <span style={{ fontSize:'0.72rem', color:'#6b7280' }}>{expanded ? '▲' : '▼'}</span>
+          <span style={{ fontSize:'0.72rem', color:'var(--text-secondary)' }}>{expanded ? '▲' : '▼'}</span>
         </Td>
       </tr>
       {expanded && (
@@ -279,7 +279,7 @@ function OrderRow({ order, drivers }) {
 
 function Detail({ label, value, color }) {
   return (
-    <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:7, padding:'0.4rem 0.6rem' }}>
+    <div style={{ background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:7, padding:'0.4rem 0.6rem' }}>
       <div style={{ fontSize:'0.68rem', color:'#9ca3af', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.03em' }}>{label}</div>
       <div style={{ fontSize:'0.82rem', fontWeight:700, color: color || '#1f2937', marginTop:'0.1rem' }}>{value || '—'}</div>
     </div>
@@ -305,9 +305,16 @@ export default function AdminDashboard() {
 
   // ── Engine params ─────────────────────────────────────────────────────────
   const [engineParams, setEngineParams]   = useState([]);
-  const [paramEditing, setParamEditing]   = useState({}); // key → draft string value
-  const [paramSaving,  setParamSaving]    = useState(''); // key being saved
+  const [paramEditing, setParamEditing]   = useState({});
+  const [paramSaving,  setParamSaving]    = useState('');
   const [paramMsg,     setParamMsg]       = useState('');
+
+  // ── Reports / Notes / Ratings ─────────────────────────────────────────────
+  const [reports,       setReports]       = useState([]);
+  const [reportsDone,   setReportsDone]   = useState([]);
+  const [notes,         setNotes]         = useState([]);
+  const [ratings,       setRatings]       = useState([]);
+  const [reviewLoading, setReviewLoading] = useState('');
 
   async function loadEngineParams() {
     try {
@@ -404,6 +411,19 @@ export default function AdminDashboard() {
         setUsers(d.users || []);
       } else if (tab === 'engine') {
         await loadEngineParams();
+      } else if (tab === 'reports') {
+        const [pending, done] = await Promise.all([
+          apiFetch('/admin/reports?reviewed=false', {}, auth.token),
+          apiFetch('/admin/reports?reviewed=true', {}, auth.token),
+        ]);
+        setReports(pending.reports || []);
+        setReportsDone(done.reports || []);
+      } else if (tab === 'notes') {
+        const d = await apiFetch('/admin/order-notes', {}, auth.token);
+        setNotes(d.notes || []);
+      } else if (tab === 'ratings') {
+        const d = await apiFetch('/admin/ratings', {}, auth.token);
+        setRatings(d.ratings || []);
       }
     } catch (e) {
       setMsg(e.message);
@@ -467,26 +487,29 @@ export default function AdminDashboard() {
   return (
     <div style={{ padding:'1rem', maxWidth:1200, margin:'0 auto' }}>
       {/* Encabezado */}
-      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg,#374151 0%,#1f2937 100%)', color:'#fff' }}>
+      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'var(--promo-gradient)', color:'#fff' }}>
         <div style={{ fontWeight:800, fontSize:'1.05rem' }}>🛠 Panel de administración</div>
         <div style={{ fontSize:'0.75rem', opacity:0.8, marginTop:'0.1rem' }}>Vista completa del sistema</div>
       </div>
 
       {/* Tabs */}
-      <div style={{ display:'flex', gap:'0.25rem', marginBottom:'1.25rem', borderBottom:'1px solid var(--gray-200)', paddingBottom:'0.5rem', flexWrap:'wrap' }}>
+      <div style={{ display:'flex', gap:'0.25rem', marginBottom:'1.25rem', borderBottom:'1px solid var(--border)', paddingBottom:'0.5rem', flexWrap:'wrap' }}>
         {tabBtn('assignment', `🛵 Asignaciones${liveData.orders.filter(o=>!o.driver_id).length ? ` (${liveData.orders.filter(o=>!o.driver_id).length})` : ''}`)}
         {tabBtn('orders', '📦 Pedidos')}
         {tabBtn('metrics', '📊 Métricas')}
         {tabBtn('users', '👥 Usuarios')}
         {tabBtn('engine', '⚙️ Motor')}
+        {tabBtn('reports', `🚨 Reportes${reports.length > 0 ? ` (${reports.length})` : ''}`)}
+        {tabBtn('notes', '📝 Notas')}
+        {tabBtn('ratings', '⭐ Ratings')}
         {tabBtn('feed', `📡 Feed${liveOffers.length + orderLog.length > 0 ? ` (${liveOffers.length + orderLog.length})` : ''}`)}
-        <button onClick={load} style={{ marginLeft:'auto', padding:'0.4rem 0.75rem', border:'1px solid var(--gray-200)', borderRadius:8, cursor:'pointer', fontSize:'0.8rem', background:'#fff' }}>
+        <button onClick={load} style={{ marginLeft:'auto', padding:'0.4rem 0.75rem', border:'1px solid var(--border)', borderRadius:8, cursor:'pointer', fontSize:'0.8rem', background:'var(--bg-card)' }}>
           ↻ Actualizar
         </button>
       </div>
 
       {msg && <p className="flash flash-error" style={{ marginBottom:'0.75rem' }}>{msg}</p>}
-      {loading && <div style={{ color:'var(--gray-400)', fontSize:'0.85rem', marginBottom:'0.5rem' }}>Cargando…</div>}
+      {loading && <div style={{ color:'var(--text-tertiary)', fontSize:'0.85rem', marginBottom:'0.5rem' }}>Cargando…</div>}
 
       {/* ── TAB: ASIGNACIONES ─────────────────────────────────────────── */}
       {tab === 'assignment' && (
@@ -494,14 +517,14 @@ export default function AdminDashboard() {
           {/* Resumen rápido */}
           <div style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap', marginBottom:'1.25rem' }}>
             {[
-              { label:'Pedidos activos', value:liveData.orders.length, color:'#3b82f6' },
+              { label:'Pedidos activos', value:liveData.orders.length, color:'#60a5fa' },
               { label:'Sin driver', value:liveData.orders.filter(o=>!o.driver_id).length, color:'#ef4444' },
               { label:'Con oferta', value:liveData.orders.filter(o=>o.pending_driver_id&&!o.driver_id).length, color:'#f59e0b' },
               { label:'Drivers disponibles', value:liveData.drivers.filter(d=>d.is_available).length, color:'#16a34a' },
               { label:'Drivers en entrega', value:liveData.drivers.filter(d=>d.active_orders>0).length, color:'#8b5cf6' },
             ].map(({ label, value, color }) => (
-              <div key={label} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'0.6rem 1rem', flex:'1 1 130px', minWidth:130 }}>
-                <div style={{ fontSize:'0.72rem', color:'#6b7280' }}>{label}</div>
+              <div key={label} style={{ border:'1px solid var(--border)', borderRadius:8, padding:'0.6rem 1rem', flex:'1 1 130px', minWidth:130 }}>
+                <div style={{ fontSize:'0.72rem', color:'var(--text-secondary)' }}>{label}</div>
                 <div style={{ fontSize:'1.5rem', fontWeight:800, color, lineHeight:1.2 }}>{value}</div>
               </div>
             ))}
@@ -509,9 +532,9 @@ export default function AdminDashboard() {
 
           {/* Tabla de pedidos activos */}
           {liveData.orders.length === 0 ? (
-            <div style={{ textAlign:'center', padding:'3rem', color:'var(--gray-400)' }}>No hay pedidos activos.</div>
+            <div style={{ textAlign:'center', padding:'3rem', color:'var(--text-tertiary)' }}>No hay pedidos activos.</div>
           ) : (
-            <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:10 }}>
+            <div style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:10 }}>
               <table style={{ width:'100%', borderCollapse:'collapse', minWidth:800 }}>
                 <thead>
                   <tr>
@@ -534,12 +557,12 @@ export default function AdminDashboard() {
           )}
 
           {/* Estado global de todos los drivers */}
-          <div style={{ marginTop:'1.5rem', border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
+          <div style={{ marginTop:'1.5rem', border:'1px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
             <div style={{ padding:'0.65rem 1rem', background:'#f9fafb', fontWeight:700, fontSize:'0.875rem', borderBottom:'1px solid #e5e7eb' }}>
               👥 Estado de todos los drivers
             </div>
             {liveData.drivers.length === 0 ? (
-              <div style={{ padding:'1rem', color:'var(--gray-400)', fontSize:'0.85rem' }}>Sin drivers registrados.</div>
+              <div style={{ padding:'1rem', color:'var(--text-tertiary)', fontSize:'0.85rem' }}>Sin drivers registrados.</div>
             ) : (
               <div style={{ overflowX:'auto' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse' }}>
@@ -588,7 +611,7 @@ export default function AdminDashboard() {
                             {d.pending_offer_order_id
                               ? (
                                 <div>
-                                  <span style={{ fontSize:'0.75rem', color:'#3b82f6', fontWeight:600 }}>
+                                  <span style={{ fontSize:'0.75rem', color:'#60a5fa', fontWeight:600 }}>
                                     {d.pending_offer_order_id.slice(0,8)}
                                   </span>
                                   {d.pending_offer_started_at && (
@@ -614,7 +637,7 @@ export default function AdminDashboard() {
                                 <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
                                   {cooldowns.map((cd, i) => (
                                     <div key={i} style={{ display:'flex', alignItems:'center', gap:4 }}>
-                                      <span style={{ fontSize:'0.68rem', color:'#6b7280' }}>{cd.order_id.slice(0,6)}</span>
+                                      <span style={{ fontSize:'0.68rem', color:'var(--text-secondary)' }}>{cd.order_id.slice(0,6)}</span>
                                       <CooldownBadge waitUntil={cd.wait_until} />
                                     </div>
                                   ))}
@@ -647,7 +670,7 @@ export default function AdminDashboard() {
               </button>
             ))}
           </div>
-          <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:10 }}>
+          <div style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:10 }}>
             <table style={{ width:'100%', borderCollapse:'collapse', minWidth:600 }}>
               <thead>
                 <tr>
@@ -705,21 +728,21 @@ export default function AdminDashboard() {
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))', gap:'0.6rem', marginBottom:'1.25rem' }}>
             {[
-              { label:'Pedidos', value:metrics.summary?.total_orders, color:'#3b82f6' },
+              { label:'Pedidos', value:metrics.summary?.total_orders, color:'#60a5fa' },
               { label:'Entregados', value:metrics.summary?.delivered, color:'#16a34a' },
               { label:'Cancelados', value:metrics.summary?.cancelled, color:'#dc2626' },
               { label:'Activos', value:metrics.summary?.active, color:'#f59e0b' },
               { label:'Ticket prom.', value:fmt(metrics.summary?.avg_ticket_cents), color:'#8b5cf6' },
               { label:'Ingresos', value:fmt(metrics.summary?.revenue_cents), color:'#0d9488' },
             ].map(({ label, value, color }) => (
-              <div key={label} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'0.6rem 1rem' }}>
-                <div style={{ fontSize:'0.72rem', color:'#6b7280' }}>{label}</div>
+              <div key={label} style={{ border:'1px solid var(--border)', borderRadius:8, padding:'0.6rem 1rem' }}>
+                <div style={{ fontSize:'0.72rem', color:'var(--text-secondary)' }}>{label}</div>
                 <div style={{ fontSize:'1.3rem', fontWeight:800, color }}>{value ?? '—'}</div>
               </div>
             ))}
           </div>
           {metrics.timings && (
-            <div style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'0.75rem 1rem', marginBottom:'1rem' }}>
+            <div style={{ border:'1px solid var(--border)', borderRadius:8, padding:'0.75rem 1rem', marginBottom:'1rem' }}>
               <div style={{ fontWeight:700, fontSize:'0.875rem', marginBottom:'0.5rem' }}>⏱ Tiempos promedio</div>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))', gap:'0.5rem', fontSize:'0.8rem' }}>
                 {[
@@ -730,7 +753,7 @@ export default function AdminDashboard() {
                   ['Entrega', metrics.timings.avg_min_to_deliver],
                   ['Total', metrics.timings.avg_total_min],
                 ].map(([k, v]) => (
-                  <div key={k}><span style={{ color:'#6b7280' }}>{k}:</span> <strong>{v != null ? `${v}m` : '—'}</strong></div>
+                  <div key={k}><span style={{ color:'var(--text-secondary)' }}>{k}:</span> <strong>{v != null ? `${v}m` : '—'}</strong></div>
                 ))}
               </div>
             </div>
@@ -741,20 +764,20 @@ export default function AdminDashboard() {
       {/* ── TAB: USUARIOS ───────────────────────────────────────────── */}
       {tab === 'users' && (
         <div>
-          <div style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'1rem', marginBottom:'1.25rem', background:'#f9fafb' }}>
+          <div style={{ border:'1px solid var(--border)', borderRadius:8, padding:'1rem', marginBottom:'1.25rem', background:'#f9fafb' }}>
             <div style={{ fontWeight:700, marginBottom:'0.75rem', fontSize:'0.875rem' }}>Crear cuenta admin</div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr auto', gap:'0.5rem', alignItems:'end', flexWrap:'wrap' }}>
               {[['Usuario','username','username'],['Nombre','displayName','text'],['Contraseña','password','password']].map(([label,key,type]) => (
                 <label key={key} style={{ fontSize:'0.8rem' }}>
                   {label}
                   <input type={type} value={newUser[key]} onChange={e => setNewUser(p=>({...p,[key]:e.target.value}))}
-                    style={{ display:'block', width:'100%', marginTop:2, padding:'0.4rem 0.6rem', border:'1px solid #e5e7eb', borderRadius:6, fontSize:'0.85rem' }} />
+                    style={{ display:'block', width:'100%', marginTop:2, padding:'0.4rem 0.6rem', border:'1px solid var(--border)', borderRadius:6, fontSize:'0.85rem' }} />
                 </label>
               ))}
               <button onClick={createAdmin} style={{ padding:'0.45rem 1rem', background:'var(--brand)', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontWeight:700, fontSize:'0.85rem' }}>Crear</button>
             </div>
           </div>
-          <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:10 }}>
+          <div style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:10 }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead><tr><Th>Usuario</Th><Th>Nombre</Th><Th>Rol</Th><Th>Estado</Th><Th>Creado</Th><Th>Acción</Th></tr></thead>
               <tbody>
@@ -792,13 +815,13 @@ export default function AdminDashboard() {
         <div>
           <div style={{ marginBottom:'1rem', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
             <div>
-              <div style={{ fontWeight:700, fontSize:'0.95rem', color:'var(--gray-800)' }}>⚙️ Parámetros del motor de asignación</div>
-              <div style={{ fontSize:'0.75rem', color:'var(--gray-500)', marginTop:'0.1rem' }}>
+              <div style={{ fontWeight:700, fontSize:'0.95rem', color:'var(--text-primary)' }}>⚙️ Parámetros del motor de asignación</div>
+              <div style={{ fontSize:'0.75rem', color:'var(--text-tertiary)', marginTop:'0.1rem' }}>
                 Los cambios se aplican en el siguiente tick (~60s). Los valores por defecto están en gris.
               </div>
             </div>
             <button onClick={loadEngineParams}
-              style={{ padding:'0.35rem 0.75rem', border:'1px solid var(--gray-200)', borderRadius:8, cursor:'pointer', fontSize:'0.78rem', background:'#fff' }}>
+              style={{ padding:'0.35rem 0.75rem', border:'1px solid var(--border)', borderRadius:8, cursor:'pointer', fontSize:'0.78rem', background:'var(--bg-card)' }}>
               ↻ Recargar
             </button>
           </div>
@@ -813,9 +836,9 @@ export default function AdminDashboard() {
           )}
 
           {engineParams.length === 0
-            ? <div style={{ color:'var(--gray-400)', fontSize:'0.85rem', padding:'2rem 0' }}>Cargando parámetros…</div>
+            ? <div style={{ color:'var(--text-tertiary)', fontSize:'0.85rem', padding:'2rem 0' }}>Cargando parámetros…</div>
             : (
-              <div style={{ border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
+              <div style={{ border:'1px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse' }}>
                   <thead>
                     <tr>
@@ -834,10 +857,10 @@ export default function AdminDashboard() {
                       return (
                         <tr key={p.key} style={{ background: isModified ? '#fffbeb' : undefined }}>
                           <Td>
-                            <code style={{ fontSize:'0.75rem', color:'#374151', background:'#f3f4f6',
+                            <code style={{ fontSize:'0.75rem', color:'var(--text-primary)', background:'#f3f4f6',
                               padding:'0.1rem 0.35rem', borderRadius:4 }}>{p.key}</code>
                           </Td>
-                          <Td style={{ maxWidth:280, color:'#6b7280', fontSize:'0.75rem' }}>{p.description || '—'}</Td>
+                          <Td style={{ maxWidth:280, color:'var(--text-secondary)', fontSize:'0.75rem' }}>{p.description || '—'}</Td>
                           <Td>
                             {isEditing ? (
                               <input
@@ -874,15 +897,15 @@ export default function AdminDashboard() {
                                 <button
                                   onClick={() => setParamEditing(prev => { const n={...prev}; delete n[p.key]; return n; })}
                                   style={{ padding:'0.2rem 0.55rem', background:'#f3f4f6',
-                                    border:'1px solid #e5e7eb', borderRadius:4, cursor:'pointer', fontSize:'0.75rem' }}>
+                                    border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', fontSize:'0.75rem' }}>
                                   Cancelar
                                 </button>
                               </div>
                             ) : (
                               <button
                                 onClick={() => setParamEditing(prev => ({ ...prev, [p.key]: String(p.value) }))}
-                                style={{ padding:'0.2rem 0.55rem', background:'#f3f4f6', color:'#374151',
-                                  border:'1px solid #e5e7eb', borderRadius:4, cursor:'pointer', fontSize:'0.75rem' }}>
+                                style={{ padding:'0.2rem 0.55rem', background:'#f3f4f6', color:'var(--text-primary)',
+                                  border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', fontSize:'0.75rem' }}>
                                 Editar
                               </button>
                             )}
@@ -898,13 +921,13 @@ export default function AdminDashboard() {
 
           {/* ── Panel de penalizaciones de drivers ─────────────────────────── */}
           <div style={{ marginTop:'1.5rem' }}>
-            <div style={{ fontWeight:700, fontSize:'0.9rem', marginBottom:'0.6rem', color:'var(--gray-800)' }}>
+            <div style={{ fontWeight:700, fontSize:'0.9rem', marginBottom:'0.6rem', color:'var(--text-primary)' }}>
               🚦 Penalizaciones de drivers por desconexión
             </div>
             {liveData.drivers.length === 0
-              ? <div style={{ color:'var(--gray-400)', fontSize:'0.82rem' }}>Sin datos. Carga la pestaña Asignaciones primero.</div>
+              ? <div style={{ color:'var(--text-tertiary)', fontSize:'0.82rem' }}>Sin datos. Carga la pestaña Asignaciones primero.</div>
               : (
-                <div style={{ border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
+                <div style={{ border:'1px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
                   <table style={{ width:'100%', borderCollapse:'collapse' }}>
                     <thead>
                       <tr><Th>#</Th><Th>Driver</Th><Th>Penalizaciones</Th><Th>Acción</Th></tr>
@@ -926,7 +949,7 @@ export default function AdminDashboard() {
                           <Td>
                             <button
                               onClick={() => handlePenaltyEdit(d.id, d.disconnect_penalties ?? 0)}
-                              style={{ padding:'0.2rem 0.55rem', background:'#f3f4f6', border:'1px solid #e5e7eb',
+                              style={{ padding:'0.2rem 0.55rem', background:'#f3f4f6', border:'1px solid var(--border)',
                                 borderRadius:4, cursor:'pointer', fontSize:'0.75rem' }}>
                               Ajustar
                             </button>
@@ -942,30 +965,189 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {/* ── TAB: REPORTES ───────────────────────────────────────────── */}
+      {tab === 'reports' && (
+        <div>
+          <div style={{ marginBottom:'1rem' }}>
+            <div style={{ fontWeight:700, fontSize:'0.95rem', color:'var(--text-primary)', marginBottom:'0.5rem' }}>
+              Pendientes de revisión ({reports.length})
+            </div>
+            {reports.length === 0
+              ? <p style={{ color:'var(--text-tertiary)', fontSize:'0.875rem' }}>Sin reportes pendientes 🎉</p>
+              : reports.map(r => (
+                <div key={r.id} className="card" style={{ marginBottom:'0.5rem', borderLeft:'3px solid var(--danger)' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'0.5rem', marginBottom:'0.4rem' }}>
+                    <div>
+                      <span style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--danger)',
+                        background:'var(--danger-bg)', border:'1px solid var(--danger-border)',
+                        borderRadius:6, padding:'1px 6px', marginRight:'0.5rem' }}>
+                        {r.reporter_role}
+                      </span>
+                      <span style={{ fontSize:'0.78rem', color:'var(--text-secondary)' }}>
+                        {r.reporter_name} · {r.restaurant_name}
+                      </span>
+                    </div>
+                    <span style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', flexShrink:0 }}>
+                      {new Date(r.created_at).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}
+                    </span>
+                  </div>
+                  <div style={{ fontSize:'0.85rem', color:'var(--text-primary)', marginBottom:'0.5rem', lineHeight:1.5 }}>
+                    {r.text}
+                  </div>
+                  <div style={{ display:'flex', gap:'0.5rem', alignItems:'center' }}>
+                    <span style={{ fontSize:'0.72rem', color:'var(--text-tertiary)' }}>
+                      Pedido: <code style={{ fontSize:'0.72rem' }}>{r.order_id?.slice(0,8)}</code> · Estado: {r.order_status}
+                    </span>
+                    <button className="btn-sm btn-primary"
+                      style={{ marginLeft:'auto', fontSize:'0.75rem' }}
+                      disabled={reviewLoading === r.id}
+                      onClick={async () => {
+                        setReviewLoading(r.id);
+                        try {
+                          await apiFetch(`/admin/reports/${r.id}/review`, { method:'PATCH' }, auth.token);
+                          setReports(prev => prev.filter(x => x.id !== r.id));
+                          setReportsDone(prev => [{ ...r, reviewed: true }, ...prev]);
+                        } catch(e) { setMsg(e.message); }
+                        finally { setReviewLoading(''); }
+                      }}>
+                      {reviewLoading === r.id ? '…' : '✓ Revisado'}
+                    </button>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+          {reportsDone.length > 0 && (
+            <details>
+              <summary style={{ fontSize:'0.85rem', color:'var(--text-tertiary)', cursor:'pointer', marginBottom:'0.5rem' }}>
+                Revisados ({reportsDone.length})
+              </summary>
+              {reportsDone.map(r => (
+                <div key={r.id} className="card" style={{ marginBottom:'0.4rem', opacity:0.6, borderLeft:'3px solid var(--success)' }}>
+                  <div style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginBottom:'0.2rem' }}>
+                    <span style={{ fontWeight:700 }}>{r.reporter_role}</span> · {r.reporter_name} · {r.restaurant_name}
+                  </div>
+                  <div style={{ fontSize:'0.82rem', color:'var(--text-primary)' }}>{r.text}</div>
+                </div>
+              ))}
+            </details>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB: NOTAS DE CANCELACIÓN / LIBERACIÓN ──────────────────── */}
+      {tab === 'notes' && (
+        <div>
+          <div style={{ fontWeight:700, fontSize:'0.95rem', color:'var(--text-primary)', marginBottom:'1rem' }}>
+            Notas de cancelación y liberación ({notes.length})
+          </div>
+          {notes.length === 0
+            ? <p style={{ color:'var(--text-tertiary)', fontSize:'0.875rem' }}>Sin notas registradas</p>
+            : (
+              <div style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:10 }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', minWidth:640 }}>
+                  <thead><tr>
+                    <Th>Pedido</Th><Th>Estado</Th><Th>Tienda</Th><Th>Driver</Th>
+                    <Th>Nota driver</Th><Th>Nota tienda</Th><Th>Fecha</Th>
+                  </tr></thead>
+                  <tbody>
+                    {notes.map(n => (
+                      <tr key={n.id}>
+                        <Td><code style={{ fontSize:'0.72rem' }}>{n.id?.slice(0,8)}</code></Td>
+                        <Td><Badge status={n.status} /></Td>
+                        <Td>{n.restaurant_name}</Td>
+                        <Td>{n.driver_name || '—'}</Td>
+                        <Td style={{ maxWidth:200 }}>
+                          {n.driver_note
+                            ? <span style={{ fontSize:'0.78rem', color:'var(--text-primary)' }}>{n.driver_note}</span>
+                            : <span style={{ color:'var(--text-tertiary)' }}>—</span>}
+                        </Td>
+                        <Td style={{ maxWidth:200 }}>
+                          {n.restaurant_note
+                            ? <span style={{ fontSize:'0.78rem', color:'var(--text-primary)' }}>{n.restaurant_note}</span>
+                            : <span style={{ color:'var(--text-tertiary)' }}>—</span>}
+                        </Td>
+                        <Td>{new Date(n.updated_at).toLocaleString('es-MX', { dateStyle:'short', timeStyle:'short' })}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          }
+        </div>
+      )}
+
+      {/* ── TAB: RATINGS ────────────────────────────────────────────── */}
+      {tab === 'ratings' && (
+        <div>
+          <div style={{ fontWeight:700, fontSize:'0.95rem', color:'var(--text-primary)', marginBottom:'1rem' }}>
+            Calificaciones ({ratings.length})
+          </div>
+          {ratings.length === 0
+            ? <p style={{ color:'var(--text-tertiary)', fontSize:'0.875rem' }}>Sin calificaciones aún</p>
+            : (
+              <div style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:10 }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', minWidth:780 }}>
+                  <thead><tr>
+                    <Th>Pedido</Th><Th>Tienda</Th><Th>Cliente</Th><Th>Driver</Th>
+                    <Th>Cli→Tienda</Th><Th>Cli→Driver</Th>
+                    <Th>Tienda→Driver</Th><Th>Driver→Tienda</Th>
+                    <Th>Comentario</Th><Th>Fecha</Th>
+                  </tr></thead>
+                  <tbody>
+                    {ratings.map(r => {
+                      const star = n => n ? '★'.repeat(n) + '☆'.repeat(5-n) : '—';
+                      const starColor = n => !n ? 'var(--text-tertiary)' : n >= 4 ? 'var(--success)' : n >= 3 ? 'var(--warn)' : 'var(--danger)';
+                      return (
+                        <tr key={r.id}>
+                          <Td><code style={{ fontSize:'0.72rem' }}>{r.order_id?.slice(0,8)}</code></Td>
+                          <Td style={{ fontSize:'0.78rem' }}>{r.restaurant_name}</Td>
+                          <Td style={{ fontSize:'0.78rem' }}>{r.customer_name?.split('@')[0]}</Td>
+                          <Td style={{ fontSize:'0.78rem' }}>{r.driver_name?.split('@')[0] || '—'}</Td>
+                          <Td><span style={{ color: starColor(r.restaurant_stars), fontSize:'0.75rem', letterSpacing:-1 }}>{star(r.restaurant_stars > 0 ? r.restaurant_stars : null)}</span></Td>
+                          <Td><span style={{ color: starColor(r.driver_stars), fontSize:'0.75rem', letterSpacing:-1 }}>{star(r.driver_stars)}</span></Td>
+                          <Td><span style={{ color: starColor(r.restaurant_rates_driver), fontSize:'0.75rem', letterSpacing:-1 }}>{star(r.restaurant_rates_driver)}</span></Td>
+                          <Td><span style={{ color: starColor(r.driver_rates_restaurant), fontSize:'0.75rem', letterSpacing:-1 }}>{star(r.driver_rates_restaurant)}</span></Td>
+                          <Td style={{ maxWidth:160, fontSize:'0.75rem', color:'var(--text-secondary)' }}>
+                            {r.comment || r.driver_comment || r.restaurant_comment || '—'}
+                          </Td>
+                          <Td>{new Date(r.created_at).toLocaleDateString('es-MX')}</Td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )
+          }
+        </div>
+      )}
+
       {/* ── TAB: FEED EN VIVO ───────────────────────────────────────── */}
       {tab === 'feed' && (
         <div>
           <div style={{ display:'flex', gap:'0.5rem', marginBottom:'0.75rem' }}>
             <button onClick={() => { setLiveOffers([]); setOrderLog([]); }}
-              style={{ padding:'0.3rem 0.65rem', border:'1px solid #e5e7eb', borderRadius:8, cursor:'pointer', fontSize:'0.78rem', background:'#fff' }}>
+              style={{ padding:'0.3rem 0.65rem', border:'1px solid var(--border)', borderRadius:8, cursor:'pointer', fontSize:'0.78rem', background:'var(--bg-card)' }}>
               Limpiar feed
             </button>
           </div>
-          <div style={{ border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden', maxHeight:500, overflowY:'auto' }}>
+          <div style={{ border:'1px solid var(--border)', borderRadius:10, overflow:'hidden', maxHeight:500, overflowY:'auto' }}>
             {[...liveOffers.map(e=>({...e,_t:'offer'})), ...orderLog.map(e=>({...e,_t:'log'}))]
               .sort((a,b) => b.ts - a.ts)
               .map((e, i) => (
-                <div key={i} style={{ padding:'0.4rem 0.875rem', borderBottom:'1px solid #f3f4f6', fontSize:'0.78rem',
+                <div key={i} style={{ padding:'0.4rem 0.875rem', borderBottom:'1px solid var(--border-light)', fontSize:'0.78rem',
                   background: e._t === 'offer' ? '#eff6ff' : '#f0fdf4', display:'flex', gap:'0.75rem' }}>
                   <span style={{ color:'#9ca3af', fontFamily:'monospace' }}>{new Date(e.ts).toLocaleTimeString('es-MX')}</span>
                   <span style={{ color: e._t==='offer'?'#3b82f6':'#16a34a', fontWeight:700 }}>{e._t==='offer'?'📤 OFERTA':'📦 PEDIDO'}</span>
-                  <span style={{ color:'#374151' }}>{e.orderId}</span>
-                  <span style={{ color:'#6b7280' }}>{e.extra}</span>
+                  <span style={{ color:'var(--text-primary)' }}>{e.orderId}</span>
+                  <span style={{ color:'var(--text-secondary)' }}>{e.extra}</span>
                 </div>
               ))
             }
             {liveOffers.length + orderLog.length === 0 && (
-              <div style={{ padding:'2rem', textAlign:'center', color:'var(--gray-400)', fontSize:'0.85rem' }}>
+              <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)', fontSize:'0.85rem' }}>
                 Esperando eventos SSE…
               </div>
             )}

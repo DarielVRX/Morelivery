@@ -20,10 +20,18 @@ import { errorHandler, notFoundHandler } from './middlewares/errorHandler.js';
 import { checkDbConnection } from './config/db.js';
 
 function corsOrigin(origin, callback) {
+  // Sin origin = server-to-server o same-origin — siempre permitir
   if (!origin) return callback(null, true);
+  // Sin lista o wildcard = desarrollo local
   if (env.allowedOrigins.length === 0 || env.allowedOrigins.includes('*')) return callback(null, true);
+  // Origen en lista — permitir
   if (env.allowedOrigins.includes(origin)) return callback(null, true);
-  console.warn(`[cors] Origin not in allowlist, allowing for beta: ${origin}`);
+  // En producción: bloquear. En desarrollo: advertir pero permitir.
+  if (env.nodeEnv === 'production') {
+    console.warn(`[cors] Origen bloqueado en producción: ${origin}`);
+    return callback(new Error(`CORS: origen no permitido: ${origin}`), false);
+  }
+  console.warn(`[cors] Origen no en allowlist (dev — permitiendo): ${origin}`);
   return callback(null, true);
 }
 

@@ -22,6 +22,7 @@ export default function ActiveOrderPanel({
   onToggleRelease,
   onReleaseNoteChange,
   onConfirmRelease,
+  onRebalance,
   onRoute,
 }) {
   if (!order) return null;
@@ -42,7 +43,7 @@ export default function ActiveOrderPanel({
   };
 
   return (
-    <div style={{ flexShrink:0, background:'#fff',
+    <div style={{ flexShrink:0, background:'var(--bg-card)',
       borderTop:'2px solid var(--success)', zIndex:10,
       position:'absolute', bottom:0, left:0, right:0, width:'100%',
       display:'flex', flexDirection:'column' }}>
@@ -55,6 +56,14 @@ export default function ActiveOrderPanel({
             letterSpacing:'0.5px', color:'var(--success)' }}>
             {DST[order.status] || order.status}
           </span>
+          {order.is_disputed && (
+            <span style={{ fontSize:'0.65rem', fontWeight:700,
+              background:'#fef9c3', color:'#854d0e',
+              border:'1px solid #fde047', borderRadius:8,
+              padding:'0.1rem 0.45rem', marginLeft:'0.35rem' }}>
+              🔄 En disputa
+            </span>
+          )}
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
             stroke="var(--gray-400)" strokeWidth="2.5" strokeLinecap="round"
             style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition:'transform 0.2s' }}>
@@ -66,13 +75,13 @@ export default function ActiveOrderPanel({
           <div style={{ fontSize:'0.82rem', marginTop:'0.15rem' }}>
             <strong>{order.restaurant_name}</strong>
             {order.restaurant_address && (
-              <div style={{ color:'var(--gray-500)', fontSize:'0.77rem' }}>{order.restaurant_address}</div>
+              <div style={{ color:'var(--text-secondary)', fontSize:'0.77rem' }}>{order.restaurant_address}</div>
             )}
             {isCash
               ? <div style={{ fontWeight:700, color:'var(--brand)', fontSize:'0.8rem', marginTop:'0.1rem' }}>
                   Pagar a tienda: {fmt(order.total_cents || 0)}
                 </div>
-              : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
+              : <div style={{ fontSize:'0.77rem', color:'var(--text-tertiary)', marginTop:'0.1rem' }}>
                   {order.payment_method === 'card' ? '💳 Pago con tarjeta — no cobrar' : '🏦 Pago SPEI — no cobrar'}
                 </div>
             }
@@ -81,7 +90,7 @@ export default function ActiveOrderPanel({
           <div style={{ fontSize:'0.82rem', marginTop:'0.15rem' }}>
             <strong>{order.customer_name || 'Cliente'}</strong>
             {(order.customer_address || order.delivery_address) && (
-              <div style={{ color:'var(--gray-500)', fontSize:'0.77rem' }}>
+              <div style={{ color:'var(--text-secondary)', fontSize:'0.77rem' }}>
                 {order.customer_address || order.delivery_address}
               </div>
             )}
@@ -89,7 +98,7 @@ export default function ActiveOrderPanel({
               ? <div style={{ fontWeight:700, color:'var(--success)', fontSize:'0.8rem', marginTop:'0.1rem' }}>
                   Cobrar a cliente: {fmt(total)}
                 </div>
-              : <div style={{ fontSize:'0.77rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
+              : <div style={{ fontSize:'0.77rem', color:'var(--text-tertiary)', marginTop:'0.1rem' }}>
                   {order.payment_method === 'card' ? '💳 Ya pagó con tarjeta' : '🏦 Ya pagó SPEI'}
                 </div>
             }
@@ -105,17 +114,17 @@ export default function ActiveOrderPanel({
       {/* Sección expandible — OPT-11: grid-template-rows, no max-height */}
       <div style={expandStyle}>
         <div style={{ overflow:'hidden' }}>
-          <div style={{ padding:'0.4rem 1rem 0.6rem', borderTop:'1px solid var(--gray-100)' }}>
+          <div style={{ padding:'0.4rem 1rem 0.6rem', borderTop:'1px solid var(--border-light)' }}>
 
             {(order.items || []).length > 0 && (
-              <ul style={{ fontSize:'0.8rem', margin:'0 0 0.3rem 1rem', color:'var(--gray-700)' }}>
+              <ul style={{ fontSize:'0.8rem', margin:'0 0 0.3rem 1rem', color:'var(--text-primary)' }}>
                 {order.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
               </ul>
             )}
 
             <FeeBreakdown order={order} />
 
-            <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.3rem', marginTop:'0.3rem' }}>
+            <div style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginBottom:'0.3rem', marginTop:'0.3rem' }}>
               Ganancia estimada:{' '}
               <strong style={{ color:'var(--success)' }}>{fmt(earn)}</strong>
             </div>
@@ -135,6 +144,20 @@ export default function ActiveOrderPanel({
                 onClick={() => onChangeStatus(order.id, 'delivered')}>
                 Entregado
               </button>
+              {!['on_the_way', 'delivered', 'cancelled'].includes(order.status) && !order.picked_up_at && (
+                order.is_disputed ? (
+                  <span style={{ fontSize:'0.72rem', color:'#854d0e',
+                    fontStyle:'italic', alignSelf:'center' }}>
+                    En disputa — buscando conductor…
+                  </span>
+                ) : (
+                  <button className="btn-sm"
+                    style={{ color:'#854d0e', borderColor:'#fde047', background:'#fef9c3' }}
+                    onClick={onRebalance}>
+                    🔄 Rebalancear
+                  </button>
+                )
+              )}
               {!['on_the_way', 'delivered', 'cancelled'].includes(order.status) && (
                 <button className="btn-sm btn-danger" onClick={onToggleRelease}>Liberar</button>
               )}

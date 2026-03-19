@@ -12,7 +12,7 @@ function FeeBreakdown({ order }) {
   const neto    = sub - resFee;
   if (!sub) return null;
   return (
-    <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', borderTop:'1px solid var(--gray-100)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
+    <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)', borderTop:'1px solid var(--border-light)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
       <div style={{ display:'flex', justifyContent:'space-between' }}>
         <span>Subtotal del pedido</span><span>{fmt(sub)}</span>
       </div>
@@ -185,14 +185,14 @@ export default function RestaurantOrders() {
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
       {/* ── Encabezado fijo ─────────────────────────────────────────── */}
       <div style={{
-        flexShrink:0, background:'#fff', borderBottom:'2px solid var(--brand-light)',
+        flexShrink:0, background:'var(--bg-card)', borderBottom:'2px solid var(--border)',
         padding:'0.65rem 1rem 0', zIndex:30,
         boxShadow:'0 1px 4px rgba(0,0,0,0.04)'
       }}>
         <div style={{ fontWeight:800, fontSize:'1rem', color:'var(--brand)', letterSpacing:'-0.01em', marginBottom:'0.4rem' }}>
           Mis pedidos
         </div>
-        <div style={{ display:'flex', gap:0, borderTop:'1px solid var(--gray-100)' }}>
+        <div style={{ display:'flex', gap:0, borderTop:'1px solid var(--border-light)' }}>
           {[['active','Activos'],['past','Historial']].map(([val, label]) => (
             <button key={val} onClick={() => setTab(val)}
               style={{
@@ -253,7 +253,7 @@ export default function RestaurantOrders() {
       {/* Activos */}
       {tab === 'active' && (
         active.length === 0
-          ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin pedidos activos.</p>
+          ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos activos.</p>
           : (
             <ul className="orders-tab-panel" style={{ listStyle:'none', padding:0 }}>
               {active.map(order => {
@@ -271,22 +271,22 @@ export default function RestaurantOrders() {
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
                         <span style={{ fontWeight:700 }}>{fmt(order.total_cents)}</span>
-                        <span style={{ color:'var(--gray-400)', fontSize:'0.8rem' }}>{isExp?'▲':'▼'}</span>
+                        <span style={{ color:'var(--text-tertiary)', fontSize:'0.8rem' }}>{isExp?'▲':'▼'}</span>
                       </div>
                     </div>
                     {isExp && (
                     <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
-                    <div style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>
+                    <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>
                       {order.customer_address && <div>Dirección: <strong>{order.customer_address}</strong></div>}
                       Conductor: <strong>{order.driver_first_name || 'Pendiente'}</strong>
                     </div>
                     {(order.items || []).length > 0 && (
-                      <ul style={{ margin:'0.25rem 0 0.5rem 1rem', fontSize:'0.83rem', color:'var(--gray-800)' }}>
+                      <ul style={{ margin:'0.25rem 0 0.5rem 1rem', fontSize:'0.83rem', color:'var(--text-primary)' }}>
                         {order.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
                       </ul>
                     )}
                     {order.payment_method && (
-                      <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.3rem' }}>
+                      <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)', marginBottom:'0.3rem' }}>
                         Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[order.payment_method]||order.payment_method}</strong>
                       </div>
                     )}
@@ -324,25 +324,25 @@ export default function RestaurantOrders() {
 
                     {/* Panel sugerencia */}
                     {suggestionFor === order.id && (
-                      <div style={{ marginTop:'0.75rem', background:'var(--gray-50)', border:'1px solid var(--gray-200)', borderRadius:8, padding:'0.875rem' }}>
+                      <div style={{ marginTop:'0.75rem', background:'var(--gray-50)', border:'1px solid var(--border)', borderRadius:8, padding:'0.875rem' }}>
                         <p style={{ fontWeight:700, fontSize:'0.875rem', marginBottom:'0.5rem' }}>Proponer cambio al cliente</p>
                         {order.suggestion_status === 'pending_customer' && (
                           <p style={{ fontSize:'0.8rem', color:'#92400e', background:'#fffbeb', border:'1px solid #f59e0b', borderRadius:6, padding:'0.4rem 0.6rem', marginBottom:'0.5rem' }}>
                             Ya hay una sugerencia pendiente de respuesta.
                           </p>
                         )}
-                        <p style={{ fontSize:'0.75rem', color:'var(--gray-500)', marginBottom:'0.35rem' }}>
+                        <p style={{ fontSize:'0.75rem', color:'var(--text-tertiary)', marginBottom:'0.35rem' }}>
                           Nota: al marcar el pedido como Listo debes esperar al menos 5 minutos despues de enviar una sugerencia.
                         </p>
-                        <p style={{ fontSize:'0.75rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>Pedido original:</p>
-                        <div style={{ background:'#fff', border:'1px solid var(--gray-200)', borderRadius:6, padding:'0.4rem 0.75rem', marginBottom:'0.65rem' }}>
+                        <p style={{ fontSize:'0.75rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>Pedido original:</p>
+                        <div style={{ background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:6, padding:'0.4rem 0.75rem', marginBottom:'0.65rem' }}>
                           {(order.items || []).map(i => (
                             <div key={i.menuItemId} style={{ display:'flex', justifyContent:'space-between', fontSize:'0.83rem', padding:'0.1rem 0' }}>
-                              <span>{i.name}</span><span style={{ color:'var(--gray-400)' }}>× {i.quantity}</span>
+                              <span>{i.name}</span><span style={{ color:'var(--text-tertiary)' }}>× {i.quantity}</span>
                             </div>
                           ))}
                         </div>
-                        <p style={{ fontSize:'0.75rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>Sugerencia:</p>
+                        <p style={{ fontSize:'0.75rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>Sugerencia:</p>
                         {/* Total en tiempo real de la sugerencia */}
                         {(() => {
                           const draft = suggDrafts[order.id] || {};
@@ -364,7 +364,7 @@ export default function RestaurantOrders() {
                                 borderRadius:6, padding:'0.4rem 0.75rem',
                               }}>
                                 <span style={{ flex:1, fontSize:'0.875rem', fontWeight: qty > 0 ? 600 : 400 }}>{p.name}</span>
-                                <span style={{ fontSize:'0.75rem', color:'var(--gray-400)' }}>{fmt(p.price_cents)}</span>
+                                <span style={{ fontSize:'0.75rem', color:'var(--text-tertiary)' }}>{fmt(p.price_cents)}</span>
                                 <div className="qty-control">
                                   <button className="qty-btn" disabled={qty===0} onClick={() => adjustSugg(order.id, p.id, -1)}>−</button>
                                   <span className="qty-num">{qty}</span>
@@ -392,7 +392,7 @@ export default function RestaurantOrders() {
       {/* Historial */}
       {tab === 'past' && (
         past.length === 0
-          ? <p style={{ color:'var(--gray-600)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
+          ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
           : (
             <ul className="orders-tab-panel reverse" style={{ listStyle:'none', padding:0 }}>
               {past.slice(0, 50).map(o => {
@@ -410,12 +410,12 @@ export default function RestaurantOrders() {
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
                         <span style={{ fontWeight:700 }}>{fmt(o.total_cents)}</span>
-                        <span style={{ color:'var(--gray-400)', fontSize:'0.8rem' }}>{isPastExp?'▲':'▼'}</span>
+                        <span style={{ color:'var(--text-tertiary)', fontSize:'0.8rem' }}>{isPastExp?'▲':'▼'}</span>
                       </div>
                     </div>
                     {isPastExp && (
                       <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
-                        <div style={{ fontSize:'0.82rem', color:'var(--gray-600)', marginBottom:'0.35rem' }}>
+                        <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>
                           Conductor: <strong>{o.driver_first_name || '—'}</strong>
                         </div>
                         {(o.items || []).length > 0 && (
@@ -424,7 +424,7 @@ export default function RestaurantOrders() {
                           </ul>
                         )}
                         {o.payment_method && (
-                          <div style={{ fontSize:'0.78rem', color:'var(--gray-500)', marginBottom:'0.2rem' }}>
+                          <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)', marginBottom:'0.2rem' }}>
                             Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[o.payment_method]||o.payment_method}</strong>
                           </div>
                         )}

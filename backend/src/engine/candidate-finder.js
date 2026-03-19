@@ -53,6 +53,7 @@ async function loadCandidateDrivers(orderId) {
        dp.driver_number,
        dp.vehicle_type,
        dp.disconnect_penalties,
+       dp.bag_capacity_liters,
        dp.last_lat         AS lat,
        dp.last_lng         AS lng,
        (SELECT COUNT(*)::int FROM orders o
@@ -95,6 +96,7 @@ async function loadCandidateDrivers(orderId) {
     vehicleType:         row.vehicle_type,
     speedKmh:            speedKmhByVehicle(row.vehicle_type),
     disconnectPenalties: row.disconnect_penalties ?? 0,
+    bagCapacityLiters:   Number(row.bag_capacity_liters) || 25,
     pos:                 { lat: Number(row.lat), lng: Number(row.lng) },
     activeOrders:        row.active_orders ?? 0,
   }));

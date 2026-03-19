@@ -4,7 +4,7 @@ import { query } from '../../../config/db.js';
 import { log, logWarn } from './constants.js';
 import { upsertPendingOffer, driverHasPendingOffer, getOfferPayload } from './queries.js';
 
-export async function upsertOffer(orderId, driverId, onOffer) {
+export async function upsertOffer(orderId, driverId, onOffer, bagOverflowPct = 0) {
   // Advisory lock por driver (transaccional) — evita race condition entre pedidos
   const lockKey = Buffer.from(driverId.replace(/-/g, '')).readBigUInt64BE(0);
   const lockResult = await query(
@@ -22,7 +22,7 @@ export async function upsertOffer(orderId, driverId, onOffer) {
     return false;
   }
 
-  await upsertPendingOffer(orderId, driverId);
+  await upsertPendingOffer(orderId, driverId, bagOverflowPct);
   log(`order=${orderId}`, `oferta guardada driver=${driverId}`);
 
   if (!onOffer) {
@@ -55,6 +55,7 @@ export async function upsertOffer(orderId, driverId, onOffer) {
       driverEarning:     del + Math.round(svc * 0.5) + tip,
       paymentMethod:     row.payment_method,
       secondsLeft:       row.seconds_left,
+      bagOverflowPct:    row.bag_overflow_pct ?? 0,
     });
     log(`order=${orderId}`, `SSE disparado driver=${driverId} secs=${row.seconds_left}`);
   } catch (e) {
