@@ -3,7 +3,7 @@ import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { expireTimedOutOffers, expireDisputedOrders } from './modules/orders/assignment/index.js';
 import { offerCb } from './modules/events/offerCallback.js';
-import { ensureParamsLoaded, getParam } from './engine/params.js';
+import { ensureParamsLoaded, seedDefaultParams, getParam } from './engine/params.js';
 import { tickKitchen } from './engine/kitchen.js';
 import { cleanStaleEntities } from './engine/stale.js';
 import { runRebalancer } from './engine/rebalancer.js';
@@ -14,6 +14,12 @@ const server = http.createServer(app);
 // ── Pre-cargar parámetros del motor antes del primer tick ────────────────────
 ensureParamsLoaded().catch(e =>
   console.warn('[server] pre-carga de engine_params falló (usando defaults):', e.message)
+);
+
+// Sembrar params faltantes en DB (idempotente — ON CONFLICT DO NOTHING)
+// Garantiza que el admin siempre ve todos los parámetros del catálogo
+seedDefaultParams().catch(e =>
+  console.warn('[server] seedDefaultParams falló (no crítico):', e.message)
 );
 
 // ── Scheduler de asignación (cada 2s, resiliente, sin solapamiento) ──────────
