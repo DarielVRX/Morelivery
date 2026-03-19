@@ -248,7 +248,7 @@ return (
 
   <div className="row" style={{ flexDirection:'row', flexWrap:'wrap', gap:'0.75rem', alignItems:'center' }}>
   <button className="btn-primary" onClick={submit} disabled={loading}
-  style={{ flex:'1 1 140px', borderRadius:8 }}>
+  style={{ flex:'1 1 140px', borderRadius:8, alignSelf:'flex-start' }}>
   {loading ? 'Cargando…' : (isLogin ? 'Iniciar sesión' : 'Registrarse')}
   </button>
   {isLogin
