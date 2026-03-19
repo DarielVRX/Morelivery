@@ -182,7 +182,7 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       return `($${base+1},$${base+2},$${base+3},$${base+4})`;
     }).join(',');
     const itemParams = items.flatMap(item => [
-      order.id, item.menuItemId, item.quantity, priceMap.get(item.menuItemId)
+      order.id, item.menuItemId, item.quantity, priceMap.get(item.menuItemId).price_cents
     ]);
     await query(
       `INSERT INTO order_items(order_id, menu_item_id, quantity, unit_price_cents) VALUES ${itemValues}`,
