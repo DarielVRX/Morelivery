@@ -442,7 +442,7 @@ export default function RestaurantPage() {
         {menu.length === 0 ? (
           <p style={{ color:'var(--text-tertiary)' }}>Sin productos disponibles.</p>
         ) : (
-        <>
+          <>
           {/* Sort controls */}
         <div style={{ display:'flex', gap:'0.4rem', marginBottom:'0.6rem', alignItems:'center' }}>
           <span style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', fontWeight:600 }}>Ordenar:</span>

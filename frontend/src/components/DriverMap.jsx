@@ -9,6 +9,29 @@
 import { useEffect, useRef, useState } from 'react';
 import { getBearing }                  from '../utils/geo';
 import { ensureMapLibreCSS, ensureMapLibreJS } from '../utils/mapLibre';
+import { useTheme } from '../contexts/ThemeContext';
+
+// Stadia Maps styles — professional tiles with CDN SLA
+// API key read from VITE_STADIA_KEY env var; falls back to OpenFreeMap if not set.
+// Stadia has native dark/light pairs — no CSS filter hack needed.
+const STADIA_KEY = typeof import !== 'undefined'
+  ? (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_STADIA_KEY : '') || ''
+  : '';
+
+function stadiaStyle(name) {
+  const base = `https://tiles.stadiamaps.com/styles/${name}.json`;
+  return STADIA_KEY ? `${base}?api_key=${STADIA_KEY}` : base;
+}
+
+// Light: alidade_smooth — cleaner than bright, less visual noise, routes stand out more
+// Dark:  alidade_smooth_dark — native dark, no color inversion needed
+// Fallback: OpenFreeMap (no key required)
+const STYLE_LIGHT = STADIA_KEY
+  ? stadiaStyle('alidade_smooth')
+  : 'https://tiles.openfreemap.org/styles/bright';
+const STYLE_DARK = STADIA_KEY
+  ? stadiaStyle('alidade_smooth_dark')
+  : 'https://tiles.openfreemap.org/styles/bright'; // fallback still uses filter
 
 // OPT-4: singleton — se asigna una vez cuando la lib carga y se reutiliza
 let _ml = null;
@@ -31,18 +54,65 @@ export default function DriverMap({
   const containerRef      = useRef(null);
   const mapRef            = useRef(null);
   const markersRef        = useRef({ driver: null, driverSvg: null, custom: null, pickup: null, delivery: null });
-  const livePosRef        = useRef(driverPos || null);   // OPT-12
-  const liveHeadingRef    = useRef(0);                   // OPT-12
+  const livePosRef        = useRef(driverPos || null);
+  const liveHeadingRef    = useRef(0);
   const watchIdRef        = useRef(null);
   const prevWatchPosRef   = useRef(null);
-  const hasActiveOrderRef = useRef(hasActiveOrder);      // OPT-7
-  const navFollowRef      = useRef(navFollowEnabled);    // leído en watchPosition sin deps
+  const hasActiveOrderRef = useRef(hasActiveOrder);
+  const navFollowRef      = useRef(navFollowEnabled);
   const onHeadingRef      = useRef(onHeadingChange);
   const zoomCtrlRef       = useRef(null);
   const zoomTimeRef       = useRef(null);
+  const isDarkRef         = useRef(isDark);
 
   const [showAttrib, setShowAttrib] = useState(false);
   const [hasGPS,     setHasGPS]     = useState(Boolean(driverPos));
+
+  useEffect(() => { isDarkRef.current = isDark; }, [isDark]);
+
+  // Dark mode
+  // With Stadia key: swap style (native dark/light, no filter)
+  // Without Stadia key: CSS filter workaround on the canvas
+  const { isDark } = useTheme();
+
+  function applyDarkFilter(dark) {
+    // Apply to the map container div — catches the canvas and all tile elements
+    // Using the container avoids querySelector timing issues (canvas created async)
+    const el = containerRef.current;
+    if (el) {
+      el.style.filter = dark
+        ? 'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)'
+        : '';
+    }
+  }
+
+  useEffect(() => {
+    if (STADIA_KEY) {
+      const map = mapRef.current;
+      if (!map || !map.isStyleLoaded()) return;
+      const newStyle = isDark ? STYLE_DARK : STYLE_LIGHT;
+      map.setStyle(newStyle);
+      map.once('styledata', () => {
+        const SRC = 'driver-route-source', LYR = 'driver-route-layer', BDR = 'driver-route-border';
+        const coords = (routeGeometry || []).map(p => [p.lng, p.lat]);
+        if (!coords.length) return;
+        try {
+          const geo = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } };
+          if (!map.getSource(SRC)) map.addSource(SRC, { type: 'geojson', data: geo });
+          if (!map.getLayer(BDR)) map.addLayer({ id: BDR, type: 'line', source: SRC,
+            paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.4 },
+            layout: { 'line-cap': 'round', 'line-join': 'round' } });
+          if (!map.getLayer(LYR)) map.addLayer({ id: LYR, type: 'line', source: SRC,
+            paint: { 'line-color': '#6366f1', 'line-width': 5, 'line-opacity': 0.95 },
+            layout: { 'line-cap': 'round', 'line-join': 'round' } });
+        } catch (_) {}
+      });
+    } else {
+      // CSS filter fallback — canvas may not exist yet if map is still loading;
+      // applyDarkFilter is also called in map.once('load') below
+      applyDarkFilter(isDark);
+    }
+  }, [isDark]); // eslint-disable-line react-hooks/exhaustive-deps  }, [isDark]);
 
   // ── Sincronizar refs sin recrear listeners ───────────────────────────────────
   useEffect(() => { hasActiveOrderRef.current = hasActiveOrder;  }, [hasActiveOrder]);
@@ -124,12 +194,13 @@ export default function DriverMap({
 
     if (isDrive) {
       // ── Flecha de navegación ──────────────────────────────────────────────
+      const arrowColor = isDarkRef.current ? '#c97f7f' : '#e3aaaa';
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.setAttribute('width',  '60');
       svg.setAttribute('height', '60');
       svg.setAttribute('viewBox', '0 0 24 24');
-      svg.setAttribute('fill',            '#e3aaaa');
-      svg.setAttribute('stroke',          'rgba(227,170,170,0.85)');
+      svg.setAttribute('fill',            arrowColor);
+      svg.setAttribute('stroke',          arrowColor + 'cc');
       svg.setAttribute('stroke-width',    '1.4');
       svg.setAttribute('stroke-linejoin', 'round');
       svg.style.cssText   = 'display:block;transform-origin:50% 55%;';
@@ -145,11 +216,12 @@ export default function DriverMap({
     } else {
       // ── Punto simple ──────────────────────────────────────────────────────
       const dot = document.createElement('div');
+      const dotColor = isDarkRef.current ? '#c97f7f' : '#e3aaaa';
       dot.style.cssText = [
         'width:20px', 'height:20px', 'border-radius:50%',
-        'background:#e3aaaa',
-        'border:2.5px solid #fff',
-        'box-shadow:0 2px 8px rgba(227,170,170,0.55)',
+        `background:${dotColor}`,
+        'border:2.5px solid rgba(255,255,255,0.9)',
+        'box-shadow:0 2px 8px rgba(0,0,0,0.35)',
       ].join(';');
       wrap.style.cssText = 'width:20px;height:20px';
       wrap.appendChild(dot);
@@ -175,7 +247,7 @@ export default function DriverMap({
         // Zoom-dependent nativo: z10-12 carreteras principales;
         // z13-15 secundarias + colonias; z16+ calles completas + POIs.
         // ~35% menos memoria de spritesheet vs. "liberty".
-        style:   'https://tiles.openfreemap.org/styles/bright',
+        style:   isDarkRef.current ? STYLE_DARK : STYLE_LIGHT,
         center:  [start.lng, start.lat],
         zoom:    14,
         pitch:   0,       // sin inclinación — vista de planta para entregar
@@ -222,7 +294,16 @@ export default function DriverMap({
         onCustomPin?.({ lat: e.lngLat.lat, lng: e.lngLat.lng });
       });
 
-      map.once('load', () => _buildDriverMarker(ml, map));
+      map.once('load', () => {
+        _buildDriverMarker(ml, map);
+        // Apply dark mode on load — container is guaranteed to exist here
+        if (!STADIA_KEY && document.documentElement.getAttribute('data-theme') === 'dark') {
+          if (containerRef.current) {
+            containerRef.current.style.filter =
+              'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)';
+          }
+        }
+      });
       mapRef.current = map;
       onMapReady?.(map);
     }).catch(() => onRouteError?.('No se pudo inicializar el mapa'));
@@ -291,41 +372,110 @@ export default function DriverMap({
     const map = mapRef.current;
     if (!map) return;
     const SRC = 'driver-route-source', LYR = 'driver-route-layer', BDR = 'driver-route-border';
-    const draw = () => {
-      const geo = { type: 'Feature', properties: {},
-        geometry: { type: 'LineString', coordinates: (routeGeometry || []).map(p => [p.lng, p.lat]) } };
-      if (!map.getSource(SRC)) map.addSource(SRC, { type: 'geojson', data: geo });
-      else map.getSource(SRC).setData(geo);
-      if (!map.getLayer(LYR)) map.addLayer({ id: LYR, type: 'line', source: SRC,
-        paint: { 'line-color': '#ad1457', 'line-width': 14, 'line-opacity': 0.8 },
-        layout: { 'line-cap': 'round', 'line-join': 'round' } });
-      if (!map.getLayer(BDR)) map.addLayer({ id: BDR, type: 'line', source: SRC,
-        paint: { 'line-color': '#e3aaaa', 'line-width': 8, 'line-opacity': 0.6 },
-        layout: { 'line-cap': 'round', 'line-join': 'round' } });
-    };
-    if (map.isStyleLoaded()) draw(); else map.once('load', draw);
-  }, [routeGeometry]);
+
+    function draw() {
+      try {
+        const coords = (routeGeometry || []).map(p => [p.lng, p.lat]);
+        const geo = {
+          type: 'Feature', properties: {},
+          geometry: { type: 'LineString', coordinates: coords },
+        };
+
+        // Remove old route if clearing
+        if (!coords.length) {
+          try { if (map.getLayer(BDR)) map.removeLayer(BDR); } catch (_) {}
+          try { if (map.getLayer(LYR)) map.removeLayer(LYR); } catch (_) {}
+          try { if (map.getSource(SRC)) map.removeSource(SRC); } catch (_) {}
+          return;
+        }
+
+        if (map.getSource(SRC)) {
+          map.getSource(SRC).setData(geo);
+        } else {
+          map.addSource(SRC, { type: 'geojson', data: geo });
+        }
+
+        // Border layer (drawn first = behind)
+        if (!map.getLayer(BDR)) {
+          map.addLayer({
+            id: BDR, type: 'line', source: SRC,
+            paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.4 },
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+          });
+        }
+        // Main line layer
+        if (!map.getLayer(LYR)) {
+          map.addLayer({
+            id: LYR, type: 'line', source: SRC,
+            paint: { 'line-color': '#6366f1', 'line-width': 5, 'line-opacity': 0.95 },
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+          });
+        }
+      } catch (e) {
+        console.warn('[DriverMap] route draw error:', e.message);
+      }
+    }
+
+    // Guard: wait for both map load AND style load
+    if (map.isStyleLoaded()) {
+      draw();
+    } else {
+      // Use 'styledata' which fires when style is ready, including after tile changes
+      map.once('styledata', draw);
+    }
+  }, [routeGeometry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Centrar — señal puntual del padre ────────────────────────────────────────
-  // Funciona en AMBOS modos (navegar y normal).
-  //   'follow' → zoom alto + bearing del conductor  (nav activo)
-  //   'free'   → zoom medio + norte arriba           (modo normal)
+  // 'follow'   → lock to driver, zoom 19, heading-aligned (nav activo)
+  // 'overview' → fit bounds to driver + pickup + delivery (ver toda la ruta)
+  // 'free'     → center on driver, zoom 15, north up (reset)
   useEffect(() => {
     if (!centerSignal || !mapRef.current) return;
     const map = mapRef.current;
     const pos = livePosRef.current || driverPos;
-    if (!pos) { onCenterDone?.(); return; }
 
     if (centerSignal === 'follow') {
+      if (!pos) { onCenterDone?.(); return; }
       const h       = liveHeadingRef.current || navHeadingDeg || 0;
       const offsetY = Math.round(map.getContainer().clientHeight * 0.18);
       map.easeTo({ center: [pos.lng, pos.lat], zoom: 19, pitch: 0, bearing: h,
         duration: 350, offset: [0, offsetY], essential: true });
+
+    } else if (centerSignal === 'overview') {
+      // Collect all relevant points
+      const pts = [];
+      if (pos)         pts.push([pos.lng, pos.lat]);
+      if (pickupPos)   pts.push([pickupPos.lng, pickupPos.lat]);
+      if (deliveryPos) pts.push([deliveryPos.lng, deliveryPos.lat]);
+
+      if (pts.length >= 2 && _ml) {
+        try {
+          const bounds = pts.reduce(
+            (b, pt) => b.extend(pt),
+            new _ml.LngLatBounds(pts[0], pts[0])
+          );
+          map.fitBounds(bounds, {
+            padding: { top: 80, bottom: 160, left: 40, right: 60 },
+            maxZoom: 16,
+            duration: 500,
+            essential: true,
+          });
+        } catch (_) {
+          // Fallback to simple center
+          if (pos) map.easeTo({ center: [pos.lng, pos.lat], zoom: 13, duration: 400 });
+        }
+      } else if (pos) {
+        map.easeTo({ center: [pos.lng, pos.lat], zoom: 13, pitch: 0, bearing: 0,
+          duration: 400, essential: true });
+      }
+
     } else {
-      // Modo normal: norte arriba, zoom moderado para ver contexto del barrio
+      // 'free' — north up, medium zoom
+      if (!pos) { onCenterDone?.(); return; }
       map.easeTo({ center: [pos.lng, pos.lat], zoom: 15, pitch: 0, bearing: 0,
         duration: 350, essential: true });
     }
+
     onCenterDone?.();
   }, [centerSignal]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -340,8 +490,10 @@ export default function DriverMap({
           boxShadow: '0 1px 6px #0002', maxWidth: 260, pointerEvents: 'none' }}>
           © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer"
             style={{ color: '#2563eb' }}>OpenStreetMap</a> contributors ·{' '}
-          <a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer"
-            style={{ color: '#2563eb' }}>OpenFreeMap</a> ·{' '}
+          {STADIA_KEY
+            ? <><a href="https://stadiamaps.com" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>Stadia Maps</a> · </>
+            : <><a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>OpenFreeMap</a> · </>
+          }
           <a href="https://maplibre.org" target="_blank" rel="noopener noreferrer"
             style={{ color: '#2563eb' }}>MapLibre</a>
         </div>
