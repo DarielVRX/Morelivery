@@ -1,676 +1,657 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 
+// ── Leaflet helpers ───────────────────────────────────────────────────────────
+function ensureLeafletCSS() {
+  if (document.getElementById('leaflet-css')) return;
+  const lnk = document.createElement('link');
+  lnk.id = 'leaflet-css'; lnk.rel = 'stylesheet';
+  lnk.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  document.head.appendChild(lnk);
+}
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371, toRad = x => x * Math.PI / 180;
+  const dLat = toRad(lat2-lat1), dLng = toRad(lng2-lng1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
+
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
-// ── VolumeHelper ──────────────────────────────────────────────────────────────
-// Regla visual de volumen para empaque de comida.
-//
-// MEDIDA ABSOLUTA: los rectángulos se dibujan en píxeles físicos fijos.
-// No usa rem, em, %, vw — solo px + devicePixelRatio para pantallas retina.
-// El contenedor tiene zoom:1 y transform-origin explícito para aislar el contexto
-// de zoom del navegador. El tamaño visual en pantalla no cambia con:
-//   - Zoom del navegador (Ctrl +/-)
-//   - Tamaño de fuente del sistema
-//   - Viewport del dispositivo
-//
-// Cada preset representa un contenedor de comida real común en Morelia.
-// El ancho visual de cada rectángulo = sqrt(volumen) * SCALE_PX — proporcional
-// al área para dar intuición correcta de espacio, no solo longitud.
-//
-// Mochila de referencia: 25 litros (default de params.js)
-// = caja de 30×29×29 cm aprox.
+// ── Manual pin map ────────────────────────────────────────────────────────────
+function ManualPinMap({ initialPos, mapRef, onConfirm, onCancel }) {
+  const containerRef  = useRef(null);
+  const pinMarkerRef  = useRef(null);
 
-const PRESETS = [
-  { label: 'Salsa / aderezo',  vol: 0.05,  emoji: '🫙',  example: 'Sobre, mini cup'      },
-{ label: 'Taco / quesadilla',vol: 0.15,  emoji: '🌮',  example: 'Empaque individual'   },
-{ label: 'Orden de tacos',   vol: 0.35,  emoji: '📦',  example: '3-4 tacos con caja'   },
-{ label: 'Torta / burger',   vol: 0.6,   emoji: '🍔',  example: 'Caja mediana'          },
-{ label: 'Pizza personal',   vol: 1.2,   emoji: '🍕',  example: 'Caja 20×20 cm'        },
-{ label: 'Pizza mediana',    vol: 2.5,   emoji: '🍕',  example: 'Caja 30×30 cm'        },
-{ label: 'Pizza grande',     vol: 4.0,   emoji: '🍕',  example: 'Caja 40×40 cm'        },
-{ label: 'Combo familiar',   vol: 6.0,   emoji: '🛍',  example: 'Bolsa grande + bebida' },
-];
-
-// Mochila referencia = 25L
-const BAG_LITERS  = 25;
-// Ancho máximo de la regla en px físicos (no escala con viewport)
-const RULE_W_PX   = 240;
-
-function VolumeHelper({ value, onChange }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  // Close on outside click
   useEffect(() => {
-    if (!open) return;
-    function handler(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    }
-    document.addEventListener('mousedown', handler);
-    document.addEventListener('touchstart', handler, { passive: true });
+    if (!containerRef.current) return;
+    import('leaflet').then(L => {
+      if (!containerRef.current) return;
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+      ensureLeafletCSS();
+      delete L.Icon.Default.prototype._getIconUrl;
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+        iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+      });
+      const center = initialPos ? [initialPos.lat, initialPos.lng] : [19.706700, -101.194900];
+      const map = L.map(containerRef.current, { zoomControl: true }).setView(center, 15);
+      mapRef.current = map;
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap', maxZoom: 19,
+      }).addTo(map);
+      const icon = L.divIcon({
+        html: `<div style="font-size:28px;line-height:1;filter:drop-shadow(0 2px 4px #0005)">📌</div>`,
+                             iconSize: [28, 28], iconAnchor: [14, 28], className: '',
+      });
+      const marker = L.marker(center, { icon, draggable: true }).addTo(map);
+      pinMarkerRef.current = marker;
+      map.on('click', e => marker.setLatLng(e.latlng));
+    });
     return () => {
-      document.removeEventListener('mousedown', handler);
-      document.removeEventListener('touchstart', handler);
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
     };
-  }, [open]);
+  }, []);
 
-  const vol = parseFloat(String(value).replace(',', '.')) || 0;
-
-  // Width in px proportional to cube root of volume (3D space intuition)
-  // cbrt(vol / BAG_LITERS) * RULE_W_PX
-  function volToPx(v) {
-    return Math.round(Math.cbrt(Math.max(0, v) / BAG_LITERS) * RULE_W_PX);
+  async function handleConfirm() {
+    if (!pinMarkerRef.current) return;
+    const ll = pinMarkerRef.current.getLatLng();
+    let result = { lat: ll.lat, lng: ll.lng, label: null };
+    try {
+      const r = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${ll.lat}&lon=${ll.lng}&format=json&addressdetails=1&countrycodes=mx`,
+        { headers: { 'Accept-Language': 'es' } }
+      );
+      const data = await r.json();
+      const a = data.address || {};
+      const parts = [
+        [a.road, a.house_number].filter(Boolean).join(' '),
+        a.suburb || a.neighbourhood || a.quarter,
+        a.city || a.town || a.municipality,
+      ].filter(Boolean);
+      result.label = parts.join(', ') || data.display_name?.split(',').slice(0,3).join(',') || null;
+    } catch (_) {}
+    onConfirm(result);
   }
 
-  const curPx  = Math.min(volToPx(vol), RULE_W_PX);
-  const pct    = vol > 0 ? Math.round((vol / BAG_LITERS) * 100) : 0;
-
   return (
-    <div ref={ref} style={{ marginTop: 6 }}>
-    {/* Trigger button */}
-    <button
-    type="button"
-    onClick={() => setOpen(v => !v)}
-    style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5,
-      background: 'none', border: 'none', padding: 0,
-      fontSize: 12, color: 'var(--brand)', cursor: 'pointer',
-          fontWeight: 600, minHeight: 'unset', textDecoration: 'underline',
-          textUnderlineOffset: 2,
-    }}>
-    📐 {open ? 'Cerrar regla' : 'Ver regla de volumen'}
+    <div style={{ marginTop:'0.5rem', borderRadius:'var(--radius)', overflow:'hidden', border:'1px solid var(--border)' }}>
+    <div ref={containerRef} style={{ height:220, width:'100%' }} />
+    <div style={{ display:'flex', gap:'0.5rem', padding:'0.5rem', background:'var(--bg-sunken)' }}>
+    <button className="btn-primary btn-sm" style={{ flex:1 }} onClick={handleConfirm}>
+    Confirmar ubicación
     </button>
-
-    {open && (
-      <div style={{
-        marginTop: 8,
-        padding: '12px 14px',
-        background: 'var(--bg-raised)',
-              border: '1px solid var(--border)',
-              borderRadius: 10,
-              // CRITICAL: isolate from browser zoom and font-size settings
-              // zoom:1 + will-change:transform creates a new stacking context
-              // All internal measurements are in px — immune to rem/em scaling
-              zoom: 1,
-              willChange: 'transform',
-      }}>
-
-      {/* Header */}
-      <div style={{
-        fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
-              textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
-      }}>
-      Regla de volumen — escala real (px físicos)
-      </div>
-
-      {/* The ruler — absolute px, zoom-immune */}
-      {/* Container is exactly RULE_W_PX wide regardless of anything */}
-      <div style={{
-        width: RULE_W_PX,         // FIXED px — never changes
-        position: 'relative',
-        marginBottom: 12,
-        fontFamily: 'monospace',  // monospace for consistent px rendering
-      }}>
-      {/* Bag background (full width = 25L) */}
-      <div style={{
-        width: RULE_W_PX,       // FIXED
-        height: 28,             // FIXED
-        background: 'var(--bg-sunken)',
-              border: '1px solid var(--border)',
-              borderRadius: 4,
-              position: 'relative',
-              overflow: 'hidden',
-      }}>
-      {/* Fill bar for current value */}
-      {curPx > 0 && (
-        <div style={{
-          position: 'absolute', left: 0, top: 0,
-          width: curPx,        // FIXED px from calculation
-          height: '100%',
-          background: curPx >= RULE_W_PX * 0.8
-          ? 'var(--danger)'
-          : curPx >= RULE_W_PX * 0.5
-          ? 'var(--warn)'
-          : 'var(--brand)',
-                     opacity: 0.35,
-                     borderRadius: '3px 0 0 3px',
-                     transition: 'width 0.2s ease',
-        }} />
-      )}
-      {/* Tick marks at 25%, 50%, 75% */}
-      {[0.25, 0.5, 0.75].map(f => (
-        <div key={f} style={{
-          position: 'absolute',
-          left: Math.round(f * RULE_W_PX),  // FIXED
-                                   top: 0, bottom: 0, width: 1,
-                                   background: 'var(--border)',
-                                   pointerEvents: 'none',
-        }} />
-      ))}
-      {/* Value label */}
-      <div style={{
-        position: 'absolute', inset: 0,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)',
-              pointerEvents: 'none',
-      }}>
-      {vol > 0 ? `${vol}L = ${pct}% de mochila (25L)` : 'Sin volumen configurado'}
-      </div>
-      </div>
-
-      {/* Scale labels — fixed px positions */}
-      <div style={{
-        display: 'flex', justifyContent: 'space-between',
-        marginTop: 3, width: RULE_W_PX,  // FIXED
-      }}>
-      {['0L', '6.25L', '12.5L', '18.75L', '25L'].map(l => (
-        <span key={l} style={{ fontSize: 9, color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>
-        {l}
-        </span>
-      ))}
-      </div>
-      </div>
-
-      {/* Preset buttons */}
-      <div style={{
-        fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
-              textTransform: 'uppercase', letterSpacing: '0.05em',
-              marginBottom: 6,
-      }}>
-      Referencia rápida
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      {PRESETS.map(p => {
-        const barPx   = Math.min(volToPx(p.vol), RULE_W_PX);
-        const isActive = Math.abs(vol - p.vol) < 0.001;
-        return (
-          <button
-          key={p.label}
-          type="button"
-          onClick={() => { onChange(String(p.vol)); setOpen(false); }}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            background: isActive ? 'var(--brand-light)' : 'transparent',
-                border: `1px solid ${isActive ? 'var(--brand)' : 'transparent'}`,
-                borderRadius: 6, padding: '5px 8px', cursor: 'pointer',
-                textAlign: 'left', width: '100%', minHeight: 'unset',
-          }}>
-          {/* Mini bar — FIXED px */}
-          <div style={{
-            width: RULE_W_PX,   // FIXED — same ruler width
-            height: 14,          // FIXED
-            background: 'var(--bg-sunken)',
-                borderRadius: 2,
-                position: 'relative',
-                flexShrink: 0,
-                overflow: 'hidden',
-                border: '1px solid var(--border)',
-          }}>
-          <div style={{
-            position: 'absolute', left: 0, top: 0,
-            width: barPx,      // FIXED px
-            height: '100%',
-            background: 'var(--brand)',
-                opacity: isActive ? 0.6 : 0.3,
-                borderRadius: '1px 0 0 1px',
-          }} />
-          </div>
-          {/* Label */}
-          <div style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
-          {p.emoji} {p.label}
-          </span>
-          <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginLeft: 5 }}>
-          {p.vol}L
-          </span>
-          <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 1 }}>
-          {p.example}
-          </div>
-          </div>
-          </button>
-        );
-      })}
-      </div>
-
-      <div style={{
-        marginTop: 10, fontSize: 10, color: 'var(--text-tertiary)',
-              lineHeight: 1.4,
-      }}>
-      💡 La mochila estándar tiene 25L. Configura el volumen del empaque para que el motor
-      evite asignar pedidos que excedan la capacidad del conductor.
-      </div>
-      </div>
-    )}
+    <button className="btn-sm" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
+    </div>
     </div>
   );
 }
 
-function ProductImagePlaceholder({ size = 68 }) {
-  return (
-    <div style={{ width:size, height:size, borderRadius:6, background:'var(--gray-100)', border:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-    <svg width={size*0.5} height={size*0.5} viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="1.5">
+// ── Product image ─────────────────────────────────────────────────────────────
+function ProductImage({ src, name }) {
+  const [err, setErr] = useState(false);
+  if (!src || err) return (
+    <div className="product-img-placeholder">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
     <circle cx="12" cy="12" r="9"/>
-    <path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
-    <circle cx="12" cy="10" r="2"/>
+    <path d="M7 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
+    <path d="M9 9h.01M15 9h.01"/>
     </svg>
     </div>
   );
-}
-
-function ProductImage({ src, size = 68 }) {
-  const [err, setErr] = useState(false);
-  if (!src || err) return <ProductImagePlaceholder size={size} />;
   return (
-    <img src={src} alt="" width={size} height={size} onError={() => setErr(true)}
-    style={{ width:size, height:size, borderRadius:6, objectFit:'cover', border:'1px solid var(--border)', flexShrink:0 }} />
+    <img src={src} alt={name} onError={() => setErr(true)}
+    className="product-img" />
   );
 }
 
-// Convierte archivo local a data-URL base64
-function useLocalImage() {
-  const [preview, setPreview] = useState(null);
-  const [dataUrl, setDataUrl]  = useState(null);
-  function pick(file) {
-    if (!file) { setPreview(null); setDataUrl(null); return; }
-    const reader = new FileReader();
-    reader.onload = e => { setPreview(e.target.result); setDataUrl(e.target.result); };
-    reader.readAsDataURL(file);
-  }
-  function clear() { setPreview(null); setDataUrl(null); }
-  return { preview, dataUrl, pick, clear };
+// ── Star picker component ─────────────────────────────────────────────────────
+function StarPicker({ value, onChange, label }) {
+  return (
+    <div style={{ marginBottom:'0.5rem' }}>
+    <div style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginBottom:'0.25rem' }}>{label}</div>
+    <div style={{ display:'flex', gap:'4px' }}>
+    {[1,2,3,4,5].map(s => (
+      <button key={s} onClick={() => onChange(s)}
+      style={{ fontSize:'1.4rem', background:'none', border:'none', cursor:'pointer',
+        color: s <= value ? '#f59e0b' : 'var(--border)', padding:0, minHeight:'unset', lineHeight:1 }}>
+        ★
+        </button>
+    ))}
+    </div>
+    </div>
+  );
 }
 
-export default function RestaurantMenu() {
-  const { auth } = useAuth();
-  const [products, setProducts] = useState([]);
-  const [name, setName]         = useState('');
-  const [description, setDesc]  = useState('');
-  const [price, setPrice]       = useState('');
-  const [pkgUnits, setPkgUnits]           = useState('1');
-  const [pkgVolume, setPkgVolume]         = useState('0');
-  const [msg, setMsg]           = useState('');
-  const [editingId, setEditingId] = useState(null);
-  const [editingIsAvailable, setEditingIsAvailable] = useState(true);
-  const [formOpen, setFormOpen]   = useState(false); // colapsado por defecto
-  // Imagen
-  const [editingImg, setEditingImg] = useState(null);
-  const [imgUrl, setImgUrl]         = useState('');
-  const [savingImg, setSavingImg]   = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const [restaurantData, setRestaurantData] = useState(null);
-  const { preview, dataUrl, pick, clear } = useLocalImage();
-  const fileRef = useRef(null);
+// ── Main component ────────────────────────────────────────────────────────────
+export default function RestaurantPage() {
+  const { id }     = useParams();
+  const { auth }   = useAuth();
+  const navigate   = useNavigate();
 
-  // ─── Foto de perfil de la tienda ─────────────────────────────────────────
-  const [profilePhoto, setProfilePhoto]     = useState(null);
-  const [editingProfilePhoto, setEditingPP] = useState(false);
-  const [savingPP, setSavingPP]             = useState(false);
-  const {
-    preview: ppPreview, dataUrl: ppDataUrl, pick: ppPick, clear: ppClear
-  } = useLocalImage();
-  const ppFileRef = useRef(null);
+  const [restaurant,    setRestaurant]    = useState(null);
+  const [menu,          setMenu]          = useState([]);
+  const [selectedItems, setSelectedItems] = useState({});
+  const [loading,       setLoading]       = useState(true);
+  const [msg,           setMsg]           = useState('');
+  const [ordering,      setOrdering]      = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [tipCents,      setTipCents]      = useState(0);
 
-  async function saveProfilePhoto() {
-    if (!ppDataUrl) return;
-    setSavingPP(true);
+  // Rating state
+  const [ratingOrder,    setRatingOrder]    = useState(null);
+  const [ratingRestStar, setRatingRestStar] = useState(0);
+  const [ratingDrvStar,  setRatingDrvStar]  = useState(0);
+  const [ratingComment,  setRatingComment]  = useState('');
+  const [ratingLoading,  setRatingLoading]  = useState(false);
+  const [ratedOrders,    setRatedOrders]    = useState(new Set());
+
+  const isCustomer  = auth.user?.role === 'customer';
+  const hasAddress  = Boolean(auth.user?.address && auth.user.address !== 'address-pending');
+  const homeLatNum  = Number(auth.user?.home_lat);
+  const homeLngNum  = Number(auth.user?.home_lng);
+  const hasHomePin  = Number.isFinite(homeLatNum) && Number.isFinite(homeLngNum);
+
+  // Menu sort
+  const [sortBy, setSortBy] = useState('default'); // 'default' | 'asc' | 'desc'
+
+  // Delivery location — reads from Layout GPS panel or GPS/home fallback
+  const [currentPos,    setCurrentPos]    = useState(() => {
     try {
-      await apiFetch('/restaurants/my/profile-photo', {
-        method: 'PATCH', body: JSON.stringify({ photoUrl: ppDataUrl })
-      }, auth.token);
-      setProfilePhoto(ppDataUrl);
-      setEditingPP(false); ppClear();
-    } catch (e) { setMsg(e.message); }
-    finally { setSavingPP(false); }
-  }
-
-  async function load() {
-    try {
-      const [menuData, myData] = await Promise.all([
-        apiFetch('/restaurants/my/menu', {}, auth.token),
-                                                   apiFetch('/restaurants/my', {}, auth.token),
-      ]);
-      setProducts(menuData.menu || []);
-      if (myData?.restaurant?.profile_photo) setProfilePhoto(myData.restaurant.profile_photo);
-      if (myData?.restaurant) setRestaurantData(myData.restaurant);
+      const stored = sessionStorage.getItem('morelivery_delivery_pos');
+      if (stored) return JSON.parse(stored);
     } catch (_) {}
-  }
+    return null;
+  });
+  const [gpsError,      setGpsError]      = useState('');
+  const [deliveryMode,  setDeliveryMode]  = useState(() => {
+    try { return sessionStorage.getItem('morelivery_delivery_pos') ? 'confirmed' : 'current'; }
+    catch (_) { return 'current'; }
+  });
+  const [manualPos,     setManualPos]     = useState(null);
+  const [showManualMap, setShowManualMap] = useState(false);
+  const manualMapRef = useRef(null);
 
-  useEffect(() => { load(); }, [auth.token]);
-
-  async function handleSubmit() {
-    if (!name.trim()) return setMsg('El nombre es requerido');
-    const cents = Math.round(parseFloat(price.toString().replace(',', '.')) * 100);
-    if (isNaN(cents) || cents <= 0) return setMsg('Precio inválido');
+  // GPS — skip if Layout panel already provided a confirmed location
+  useEffect(() => {
     try {
-      const payload = {
-        name: name.trim(),
-        description: description.trim(),
-        priceCents: cents,
-        pkgUnits:        Math.max(1, parseInt(pkgUnits,  10) || 1),
-        pkgVolumeLiters: Math.max(0, parseFloat(pkgVolume.toString().replace(',', '.')) || 0),
-      };
-      if (editingId) {
-        payload.isAvailable = editingIsAvailable;
-        await apiFetch(`/restaurants/menu-items/${editingId}`, { method:'PATCH', body: JSON.stringify(payload) }, auth.token);
-      } else {
-        await apiFetch('/restaurants/menu-items', { method:'POST', body: JSON.stringify(payload) }, auth.token);
+      const stored = sessionStorage.getItem('morelivery_delivery_pos');
+      if (stored) return; // GPS panel already confirmed a location
+    } catch (_) {}
+    if (!isCustomer || !navigator.geolocation) { setGpsError('GPS no disponible'); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => setCurrentPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+                                             ()  => setGpsError('No se pudo obtener tu ubicación'),
+                                             { timeout: 8000, maximumAge: 60000 }
+    );
+  }, [isCustomer]);
+
+  // Load restaurant + menu
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const [restData, menuData] = await Promise.all([
+          apiFetch(`/restaurants/${id}`),
+                                                       apiFetch(`/restaurants/${id}/menu`),
+        ]);
+        setRestaurant(restData.restaurant);
+        setMenu((menuData.menu || []).filter(i => i.is_available !== false));
+      } catch (e) {
+        setMsg('Error cargando la tienda');
+      } finally {
+        setLoading(false);
       }
-      resetForm();
-      load();
-    } catch (e) { setMsg(e.message); }
-  }
+    }
+    load();
+  }, [id]);
 
-  function startEdit(product) {
-    setEditingId(product.id);
-    setEditingIsAvailable(product.is_available ?? true);
-    setName(product.name);
-    setDesc(product.description || '');
-    setPrice((product.price_cents / 100).toFixed(2));
-    setPkgUnits(String(product.pkg_units ?? 1));
-    setPkgVolume(String(product.pkg_volume_liters ?? 0));
-    setMsg('');
-  }
-
-  function resetForm() {
-    setEditingId(null); setEditingIsAvailable(true);
-    setName(''); setDesc(''); setPrice('');
-    setPkgUnits('1'); setPkgVolume('0');
-    setMsg(''); setFormOpen(false);
-  }
-
-  async function toggleAvailable(product) {
+  // Rating submit
+  async function submitRating() {
+    if (!ratingOrder || ratingRestStar < 1) return;
+    setRatingLoading(true);
     try {
-      await apiFetch(`/restaurants/menu-items/${product.id}`, {
-        method:'PATCH',
-        body: JSON.stringify({ name: product.name, description: product.description, priceCents: product.price_cents, isAvailable: !product.is_available })
+      await apiFetch(`/orders/${ratingOrder.id}/rating`, {
+        method: 'POST',
+        body: JSON.stringify({
+          restaurant_stars: ratingRestStar,
+          driver_stars:     ratingDrvStar > 0 ? ratingDrvStar : undefined,
+          comment:          ratingComment.trim() || undefined,
+        }),
       }, auth.token);
-      load();
-    } catch (e) { setMsg(e.message); }
+      setRatedOrders(prev => new Set([...prev, ratingOrder.id]));
+      setRatingOrder(null); setRatingRestStar(0); setRatingDrvStar(0); setRatingComment('');
+      setMsg('¡Gracias por tu calificación!');
+      setTimeout(() => setMsg(''), 4000);
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setRatingLoading(false);
+    }
   }
 
-  async function saveImage(productId) {
-    setSavingImg(true);
-    try {
-      // Solo imagen local (base64)
-      const imageToSave = dataUrl || null;
-      await apiFetch(`/restaurants/menu-items/${productId}`, {
-        method:'PATCH', body: JSON.stringify({ imageUrl: imageToSave })
-      }, auth.token);
-      setEditingImg(null); setImgUrl(''); clear();
-      load();
-    } catch (e) { setMsg(e.message); }
-    finally { setSavingImg(false); }
+  // Order totals
+  const subtotal    = Object.entries(selectedItems).reduce((sum, [itemId, qty]) => {
+    const item = menu.find(i => i.id === itemId);
+    return sum + (item ? item.price_cents * Number(qty) : 0);
+  }, 0);
+  const serviceFee  = Math.round(subtotal * 0.05);
+  const deliveryFee = Math.round(subtotal * 0.10);
+  const total       = subtotal + serviceFee + deliveryFee + tipCents;
+
+  function adjust(itemId, delta) {
+    setSelectedItems(p => ({ ...p, [itemId]: Math.max(0, (Number(p[itemId]) || 0) + delta) }));
   }
 
-  async function deleteProduct(productId) {
+  async function createOrder() {
+    if (!auth.token) return navigate('/customer/login');
+    if (!isCustomer) return setMsg('Solo los clientes pueden hacer pedidos');
+    if (!hasAddress) return setMsg('Guarda tu dirección antes de hacer un pedido');
+
+    const items = Object.entries(selectedItems)
+    .filter(([, qty]) => Number(qty) > 0)
+    .map(([menuItemId, quantity]) => ({ menuItemId, quantity: Number(quantity) }));
+    if (items.length === 0) return setMsg('Selecciona al menos un producto');
+
+    setOrdering(true);
     try {
-      await apiFetch(`/restaurants/menu-items/${productId}`, { method:'DELETE' }, auth.token);
+      const body = { restaurantId: id, items, payment_method: paymentMethod, tip_cents: tipCents };
+
+      if (deliveryMode === 'manual' && manualPos) {
+        body.delivery_address = manualPos.label || `${manualPos.lat.toFixed(5)}, ${manualPos.lng.toFixed(5)}`;
+        body.delivery_lat = manualPos.lat;
+        body.delivery_lng = manualPos.lng;
+      } else if (deliveryMode === 'home' && hasHomePin) {
+        body.delivery_address = auth.user.address;
+        body.delivery_lat = homeLatNum;
+        body.delivery_lng = homeLngNum;
+      } else if (currentPos) {
+        body.delivery_lat = currentPos.lat;
+        body.delivery_lng = currentPos.lng;
+      }
+
+      await apiFetch('/orders', { method: 'POST', body: JSON.stringify(body) }, auth.token);
       setMsg('');
-      setConfirmDelete(null);
-      load();
-    } catch (e) { setMsg(e.message); }
+      setSelectedItems({});
+      setTimeout(() => navigate('/customer'), 800);
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setOrdering(false);
+    }
   }
+
+  // Distance checks
+  const restLat = Number.isFinite(Number(restaurant?.lat)) ? Number(restaurant.lat) : null;
+  const restLng = Number.isFinite(Number(restaurant?.lng)) ? Number(restaurant.lng) : null;
+  // Priority: GPS panel confirmed > manual > home > GPS
+  const activePos =
+  (deliveryMode === 'confirmed' && currentPos) ? currentPos :
+  deliveryMode === 'manual'  ? manualPos :
+  deliveryMode === 'home'    ? (hasHomePin ? { lat: homeLatNum, lng: homeLngNum } : null) :
+  currentPos;
+  const distKm = (activePos && restLat !== null && restLng !== null)
+  ? haversineKm(activePos.lat, activePos.lng, restLat, restLng) : null;
+  const tooFar = distKm !== null && distKm > 5;
+  const isClosed = restaurant?.is_open === false;
+  const canOrder = isCustomer && hasAddress && !isClosed && !tooFar && restLat !== null;
+
+  const itemCount = Object.values(selectedItems).reduce((s, q) => s + Number(q), 0);
+
+  if (loading) return (
+    <div style={{ padding:'3rem', textAlign:'center', color:'var(--text-tertiary)' }}>Cargando…</div>
+  );
 
   return (
-    <div style={{ backgroundColor: 'var(--bg-base)', minHeight:'100vh', padding:'1rem' }}>
-    {/* ── Encabezado Gestión de menú ─────────────────────────────────── */}
-    <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'var(--promo-gradient)', color:'#fff' }}>
-    <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>📋 Gestión de menú</div>
-    <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Productos, precios e imagen de tu tienda</div>
-    </div>
+    <div style={{ backgroundColor:'var(--bg-base)', minHeight:'100vh' }}>
 
-    {/* ── Alerta coordenadas faltantes ─────────────────────────────────── */}
-    {restaurantData && !Number.isFinite(Number(restaurantData.lat)) && (
-      <div style={{
-        display:'flex', alignItems:'flex-start', gap:'0.6rem',
-        background:'#fffbeb', border:'1px solid #fde68a',
-        borderRadius:8, padding:'0.7rem 0.875rem', marginBottom:'1rem',
-      }}>
-      <span style={{ fontSize:'1.1rem', flexShrink:0 }}>⚠️</span>
-      <div style={{ flex:1, fontSize:'0.82rem', color:'#92400e' }}>
-      <strong>Tu tienda no tiene ubicación configurada.</strong>
-      <span> Los clientes a más de 5 km no podrán hacerte pedidos.</span>
-      <br />
-      <a href="/profile" style={{ color:'#b45309', fontWeight:700, textDecoration:'underline' }}>
-      Ir a Perfil → configurar ubicación
-      </a>
-      </div>
-      </div>
+    {/* Rating modal */}
+    {ratingOrder && (
+      <div style={{ position:'fixed', inset:0, background:'var(--bg-overlay)', zIndex:999,
+        display:'flex', alignItems:'flex-end', justifyContent:'center' }}
+        onClick={e => { if (e.target === e.currentTarget) setRatingOrder(null); }}>
+        <div style={{ background:'var(--bg-card)', borderRadius:'20px 20px 0 0',
+          padding:'1.5rem', width:'100%', maxWidth:480,
+          boxShadow:'0 -4px 32px rgba(0,0,0,0.2)' }}>
+          <h3 style={{ fontSize:'1rem', fontWeight:800, color:'var(--text-primary)', marginBottom:'1rem' }}>
+          Calificar pedido
+          </h3>
+          <StarPicker value={ratingRestStar} onChange={setRatingRestStar} label="Tienda / Restaurante" />
+          {ratingOrder.driver_id && (
+            <StarPicker value={ratingDrvStar} onChange={setRatingDrvStar} label="Conductor (opcional)" />
+          )}
+          <textarea value={ratingComment} onChange={e => setRatingComment(e.target.value)}
+          placeholder="Comentario opcional…" rows={2}
+          style={{ width:'100%', marginBottom:'0.75rem', fontSize:'0.875rem', resize:'none' }} />
+          <div style={{ display:'flex', gap:'0.5rem' }}>
+          <button className="btn-primary" style={{ flex:1 }}
+          disabled={ratingRestStar < 1 || ratingLoading} onClick={submitRating}>
+          {ratingLoading ? 'Enviando…' : 'Enviar calificación'}
+          </button>
+          <button className="btn-sm" onClick={() => setRatingOrder(null)}>Cancelar</button>
+          </div>
+          </div>
+          </div>
     )}
 
-    {/* ── Foto de perfil de la tienda ── */}
-    <div style={{ display:'flex', alignItems:'center', gap:'0.875rem', marginBottom:'1.25rem',
-      padding:'0.875rem 1rem', background:'var(--bg-card)', borderRadius:10, border:'1px solid var(--border)' }}>
-      <div style={{ position:'relative', flexShrink:0 }}>
-      {profilePhoto
-        ? <img src={profilePhoto} alt="Foto de tienda"
-        style={{ width:64, height:64, borderRadius:'50%', objectFit:'cover', border:'2px solid #e3aaaa' }} />
-        : <div style={{ width:64, height:64, borderRadius:'50%', background:'var(--gray-100)',
-          border:'2px solid #e3aaaa', display:'flex', alignItems:'center', justifyContent:'center' }}>
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#e3aaaa" strokeWidth="1.5">
-          <circle cx="12" cy="12" r="9"/><path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
-          <circle cx="12" cy="10" r="2"/>
-          </svg>
+    {/* Hero header */}
+    <div style={{
+      background: restaurant?.profile_photo
+      ? 'var(--bg-sunken)'
+      : 'var(--promo-gradient)',
+          position: 'relative', overflow: 'hidden',
+          minHeight: 140,
+    }}>
+    {restaurant?.profile_photo && (
+      <>
+      <img src={restaurant.profile_photo} alt={restaurant?.name}
+      style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover', opacity:0.35 }} />
+      <div style={{ position:'absolute', inset:0,
+        background:'linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.7) 100%)' }} />
+        </>
+    )}
+    <div style={{ position:'relative', padding:'1rem 1rem 1.25rem', display:'flex', flexDirection:'column', gap:'0.5rem' }}>
+    {/* Back button */}
+    <button onClick={() => navigate(-1)}
+    style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.3)',
+      borderRadius:8, color:'#fff', padding:'0.3rem 0.65rem', fontSize:'0.82rem',
+      fontWeight:600, cursor:'pointer', alignSelf:'flex-start', minHeight:'unset',
+      display:'flex', alignItems:'center', gap:'0.3rem' }}>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+      Volver
+      </button>
+
+      {/* Restaurant info */}
+      <div style={{ display:'flex', gap:'0.875rem', alignItems:'flex-start' }}>
+      {restaurant?.profile_photo
+        ? <img src={restaurant.profile_photo} alt={restaurant?.name}
+        style={{ width:56, height:56, borderRadius:'50%', objectFit:'cover',
+          border:'2px solid rgba(255,255,255,0.7)', flexShrink:0 }} />
+          : <div style={{ width:56, height:56, borderRadius:'50%',
+            background:'rgba(255,255,255,0.2)', border:'2px solid rgba(255,255,255,0.4)',
+          display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+          <span style={{ fontSize:'1.5rem' }}>🏪</span>
           </div>
       }
-      <button onClick={() => { setEditingPP(e => !e); ppClear(); }}
-      style={{ position:'absolute', bottom:-4, right:-4, width:24, height:24, borderRadius:'50%',
-        background:'var(--brand)', border:'2px solid #fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:0 }}>
-        <span style={{ color:'#fff', fontSize:'1rem', lineHeight:1, fontWeight:300, marginTop:'-1px' }}>+</span>
-        </button>
+      <div style={{ flex:1 }}>
+      <h2 style={{ fontSize:'1.15rem', fontWeight:900, margin:'0 0 0.2rem', color:'#fff',
+        letterSpacing:'-0.02em' }}>{restaurant?.name}</h2>
+        {restaurant?.address && (
+          <p style={{ color:'rgba(255,255,255,0.8)', fontSize:'0.8rem', margin:'0 0 0.3rem' }}>
+          {restaurant.address}
+          </p>
+        )}
+        <div style={{ display:'flex', gap:'0.5rem', alignItems:'center', flexWrap:'wrap' }}>
+        {restaurant?.rating_avg != null && restaurant.rating_count > 0 && (
+          <span style={{ fontSize:'0.78rem', color:'rgba(255,255,255,0.9)',
+            display:'flex', alignItems:'center', gap:'0.2rem' }}>
+            <span style={{ color:'#fbbf24' }}>★</span>
+            {Number(restaurant.rating_avg).toFixed(1)}
+            <span style={{ opacity:0.7 }}>({restaurant.rating_count})</span>
+            </span>
+        )}
+        {distKm !== null && (
+          <span style={{ fontSize:'0.75rem', color:'rgba(255,255,255,0.8)' }}>
+          📍 {distKm < 1 ? `${Math.round(distKm*1000)}m` : `${distKm.toFixed(1)}km`}
+          </span>
+        )}
+        <span style={{
+          fontSize:'0.72rem', fontWeight:700,
+          color: isClosed ? 'rgba(255,255,255,0.55)' : '#fff',
+          background: isClosed ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.2)',
+          border:`1px solid ${isClosed ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.5)'}`,
+          borderRadius:10, padding:'0.15rem 0.55rem',
+        }}>
+        {isClosed ? '● Cerrado' : '● Abierto'}
+        </span>
         </div>
-        <div>
-        <div style={{ fontWeight:700, fontSize:'0.9rem', color:'#8a5e5e' }}>
-        {auth.user?.restaurant?.name || 'Mi tienda'}
+        </div>
+        </div>
+        </div>
         </div>
 
-        </div>
-        </div>
+        <div style={{ padding:'0.875rem 1rem 6rem' }}>
+        {msg && <p className="flash flash-error" style={{ marginBottom:'0.75rem' }}>{msg}</p>}
 
-        {/* Editor de foto de tienda */}
-        {editingProfilePhoto && (
-          <div style={{ marginBottom:'1rem', padding:'0.875rem 1rem', background:'var(--bg-card)',
-            borderRadius:10, border:'1px solid #e3aaaa' }}>
-            <p style={{ fontWeight:700, fontSize:'0.85rem', color:'#8a5e5e', marginBottom:'0.5rem' }}>
-            Cambiar foto de perfil
-            </p>
-            <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-            <button className="btn-sm" style={{ borderColor:'#e3aaaa', color:'#8a5e5e' }}
-            onClick={() => ppFileRef.current?.click()}>
-            Seleccionar archivo
-            </button>
-            <input ref={ppFileRef} type="file" accept="image/*" style={{ display:'none' }}
-            onChange={e => ppPick(e.target.files?.[0])} />
-            {ppPreview && (
-              <img src={ppPreview} alt="Preview"
-              style={{ width:44, height:44, borderRadius:'50%', objectFit:'cover', border:'2px solid #e3aaaa' }} />
-            )}
-            <button className="btn-primary btn-sm"
-            style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}
-            disabled={savingPP || !ppPreview}
-            onClick={saveProfilePhoto}>
-            {savingPP ? 'Guardando…' : 'Guardar foto'}
-            </button>
-            <button className="btn-sm"
-            onClick={() => { setEditingPP(false); ppClear(); }}>
-            Cancelar
-            </button>
-            </div>
-            </div>
+        {isClosed && (
+          <div style={{ background:'var(--bg-raised)', border:'1px solid var(--border)',
+            borderRadius:'var(--radius)', padding:'0.75rem', marginBottom:'1rem',
+                      fontSize:'0.85rem', color:'var(--text-secondary)', textAlign:'center' }}>
+                      Esta tienda está cerrada. Puedes ver el menú pero no hacer pedidos.
+                      </div>
         )}
 
-        {/* Lista de productos */}
-        {products.length === 0
-          ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin productos en el menú.</p>
-          : (
-            <ul style={{ listStyle:'none', padding:0, marginBottom:'1rem' }}>
-            {products.map(product => (
-              <li key={product.id} className="card" style={{ marginBottom:'0.5rem', padding:'0.75rem',
-                border: editingId===product.id ? '2px solid #e3aaaa' : '1px solid var(--gray-200)' }}>
-                {/* ── Modo edición inline ── */}
-                {editingId === product.id ? (
-                  <div>
-                  <div style={{ fontWeight:700, fontSize:'0.82rem', color:'var(--brand)', marginBottom:'0.6rem' }}>
-                  ✏️ Editando: <span style={{ color:'var(--gray-700)' }}>{product.name}</span>
-                  </div>
-                  <div className="row">
-                  <label>Nombre<input value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre del producto" /></label>
-                  <label>Descripción<input value={description} onChange={e=>setDesc(e.target.value)} placeholder="Descripción (opcional)" /></label>
-                  <label>Precio (MXN)<input type="number" value={price} onChange={e=>setPrice(e.target.value)} step="0.01" min="0" placeholder="0.00" /></label>
-                  </div>
-                  <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.4rem' }}>
-                  <label style={{ flex:1 }}>
-                  Unidades por empaque
-                  <input type="number" value={pkgUnits} onChange={e=>setPkgUnits(e.target.value)}
-                  min="1" step="1" placeholder="1"
-                  title="Cuántas unidades incluye un empaque (ej: 6 nuggets = 6)" />
-                  </label>
-                  <label style={{ flex:1 }}>
-                  Volumen empaque (L)
-                  <input type="number" value={pkgVolume} onChange={e=>setPkgVolume(e.target.value)}
-                  min="0" step="0.01" placeholder="0.00"
-                  title="Litros que ocupa un empaque en la mochila (ej: 0.5 = medio litro)" />
-                  </label>
-                  </div>
-                  <VolumeHelper value={pkgVolume} onChange={setPkgVolume} />
-                  <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
-                  <button className="btn-primary btn-sm" onClick={handleSubmit} disabled={!name.trim()||!price}>
-                  Guardar cambios
-                  </button>
-                  <button className="btn-sm" onClick={resetForm}>Cancelar</button>
-                  </div>
-                  {msg && <p className="flash flash-error" style={{ marginTop:'0.4rem' }}>{msg}</p>}
-                  </div>
-                ) : (
-                  <div style={{ display:'flex', gap:'0.75rem', alignItems:'flex-start' }}>
-                  <ProductImage src={product.image_url} size={68} />
-                  <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'0.5rem', flexWrap:'wrap' }}>
-                  <span style={{ fontWeight:700, fontSize:'0.95rem' }}>{product.name}</span>
-                  <span style={{ fontWeight:700, color:'#8a5e5e', flexShrink:0 }}>{fmt(product.price_cents)}</span>
-                  </div>
-                  {product.description && (
-                    <p style={{ fontSize:'0.82rem', color:'var(--text-secondary)', margin:'0.15rem 0 0' }}>{product.description}</p>
-                  )}
-                  <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
-                  <button className="btn-sm" onClick={() => startEdit(product)}>Editar</button>
-                  <button className="btn-sm" onClick={() => toggleAvailable(product)}>
-                  {product.is_available ? 'Desactivar' : 'Activar'}
-                  </button>
-                  <button className="btn-sm" onClick={() => {
-                    setEditingImg(product.id);
-                    setImgUrl(product.image_url && !product.image_url.startsWith('data:') ? product.image_url : '');
-                    clear();
-                  }}>
-                  {product.image_url ? 'Cambiar imagen' : 'Agregar imagen'}
-                  </button>
-                  {confirmDelete === product.id ? (
-                    <div style={{ display:'flex', gap:'0.3rem', alignItems:'center' }}>
-                    <span style={{ fontSize:'0.72rem', color:'var(--danger)', fontWeight:700 }}>¿Eliminar?</span>
-                    <button className="btn-sm" onClick={() => deleteProduct(product.id)}
-                    style={{ background:'var(--danger)', color:'#fff', borderColor:'var(--danger)', fontSize:'0.72rem' }}>
-                    Sí
-                    </button>
-                    <button className="btn-sm" onClick={() => setConfirmDelete(null)}
-                    style={{ fontSize:'0.72rem' }}>No</button>
-                    </div>
-                  ) : (
-                    <button className="btn-sm" onClick={() => setConfirmDelete(product.id)}
-                    style={{ color:'var(--danger)', borderColor:'var(--danger)' }}>
-                    Eliminar
-                    </button>
-                  )}
-                  </div>
+        {tooFar && (
+          <div className="flash flash-error" style={{ marginBottom:'0.75rem' }}>
+          Esta tienda está a {distKm?.toFixed(1)} km. Solo se aceptan pedidos dentro de 5 km.
+          </div>
+        )}
 
-                  {/* Editor de imagen */}
-                  {editingImg === product.id && (
-                    <div style={{ marginTop:'0.5rem', display:'flex', flexDirection:'column', gap:'0.4rem' }}>
-                    {/* Opción 1: desde local */}
-                    <div style={{ display:'flex', alignItems:'center', gap:'0.4rem' }}>
-                    <button className="btn-sm" onClick={() => fileRef.current?.click()}>
-                    Seleccionar archivo
-                    </button>
-                    <input
-                    ref={fileRef} type="file" accept="image/*"
-                    style={{ display:'none' }}
-                    onChange={e => pick(e.target.files?.[0])}
-                    />
-                    {preview && (
-                      <img src={preview} alt="Preview"
-                      style={{ width:40, height:40, borderRadius:4, objectFit:'cover', border:'1px solid var(--border)' }} />
-                    )}
-                    </div>
-                    <div style={{ display:'flex', gap:'0.4rem' }}>
-                    <button className="btn-primary btn-sm" disabled={savingImg || !preview}
-                    onClick={() => saveImage(product.id)}
-                    style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}>
-                    {savingImg ? '...' : 'Guardar'}
-                    </button>
-                    <button className="btn-sm" onClick={() => { setEditingImg(null); setImgUrl(''); clear(); }}>
-                    Cancelar
-                    </button>
-                    </div>
-                    </div>
-                  )}
-                  </div>
-                  <span style={{ fontSize:'0.72rem', fontWeight:700, color: product.is_available ? 'var(--success)':'var(--gray-400)', flexShrink:0 }}>
-                  {product.is_available ? 'Activo':'Inactivo'}
-                  </span>
-                  </div>
-                )}{/* fin ternario edición */}
-                </li>
+        {/* Menu */}
+        <div style={{ fontWeight:800, fontSize:'0.85rem', color:'var(--text-tertiary)',
+          textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'0.75rem' }}>
+          Menú
+          </div>
+
+          {menu.length === 0 ? (
+            <p style={{ color:'var(--text-tertiary)' }}>Sin productos disponibles.</p>
+          ) : (
+            <>
+            {/* Sort controls */}
+            <div style={{ display:'flex', gap:'0.4rem', marginBottom:'0.6rem', alignItems:'center' }}>
+            <span style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', fontWeight:600 }}>Ordenar:</span>
+            {[['default','Por defecto'],['asc','Menor precio'],['desc','Mayor precio']].map(([val,label]) => (
+              <button key={val} onClick={() => setSortBy(val)}
+              className={`chip${sortBy===val?' active':''}`}
+              style={{ fontSize:'0.7rem', padding:'3px 9px' }}>
+              {label}
+              </button>
             ))}
-            </ul>
-          )
-        }
+            </div>
 
-        {/* Formulario colapsable al fondo */}
-        <div className="card" style={{ border: formOpen ? '2px solid #e3aaaa' : '1px solid var(--gray-200)', padding:0, overflow:'hidden' }}>
-        <button
-        onClick={() => { setFormOpen(o => !o); if (editingId) resetForm(); }}
-        style={{ width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.85rem 1rem', background:'none', border:'none', cursor:'pointer', fontWeight:700, fontSize:'0.88rem', borderBottom: formOpen ? '1px solid var(--gray-200)':'none' }}
-        >
-        <span>{editingId ? 'Modo Edición' : '+ Agregar producto'}</span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-        style={{ transform: formOpen ? 'rotate(180deg)':'rotate(0)', transition:'transform 0.2s' }}>
-        <path d="M6 9l6 6 6-6"/>
-        </svg>
-        </button>
-        {formOpen && (
-          <div style={{ padding:'1rem' }}>
-          <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
-          <label>Nombre del producto<input value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Taco de pastor" /></label>
-          <label>Descripción (opcional)<input value={description} onChange={e => setDesc(e.target.value)} placeholder="Ej: Con cebolla y cilantro" /></label>
-          <label>Precio (pesos)<input value={price} onChange={e => setPrice(e.target.value)} placeholder="Ej: 35.00" inputMode="decimal" /></label>
-          <div style={{ display:'flex', gap:'0.5rem' }}>
-          <label style={{ flex:1 }}>
-          Unidades por empaque
-          <input type="number" value={pkgUnits} onChange={e => setPkgUnits(e.target.value)}
-          min="1" step="1" placeholder="1"
-          title="Cuántas unidades incluye un empaque" />
-          </label>
-          <label style={{ flex:1 }}>
-          Volumen empaque (L)
-          <input type="number" value={pkgVolume} onChange={e => setPkgVolume(e.target.value)}
-          min="0" step="0.01" placeholder="0.00"
-          title="Litros que ocupa un empaque en la mochila" />
-          </label>
+            <ul style={{ listStyle:'none', padding:0, margin:0 }}>
+            {[...menu].sort((a,b) => {
+              if (sortBy === 'asc')  return (a.price_cents||0) - (b.price_cents||0);
+              if (sortBy === 'desc') return (b.price_cents||0) - (a.price_cents||0);
+              return 0;
+            }).map(item => {
+              const qty = Number(selectedItems[item.id]) || 0;
+              return (
+                <li key={item.id} className="card"
+                style={{ display:'flex', gap:'0.75rem', alignItems:'center',
+                  opacity: isClosed ? 0.65 : 1 }}>
+                  <ProductImage src={item.image_url} name={item.name} />
+                  <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontWeight:700, fontSize:'0.95rem', color:'var(--text-primary)' }}>
+                  {item.name}
+                  </div>
+                  {item.description && (
+                    <div style={{ color:'var(--text-secondary)', fontSize:'0.82rem', margin:'0.1rem 0' }}>
+                    {item.description}
+                    </div>
+                  )}
+                  <div style={{ fontWeight:700, color:'var(--brand)', marginTop:'0.2rem' }}>
+                  {fmt(item.price_cents)}
+                  </div>
+                  </div>
+                  {isCustomer && !isClosed && (
+                    <div className="qty-control" style={{ flexShrink:0 }}>
+                    <button className="qty-btn" disabled={qty === 0} onClick={() => adjust(item.id, -1)}>−</button>
+                    <span className="qty-num">{qty}</span>
+                    <button className="qty-btn add" onClick={() => adjust(item.id, 1)}>+</button>
+                    </div>
+                  )}
+                  </li>
+              );
+            })}
+            </ul>
+            </>
+          )}
+
+          {/* Order summary */}
+          {isCustomer && total > 0 && !isClosed && (
+            <div style={{ marginTop:'1rem', background:'var(--bg-card)',
+              border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'1rem' }}>
+
+              {/* Payment method */}
+              <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
+                textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
+                Método de pago
+                </p>
+                <div style={{ display:'flex', gap:'0.4rem', marginBottom:'1rem' }}>
+                {[['cash','💵 Efectivo'],['card','💳 Tarjeta'],['spei','🏦 SPEI']].map(([val,label]) => (
+                  <button key={val} onClick={() => setPaymentMethod(val)}
+                  className={paymentMethod===val ? 'btn-primary btn-sm' : 'btn-sm'}
+                  style={{ flex:1, fontSize:'0.78rem' }}>
+                  {label}
+                  </button>
+                ))}
+                </div>
+
+                {/* Tip */}
+                <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
+                  textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
+                  Agradecimiento al conductor
+                  </p>
+                  <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', marginBottom:'1rem' }}>
+                  {[{pct:0,label:'—'},{pct:5,label:'5%'},{pct:10,label:'10%'},{pct:20,label:'20%'}].map(({pct,label}) => {
+                    const v = pct===0 ? 0 : Math.round(subtotal * pct / 100);
+                    const sel = tipCents === v;
+                    return (
+                      <button key={pct} onClick={() => setTipCents(v)}
+                      style={{ padding:'0.25rem 0.55rem', cursor:'pointer', fontSize:'0.78rem',
+                        border:`1.5px solid ${sel ? 'var(--success)' : 'var(--border)'}`,
+                            borderRadius:6, background: sel ? 'var(--success-bg)' : 'var(--bg-card)',
+                            color: sel ? 'var(--success)' : 'var(--text-secondary)',
+                            fontWeight: sel ? 700 : 400, minHeight:'unset' }}>
+                            {label}{pct>0&&subtotal>0?` (${fmt(v)})` : ''}
+                            </button>
+                    );
+                  })}
+                  </div>
+
+                  {/* Totals */}
+                  <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)',
+                    borderTop:'1px solid var(--border-light)', paddingTop:'0.6rem' }}>
+                    {[['Subtotal', subtotal],['Servicio (5%)', serviceFee],['Envío (10%)', deliveryFee]].map(([label, val]) => (
+                      <div key={label} style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.15rem' }}>
+                      <span>{label}</span><span>{fmt(val)}</span>
+                      </div>
+                    ))}
+                    {tipCents > 0 && (
+                      <div style={{ display:'flex', justifyContent:'space-between',
+                        color:'var(--success)', marginBottom:'0.15rem' }}>
+                        <span>Agradecimiento</span><span>+{fmt(tipCents)}</span>
+                        </div>
+                    )}
+                    <div style={{ display:'flex', justifyContent:'space-between', fontWeight:800,
+                      fontSize:'0.95rem', color:'var(--text-primary)', marginTop:'0.4rem',
+                                                    paddingTop:'0.4rem', borderTop:'1px solid var(--border)' }}>
+                                                    <span>Total</span><span>{fmt(total)}</span>
+                                                    </div>
+                                                    </div>
+                                                    </div>
+          )}
           </div>
-          <VolumeHelper value={pkgVolume} onChange={setPkgVolume} />
-          </div>
-          {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
-          <div style={{ display:'flex', gap:'0.5rem' }}>
-          <button className="btn-primary btn-sm" onClick={handleSubmit}
-          style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}>
-          {editingId ? 'Guardar cambios' : 'Agregar'}
+
+          {/* Sticky bottom bar */}
+          {isCustomer && !isClosed && (
+            <div style={{ position:'fixed', bottom:0, left:0, right:0, zIndex:50,
+              background:'var(--bg-card)', borderTop:'1px solid var(--border)',
+                                       padding:'0.75rem 1rem', paddingBottom:'calc(0.75rem + env(safe-area-inset-bottom, 0px))',
+                                       boxShadow:'0 -4px 20px rgba(0,0,0,0.1)' }}>
+
+                                       {/* Delivery mode selector */}
+                                       <div style={{ marginBottom:'0.6rem' }}>
+                                       <div style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
+                                         textTransform:'uppercase', letterSpacing:'0.04em', marginBottom:'0.35rem' }}>
+                                         Enviar a
+                                         </div>
+                                         <div style={{ display:'flex', gap:'0.35rem', flexWrap:'wrap' }}>
+                                         {[
+                                           ['current', `📍 Actual${!currentPos && !gpsError ? ' (buscando…)' : gpsError ? ' (no disp.)' : ''}`],
+                                       ...(currentPos && deliveryMode !== 'confirmed' ? [['current', `📍 GPS`]] : []),
+                                       ...(deliveryMode === 'confirmed' ? [['confirmed', `✓ Confirmada`]] : []),
+                                       ...(hasHomePin ? [['home', '🏠 Casa']] : []),
+                                       ['manual', `📌 Manual${manualPos ? ' ✓' : ''}`],
+                                         ].map(([mode, label]) => (
+                                           <button key={mode}
+                                           onClick={() => {
+                                             setDeliveryMode(mode);
+                                             if (mode === 'manual') setShowManualMap(true);
+                                             else setShowManualMap(false);
+                                           }}
+                                           style={{ padding:'0.3rem 0.65rem', borderRadius:6, fontSize:'0.78rem',
+                                             cursor:'pointer', minHeight:'unset',
+                                             border:`1.5px solid ${deliveryMode===mode ? 'var(--brand)' : 'var(--border)'}`,
+                                                                   background: deliveryMode===mode ? 'var(--brand-light)' : 'var(--bg-card)',
+                                                                   color: deliveryMode===mode ? 'var(--brand)' : 'var(--text-secondary)',
+                                                                   fontWeight: deliveryMode===mode ? 700 : 400 }}>
+                                                                   {label}
+                                                                   </button>
+                                         ))}
+                                         </div>
+                                         {deliveryMode === 'home' && auth.user?.address && (
+                                           <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.25rem' }}>
+                                           {auth.user.address}
+                                           </div>
+                                         )}
+                                         {deliveryMode === 'manual' && manualPos?.label && (
+                                           <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.25rem' }}>
+                                           📌 {manualPos.label}
+                                           </div>
+                                         )}
+                                         {deliveryMode === 'manual' && showManualMap && (
+                                           <ManualPinMap
+                                           initialPos={currentPos || (hasHomePin ? { lat:homeLatNum, lng:homeLngNum } : null)}
+                                           mapRef={manualMapRef}
+                                           onConfirm={pos => { setManualPos(pos); setShowManualMap(false); }}
+                                           onCancel={() => { setShowManualMap(false); if (!manualPos) setDeliveryMode('current'); }}
+                                           />
+                                         )}
+                                         </div>
+
+                                         {!hasAddress && (
+                                           <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem', fontWeight:600 }}>
+                                           Guarda tu dirección en Perfil antes de pedir
+                                           </p>
+                                         )}
+                                         {deliveryMode === 'manual' && !manualPos && !showManualMap && (
+                                           <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem' }}>
+                                           Confirma tu ubicación en el mapa para continuar
+                                           </p>
+                                         )}
+
+                                         <button className="btn-primary"
+                                         style={{ width:'100%', fontSize:'1rem', fontWeight:800, padding:'0.75rem' }}
+                                         disabled={!canOrder || ordering || itemCount === 0 || (deliveryMode==='manual' && !manualPos)}
+                                         onClick={createOrder}>
+                                         {ordering ? 'Procesando…'
+                                           : itemCount === 0 ? 'Selecciona productos'
+          : `Hacer pedido · ${fmt(total)}`}
           </button>
-          {editingId && <button className="btn-sm" onClick={resetForm}>Cancelar</button>}
           </div>
+          )}
+
+          {!isCustomer && auth.user && (
+            <div style={{ padding:'1rem', textAlign:'center', color:'var(--text-tertiary)', fontSize:'0.85rem' }}>
+            Solo los clientes pueden hacer pedidos.
+            </div>
+          )}
+          {!auth.user && (
+            <div style={{ padding:'1rem' }}>
+            <button className="btn-primary" style={{ width:'100%' }}
+            onClick={() => navigate('/customer/login')}>
+            Iniciar sesión para pedir
+            </button>
+            </div>
+          )}
           </div>
-        )}
-        </div>
-        </div>
   );
 }
