@@ -4,6 +4,7 @@ import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
 import { AppError } from '../../utils/errors.js';
 import { registerUser } from '../auth/service.js';
+import { getParamsWithMeta, saveParam } from '../../engine/params.js';
 
 const router = Router();
 
@@ -313,6 +314,71 @@ router.get('/assignment-live', authenticate, authorize(['admin']), async (req, r
       orders:  ordersResult.rows,
       drivers: driversResult.rows,
     });
+  } catch (error) { return next(error); }
+});
+
+// ── GET /admin/engine-params — listar todos los parámetros del motor ──────────
+
+router.get('/engine-params', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const params = await getParamsWithMeta();
+    return res.json({ params });
+  } catch (error) { return next(error); }
+});
+
+// ── PATCH /admin/engine-params/:key — actualizar un parámetro ─────────────────
+router.patch('/engine-params/:key', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const { value } = req.body;
+    if (value === undefined || value === null) {
+      return next(new AppError(400, 'Se requiere el campo value'));
+    }
+    await saveParam(req.params.key, value, req.user.userId);
+    const params = await getParamsWithMeta();
+    return res.json({ ok: true, params });
+  } catch (error) {
+    if (error.message?.startsWith('Parámetro desconocido') ||
+        error.message?.startsWith('Valor inválido')) {
+      return next(new AppError(400, error.message));
+    }
+    return next(error);
+  }
+});
+
+// ── PATCH /admin/restaurants/:id/prep-estimate — corregir estimado de prep ────
+router.patch('/restaurants/:id/prep-estimate', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const { prep_time_estimate_s } = req.body;
+    const val = Number(prep_time_estimate_s);
+    if (!Number.isFinite(val) || val < 30 || val > 7200) {
+      return next(new AppError(400, 'prep_time_estimate_s debe ser entre 30 y 7200 segundos'));
+    }
+    const r = await query(
+      `UPDATE restaurants
+       SET prep_time_estimate_s = $1, prep_estimate_updated_at = NOW()
+       WHERE id = $2 RETURNING id, name, prep_time_estimate_s`,
+      [val, req.params.id]
+    );
+    if (r.rowCount === 0) return next(new AppError(404, 'Restaurante no encontrado'));
+    return res.json({ restaurant: r.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+// ── PATCH /admin/drivers/:id/penalties — ajustar penalizaciones de un driver ──
+router.patch('/drivers/:id/penalties', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const { disconnect_penalties } = req.body;
+    const val = Number(disconnect_penalties);
+    if (!Number.isFinite(val) || val < 0 || val > 10) {
+      return next(new AppError(400, 'disconnect_penalties debe ser entre 0 y 10'));
+    }
+    const r = await query(
+      `UPDATE driver_profiles SET disconnect_penalties=$1 WHERE user_id=$2
+       RETURNING user_id, disconnect_penalties`,
+      [val, req.params.id]
+    );
+    if (r.rowCount === 0) return next(new AppError(404, 'Driver no encontrado'));
+    return res.json({ driver: r.rows[0] });
   } catch (error) { return next(error); }
 });
 

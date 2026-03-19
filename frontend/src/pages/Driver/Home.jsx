@@ -217,6 +217,24 @@ export default function DriverHome() {
           </div>
         )}
 
+        {/* Banner de transferencia de pedido */}
+        {order.transferBanner && (
+          <div style={{
+            flexShrink: 0, zIndex: 25,
+            background: order.transferBanner.type === 'order_transferred_in' ? '#f0fdf4' : '#fff7ed',
+            borderBottom: `2px solid ${order.transferBanner.type === 'order_transferred_in' ? '#16a34a' : '#f97316'}`,
+            padding: '0.6rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>
+              {order.transferBanner.type === 'order_transferred_in'
+                ? '📦 Se te asignó un pedido transferido'
+                : '↩️ Un pedido fue reasignado a otro conductor'}
+            </span>
+            <button onClick={() => order.setTransferBanner(null)}
+              style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#9ca3af', fontWeight: 700 }}>✕</button>
+          </div>
+        )}
+
         {/* Mapa */}
         <div style={{ flex:1, minHeight:0, position:'relative', overflow:'hidden', zIndex:0 }}>
 

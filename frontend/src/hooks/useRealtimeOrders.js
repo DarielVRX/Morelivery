@@ -123,24 +123,28 @@ async function notifyRealtime({ title, body, tag, group, url = '/' }) {
 /**
  * SSE listener central — una sola conexión estable por token.
  */
-export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewOffer, onChatMessage, onReconnect) {
+export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewOffer, onChatMessage, onReconnect, onKitchenEvent, onTransferEvent) {
   const esRef          = useRef(null);
   const reconnectTimer = useRef(null);
   const mountedRef     = useRef(true);
   const retryCount     = useRef(0);
   const lastOfferPulse = useRef({ id: null, at: 0 });
 
-  const cbUpdate   = useRef(onOrderUpdate);
-  const cbLocation = useRef(onDriverLocation);
-  const cbOffer    = useRef(onNewOffer);
-  const cbChat     = useRef(onChatMessage);
+  const cbUpdate    = useRef(onOrderUpdate);
+  const cbLocation  = useRef(onDriverLocation);
+  const cbOffer     = useRef(onNewOffer);
+  const cbChat      = useRef(onChatMessage);
   const cbReconnect = useRef(onReconnect);
+  const cbKitchen   = useRef(onKitchenEvent);
+  const cbTransfer  = useRef(onTransferEvent);
 
   useEffect(() => { cbUpdate.current    = onOrderUpdate;    }, [onOrderUpdate]);
   useEffect(() => { cbLocation.current  = onDriverLocation; }, [onDriverLocation]);
   useEffect(() => { cbOffer.current     = onNewOffer;       }, [onNewOffer]);
   useEffect(() => { cbChat.current      = onChatMessage;    }, [onChatMessage]);
   useEffect(() => { cbReconnect.current = onReconnect;      }, [onReconnect]);
+  useEffect(() => { cbKitchen.current   = onKitchenEvent;   }, [onKitchenEvent]);
+  useEffect(() => { cbTransfer.current  = onTransferEvent;  }, [onTransferEvent]);
 
   // Pedir permiso una vez cuando hay sesión activa
   useEffect(() => {
@@ -227,6 +231,67 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
 
     es.addEventListener('offer_assigned', (e) => {
       try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {}
+    });
+
+    // ── Eventos del motor de cocina ──────────────────────────────────────────
+    // kitchen_auto_ready: el sistema marcó automáticamente un pedido como listo
+    es.addEventListener('kitchen_auto_ready', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbKitchen.current?.({ type: 'kitchen_auto_ready', ...data });
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: 'Pedido marcado como listo',
+            body:  data.message || 'Un pedido fue marcado automáticamente como listo.',
+            tag:   'kitchen',
+            group: 'kitchen',
+            url:   '/restaurant/pedidos',
+          });
+        }
+      } catch (_) {}
+    });
+
+    // prep_estimate_updated: el sistema ajustó el estimado de preparación
+    es.addEventListener('prep_estimate_updated', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbKitchen.current?.({ type: 'prep_estimate_updated', ...data });
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: 'Estimado de preparación ajustado',
+            body:  data.message || 'Tu tiempo estimado de preparación fue actualizado.',
+            tag:   'kitchen',
+            group: 'kitchen',
+            url:   '/restaurant/pedidos',
+          });
+        }
+      } catch (_) {}
+    });
+
+    // ── Eventos de rebalanceo (driver) ───────────────────────────────────────
+    es.addEventListener('order_transferred_away', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbTransfer.current?.({ type: 'order_transferred_away', ...data });
+        cbUpdate.current?.(data);
+      } catch (_) {}
+    });
+
+    es.addEventListener('order_transferred_in', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbTransfer.current?.({ type: 'order_transferred_in', ...data });
+        cbUpdate.current?.(data);
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: 'Nuevo pedido asignado',
+            body:  'Se te asignó un pedido transferido.',
+            tag:   'offers',
+            group: 'offers',
+            url:   '/driver',
+          });
+        }
+      } catch (_) {}
     });
 
     es.addEventListener('chat_message', (e) => {

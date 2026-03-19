@@ -13,6 +13,7 @@ import { createOrderSchema, suggestionResponseSchema, suggestionSchema, updateOr
 import { AppError } from '../../utils/errors.js';
 import { offerNextDrivers, expireTimedOutOffers, serializedOffer, getPendingAssignmentOrders } from './assignment/index.js';
 import { sseHub } from '../events/hub.js';
+import { initKitchenTiming, evaluatePrepEstimate, recordPickupWait } from '../../engine/kitchen.js';
 import ratingsRouter from './ratings.js';
 
 const router = Router();
@@ -179,6 +180,9 @@ router.post('/', authenticate, authorize(['customer']), validate(createOrderSche
       if (!isMissingRelationError(e) && !isMissingColumnError(e)) throw e;
     }
 
+    // Inicializar timing de cocina (no bloquea si falla)
+    initKitchenTiming(order.id, restaurantId).catch(() => {});
+
     const updated = await query('SELECT * FROM orders WHERE id=$1', [order.id]);
     orderEvents.emitOrderUpdate(order.id, updated.rows[0].status);
 
@@ -260,6 +264,23 @@ router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admi
     const updated = result.rows[0];
     orderEvents.emitOrderUpdate(updated.id, updated.status);
     await notifyOrderParties(updated.id, 'order_update', { orderId: updated.id, status: updated.status });
+
+    // ── Hooks del motor de cocina ─────────────────────────────────────────
+    // on_the_way: el driver recogió el pedido — calcular cuánto esperó
+    if (nextStatus === 'on_the_way' && updated.driver_id) {
+      const waitResult = await query(
+        `SELECT EXTRACT(EPOCH FROM (NOW() - ready_at))::int AS wait_s
+         FROM orders WHERE id=$1 AND ready_at IS NOT NULL`,
+        [updated.id]
+      );
+      const waitSec = waitResult.rows[0]?.wait_s ?? 0;
+      if (waitSec > 0) recordPickupWait(updated.id, waitSec).catch(() => {});
+    }
+    // delivered: evaluar si hay que ajustar el estimado de prep del restaurante
+    if (nextStatus === 'delivered') {
+      evaluatePrepEstimate(updated.id).catch(() => {});
+    }
+    // ─────────────────────────────────────────────────────────────────────
     const STATUS_ES_LOG = { created:'Recibido', pending_driver:'Sin conductor', assigned:'Asignado', accepted:'Aceptado', preparing:'En preparación', ready:'Listo para retiro', on_the_way:'En camino', delivered:'Entregado', cancelled:'Cancelado' };
     console.log(`🔄 [pedido.estado] id=${updated.id.slice(0,8)} → "${STATUS_ES_LOG[updated.status] || updated.status}" por rol=${req.user.role} actor=${req.user.userId.slice(0,8)}`);
     logEvent('order.status_changed', { orderId: updated.id, status: updated.status, actor: req.user.userId });
