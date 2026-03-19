@@ -49,7 +49,7 @@ export default function DriverMap({
   centerSignal, onCenterDone,
   onMapReady,
 }) {
-  const { isDark } = useTheme();
+  const { isDark }        = useTheme();
   const containerRef      = useRef(null);
   const mapRef            = useRef(null);
   const markersRef        = useRef({ driver: null, driverSvg: null, custom: null, pickup: null, delivery: null });
@@ -75,8 +75,8 @@ export default function DriverMap({
     const el = containerRef.current;
     if (el) {
       el.style.filter = dark
-        ? 'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)'
-        : '';
+        ? 'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9) contrast(1.3)'
+        : 'contrast(1.25) saturate(1.4)';
     }
   }
 
