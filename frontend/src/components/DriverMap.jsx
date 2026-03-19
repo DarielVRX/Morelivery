@@ -49,7 +49,7 @@ export default function DriverMap({
   centerSignal, onCenterDone,
   onMapReady,
 }) {
-  onst { isDark } = useTheme();
+  const { isDark } = useTheme();
   const containerRef      = useRef(null);
   const mapRef            = useRef(null);
   const markersRef        = useRef({ driver: null, driverSvg: null, custom: null, pickup: null, delivery: null });
