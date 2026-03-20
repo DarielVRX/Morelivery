@@ -191,6 +191,11 @@ function AuthScreen({ mode = 'login' }) {
           {/* Ícono y título del rol */}
           <div style={{ textAlign:'center', marginBottom:'1rem' }}>
             <span style={{ fontSize:'2rem' }}>{app.icon || '🔐'}</span>
+            {mode === 'register' && (
+              <p style={{ margin:'0.3rem 0 0', fontWeight:700, fontSize:'0.9rem', color:'var(--text-secondary)' }}>
+              {app.label}
+              </p>
+            )}
           </div>
 
           {/* Aviso si hay sesión activa de otro rol */}
