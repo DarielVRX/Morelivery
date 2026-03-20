@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -44,10 +44,7 @@ function RestaurantCard({ r, isHero, distKm, onClick }) {
     return (
       <div className="restaurant-hero-card" onClick={onClick}>
       <div className="restaurant-hero-bg">
-      {r.profile_photo
-        ? <img src={r.profile_photo} alt={r.name} />
-        : <span>🏪</span>
-      }
+      {r.profile_photo ? <img src={r.profile_photo} alt={r.name} /> : <span>🏪</span>}
       </div>
       <div className="restaurant-hero-overlay">
       <span className="restaurant-hero-tag">⭐ Destacado</span>
@@ -66,10 +63,7 @@ function RestaurantCard({ r, isHero, distKm, onClick }) {
   return (
     <div className="restaurant-card" onClick={onClick}>
     <div className="restaurant-card-bg">
-    {r.profile_photo
-      ? <img src={r.profile_photo} alt={r.name} />
-      : <span>🏪</span>
-    }
+    {r.profile_photo ? <img src={r.profile_photo} alt={r.name} /> : <span>🏪</span>}
     <div className="restaurant-card-overlay" />
     </div>
     <div className="restaurant-card-body">
@@ -90,32 +84,210 @@ function RestaurantCard({ r, isHero, distKm, onClick }) {
   );
 }
 
+// ── Address search bar (inline, expandable) ──────────────────────────────────
+function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
+  const [open,        setOpen]        = useState(false);
+  const [inputVal,    setInputVal]    = useState('');
+  const [results,     setResults]     = useState([]);
+  const [searching,   setSearching]   = useState(false);
+  const debounceRef   = useRef(null);
+  const wrapRef       = useRef(null);
+
+  // Close on outside click
+  useEffect(() => {
+    function handler(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false);
+        setResults([]);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  function doSearch(val) {
+    clearTimeout(debounceRef.current);
+    if (!val.trim()) { setResults([]); setSearching(false); return; }
+    setSearching(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const r = await fetch(
+          `https://photon.komoot.io/api/?q=${encodeURIComponent(val)}&bbox=-102.1,-101.0,19.4,20.0&limit=5&lang=es`,
+                              { headers: { 'Accept-Language': 'es' } }
+        );
+        const data = await r.json();
+        const items = (data.features || []).map(f => {
+          const p = f.properties || {};
+          const parts = [p.name, p.street && p.housenumber ? `${p.street} ${p.housenumber}` : p.street, p.city || p.town].filter(Boolean);
+          return {
+            label: parts.join(', ') || p.name || 'Sin nombre',
+                                                lat: f.geometry?.coordinates[1],
+                                                lng: f.geometry?.coordinates[0],
+          };
+        }).filter(i => i.lat && i.lng);
+        setResults(items);
+      } catch (_) { setResults([]); }
+      finally { setSearching(false); }
+    }, 350);
+  }
+
+  function selectGPS() {
+    if (userPos) onSelectPos({ lat: userPos.lat, lng: userPos.lng, label: 'Ubicación actual' });
+    setOpen(false); setResults([]); setInputVal('');
+  }
+
+  function selectHome() {
+    if (homeAddress) onSelectPos({ label: homeAddress, preset: 'home' });
+    setOpen(false); setResults([]); setInputVal('');
+  }
+
+  const hasHome = !!homeAddress;
+
+  return (
+    <div ref={wrapRef} style={{ position:'relative' }}>
+    {/* Trigger button */}
+    {!open && (
+      <button
+      onClick={() => setOpen(true)}
+      title="Ubicación de entrega"
+      style={{
+        background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.3)',
+               borderRadius:8, width:32, height:32, display:'flex', alignItems:'center',
+               justifyContent:'center', cursor:'pointer', flexShrink:0, minHeight:'unset', padding:0,
+      }}
+      >
+      {/* Pin icon */}
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+      <circle cx="12" cy="9" r="2.5"/>
+      </svg>
+      </button>
+    )}
+
+    {/* Expanded bar */}
+    {open && (
+      <div style={{
+        display:'flex', alignItems:'center', gap:'4px',
+        background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.35)',
+              borderRadius:10, padding:'4px 6px', minWidth:240,
+      }}>
+      {/* GPS button */}
+      <button
+      onClick={selectGPS}
+      title="Ubicación actual"
+      disabled={!userPos}
+      style={{
+        background:'none', border:'none', cursor: userPos ? 'pointer' : 'default',
+        padding:'4px', borderRadius:6, display:'flex', alignItems:'center',
+        opacity: userPos ? 1 : 0.4, minHeight:'unset', flexShrink:0,
+      }}
+      >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="4.5"/>
+      <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+      <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
+      <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
+      <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
+      </svg>
+      </button>
+
+      {/* Text input */}
+      <input
+      autoFocus
+      value={inputVal}
+      onChange={e => { setInputVal(e.target.value); doSearch(e.target.value); }}
+      placeholder="Buscar dirección…"
+      style={{
+        flex:1, background:'none', border:'none', outline:'none',
+        color:'#fff', fontSize:'13px', minWidth:0,
+      }}
+      />
+
+      {/* Home button */}
+      {hasHome && (
+        <button
+        onClick={selectHome}
+        title="Casa"
+        style={{
+          background:'none', border:'none', cursor:'pointer',
+          padding:'4px', borderRadius:6, display:'flex', alignItems:'center',
+          minHeight:'unset', flexShrink:0,
+        }}
+        >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z"/>
+        <polyline points="9 21 9 12 15 12 15 21"/>
+        </svg>
+        </button>
+      )}
+
+      {/* Close */}
+      <button
+      onClick={() => { setOpen(false); setResults([]); setInputVal(''); }}
+      style={{
+        background:'none', border:'none', cursor:'pointer', color:'rgba(255,255,255,0.7)',
+              fontSize:'13px', padding:'2px 4px', minHeight:'unset', flexShrink:0,
+      }}
+      >✕</button>
+      </div>
+    )}
+
+    {/* Dropdown results */}
+    {open && (results.length > 0 || searching) && (
+      <div style={{
+        position:'absolute', top:'calc(100% + 4px)', right:0, left: hasHome ? 'auto' : 0,
+                                                   minWidth:260, background:'var(--bg-card)', border:'1px solid var(--border)',
+                                                   borderRadius:10, boxShadow:'0 8px 24px rgba(0,0,0,0.18)', zIndex:100, overflow:'hidden',
+      }}>
+      {searching && (
+        <div style={{ padding:'0.6rem 0.875rem', fontSize:'0.8rem', color:'var(--text-tertiary)' }}>
+        Buscando…
+        </div>
+      )}
+      {results.map((item, i) => (
+        <button
+        key={i}
+        onClick={() => { onSelectPos(item); setOpen(false); setResults([]); setInputVal(''); }}
+        style={{
+          width:'100%', textAlign:'left', background:'none', border:'none',
+          borderBottom: i < results.length-1 ? '1px solid var(--border-light)' : 'none',
+                                 padding:'0.55rem 0.875rem', cursor:'pointer', fontSize:'0.82rem',
+                                 color:'var(--text-primary)', display:'block',
+        }}
+        >
+        📍 {item.label}
+        </button>
+      ))}
+      </div>
+    )}
+    </div>
+  );
+}
+
 export default function CustomerHome() {
   const { auth } = useAuth();
   const navigate  = useNavigate();
 
-  const [restaurants, setRestaurants]   = useState([]);
-  const [menuCache,   setMenuCache]     = useState({}); // restaurantId → [{name,...}]
-  const [loading,     setLoading]       = useState(true);
-  const [userPos,     setUserPos]       = useState(null); // {lat,lng}
+  const [restaurants, setRestaurants] = useState([]);
+  const [menuCache,   setMenuCache]   = useState({});
+  const [loading,     setLoading]     = useState(true);
+  const [userPos,     setUserPos]     = useState(null);
+  const [deliveryPos, setDeliveryPos] = useState(null); // {lat,lng,label} | null = use GPS
 
-  // Search & filters
-  const [query,        setQuery]        = useState('');
-  const [statusFilter, setStatusFilter] = useState('all'); // 'all'|'open'|'closed'
-  const [showFilters,  setShowFilters]  = useState(false);
-  const [minRating,    setMinRating]    = useState(0);
-  const [maxDist,      setMaxDist]      = useState(20); // km
-  const [sortBy,       setSortBy]       = useState('default'); // 'default'|'rating'|'distance'
+  // Search & sort
+  const [query,       setQuery]       = useState('');
+  // sortBy: 'default' | 'rating_asc' | 'rating_desc' | 'distance_asc' | 'distance_desc'
+  const [sortBy,      setSortBy]      = useState('default');
 
   // Suggestions
-  const [pendingSugg,    setPendingSugg]    = useState([]);
-  const [suggFor,        setSuggFor]        = useState('');
-  const [suggDrafts,     setSuggDrafts]     = useState({});
-  const [dismissedSugg,  setDismissedSugg]  = useState(new Set());
-  const [msg,            setMsg]            = useState('');
+  const [pendingSugg,   setPendingSugg]   = useState([]);
+  const [suggFor,       setSuggFor]       = useState('');
+  const [suggDrafts,    setSuggDrafts]    = useState({});
+  const [dismissedSugg, setDismissedSugg] = useState(new Set());
+  const [msg,           setMsg]           = useState('');
   const loadSuggRef = useRef(null);
 
-  // Get user position for distance calc
+  // GPS
   useEffect(() => {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
@@ -152,7 +324,6 @@ export default function CustomerHome() {
                       ()=>{},
     );
 
-    // Preload menu for search
     async function ensureMenu(restaurantId) {
       if (menuCache[restaurantId]) return;
       try {
@@ -161,7 +332,6 @@ export default function CustomerHome() {
       } catch (_) {}
     }
 
-    // When query changes, load menus for all restaurants (lazy, only first time)
     useEffect(() => {
       if (!query.trim()) return;
       restaurants.forEach(r => ensureMenu(r.id));
@@ -193,31 +363,21 @@ export default function CustomerHome() {
       } catch (e) { setMsg(e.message); }
     }
 
-    async function cancelOrder(orderId) {
-      const note = window.prompt('Motivo de cancelación (obligatorio):');
-      if (!note?.trim()) return;
-      try {
-        await apiFetch(`/orders/${orderId}/cancel`, { method:'PATCH', body: JSON.stringify({ note }) }, auth.token);
-        loadSuggestions();
-      } catch (e) { setMsg(e.message); }
+    // ── Sort toggle helpers ───────────────────────────────────────────────────
+    function toggleRating() {
+      setSortBy(s => s === 'rating_desc' ? 'rating_asc' : 'rating_desc');
+    }
+    function toggleDistance() {
+      setSortBy(s => s === 'distance_asc' ? 'distance_desc' : 'distance_asc');
     }
 
-    // ── Filtered + sorted restaurants ──────────────────────────────────────────
+    // ── Filtered + sorted restaurants ────────────────────────────────────────
+    const posForSort = userPos; // GPS used for distance sort
+
     const filtered = useMemo(() => {
       const q = query.toLowerCase().trim();
 
       let list = restaurants.filter(r => {
-        // Status filter
-        if (statusFilter === 'open'   && !r.is_open) return false;
-        if (statusFilter === 'closed' &&  r.is_open) return false;
-        // Rating filter
-        if (minRating > 0 && (r.rating_avg == null || Number(r.rating_avg) < minRating)) return false;
-        // Distance filter
-        if (userPos && r.lat && r.lng) {
-          const d = haversineKm(userPos.lat, userPos.lng, Number(r.lat), Number(r.lng));
-          if (d > maxDist) return false;
-        }
-        // Text search: name + menu items
         if (!q) return true;
         if (r.name?.toLowerCase().includes(q)) return true;
         if (r.category?.toLowerCase().includes(q)) return true;
@@ -225,14 +385,21 @@ export default function CustomerHome() {
         return menu.some(item => item.name?.toLowerCase().includes(q));
       });
 
-      // Sort
-      if (sortBy === 'rating') {
+      if (sortBy === 'rating_desc') {
         list = [...list].sort((a,b) => (Number(b.rating_avg)||0) - (Number(a.rating_avg)||0));
-      } else if (sortBy === 'distance' && userPos) {
+      } else if (sortBy === 'rating_asc') {
+        list = [...list].sort((a,b) => (Number(a.rating_avg)||0) - (Number(b.rating_avg)||0));
+      } else if (sortBy === 'distance_asc' && posForSort) {
         list = [...list].sort((a,b) => {
-          const da = a.lat ? haversineKm(userPos.lat,userPos.lng,Number(a.lat),Number(a.lng)) : 999;
-          const db = b.lat ? haversineKm(userPos.lat,userPos.lng,Number(b.lat),Number(b.lng)) : 999;
+          const da = a.lat ? haversineKm(posForSort.lat,posForSort.lng,Number(a.lat),Number(a.lng)) : 999;
+          const db = b.lat ? haversineKm(posForSort.lat,posForSort.lng,Number(b.lat),Number(b.lng)) : 999;
           return da - db;
+        });
+      } else if (sortBy === 'distance_desc' && posForSort) {
+        list = [...list].sort((a,b) => {
+          const da = a.lat ? haversineKm(posForSort.lat,posForSort.lng,Number(a.lat),Number(a.lng)) : 999;
+          const db = b.lat ? haversineKm(posForSort.lat,posForSort.lng,Number(b.lat),Number(b.lng)) : 999;
+          return db - da;
         });
       } else {
         // Default: open first, then by name
@@ -243,7 +410,7 @@ export default function CustomerHome() {
       }
 
       return list;
-    }, [restaurants, query, statusFilter, minRating, maxDist, sortBy, userPos, menuCache]);
+    }, [restaurants, query, sortBy, posForSort, menuCache]);
 
     const visibleSugg = pendingSugg.filter(o => !dismissedSugg.has(o.id));
 
@@ -252,8 +419,16 @@ export default function CustomerHome() {
       return haversineKm(userPos.lat, userPos.lng, Number(r.lat), Number(r.lng));
     }
 
-    const heroRest  = filtered[0] || null;
+    const heroRest   = filtered[0] || null;
     const restOfList = filtered.slice(1);
+
+    const homeAddress = auth.user?.address || null;
+
+    // Sort chip helpers
+    const ratingActive   = sortBy === 'rating_desc' || sortBy === 'rating_asc';
+    const distanceActive = sortBy === 'distance_asc' || sortBy === 'distance_desc';
+    const ratingIcon     = sortBy === 'rating_asc'    ? '↑' : '↓';
+    const distanceIcon   = sortBy === 'distance_desc' ? '↑' : '↓';
 
     if (loading) return (
       <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)' }}>Cargando…</div>
@@ -297,7 +472,15 @@ export default function CustomerHome() {
           <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
           <button className="btn-primary btn-sm" onClick={()=>respondSugg(order.id,true)}>Aceptar</button>
           <button className="btn-sm btn-danger" onClick={()=>respondSugg(order.id,false)}>Rechazar</button>
-          <button className="btn-sm" onClick={()=>cancelOrder(order.id)}>Cancelar pedido</button>
+          <button className="btn-sm" style={{ color:'var(--danger)', borderColor:'var(--danger-border)' }}
+          onClick={async()=>{
+            const note = window.prompt('Motivo de cancelación (obligatorio):');
+            if (!note?.trim()) return;
+                                          try {
+                                            await apiFetch(`/orders/${order.id}/cancel`, { method:'PATCH', body: JSON.stringify({ note }) }, auth.token);
+                                            setSuggFor(''); loadSuggestions();
+                                          } catch(e) { setMsg(e.message); }
+          }}>Cancelar pedido</button>
           <button className="btn-sm" onClick={()=>setSuggFor('')}>← Volver</button>
           </div>
           </div>
@@ -315,17 +498,45 @@ export default function CustomerHome() {
       {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
 
       {/* ── Header ──────────────────────────────────────────────────── */}
-      <div style={{ margin:'-1rem -1rem 0', padding:'1rem 1rem 0.75rem', background:'var(--hero-gradient)' }}>
+      <div style={{
+        margin:'-1rem -1rem 0', padding:'1rem 1rem 0.75rem',
+        background:'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)',
+      }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'14px' }}>
       <div>
-      <div style={{ fontSize:'12px', color:'rgba(255,255,255,0.7)', fontWeight:600 }}>
+      <div style={{ fontSize:'12px', color:'rgba(255,255,255,0.75)', fontWeight:600 }}>
       {auth.user?.alias ? `Hola, ${auth.user.alias.split(' ')[0] || auth.user.alias} 👋` : 'Bienvenido 👋'}
       </div>
       <div style={{ fontSize:'22px', fontWeight:900, color:'#fff', lineHeight:1.1, marginTop:2 }}>
       ¿Qué se te antoja?
       </div>
       </div>
+      {/* Address search trigger */}
+      <AddressSearchBar
+      userPos={userPos}
+      homeAddress={homeAddress}
+      onSelectPos={pos => setDeliveryPos(pos)}
+      />
       </div>
+
+      {/* Active delivery address indicator */}
+      {deliveryPos && (
+        <div style={{
+          display:'flex', alignItems:'center', gap:'6px',
+          fontSize:'11px', color:'rgba(255,255,255,0.8)',
+                       marginBottom:'8px',
+        }}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+        <circle cx="12" cy="9" r="2.5"/>
+        </svg>
+        <span style={{ opacity:0.9 }}>{deliveryPos.label}</span>
+        <button
+        onClick={() => setDeliveryPos(null)}
+        style={{ background:'none', border:'none', color:'rgba(255,255,255,0.6)', fontSize:'11px', cursor:'pointer', minHeight:'unset', padding:'0 2px' }}
+        >✕</button>
+        </div>
+      )}
 
       {/* Search bar */}
       <div className="search-bar" style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.25)' }}>
@@ -339,68 +550,27 @@ export default function CustomerHome() {
       {query && (
         <button className="search-bar-clear" style={{ color:'rgba(255,255,255,0.7)' }} onClick={() => setQuery('')}>✕</button>
       )}
+      </div>
+
+      {/* Sort chips — Rating y Distancia con toggle */}
+      <div className="filter-chips" style={{ marginTop:'10px', paddingBottom:'12px' }}>
       <button
-      onClick={() => setShowFilters(v => !v)}
-      style={{
-        background: showFilters ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.15)',
-            border:'1px solid rgba(255,255,255,0.3)', color:'#fff',
-            borderRadius:8, padding:'3px 8px', fontSize:'11px', fontWeight:700,
-            minHeight:'unset', flexShrink:0,
-      }}
+      className={`chip${ratingActive ? ' active' : ''}`}
+      onClick={toggleRating}
+      style={!ratingActive ? { background:'rgba(255,255,255,0.12)', borderColor:'rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.85)' } : {}}
       >
-      ⚙ Filtros
+      ★ Rating {ratingActive && ratingIcon}
+      </button>
+      <button
+      className={`chip${distanceActive ? ' active' : ''}`}
+      onClick={toggleDistance}
+      disabled={!userPos}
+      style={!distanceActive ? { background:'rgba(255,255,255,0.12)', borderColor:'rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.85)', opacity: userPos ? 1 : 0.45 } : { opacity: userPos ? 1 : 0.45 }}
+      >
+      📍 Distancia {distanceActive && distanceIcon}
       </button>
       </div>
-
-      {/* Status chips */}
-      <div className="filter-chips" style={{ marginTop:'10px', paddingBottom:'12px' }}>
-      {[['all','Todos'],['open','Abiertos'],['closed','Cerrados']].map(([val,label]) => (
-        <button key={val}
-        className={`chip${statusFilter===val?' active':''}`}
-        onClick={() => setStatusFilter(val)}
-        style={statusFilter!==val ? { background:'rgba(255,255,255,0.12)', borderColor:'rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.85)' } : {}}
-        >
-        {label}
-        </button>
-      ))}
       </div>
-      </div>
-
-      {/* ── Filter panel ─────────────────────────────────────────────── */}
-      {showFilters && (
-        <div className="filter-panel" style={{ margin:'8px 0' }}>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1rem' }}>
-        <div>
-        <label>Rating mínimo: <strong style={{ color:'var(--brand)' }}>
-        {minRating === 0 ? 'Todos' : `★ ${minRating.toFixed(1)}+`}
-        </strong></label>
-        <input type="range" min="0" max="5" step="0.5" value={minRating}
-        onChange={e => setMinRating(Number(e.target.value))} />
-        </div>
-        <div>
-        <label>Distancia máx: <strong style={{ color:'var(--brand)' }}>
-        {maxDist >= 20 ? 'Sin límite' : `${maxDist} km`}
-        </strong></label>
-        <input type="range" min="1" max="20" step="1" value={maxDist}
-        onChange={e => setMaxDist(Number(e.target.value))} />
-        </div>
-        </div>
-        <div style={{ marginTop:'10px' }}>
-        <label>Ordenar por</label>
-        <div style={{ display:'flex', gap:'6px', marginTop:4 }}>
-        {[['default','Por defecto'],['rating','Rating'],['distance','Distancia']].map(([val,label]) => (
-          <button key={val}
-          className={`chip${sortBy===val?' active':''}`}
-          onClick={() => setSortBy(val)}
-          style={{ fontSize:'11px', padding:'4px 10px' }}
-          >
-          {label}
-          </button>
-        ))}
-        </div>
-        </div>
-        </div>
-      )}
 
       {/* ── Restaurant list ───────────────────────────────────────────── */}
       {filtered.length === 0 ? (
@@ -413,14 +583,12 @@ export default function CustomerHome() {
         </div>
       ) : (
         <div style={{ marginTop:'16px' }}>
-        {/* Section header */}
         <div className="section-row">
         <div className="section-row-title">
         {query ? `Resultados (${filtered.length})` : 'Tiendas cerca de ti'}
         </div>
         </div>
 
-        {/* Hero card — first result */}
         {heroRest && (
           <RestaurantCard
           r={heroRest}
@@ -430,7 +598,6 @@ export default function CustomerHome() {
           />
         )}
 
-        {/* Rest of list */}
         <div className="restaurants-grid">
         {restOfList.map(r => (
           <RestaurantCard
