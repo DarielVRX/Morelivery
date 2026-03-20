@@ -428,8 +428,9 @@ export default function RestaurantPage() {
   // Distance / state derived from restaurant
   const restLat  = Number.isFinite(Number(restaurant?.lat)) ? Number(restaurant.lat) : null;
   const restLng  = Number.isFinite(Number(restaurant?.lng)) ? Number(restaurant.lng) : null;
-  const distKm   = (searchPos && restLat !== null && restLng !== null)
-    ? haversineKm(searchPos.lat, searchPos.lng, restLat, restLng) : null;
+  const refPos = searchPos || gpsPos;
+  const distKm = (refPos && restLat !== null && restLng !== null)
+  ? haversineKm(refPos.lat, refPos.lng, restLat, restLng) : null;
   const tooFar   = distKm !== null && distKm > 5;
   const isClosed = restaurant?.is_open === false;
   const canOrder = isCustomer && hasAddress && !isClosed && !tooFar && restLat !== null;
@@ -801,19 +802,22 @@ export default function RestaurantPage() {
 
           <button className="btn-primary"
             style={{ width:'100%', fontSize:'1rem', fontWeight:800, padding:'0.75rem' }}
-            disabled={itemCount === 0 || !isCustomer}
+            disabled={itemCount === 0 || tooFar || !isCustomer}
             onClick={() => {
               savePendingOrder({
                 restaurantId:     id,
                 items:            Object.entries(selectedItems).filter(([,q])=>Number(q)>0).map(([menuItemId,quantity])=>({ menuItemId, quantity:Number(quantity) })),
-                tip_cents:        tipCents,
-                delivery_lat:     searchPos?.lat,
-                delivery_lng:     searchPos?.lng,
-                delivery_address: searchPos?.label || '',
+                               tip_cents:        tipCents,
+                               delivery_lat:     searchPos?.lat ?? gpsPos?.lat,
+                               delivery_lng:     searchPos?.lng ?? gpsPos?.lng,
+                               delivery_address: searchPos?.label || '',
+                               delivery_from_gps: !searchPos && !!gpsPos,
               });
               navigate('/customer/pagos');
             }}>
-            {itemCount === 0 ? 'Selecciona productos' : `Ir a pagar · ${fmt(total)}`}
+            {itemCount === 0 ? 'Selecciona productos'
+              : tooFar ? `Tienda fuera de rango (${distKm?.toFixed(1)}km)`
+              : `Ir a pagar · ${fmt(total)}`}
           </button>
         </div>
       )}
