@@ -7,6 +7,7 @@ import { query }      from '../../config/db.js';
 import { env }        from '../../config/env.js';
 import { AppError }   from '../../utils/errors.js';
 import { logEvent }   from '../../utils/logger.js';
+import { randomUUID } from 'crypto';
 
 // ── Legado: mantener pseudoEmail para no romper usuarios existentes ───────────
 function normalizeUsername(username) { return username.trim().toLowerCase(); }
@@ -352,27 +353,27 @@ export async function googleLogin(credential) {
   }
 
   if (!user) {
-    // Registro automático con role 'customer'
     const alias    = given_name || name?.split(' ')[0] || 'user';
     const fullName = name || realEmail.split('@')[0];
     const username = await resolveUniqueUsername(alias);
     const pseudoEmail = pseudoEmailFromUsername(username);
 
+    // Google users no tienen contraseña — placeholder irreversible
+    const placeholderHash = await bcrypt.hash(randomUUID(), 12);
+
     try {
       const r = await query(
-        `INSERT INTO users(full_name, alias, email, real_email, google_id, role, status)
-         VALUES($1,$2,$3,$4,$5,'customer','active')
-         RETURNING *`,
-        [fullName, alias, pseudoEmail, realEmail, googleId]
+        `INSERT INTO users(full_name, alias, email, real_email, google_id, role, status, password_hash)
+        VALUES($1,$2,$3,$4,$5,'customer','active',$6) RETURNING *`,
+                            [fullName, alias, pseudoEmail, realEmail, googleId, placeholderHash]
       );
       user = r.rows[0];
     } catch (e) {
       if (e?.code === '42703') {
-        // Fallback sin columnas nuevas
         const r = await query(
-          `INSERT INTO users(full_name, alias, email, role, status)
-           VALUES($1,$2,$3,'customer','active') RETURNING *`,
-          [fullName, alias, pseudoEmail]
+          `INSERT INTO users(full_name, alias, email, role, status, password_hash)
+          VALUES($1,$2,$3,'customer','active',$4) RETURNING *`,
+                              [fullName, alias, pseudoEmail, placeholderHash]
         );
         user = r.rows[0];
       } else throw e;
