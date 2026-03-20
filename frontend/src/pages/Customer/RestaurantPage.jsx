@@ -632,7 +632,7 @@ export default function RestaurantPage() {
 
       {/* Content — padded to clear fixed bottom bar */}
       <div style={{ padding:'0.875rem 1rem',
-        paddingBottom: isCustomer && !isClosed ? 'calc(var(--order-bar-h, 160px) + var(--nav-h-mobile) + 0.5rem)' : '1rem'}}>
+        paddingBottom: isCustomer && !isClosed ? 'calc(var(--order-bar-h, 160px) + 0.5rem)' : '1rem'}}>
 
         {msg && <p className="flash flash-error" style={{ marginBottom:'0.75rem' }}>{msg}</p>}
 
