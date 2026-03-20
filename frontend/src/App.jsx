@@ -153,6 +153,7 @@ function AuthScreen({ mode = 'login' }) {
   const { appKey } = useParams();
   const { auth }   = useAuth();
   const app        = findApp(appKey);
+  const [dark, setDark] = useDarkMode();
 
   // Si ya está logueado con ESTE mismo rol, redirigir a su home
   if (auth.user && auth.user.role === appKey)
@@ -181,6 +182,7 @@ function AuthScreen({ mode = 'login' }) {
           <img src="/logo.svg" alt="" style={{ width:24, height:24 }} />
           <strong style={{ fontSize:'0.95rem' }}>Morelivery</strong>
         </div>
+        <ThemeToggle dark={dark} setDark={setDark} />
       </header>
 
       <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:'2rem 1.25rem' }}>
