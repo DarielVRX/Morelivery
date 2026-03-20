@@ -67,8 +67,8 @@ function LandingScreen() {
     {/* Marca */}
     <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'0.5rem', marginBottom:'2.5rem' }}>
     <img src="/logo.svg" alt="Morelivery" style={{ width:60, height:60 }} />
-    <h1 style={{ fontSize:'2rem', fontWeight:900, color:'var(--text-primary)', margin:0, letterSpacing:'-0.02em' }}>
-    Morelivery
+    <h1 style={{ fontSize:'2rem', fontWeight:900, margin:0, letterSpacing:'-0.02em' }}>
+    <span style={{ color:'#e3aaaa' }}>More</span><span style={{ color:'var(--text-primary)' }}>livery</span>
     </h1>
     <p style={{ color:'var(--text-secondary)', fontSize:'0.95rem', margin:0 }}>
     ¿Cómo quieres acceder?
@@ -81,27 +81,25 @@ function LandingScreen() {
       width:'100%', maxWidth:'680px', justifyContent:'center',
     }}>
     {APPS.map(app => (
-      <Link key={app.key} to={`/${app.key}/login`} style={{ textDecoration:'none', flex:'1 1 200px', justifyContent:'center', }}>
+      <Link key={app.key} to={`/${app.key}/login`} style={{ textDecoration:'none', flex:'1 1 160px', maxWidth:'200px' }}>
       <div style={{
-        display:'flex', alignItems:'center', gap:'1rem',
-        padding:'1.25rem 1.25rem',
-        background:'var(--brand-light)',
-                      border:'1.5px solid var(--border)',
+        display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-end',
+        gap:'0.5rem',
+        padding:'1.25rem 1rem 1rem',
+        background:'#e0cccc',
+        border:'1.5px solid var(--border)',
                       borderRadius:8,
-                      width:'min(100%, 200px)',
-                      maxWidth:'200px',
-                      justifyContent:'center',
-                      aspectRatio: '1 / 1',
+                      aspectRatio:'1 / 1',
                       cursor:'pointer',
                       transition:'transform 0.15s, box-shadow 0.15s',
-                      height:'100%',
+                      width:'100%',
+                      boxSizing:'border-box',
       }} className="landing-btn">
-      <span style={{ fontSize:'1.5rem', lineHeight:1 }}>{app.icon}</span>
-      <div>
-      <div style={{ fontWeight:700, fontSize:'0.95rem', color:'var(--text-primary)' }}>{app.label}</div>
-      <div style={{ fontSize:'0.78rem', color:'var(--text-secondary)' }}>{app.description}</div>
+      <span style={{ fontSize:'3rem', lineHeight:1, marginBottom:'auto' }}>{app.icon}</span>
+      <div style={{ textAlign:'center' }}>
+      <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#1a1a1a' }}>{app.label}</div>
+      <div style={{ fontSize:'0.68rem', color:'#555' }}>{app.description}</div>
       </div>
-      <span style={{ marginLeft:'auto', color:'#e3aaaa', fontSize:'1.1rem' }}>›</span>
       </div>
       </Link>
     ))}
@@ -109,9 +107,6 @@ function LandingScreen() {
 
     <style>{`
       .landing-btn:hover { transform:translateY(-2px); box-shadow:0 4px 16px rgba(227,170,170,0.35); }
-      @media (max-width: 560px) {
-        .landing-btn-wrap { flex-direction: column !important; }
-      }
       `}</style>
       </div>
   );
