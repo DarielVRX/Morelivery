@@ -211,56 +211,78 @@ function AuthScreen({ mode = 'login' }) {
   );
 }
 
+// ─── Layout wrappers por rol ──────────────────────────────────────────────────
+function CustomerLayout() {
+  return (
+    <ProtectedRole role="customer">
+    <SplitLayout
+    ordersContent={<CustomerOrders />}
+    homeContent={
+      <Routes>
+      <Route path="pagos" element={<CustomerPayments />} />
+      <Route path=":id"   element={<RestaurantPage />} />
+      <Route index        element={<CustomerHome />} />
+      </Routes>
+    }
+    />
+    </ProtectedRole>
+  );
+}
+
+function RestaurantLayout() {
+  return (
+    <ProtectedRole role="restaurant">
+    <SplitLayout
+    ordersContent={<RestaurantOrders />}
+    homeContent={
+      <Routes>
+      <Route path="horario" element={<RestaurantSchedule />} />
+      <Route index          element={<RestaurantMenu />} />
+      </Routes>
+    }
+    />
+    </ProtectedRole>
+  );
+}
+
+function DriverLayout() {
+  return (
+    <ProtectedRole role="driver">
+    <SplitLayout
+    ordersContent={<DriverOrders />}
+    homeContent={
+      <Routes>
+      <Route path="ganancias" element={<DriverEarnings />} />
+      <Route index            element={<DriverHome />} />
+      </Routes>
+    }
+    />
+    </ProtectedRole>
+  );
+}
+
 // ─── Rutas protegidas ─────────────────────────────────────────────────────────
 function AppRoutes() {
   return (
     <Layout>
-      <Suspense fallback={<Spinner />}>
-        <Routes>
-          <Route path="/profile" element={<ProtectedAny><ProfilePage /></ProtectedAny>} />
+    <Suspense fallback={<Spinner />}>
+    <Routes>
+    <Route path="/profile" element={<ProtectedAny><ProfilePage /></ProtectedAny>} />
 
-          <Route path="/restaurant/:id" element={
-            <ProtectedAny>
-              <SplitLayout homeContent={<RestaurantPage />} ordersContent={<CustomerOrders />} />
-            </ProtectedAny>
-          } />
+    {/* restaurant/:id vive dentro de CustomerLayout para mantener el mismo Orders */}
+    <Route path="/customer/*"    element={<CustomerLayout />} />
+    <Route path="/restaurant/*"  element={<RestaurantLayout />} />
+    <Route path="/driver/*"      element={<DriverLayout />} />
 
-          <Route path="/customer" element={
-            <ProtectedRole role="customer">
-              <SplitLayout homeContent={<CustomerHome />} ordersContent={<CustomerOrders />} />
-            </ProtectedRole>
-          } />
-          <Route path="/customer/pedidos"  element={<Navigate to="/customer" replace />} />
-          <Route path="/customer/pagos"    element={<ProtectedRole role="customer"><CustomerPayments /></ProtectedRole>} />
+    {/* Redirects de sub-rutas antiguas — ya no son necesarios pero no rompen */}
+    <Route path="/customer/pedidos"   element={<Navigate to="/customer" replace />} />
+    <Route path="/restaurant/pedidos" element={<Navigate to="/restaurant" replace />} />
+    <Route path="/driver/pedidos"     element={<Navigate to="/driver" replace />} />
 
-          <Route path="/restaurant" element={
-            <ProtectedRole role="restaurant">
-              <SplitLayout homeContent={<RestaurantMenu />} ordersContent={<RestaurantOrders />} />
-            </ProtectedRole>
-          } />
-          <Route path="/restaurant/pedidos" element={<Navigate to="/restaurant" replace />} />
-          <Route path="/restaurant/horario" element={
-            <ProtectedRole role="restaurant">
-              <SplitLayout homeContent={<RestaurantSchedule />} ordersContent={<RestaurantOrders />} />
-            </ProtectedRole>
-          } />
-
-          <Route path="/driver" element={
-            <ProtectedRole role="driver">
-              <SplitLayout homeContent={<DriverHome />} ordersContent={<DriverOrders />} />
-            </ProtectedRole>
-          } />
-          <Route path="/driver/pedidos"    element={<Navigate to="/driver" replace />} />
-          <Route path="/driver/ganancias"  element={
-            <ProtectedRole role="driver">
-              <SplitLayout homeContent={<DriverEarnings />} ordersContent={<DriverOrders />} />
-            </ProtectedRole>
-          } />
-
-          <Route path="/admin" element={<ProtectedRole role="admin"><AdminDashboard /></ProtectedRole>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
+    <Route path="/admin" element={<ProtectedRole role="admin"><AdminDashboard /></ProtectedRole>} />
+    <Route path="*"      element={<Navigate to="/" replace />} />
+    </Routes>
+    </Suspense>
     </Layout>
   );
 }
