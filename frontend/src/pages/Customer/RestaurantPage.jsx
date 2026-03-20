@@ -175,7 +175,7 @@ function AddressSearchBar({ active, currentLabel, onSelect }) {
     if (!showMap || !mapContRef.current) return;
     if (mapRef.current) return;
     (async () => {
-      const { ensureMapLibreCSS, ensureMapLibreJS } = await import('../utils/mapLibre');
+      const { ensureMapLibreCSS, ensureMapLibreJS } = await import('../../utils/mapLibre');
       ensureMapLibreCSS();
       ensureMapLibreJS().then(ml => {
         if (!mapContRef.current) return;
