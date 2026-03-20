@@ -712,7 +712,7 @@ export default function CustomerHome() {
               r={heroRest}
               isHero={true}
               distKm={getDistKm(heroRest)}
-              onClick={() => navigate(`/restaurant/${heroRest.id}`)}
+              onClick={() => navigate(`/customer/r/${heroRest.id}`)}
             />
           )}
 
@@ -723,7 +723,7 @@ export default function CustomerHome() {
                 r={r}
                 isHero={false}
                 distKm={getDistKm(r)}
-                onClick={() => navigate(`/restaurant/${r.id}`)}
+                onClick={() => navigate(`/customer/r/${r.id}`)}
               />
             ))}
           </div>
