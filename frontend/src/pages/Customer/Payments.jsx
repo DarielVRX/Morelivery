@@ -39,15 +39,14 @@ export default function CustomerPayments() {
   useEffect(() => {
     apiFetch('/payments/methods', {}, auth.token)
     .then(d => {
-      const list = d.methods || [];
+      // Forzar todos como disponibles — validación real se conecta al activar procesador
+      const list = (d.methods || []).map(m => ({ ...m, available: true, coming_soon: false }));
       setMethods(list);
-      const first = list.find(m => m.available);
-      if (first) setMethod(first.id);
     })
     .catch(() => setMethods([
-      { id:'cash', label:'Efectivo al entregar',      available:true  },
-      { id:'card', label:'Tarjeta de crédito/débito', available:false, coming_soon:true },
-      { id:'spei', label:'SPEI / Transferencia',      available:false, coming_soon:true },
+      { id:'cash', label:'Efectivo al entregar',      available:true },
+      { id:'card', label:'Tarjeta de crédito/débito', available:true },
+      { id:'spei', label:'SPEI / Transferencia',      available:true },
     ]))
     .finally(() => setLoading(false));
   }, [auth.token]);
@@ -100,28 +99,18 @@ export default function CustomerPayments() {
     {methods.map(m => (
       <label key={m.id} style={{
         display:'flex', alignItems:'center', gap:'0.75rem',
-        padding:'0.875rem', borderRadius:10,
-        cursor: m.available ? 'pointer' : 'default',
+        padding:'0.875rem', borderRadius:10, cursor:'pointer',
         border:`2px solid ${method===m.id ? 'var(--brand)' : 'var(--gray-200)'}`,
                        background: method===m.id ? 'var(--brand-light)' : 'var(--bg-card)',
-                       opacity: m.available ? 1 : 0.55,
       }}>
       <input type="radio" name="method" value={m.id}
       checked={method===m.id}
-      disabled={!m.available}
-      onChange={() => m.available && setMethod(m.id)}
+      onChange={() => setMethod(m.id)}
       style={{ accentColor:'var(--brand)' }} />
       <span style={{ fontSize:'1.1rem' }}>
       {m.id==='cash' ? '💵' : m.id==='card' ? '💳' : '🏦'}
       </span>
-      <div>
       <div style={{ fontWeight:700, fontSize:'0.875rem' }}>{m.label}</div>
-      {(m.coming_soon || !m.available) && (
-        <div style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'0.1rem' }}>
-        Próximamente disponible
-        </div>
-      )}
-      </div>
       </label>
     ))}
     </div>
