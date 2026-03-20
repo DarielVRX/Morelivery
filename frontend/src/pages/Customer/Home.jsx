@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
-import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 import { savePendingOrder, schedulePendingOrderExpiry, cancelPendingOrderExpiry } from '../../utils/pendingOrder';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
@@ -436,12 +435,6 @@ export default function CustomerHome() {
       .finally(()=>setLoading(false));
     if (auth.token) loadSuggestions();
   }, [auth.token]);
-
-  useRealtimeOrders(
-    auth.token,
-    (data) => { if (data?.action === 'suggestion_received') loadSuggRef.current?.(); },
-    ()=>{},
-  );
 
   async function ensureMenu(restaurantId) {
     if (menuCache[restaurantId]) return;

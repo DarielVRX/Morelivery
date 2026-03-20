@@ -347,8 +347,11 @@ export default function CustomerOrders() {
 
       useRealtimeOrders(
         auth.token,
-        () => loadDataRef.current?.(),
-                        ({ orderId, lat, lng }) => setDriverPos(p => ({ ...p, [orderId]:{ lat, lng } }))
+        (data) => {
+          loadDataRef.current?.();
+          if (data?.action === 'suggestion_received') loadDataRef.current?.();
+        },
+        ({ orderId, lat, lng }) => setDriverPos(p => ({ ...p, [orderId]:{ lat, lng } }))
       );
 
       const pendingSuggestions = useMemo(
