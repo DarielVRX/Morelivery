@@ -127,6 +127,103 @@ function StarPicker({ value, onChange, label }) {
   );
 }
 
+// ── Address search bar (inline) ───────────────────────────────────────────────
+function AddressSearchBar({ active, currentLabel, onSelect }) {
+  const [open,      setOpen]      = useState(false);
+  const [inputVal,  setInputVal]  = useState('');
+  const [results,   setResults]   = useState([]);
+  const [searching, setSearching] = useState(false);
+  const debounceRef = useRef(null);
+  const wrapRef     = useRef(null);
+
+  useEffect(() => {
+    function handler(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false); setResults([]);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  function doSearch(val) {
+    clearTimeout(debounceRef.current);
+    if (!val.trim()) { setResults([]); setSearching(false); return; }
+    setSearching(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(val + ' Morelia')}&limit=6&lang=es&bbox=-101.5,19.5,-100.9,19.9`;
+        const r = await fetch(url);
+        const data = await r.json();
+        const items = (data.features || []).map(f => {
+          const p = f.properties || {};
+          const parts = [
+            p.name !== p.street ? p.name : null,
+            p.street, p.housenumber,
+            p.suburb || p.district,
+            p.city || p.town || 'Morelia',
+          ].filter(Boolean);
+          const deduped = parts.filter((v, i) => v !== parts[i-1]);
+          return { label: deduped.join(', ') || p.name || 'Sin nombre', lat: f.geometry?.coordinates[1], lng: f.geometry?.coordinates[0] };
+        }).filter(i => i.lat && i.lng);
+        setResults(items);
+      } catch (_) { setResults([]); }
+      finally { setSearching(false); }
+    }, 350);
+  }
+
+  if (!open) {
+    return (
+      <button
+      ref={wrapRef}
+      onClick={() => setOpen(true)}
+      style={{ padding:'0.3rem 0.5rem', borderRadius:6, fontSize:'0.78rem',
+        cursor:'pointer', minHeight:'unset',
+        border:`1.5px solid ${active ? 'var(--brand)' : 'var(--border)'}`,
+            background: active ? 'var(--brand-light)' : 'var(--bg-card)',
+            color: active ? 'var(--brand)' : 'var(--text-secondary)' }}>
+            🔍{active && currentLabel ? ` ✓` : ' Buscar'}
+            </button>
+    );
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position:'relative', flex:1, minWidth:160 }}>
+    <div style={{ display:'flex', alignItems:'center', gap:4,
+      border:'1.5px solid var(--brand)', borderRadius:6, background:'var(--bg-card)',
+          padding:'2px 6px' }}>
+          <input
+          autoFocus
+          value={inputVal}
+          onChange={e => { setInputVal(e.target.value); doSearch(e.target.value); }}
+          placeholder="Buscar dirección…"
+          style={{ flex:1, border:'none', outline:'none', fontSize:'0.78rem',
+            background:'none', color:'var(--text-primary)', padding:'0.2rem 0' }}
+            />
+            {searching && <span style={{ fontSize:'0.7rem', color:'var(--text-tertiary)' }}>…</span>}
+            <button onClick={() => { setOpen(false); setResults([]); setInputVal(''); }}
+            style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-tertiary)',
+              fontSize:'0.75rem', minHeight:'unset', padding:'0 2px' }}>✕</button>
+              </div>
+              {results.length > 0 && (
+                <div style={{ position:'absolute', top:'calc(100% + 2px)', left:0, right:0, zIndex:200,
+                  background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:8,
+                                      boxShadow:'0 8px 24px rgba(0,0,0,0.15)', overflow:'hidden' }}>
+                                      {results.map((item, i) => (
+                                        <button key={i} onClick={() => { onSelect(item); setOpen(false); setResults([]); setInputVal(''); }}
+                                        style={{ width:'100%', textAlign:'left', background:'none', border:'none',
+                                          borderBottom: i < results.length-1 ? '1px solid var(--border-light)' : 'none',
+                                                                 padding:'0.5rem 0.75rem', cursor:'pointer', fontSize:'0.78rem',
+                                                                 color:'var(--text-primary)', display:'block', minHeight:'unset' }}>
+                                                                 📍 {item.label}
+                                                                 </button>
+                                      ))}
+                                      </div>
+              )}
+              </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function RestaurantPage() {
   const { id }     = useParams();
@@ -159,32 +256,20 @@ export default function RestaurantPage() {
   // Menu sort
   const [sortBy, setSortBy] = useState('default'); // 'default' | 'asc' | 'desc'
 
-  // Delivery location — reads from Layout GPS panel or GPS/home fallback
-  const [currentPos,    setCurrentPos]    = useState(() => {
-    try {
-      const stored = sessionStorage.getItem('morelivery_delivery_pos');
-      if (stored) return JSON.parse(stored);
-    } catch (_) {}
-    return null;
-  });
+  // Delivery location
+  const [gpsPos,        setGpsPos]        = useState(null);
   const [gpsError,      setGpsError]      = useState('');
-  const [deliveryMode,  setDeliveryMode]  = useState(() => {
-    try { return sessionStorage.getItem('morelivery_delivery_pos') ? 'confirmed' : 'current'; }
-    catch (_) { return 'current'; }
-  });
+  const [searchPos,     setSearchPos]     = useState(null); // {lat,lng,label} from AddressSearchBar
+  const [deliveryMode,  setDeliveryMode]  = useState('current'); // 'current'|'search'|'home'|'manual'
   const [manualPos,     setManualPos]     = useState(null);
   const [showManualMap, setShowManualMap] = useState(false);
   const manualMapRef = useRef(null);
 
-  // GPS — skip if Layout panel already provided a confirmed location
+  // GPS
   useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem('morelivery_delivery_pos');
-      if (stored) return; // GPS panel already confirmed a location
-    } catch (_) {}
     if (!isCustomer || !navigator.geolocation) { setGpsError('GPS no disponible'); return; }
     navigator.geolocation.getCurrentPosition(
-      pos => setCurrentPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      pos => setGpsPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
                                              ()  => setGpsError('No se pudo obtener tu ubicación'),
                                              { timeout: 8000, maximumAge: 60000 }
     );
@@ -261,7 +346,11 @@ export default function RestaurantPage() {
     try {
       const body = { restaurantId: id, items, payment_method: paymentMethod, tip_cents: tipCents };
 
-      if (deliveryMode === 'manual' && manualPos) {
+      if (deliveryMode === 'search' && searchPos) {
+        body.delivery_address = searchPos.label;
+        body.delivery_lat = searchPos.lat;
+        body.delivery_lng = searchPos.lng;
+      } else if (deliveryMode === 'manual' && manualPos) {
         body.delivery_address = manualPos.label || `${manualPos.lat.toFixed(5)}, ${manualPos.lng.toFixed(5)}`;
         body.delivery_lat = manualPos.lat;
         body.delivery_lng = manualPos.lng;
@@ -269,9 +358,9 @@ export default function RestaurantPage() {
         body.delivery_address = auth.user.address;
         body.delivery_lat = homeLatNum;
         body.delivery_lng = homeLngNum;
-      } else if (currentPos) {
-        body.delivery_lat = currentPos.lat;
-        body.delivery_lng = currentPos.lng;
+      } else if (gpsPos) {
+        body.delivery_lat = gpsPos.lat;
+        body.delivery_lng = gpsPos.lng;
       }
 
       await apiFetch('/orders', { method: 'POST', body: JSON.stringify(body) }, auth.token);
@@ -288,12 +377,11 @@ export default function RestaurantPage() {
   // Distance checks
   const restLat = Number.isFinite(Number(restaurant?.lat)) ? Number(restaurant.lat) : null;
   const restLng = Number.isFinite(Number(restaurant?.lng)) ? Number(restaurant.lng) : null;
-  // Priority: GPS panel confirmed > manual > home > GPS
   const activePos =
-  (deliveryMode === 'confirmed' && currentPos) ? currentPos :
-  deliveryMode === 'manual'  ? manualPos :
-  deliveryMode === 'home'    ? (hasHomePin ? { lat: homeLatNum, lng: homeLngNum } : null) :
-  currentPos;
+  deliveryMode === 'search' ? searchPos :
+  deliveryMode === 'manual' ? manualPos :
+  deliveryMode === 'home'   ? (hasHomePin ? { lat: homeLatNum, lng: homeLngNum } : null) :
+  gpsPos;
   const distKm = (activePos && restLat !== null && restLng !== null)
   ? haversineKm(activePos.lat, activePos.lng, restLat, restLng) : null;
   const tooFar = distKm !== null && distKm > 5;
@@ -573,67 +661,91 @@ export default function RestaurantPage() {
                                          textTransform:'uppercase', letterSpacing:'0.04em', marginBottom:'0.35rem' }}>
                                          Enviar a
                                          </div>
-                                         <div style={{ display:'flex', gap:'0.35rem', flexWrap:'wrap' }}>
-                                         {[
-                                           ['current', `📍 Actual${!currentPos && !gpsError ? ' (buscando…)' : gpsError ? ' (no disp.)' : ''}`],
-                                       ...(currentPos && deliveryMode !== 'confirmed' ? [['current', `📍 GPS`]] : []),
-                                       ...(deliveryMode === 'confirmed' ? [['confirmed', `✓ Confirmada`]] : []),
-                                       ...(hasHomePin ? [['home', '🏠 Casa']] : []),
-                                       ['manual', `📌 Manual${manualPos ? ' ✓' : ''}`],
-                                         ].map(([mode, label]) => (
-                                           <button key={mode}
-                                           onClick={() => {
-                                             setDeliveryMode(mode);
-                                             if (mode === 'manual') setShowManualMap(true);
-                                             else setShowManualMap(false);
-                                           }}
-                                           style={{ padding:'0.3rem 0.65rem', borderRadius:6, fontSize:'0.78rem',
-                                             cursor:'pointer', minHeight:'unset',
-                                             border:`1.5px solid ${deliveryMode===mode ? 'var(--brand)' : 'var(--border)'}`,
-                                                                   background: deliveryMode===mode ? 'var(--brand-light)' : 'var(--bg-card)',
-                                                                   color: deliveryMode===mode ? 'var(--brand)' : 'var(--text-secondary)',
-                                                                   fontWeight: deliveryMode===mode ? 700 : 400 }}>
-                                                                   {label}
-                                                                   </button>
-                                         ))}
+                                         <div style={{ display:'flex', gap:'0.35rem', flexWrap:'wrap', alignItems:'center' }}>
+                                         {/* GPS */}
+                                         <button
+                                         onClick={() => { setDeliveryMode('current'); setShowManualMap(false); }}
+                                         title="Ubicación actual"
+                                         disabled={!gpsPos}
+                                         style={{ padding:'0.3rem 0.5rem', borderRadius:6, fontSize:'0.78rem',
+                                           cursor: gpsPos ? 'pointer' : 'default', minHeight:'unset',
+                                           border:`1.5px solid ${deliveryMode==='current' ? 'var(--brand)' : 'var(--border)'}`,
+                                       background: deliveryMode==='current' ? 'var(--brand-light)' : 'var(--bg-card)',
+                                       color: deliveryMode==='current' ? 'var(--brand)' : 'var(--text-secondary)',
+                                       opacity: gpsPos ? 1 : 0.45 }}>
+                                       📍 {gpsError ? 'Sin GPS' : gpsPos ? 'Actual' : 'Buscando…'}
+                                       </button>
+                                       {/* Home */}
+                                       {hasHomePin && (
+                                         <button
+                                         onClick={() => { setDeliveryMode('home'); setShowManualMap(false); }}
+                                         style={{ padding:'0.3rem 0.5rem', borderRadius:6, fontSize:'0.78rem',
+                                           cursor:'pointer', minHeight:'unset',
+                                           border:`1.5px solid ${deliveryMode==='home' ? 'var(--brand)' : 'var(--border)'}`,
+                                                       background: deliveryMode==='home' ? 'var(--brand-light)' : 'var(--bg-card)',
+                                                       color: deliveryMode==='home' ? 'var(--brand)' : 'var(--text-secondary)' }}>
+                                                       🏠 Casa
+                                                       </button>
+                                       )}
+                                       {/* Manual pin */}
+                                       <button
+                                       onClick={() => { setDeliveryMode('manual'); setShowManualMap(true); }}
+                                       style={{ padding:'0.3rem 0.5rem', borderRadius:6, fontSize:'0.78rem',
+                                         cursor:'pointer', minHeight:'unset',
+                                         border:`1.5px solid ${deliveryMode==='manual' ? 'var(--brand)' : 'var(--border)'}`,
+                                       background: deliveryMode==='manual' ? 'var(--brand-light)' : 'var(--bg-card)',
+                                       color: deliveryMode==='manual' ? 'var(--brand)' : 'var(--text-secondary)' }}>
+                                       📌{manualPos ? ' ✓' : ' Mapa'}
+                                       </button>
+                                       {/* Address search — inline */}
+                                       <AddressSearchBar
+                                       active={deliveryMode === 'search'}
+                                       currentLabel={searchPos?.label}
+                                       onSelect={pos => { setSearchPos(pos); setDeliveryMode('search'); setShowManualMap(false); }}
+                                       />
+                                       </div>
+                                       {deliveryMode === 'home' && auth.user?.address && (
+                                         <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.25rem' }}>
+                                         {auth.user.address}
                                          </div>
-                                         {deliveryMode === 'home' && auth.user?.address && (
-                                           <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.25rem' }}>
-                                           {auth.user.address}
-                                           </div>
-                                         )}
-                                         {deliveryMode === 'manual' && manualPos?.label && (
-                                           <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.25rem' }}>
-                                           📌 {manualPos.label}
-                                           </div>
-                                         )}
-                                         {deliveryMode === 'manual' && showManualMap && (
-                                           <ManualPinMap
-                                           initialPos={currentPos || (hasHomePin ? { lat:homeLatNum, lng:homeLngNum } : null)}
-                                           mapRef={manualMapRef}
-                                           onConfirm={pos => { setManualPos(pos); setShowManualMap(false); }}
-                                           onCancel={() => { setShowManualMap(false); if (!manualPos) setDeliveryMode('current'); }}
-                                           />
-                                         )}
+                                       )}
+                                       {deliveryMode === 'search' && searchPos?.label && (
+                                         <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.25rem' }}>
+                                         🔍 {searchPos.label}
                                          </div>
+                                       )}
+                                       {deliveryMode === 'manual' && manualPos?.label && (
+                                         <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.25rem' }}>
+                                         📌 {manualPos.label}
+                                         </div>
+                                       )}
+                                       {deliveryMode === 'manual' && showManualMap && (
+                                         <ManualPinMap
+                                         initialPos={gpsPos || (hasHomePin ? { lat:homeLatNum, lng:homeLngNum } : null)}
+                                         mapRef={manualMapRef}
+                                         onConfirm={pos => { setManualPos(pos); setShowManualMap(false); }}
+                                         onCancel={() => { setShowManualMap(false); if (!manualPos) setDeliveryMode('current'); }}
+                                         />
+                                       )}
+                                       </div>
 
-                                         {!hasAddress && (
-                                           <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem', fontWeight:600 }}>
-                                           Guarda tu dirección en Perfil antes de pedir
-                                           </p>
-                                         )}
-                                         {deliveryMode === 'manual' && !manualPos && !showManualMap && (
-                                           <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem' }}>
-                                           Confirma tu ubicación en el mapa para continuar
-                                           </p>
-                                         )}
+                                       {!hasAddress && (
+                                         <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem', fontWeight:600 }}>
+                                         Guarda tu dirección en Perfil antes de pedir
+                                         </p>
+                                       )}
+                                       {deliveryMode === 'manual' && !manualPos && !showManualMap && (
+                                         <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem' }}>
+                                         Confirma tu ubicación en el mapa para continuar
+                                         </p>
+                                       )}
 
-                                         <button className="btn-primary"
-                                         style={{ width:'100%', fontSize:'1rem', fontWeight:800, padding:'0.75rem' }}
-                                         disabled={!canOrder || ordering || itemCount === 0 || (deliveryMode==='manual' && !manualPos)}
-                                         onClick={createOrder}>
-                                         {ordering ? 'Procesando…'
-                                           : itemCount === 0 ? 'Selecciona productos'
+                                       <button className="btn-primary"
+                                       style={{ width:'100%', fontSize:'1rem', fontWeight:800, padding:'0.75rem' }}
+                                       disabled={!canOrder || ordering || itemCount === 0 || (deliveryMode==='manual' && !manualPos)}
+                                       onClick={createOrder}>
+                                       {ordering ? 'Procesando…'
+                                         : itemCount === 0 ? 'Selecciona productos'
           : `Hacer pedido · ${fmt(total)}`}
           </button>
           </div>

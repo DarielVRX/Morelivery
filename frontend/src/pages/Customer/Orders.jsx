@@ -183,7 +183,7 @@ function OrderChat({ orderId, token }) {
         </div>
         <span style={{ fontSize:'0.65rem', color:'var(--text-tertiary)', marginTop:'1px' }}>
         {!isMe && `${m.sender_name} · `}
-        {new Date(m.created_at).toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' })}
+        {new Date(m.created_at).toLocaleTimeString('es-MX', { timeZone:'America/Mexico_City', hour:'2-digit', minute:'2-digit' })}
         </span>
         </div>
       );
@@ -233,7 +233,8 @@ export default function CustomerOrders() {
   const [complaintId,   setComplaintId]   = useState(null);
   const [complaintText, setComplaintText] = useState('');
   const [msg,           setMsg]           = useState('');
-  const loadDataRef = useRef(null);
+  const loadDataRef  = useRef(null);
+  const sentinelRef  = useRef(null);
 
   // Rating state
   const [ratingOrder,    setRatingOrder]    = useState(null);
@@ -289,15 +290,19 @@ export default function CustomerOrders() {
   }
 
   // ── Carga historial paginado ──────────────────────────────────────────────
+  // El backend devuelve todos los pedidos mezclados — pedimos limit grande y filtramos
+  // los past localmente. Para compensar, pedimos HISTORY_PAGE * 3 por llamada.
   async function loadPastPage(offset, replace = false) {
     if (!auth.token || pastLoading) return;
     setPastLoading(true);
     try {
-      const d = await apiFetch(`/orders/my?limit=${HISTORY_PAGE}&offset=${offset}`, {}, auth.token);
-      const incoming = (d.orders || []).filter(o => ['delivered','cancelled'].includes(o.status));
+      const fetchLimit = HISTORY_PAGE * 3;
+      const d = await apiFetch(`/orders/my?limit=${fetchLimit}&offset=${offset}`, {}, auth.token);
+      const all = d.orders || [];
+      const incoming = all.filter(o => ['delivered','cancelled'].includes(o.status));
       setPastOrders(prev => replace ? incoming : [...prev, ...incoming]);
-      setPastOffset(offset + incoming.length);
-      setPastHasMore(incoming.length === HISTORY_PAGE);
+      setPastOffset(offset + all.length); // advance by total fetched, not just past
+      setPastHasMore(all.length === fetchLimit); // more pages exist if we got a full batch
     } catch (_) {}
     finally { setPastLoading(false); }
   }
@@ -309,13 +314,25 @@ export default function CustomerOrders() {
 
   useEffect(() => { loadDataRef.current = loadData; });
 
-  useEffect(() => {
-    loadActive();
-  }, [auth.token]);
+  useEffect(() => { loadActive(); }, [auth.token]);
 
   useEffect(() => {
     if (tab === 'past' && pastOrders.length === 0) loadPastPage(0, true);
   }, [tab]);
+
+    // IntersectionObserver — cargar más al llegar al fondo del historial
+    useEffect(() => {
+      if (tab !== 'past') return;
+      const el = sentinelRef.current;
+      if (!el) return;
+      const obs = new IntersectionObserver(entries => {
+        if (entries[0].isIntersecting && pastHasMore && !pastLoading) {
+          loadPastPage(pastOffset);
+        }
+      }, { threshold: 0.1 });
+      obs.observe(el);
+      return () => obs.disconnect();
+    }, [tab, pastHasMore, pastLoading, pastOffset]);
 
     // Polling 5s para activos
     useEffect(() => {
@@ -766,18 +783,17 @@ export default function CustomerOrders() {
           })}
           </ul>
 
-          {/* Cargar más */}
-          {pastHasMore && (
-            <button
-            onClick={() => loadPastPage(pastOffset)}
-            disabled={pastLoading}
-            style={{ width:'100%', padding:'0.6rem', background:'none', border:'1px solid var(--border)',
-              borderRadius:8, fontSize:'0.85rem', color:'var(--text-secondary)', cursor:'pointer', marginTop:'0.5rem' }}>
-              {pastLoading ? 'Cargando…' : 'Ver más pedidos'}
-              </button>
+          {/* Sentinel — IntersectionObserver carga el siguiente batch al llegar aquí */}
+          <div ref={sentinelRef} style={{ height:1 }} />
+          {pastLoading && (
+            <p style={{ color:'var(--text-tertiary)', fontSize:'0.85rem', textAlign:'center', padding:'0.75rem 0' }}>
+            Cargando…
+            </p>
           )}
-          {pastLoading && pastOrders.length === 0 && (
-            <p style={{ color:'var(--text-tertiary)', fontSize:'0.85rem', textAlign:'center' }}>Cargando historial…</p>
+          {!pastHasMore && pastOrders.length > 0 && (
+            <p style={{ color:'var(--text-tertiary)', fontSize:'0.78rem', textAlign:'center', padding:'0.5rem 0' }}>
+            — fin del historial —
+            </p>
           )}
           </>
         )
