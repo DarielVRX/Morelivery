@@ -24,22 +24,6 @@ function haversineKm(lat1, lng1, lat2, lng2) {
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
 // ── Nominatim geocoding ───────────────────────────────────────────────────────
-async function nominatimForward(q) {
-  try {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Morelia, Michoacán')}&format=json&addressdetails=1&limit=6&countrycodes=mx&accept-language=es&viewbox=-101.5,19.9,-100.9,19.5&bounded=1`;
-    const r = await fetch(url, { headers: { 'Accept-Language':'es', 'User-Agent':'Morelivery/1.0' } });
-    const data = await r.json();
-    return (data || []).map(item => {
-      const a = item.address || {};
-      const parts = [a.road, a.house_number, a.suburb || a.neighbourhood, a.city || 'Morelia'].filter(Boolean);
-      return {
-        label: parts.join(', ') || item.display_name?.split(',').slice(0,3).join(',') || 'Sin nombre',
-        lat: Number(item.lat),
-        lng: Number(item.lon),
-      };
-    }).filter(i => i.lat && i.lng);
-  } catch (_) { return []; }
-}
 
 async function nominatimReverse(lat, lng) {
   try {

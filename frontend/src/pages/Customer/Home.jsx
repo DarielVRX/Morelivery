@@ -58,10 +58,6 @@ function RestaurantCard({ r, isHero, distKm, onClick }) {
           <div style={{ position:'absolute', inset:0, background:'linear-gradient(to top, rgba(120,30,30,0.82) 0%, rgba(80,20,20,0.2) 60%, transparent 100%)' }} />
         </div>
         <div style={{ position:'absolute', bottom:0, left:0, right:0, padding:'0.75rem 1rem' }}>
-          <span style={{ display:'inline-block', background:'#e3aaaa', color:'#5a1a1a', fontSize:'0.68rem', fontWeight:800,
-            borderRadius:20, padding:'0.15rem 0.55rem', marginBottom:'0.3rem', letterSpacing:'0.03em' }}>
-            ⭐ Destacado
-          </span>
           <div style={{ fontWeight:900, fontSize:'1.1rem', color:'#fff', lineHeight:1.2, marginBottom:'0.2rem',
             textShadow:'0 1px 4px rgba(0,0,0,0.5)' }}>{r.name}</div>
           <div style={{ fontSize:'0.78rem', color:'rgba(255,255,255,0.85)' }}>
