@@ -67,8 +67,11 @@ export async function registerUser(payload) {
 
   // Verificar email real único
   try {
-    const existingReal = await query('SELECT id FROM users WHERE real_email = $1', [realEmail]);
-    if (existingReal.rowCount > 0) throw new AppError(409, 'Este correo ya está registrado');
+    const existingReal = await query(
+      'SELECT id FROM users WHERE real_email = $1 AND role = $2',
+      [realEmail, payload.role]
+    );
+    if (existingReal.rowCount > 0) throw new AppError(409, 'Este correo ya está registrado para este tipo de cuenta');
   } catch (e) {
     if (e instanceof AppError) throw e;
     if (e?.code !== '42703') throw e;

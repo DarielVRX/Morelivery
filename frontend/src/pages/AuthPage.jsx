@@ -505,13 +505,15 @@ function AuthForm({ mode, appKey }) {
       />
       </label>
 
-      <label>Tipo de cuenta
-      <select value={role} onChange={e => setRole(e.target.value)}>
-      <option value="customer">Cliente</option>
-      <option value="restaurant">Tienda</option>
-      <option value="driver">Conductor</option>
-      </select>
-      </label>
+      {!appKey && (
+        <label>Tipo de cuenta
+        <select value={role} onChange={e => setRole(e.target.value)}>
+        <option value="customer">Cliente</option>
+        <option value="restaurant">Tienda</option>
+        <option value="driver">Conductor</option>
+        </select>
+        </label>
+      )}
       </div>
 
       {/* Contraseña */}
