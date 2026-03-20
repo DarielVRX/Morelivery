@@ -174,41 +174,43 @@ function AddressSearchBar({ active, currentLabel, onSelect }) {
   useEffect(() => {
     if (!showMap || !mapContRef.current) return;
     if (mapRef.current) return;
-    const { ensureMapLibreCSS, ensureMapLibreJS } = await import('../utils/mapLibre');
-    ensureMapLibreCSS();
-    ensureMapLibreJS().then(ml => {
-      if (!mapContRef.current) return;
-      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-      const map = new ml.Map({
-        container: mapContRef.current,
-        style: isDark ? STYLE_DARK : STYLE_LIGHT,
-        center: [-101.195, 19.706],
-        zoom: 14,
-        attributionControl: false,
-      });
-      map.addControl(new ml.NavigationControl({ showCompass: false }), 'top-right');
-      map.once('load', () => {
-        if (!STADIA_KEY && isDark) {
-          mapContRef.current.style.filter = 'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)';
-        }
-      });
-      // Tap to place pin
-      map.on('click', e => {
-        const pos = { lat: e.lngLat.lat, lng: e.lngLat.lng };
-        pendingPosRef.current = pos;
-        if (markerRef.current) {
-          markerRef.current.setLngLat([pos.lng, pos.lat]);
-        } else {
-          const el = document.createElement('div');
-          el.style.cssText = 'font-size:24px;line-height:1;filter:drop-shadow(0 2px 4px #0005)';
-          el.textContent = '📍';
-          markerRef.current = new ml.Marker({ element: el, anchor:'bottom' })
-          .setLngLat([pos.lng, pos.lat]).addTo(map);
-        }
-      });
-      mapRef.current = map;
-      setTimeout(() => map.resize(), 50);
-    }).catch(() => {});
+    (async () => {
+      const { ensureMapLibreCSS, ensureMapLibreJS } = await import('../utils/mapLibre');
+      ensureMapLibreCSS();
+      ensureMapLibreJS().then(ml => {
+        if (!mapContRef.current) return;
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const map = new ml.Map({
+          container: mapContRef.current,
+          style: isDark ? STYLE_DARK : STYLE_LIGHT,
+          center: [-101.195, 19.706],
+          zoom: 14,
+          attributionControl: false,
+        });
+        map.addControl(new ml.NavigationControl({ showCompass: false }), 'top-right');
+        map.once('load', () => {
+          if (!STADIA_KEY && isDark) {
+            mapContRef.current.style.filter = 'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)';
+          }
+        });
+        // Tap to place pin
+        map.on('click', e => {
+          const pos = { lat: e.lngLat.lat, lng: e.lngLat.lng };
+          pendingPosRef.current = pos;
+          if (markerRef.current) {
+            markerRef.current.setLngLat([pos.lng, pos.lat]);
+          } else {
+            const el = document.createElement('div');
+            el.style.cssText = 'font-size:24px;line-height:1;filter:drop-shadow(0 2px 4px #0005)';
+            el.textContent = '📍';
+            markerRef.current = new ml.Marker({ element: el, anchor:'bottom' })
+            .setLngLat([pos.lng, pos.lat]).addTo(map);
+          }
+        });
+        mapRef.current = map;
+        setTimeout(() => map.resize(), 50);
+      }).catch(() => {});
+    })(); // close async IIFE
     return () => {
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; markerRef.current = null; }
     };
