@@ -81,10 +81,10 @@ function LandingScreen() {
       width:'100%', maxWidth:'680px', justifyContent:'center',
     }}>
     {APPS.map(app => (
-      <Link key={app.key} to={`/${app.key}/login`} style={{ textDecoration:'none', flex:'1 1 180px' }}>
+      <Link key={app.key} to={`/${app.key}/login`} style={{ textDecoration:'none', flex:'1 1 200px' }}>
       <div style={{
         display:'flex', alignItems:'center', gap:'1rem',
-        padding:'0.875rem 1.25rem',
+        padding:'1.25rem 1.25rem',
         background:'var(--brand-light)',
                       border:'1.5px solid var(--border)',
                       borderRadius:8,
@@ -248,7 +248,7 @@ return (
 
   <div className="row" style={{ flexDirection:'row', flexWrap:'wrap', gap:'0.75rem', alignItems:'center' }}>
   <button className="btn-primary" onClick={submit} disabled={loading}
-  style={{ flex:'1 1 140px', borderRadius:8, alignSelf:'flex-start' }}>
+  style={{ borderRadius:8 }}>
   {loading ? 'Cargando…' : (isLogin ? 'Iniciar sesión' : 'Registrarse')}
   </button>
   {isLogin
