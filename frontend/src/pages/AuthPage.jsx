@@ -225,7 +225,12 @@ function AuthForm({ mode, appKey }) {
         body: JSON.stringify({ credential: response.credential }),
       });
       login({ token: data.token, user: data.user });
-      navigate(`/${data.user.role}`);
+      // Si le faltan datos obligatorios, mandar a perfil
+      if (data.user.needsAddress) {
+        navigate('/profile');
+      } else {
+        navigate(`/${data.user.role}`);
+      }
     } catch (e) {
       msg(e.message);
     } finally {
@@ -429,8 +434,16 @@ function AuthForm({ mode, appKey }) {
         <span style={{ fontSize:'0.75rem', color:'var(--text-secondary)', whiteSpace:'nowrap' }}>o continúa con</span>
         <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
         </div>
-        {/* Google renderiza aquí su botón */}
-        <div ref={googleBtnRef} style={{ width:'100%' }} />
+        <div style={{
+          borderRadius: 4,
+          overflow: 'hidden',
+          // En dark mode el botón "outline" de Google es blanco — usar filled_black
+          // ya lo hacemos con theme, pero recortamos bordes con overflow hidden
+          display: 'flex',
+          justifyContent: 'center',
+        }}>
+        <div ref={googleBtnRef} />
+        </div>
         </>
       )}
 
