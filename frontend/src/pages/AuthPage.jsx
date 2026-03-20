@@ -405,12 +405,9 @@ function AuthForm({ mode, appKey }) {
         <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
         </div>
         <div style={{
-          borderRadius: 4,
-          overflow: 'hidden',
-          // En dark mode el botón "outline" de Google es blanco — usar filled_black
-          // ya lo hacemos con theme, pero recortamos bordes con overflow hidden
           display: 'flex',
           justifyContent: 'center',
+          minHeight: 44,
         }}>
         <div ref={googleBtnRef} />
         </div>

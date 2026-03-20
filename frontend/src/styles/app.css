@@ -279,3 +279,8 @@ button,a,[role="button"]{min-height:44px;touch-action:manipulation;}
 @media(max-width:767px){.orders-tab-panel,.orders-tab-panel.reverse{animation:none;}*{scroll-behavior:auto!important;}.btn-primary,.btn-sm{transition:none;}}
 html,body{overscroll-behavior:none;}
 @media(display-mode:standalone){.app-shell{height:100dvh;overscroll-behavior:none;}.nav-desktop{display:none!important;}}
+@media (min-width: 768px) {
+  #order-bar {
+  padding-bottom: 0.75rem !important;
+  }
+}
