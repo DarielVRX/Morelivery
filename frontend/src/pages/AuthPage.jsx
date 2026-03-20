@@ -225,12 +225,7 @@ function AuthForm({ mode, appKey }) {
         body: JSON.stringify({ credential: response.credential }),
       });
       login({ token: data.token, user: data.user });
-      // Si le faltan datos obligatorios, mandar a perfil
-      if (data.user.needsAddress) {
-        navigate('/profile');
-      } else {
-        navigate(`/${data.user.role}`);
-      }
+      navigate(`/${data.user.role}`);
     } catch (e) {
       msg(e.message);
     } finally {
