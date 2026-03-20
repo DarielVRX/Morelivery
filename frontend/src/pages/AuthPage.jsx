@@ -183,13 +183,16 @@ function AuthForm({ mode, appKey }) {
         callback:  handleGoogleResponse,
       });
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  window.google.accounts.id.renderButton(googleBtnRef.current, {
-    theme:  isDark ? 'filled_black' : 'outline',
-    size:   'large',
-    width:  360,
-    text:   'continue_with',
-    locale: 'es',
-  });
+      // Ancho dinámico: ancho real del contenedor menos 2px de margen, entre 200 y 360
+      const containerWidth = googleBtnRef.current.parentElement?.offsetWidth || 360;
+      const btnWidth = Math.min(360, Math.max(200, containerWidth - 2));
+      window.google.accounts.id.renderButton(googleBtnRef.current, {
+        theme:  isDark ? 'filled_black' : 'outline',
+        size:   'large',
+        width:  btnWidth,
+        text:   'continue_with',
+        locale: 'es',
+      });
     };
     if (window.google) { render(); return; }
     const interval = setInterval(() => { if (window.google) { clearInterval(interval); render(); } }, 200);
@@ -342,9 +345,8 @@ function AuthForm({ mode, appKey }) {
         <span style={{ fontSize:'0.75rem', color:'var(--text-secondary)', whiteSpace:'nowrap' }}>o continúa con</span>
         <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
         </div>
-        {/* overflow-x hidden recorta el desborde lateral en móvil sin cortar el iframe verticalmente */}
-        <div style={{ overflowX:'hidden', borderRadius:4 }}>
-        <div ref={googleBtnRef} style={{ display:'flex', justifyContent:'center' }} />
+        <div style={{ display:'flex', justifyContent:'center' }}>
+        <div ref={googleBtnRef} />
         </div>
         </>
       )}
