@@ -190,7 +190,7 @@ function AuthScreen({ mode = 'login' }) {
 
           {/* Ícono y título del rol */}
           <div style={{ textAlign:'center', marginBottom:'1rem' }}>
-            <span style={{ fontSize:'2rem' }}>{app.icon || '🔐'}</span>
+            <span style={{ fontSize:'5rem' }}>{app.icon || '🔐'}</span>
             {mode === 'register' && (
               <p style={{ margin:'0.3rem 0 0', fontWeight:700, fontSize:'0.9rem', color:'var(--text-secondary)' }}>
               {app.label}
