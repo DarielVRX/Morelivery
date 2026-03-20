@@ -248,7 +248,7 @@ function AuthForm({ mode, appKey }) {
       window.google.accounts.id.renderButton(googleBtnRef.current, {
         theme:  dark ? 'filled_black' : 'outline',
         size:   'large',
-        width:  100%,
+        width:  '100%',
         maxwidth: '360px',
         text:   'continue_with',
         locale: 'es',
