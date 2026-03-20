@@ -632,7 +632,7 @@ export default function RestaurantPage() {
 
       {/* Content — padded to clear fixed bottom bar */}
       <div style={{ padding:'0.875rem 1rem',
-        paddingBottom:'calc(0.75rem + var(--nav-h-mobile) + env(safe-area-inset-bottom, 0px))'}}>
+        paddingBottom: isCustomer && !isClosed ? 'calc(var(--order-bar-h, 160px) + 0.5rem)' : '1rem' }}>
 
         {msg && <p className="flash flash-error" style={{ marginBottom:'0.75rem' }}>{msg}</p>}
 
@@ -760,7 +760,7 @@ export default function RestaurantPage() {
       {isCustomer && !isClosed && (
         <div id="order-bar" style={{ position:'fixed', bottom:0, left:0, right:0, zIndex:50,
           background:'var(--bg-card)', borderTop:'1px solid var(--border)',
-          padding:'0.75rem 1rem', paddingBottom:'calc(0.75rem + env(safe-area-inset-bottom, 0px))',
+          padding:'0.75rem 1rem', paddingBottom: isCustomer && !isClosed ? 'calc(var(--order-bar-h, 160px) + var(--nav-h-mobile) + 0.5rem)' : '1rem',
           boxShadow:'0 -4px 20px rgba(0,0,0,0.1)' }}>
 
           {searchPos?.label && (
