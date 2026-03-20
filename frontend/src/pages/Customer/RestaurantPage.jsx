@@ -127,52 +127,122 @@ function StarPicker({ value, onChange, label }) {
   );
 }
 
-// ── Address search bar (inline) ───────────────────────────────────────────────
+// ── Address search bar with manual map pick ───────────────────────────────────
+// Search: Nominatim (más confiable en bbox Morelia que Photon)
+// Map pick: MapLibre + mismos layers que DriverMap (Stadia/OpenFreeMap)
+var STADIA_KEY  = typeof import.meta !== 'undefined' ? (import.meta.env?.VITE_STADIA_KEY || '') : '';
+var STYLE_LIGHT = STADIA_KEY ? `https://tiles.stadiamaps.com/styles/alidade_smooth.json?api_key=${STADIA_KEY}` : 'https://tiles.openfreemap.org/styles/bright';
+var STYLE_DARK  = STADIA_KEY ? `https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json?api_key=${STADIA_KEY}` : 'https://tiles.openfreemap.org/styles/bright';
+
+async function nominatimForward(q) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Morelia, Michoacán')}&format=json&addressdetails=1&limit=6&countrycodes=mx&accept-language=es&viewbox=-101.5,19.9,-100.9,19.5&bounded=1`;
+    const r = await fetch(url, { headers: { 'Accept-Language':'es', 'User-Agent':'Morelivery/1.0' } });
+    const data = await r.json();
+    return (data || []).map(item => {
+      const a = item.address || {};
+      const parts = [a.road, a.house_number, a.suburb || a.neighbourhood, a.city || 'Morelia'].filter(Boolean);
+      return { label: parts.join(', ') || item.display_name?.split(',').slice(0,3).join(',') || 'Sin nombre', lat: Number(item.lat), lng: Number(item.lon) };
+    }).filter(i => i.lat && i.lng);
+  } catch (_) { return []; }
+}
+
 function AddressSearchBar({ active, currentLabel, onSelect }) {
   const [open,      setOpen]      = useState(false);
+  const [showMap,   setShowMap]   = useState(false);
   const [inputVal,  setInputVal]  = useState('');
   const [results,   setResults]   = useState([]);
   const [searching, setSearching] = useState(false);
-  const debounceRef = useRef(null);
-  const wrapRef     = useRef(null);
+  const debounceRef  = useRef(null);
+  const wrapRef      = useRef(null);
+  const mapContRef   = useRef(null);
+  const mapRef       = useRef(null);
+  const markerRef    = useRef(null);
+  const pendingPosRef = useRef(null); // pos confirmed on map but not yet submitted
 
   useEffect(() => {
     function handler(e) {
       if (wrapRef.current && !wrapRef.current.contains(e.target)) {
-        setOpen(false); setResults([]);
+        if (!showMap) { setOpen(false); setResults([]); }
       }
     }
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  }, [showMap]);
+
+  // Init MapLibre when showMap becomes true
+  useEffect(() => {
+    if (!showMap || !mapContRef.current) return;
+    if (mapRef.current) return;
+    const { ensureMapLibreCSS, ensureMapLibreJS } = await import('../utils/mapLibre');
+    ensureMapLibreCSS();
+    ensureMapLibreJS().then(ml => {
+      if (!mapContRef.current) return;
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const map = new ml.Map({
+        container: mapContRef.current,
+        style: isDark ? STYLE_DARK : STYLE_LIGHT,
+        center: [-101.195, 19.706],
+        zoom: 14,
+        attributionControl: false,
+      });
+      map.addControl(new ml.NavigationControl({ showCompass: false }), 'top-right');
+      map.once('load', () => {
+        if (!STADIA_KEY && isDark) {
+          mapContRef.current.style.filter = 'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)';
+        }
+      });
+      // Tap to place pin
+      map.on('click', e => {
+        const pos = { lat: e.lngLat.lat, lng: e.lngLat.lng };
+        pendingPosRef.current = pos;
+        if (markerRef.current) {
+          markerRef.current.setLngLat([pos.lng, pos.lat]);
+        } else {
+          const el = document.createElement('div');
+          el.style.cssText = 'font-size:24px;line-height:1;filter:drop-shadow(0 2px 4px #0005)';
+          el.textContent = '📍';
+          markerRef.current = new ml.Marker({ element: el, anchor:'bottom' })
+          .setLngLat([pos.lng, pos.lat]).addTo(map);
+        }
+      });
+      mapRef.current = map;
+      setTimeout(() => map.resize(), 50);
+    }).catch(() => {});
+    return () => {
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; markerRef.current = null; }
+    };
+  }, [showMap]);
+
+  async function confirmMapPin() {
+    const pos = pendingPosRef.current;
+    if (!pos) return;
+    // Reverse geocode
+    let label = `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`;
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${pos.lat}&lon=${pos.lng}&format=json&addressdetails=1&countrycodes=mx&accept-language=es`, { headers: { 'Accept-Language':'es','User-Agent':'Morelivery/1.0' } });
+      const data = await r.json();
+      const a = data.address || {};
+      const parts = [a.road, a.house_number, a.suburb || a.neighbourhood, a.city || 'Morelia'].filter(Boolean);
+      label = parts.join(', ') || data.display_name?.split(',').slice(0,3).join(',') || label;
+    } catch (_) {}
+    onSelect({ ...pos, label });
+    setShowMap(false); setOpen(false); setResults([]); setInputVal('');
+    pendingPosRef.current = null;
+  }
 
   function doSearch(val) {
     clearTimeout(debounceRef.current);
     if (!val.trim()) { setResults([]); setSearching(false); return; }
     setSearching(true);
     debounceRef.current = setTimeout(async () => {
-      try {
-        const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(val + ' Morelia')}&limit=6&lang=es&bbox=-101.5,19.5,-100.9,19.9`;
-        const r = await fetch(url);
-        const data = await r.json();
-        const items = (data.features || []).map(f => {
-          const p = f.properties || {};
-          const parts = [
-            p.name !== p.street ? p.name : null,
-            p.street, p.housenumber,
-            p.suburb || p.district,
-            p.city || p.town || 'Morelia',
-          ].filter(Boolean);
-          const deduped = parts.filter((v, i) => v !== parts[i-1]);
-          return { label: deduped.join(', ') || p.name || 'Sin nombre', lat: f.geometry?.coordinates[1], lng: f.geometry?.coordinates[0] };
-        }).filter(i => i.lat && i.lng);
-        setResults(items);
-      } catch (_) { setResults([]); }
-      finally { setSearching(false); }
-    }, 350);
+      const items = await nominatimForward(val);
+      setResults(items);
+      setSearching(false);
+    }, 400);
   }
 
-  if (!open) {
+  if (!open && !showMap) {
     return (
       <button
       ref={wrapRef}
@@ -182,18 +252,19 @@ function AddressSearchBar({ active, currentLabel, onSelect }) {
         border:`1.5px solid ${active ? 'var(--brand)' : 'var(--border)'}`,
             background: active ? 'var(--brand-light)' : 'var(--bg-card)',
             color: active ? 'var(--brand)' : 'var(--text-secondary)' }}>
-            🔍{active && currentLabel ? ` ✓` : ' Buscar'}
+            🔍{active ? ' ✓' : ' Buscar'}
             </button>
     );
   }
 
   return (
-    <div ref={wrapRef} style={{ position:'relative', flex:1, minWidth:160 }}>
+    <div ref={wrapRef} style={{ position:'relative', flex:1, minWidth:160, zIndex:100 }}>
+    {/* Search input row */}
     <div style={{ display:'flex', alignItems:'center', gap:4,
-      border:'1.5px solid var(--brand)', borderRadius:6, background:'var(--bg-card)',
-          padding:'2px 6px' }}>
+      border:'1.5px solid var(--brand)', borderRadius:6,
+          background:'var(--bg-card)', padding:'2px 4px' }}>
           <input
-          autoFocus
+          autoFocus={!showMap}
           value={inputVal}
           onChange={e => { setInputVal(e.target.value); doSearch(e.target.value); }}
           placeholder="Buscar dirección…"
@@ -201,26 +272,59 @@ function AddressSearchBar({ active, currentLabel, onSelect }) {
             background:'none', color:'var(--text-primary)', padding:'0.2rem 0' }}
             />
             {searching && <span style={{ fontSize:'0.7rem', color:'var(--text-tertiary)' }}>…</span>}
-            <button onClick={() => { setOpen(false); setResults([]); setInputVal(''); }}
-            style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-tertiary)',
-              fontSize:'0.75rem', minHeight:'unset', padding:'0 2px' }}>✕</button>
-              </div>
-              {results.length > 0 && (
-                <div style={{ position:'absolute', top:'calc(100% + 2px)', left:0, right:0, zIndex:200,
-                  background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:8,
-                                      boxShadow:'0 8px 24px rgba(0,0,0,0.15)', overflow:'hidden' }}>
-                                      {results.map((item, i) => (
-                                        <button key={i} onClick={() => { onSelect(item); setOpen(false); setResults([]); setInputVal(''); }}
-                                        style={{ width:'100%', textAlign:'left', background:'none', border:'none',
-                                          borderBottom: i < results.length-1 ? '1px solid var(--border-light)' : 'none',
-                                                                 padding:'0.5rem 0.75rem', cursor:'pointer', fontSize:'0.78rem',
-                                                                 color:'var(--text-primary)', display:'block', minHeight:'unset' }}>
-                                                                 📍 {item.label}
-                                                                 </button>
-                                      ))}
-                                      </div>
-              )}
-              </div>
+            {/* Map pick toggle */}
+            <button
+            onClick={() => setShowMap(v => !v)}
+            title="Seleccionar en mapa"
+            style={{ background: showMap ? 'var(--brand)' : 'none', border:'none',
+              cursor:'pointer', padding:'2px 4px', borderRadius:4, minHeight:'unset',
+              color: showMap ? '#fff' : 'var(--text-tertiary)', fontSize:'0.8rem' }}>
+              🗺
+              </button>
+              <button onClick={() => { setOpen(false); setShowMap(false); setResults([]); setInputVal(''); pendingPosRef.current = null; }}
+              style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-tertiary)',
+                fontSize:'0.75rem', minHeight:'unset', padding:'0 2px' }}>✕</button>
+                </div>
+
+                {/* Results dropdown */}
+                {results.length > 0 && !showMap && (
+                  <div style={{ position:'absolute', top:'calc(100% + 2px)', left:0, right:0,
+                    background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:8,
+                                                    boxShadow:'0 8px 24px rgba(0,0,0,0.15)', overflow:'hidden', zIndex:200 }}>
+                                                    {results.map((item, i) => (
+                                                      <button key={i} onClick={() => { onSelect(item); setOpen(false); setResults([]); setInputVal(''); }}
+                                                      style={{ width:'100%', textAlign:'left', background:'none', border:'none',
+                                                        borderBottom: i < results.length-1 ? '1px solid var(--border-light)' : 'none',
+                                                                               padding:'0.5rem 0.75rem', cursor:'pointer', fontSize:'0.78rem',
+                                                                               color:'var(--text-primary)', display:'block', minHeight:'unset' }}>
+                                                                               📍 {item.label}
+                                                                               </button>
+                                                    ))}
+                                                    </div>
+                )}
+
+                {/* Map panel */}
+                {showMap && (
+                  <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, right:0,
+                    background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:8,
+                             boxShadow:'0 8px 24px rgba(0,0,0,0.2)', overflow:'hidden', zIndex:200 }}>
+                             <div ref={mapContRef} style={{ height:220, width:'100%' }} />
+                             <div style={{ display:'flex', gap:'0.4rem', padding:'0.4rem 0.5rem', background:'var(--bg-card)' }}>
+                             <span style={{ flex:1, fontSize:'0.72rem', color:'var(--text-tertiary)', alignSelf:'center' }}>
+                             {pendingPosRef.current ? '📍 Toca confirmar' : 'Toca el mapa para colocar el pin'}
+                             </span>
+                             <button
+                             onClick={confirmMapPin}
+                             disabled={!pendingPosRef.current}
+                             className="btn-primary btn-sm"
+                             style={{ opacity: pendingPosRef.current ? 1 : 0.45 }}>
+                             Confirmar
+                             </button>
+                             <button onClick={() => setShowMap(false)} className="btn-sm">Cancelar</button>
+                             </div>
+                             </div>
+                )}
+                </div>
   );
 }
 
@@ -256,24 +360,9 @@ export default function RestaurantPage() {
   // Menu sort
   const [sortBy, setSortBy] = useState('default'); // 'default' | 'asc' | 'desc'
 
-  // Delivery location
-  const [gpsPos,        setGpsPos]        = useState(null);
-  const [gpsError,      setGpsError]      = useState('');
-  const [searchPos,     setSearchPos]     = useState(null); // {lat,lng,label} from AddressSearchBar
-  const [deliveryMode,  setDeliveryMode]  = useState('current'); // 'current'|'search'|'home'|'manual'
-  const [manualPos,     setManualPos]     = useState(null);
-  const [showManualMap, setShowManualMap] = useState(false);
-  const manualMapRef = useRef(null);
-
-  // GPS
-  useEffect(() => {
-    if (!isCustomer || !navigator.geolocation) { setGpsError('GPS no disponible'); return; }
-    navigator.geolocation.getCurrentPosition(
-      pos => setGpsPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-                                             ()  => setGpsError('No se pudo obtener tu ubicación'),
-                                             { timeout: 8000, maximumAge: 60000 }
-    );
-  }, [isCustomer]);
+  // Delivery location — solo AddressSearchBar, sin GPS/home/manual buttons
+  const [searchPos,    setSearchPos]    = useState(null); // {lat,lng,label}
+  const [deliveryMode, setDeliveryMode] = useState('search'); // siempre 'search' o 'current'(GPS fallback)
 
   // Load restaurant + menu
   useEffect(() => {
@@ -346,21 +435,10 @@ export default function RestaurantPage() {
     try {
       const body = { restaurantId: id, items, payment_method: paymentMethod, tip_cents: tipCents };
 
-      if (deliveryMode === 'search' && searchPos) {
+      if (searchPos) {
         body.delivery_address = searchPos.label;
         body.delivery_lat = searchPos.lat;
         body.delivery_lng = searchPos.lng;
-      } else if (deliveryMode === 'manual' && manualPos) {
-        body.delivery_address = manualPos.label || `${manualPos.lat.toFixed(5)}, ${manualPos.lng.toFixed(5)}`;
-        body.delivery_lat = manualPos.lat;
-        body.delivery_lng = manualPos.lng;
-      } else if (deliveryMode === 'home' && hasHomePin) {
-        body.delivery_address = auth.user.address;
-        body.delivery_lat = homeLatNum;
-        body.delivery_lng = homeLngNum;
-      } else if (gpsPos) {
-        body.delivery_lat = gpsPos.lat;
-        body.delivery_lng = gpsPos.lng;
       }
 
       await apiFetch('/orders', { method: 'POST', body: JSON.stringify(body) }, auth.token);
@@ -374,19 +452,26 @@ export default function RestaurantPage() {
     }
   }
 
-  // Distance checks
+  // Measure order bar height so content doesn't hide behind it
+  useEffect(() => {
+    function update() {
+      const bar = document.getElementById('order-bar');
+      if (bar) document.documentElement.style.setProperty('--order-bar-h', bar.offsetHeight + 'px');
+    }
+    update();
+    const obs = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    const bar = document.getElementById('order-bar');
+    if (obs && bar) obs.observe(bar);
+    return () => { obs?.disconnect(); document.documentElement.style.removeProperty('--order-bar-h'); };
+  }, [searchPos, isCustomer, isClosed]);
   const restLat = Number.isFinite(Number(restaurant?.lat)) ? Number(restaurant.lat) : null;
   const restLng = Number.isFinite(Number(restaurant?.lng)) ? Number(restaurant.lng) : null;
-  const activePos =
-  deliveryMode === 'search' ? searchPos :
-  deliveryMode === 'manual' ? manualPos :
-  deliveryMode === 'home'   ? (hasHomePin ? { lat: homeLatNum, lng: homeLngNum } : null) :
-  gpsPos;
+  const activePos = searchPos || null;
   const distKm = (activePos && restLat !== null && restLng !== null)
   ? haversineKm(activePos.lat, activePos.lng, restLat, restLng) : null;
-  const tooFar = distKm !== null && distKm > 5;
+  const tooFar  = distKm !== null && distKm > 5;
   const isClosed = restaurant?.is_open === false;
-  const canOrder = isCustomer && hasAddress && !isClosed && !tooFar && restLat !== null;
+  const canOrder = isCustomer && hasAddress && !isClosed && !tooFar && restLat !== null && !!searchPos;
 
   const itemCount = Object.values(selectedItems).reduce((s, q) => s + Number(q), 0);
 
@@ -504,7 +589,7 @@ export default function RestaurantPage() {
         </div>
         </div>
 
-        <div style={{ padding:'0.875rem 1rem 6rem' }}>
+        <div style={{ padding:'0.875rem 1rem', paddingBottom: isCustomer && !isClosed ? 'calc(var(--order-bar-h, 160px) + 0.5rem)' : '1rem' }}>
         {msg && <p className="flash flash-error" style={{ marginBottom:'0.75rem' }}>{msg}</p>}
 
         {isClosed && (
@@ -648,104 +733,54 @@ export default function RestaurantPage() {
           )}
           </div>
 
-          {/* Sticky bottom bar */}
+          {/* Sticky bottom bar — altura dinámica, contenido no queda oculto */}
           {isCustomer && !isClosed && (
-            <div style={{ position:'fixed', bottom:0, left:0, right:0, zIndex:50,
+            <div id="order-bar" style={{ position:'fixed', bottom:0, left:0, right:0, zIndex:50,
               background:'var(--bg-card)', borderTop:'1px solid var(--border)',
                                        padding:'0.75rem 1rem', paddingBottom:'calc(0.75rem + env(safe-area-inset-bottom, 0px))',
                                        boxShadow:'0 -4px 20px rgba(0,0,0,0.1)' }}>
 
-                                       {/* Delivery mode selector */}
-                                       <div style={{ marginBottom:'0.6rem' }}>
+                                       {/* Dirección de entrega */}
+                                       <div style={{ marginBottom:'0.5rem' }}>
                                        <div style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
                                          textTransform:'uppercase', letterSpacing:'0.04em', marginBottom:'0.35rem' }}>
                                          Enviar a
                                          </div>
-                                         <div style={{ display:'flex', gap:'0.35rem', flexWrap:'wrap', alignItems:'center' }}>
-                                         {/* GPS */}
-                                         <button
-                                         onClick={() => { setDeliveryMode('current'); setShowManualMap(false); }}
-                                         title="Ubicación actual"
-                                         disabled={!gpsPos}
-                                         style={{ padding:'0.3rem 0.5rem', borderRadius:6, fontSize:'0.78rem',
-                                           cursor: gpsPos ? 'pointer' : 'default', minHeight:'unset',
-                                           border:`1.5px solid ${deliveryMode==='current' ? 'var(--brand)' : 'var(--border)'}`,
-                                       background: deliveryMode==='current' ? 'var(--brand-light)' : 'var(--bg-card)',
-                                       color: deliveryMode==='current' ? 'var(--brand)' : 'var(--text-secondary)',
-                                       opacity: gpsPos ? 1 : 0.45 }}>
-                                       📍 {gpsError ? 'Sin GPS' : gpsPos ? 'Actual' : 'Buscando…'}
-                                       </button>
-                                       {/* Home */}
-                                       {hasHomePin && (
-                                         <button
-                                         onClick={() => { setDeliveryMode('home'); setShowManualMap(false); }}
-                                         style={{ padding:'0.3rem 0.5rem', borderRadius:6, fontSize:'0.78rem',
-                                           cursor:'pointer', minHeight:'unset',
-                                           border:`1.5px solid ${deliveryMode==='home' ? 'var(--brand)' : 'var(--border)'}`,
-                                                       background: deliveryMode==='home' ? 'var(--brand-light)' : 'var(--bg-card)',
-                                                       color: deliveryMode==='home' ? 'var(--brand)' : 'var(--text-secondary)' }}>
-                                                       🏠 Casa
-                                                       </button>
-                                       )}
-                                       {/* Manual pin */}
-                                       <button
-                                       onClick={() => { setDeliveryMode('manual'); setShowManualMap(true); }}
-                                       style={{ padding:'0.3rem 0.5rem', borderRadius:6, fontSize:'0.78rem',
-                                         cursor:'pointer', minHeight:'unset',
-                                         border:`1.5px solid ${deliveryMode==='manual' ? 'var(--brand)' : 'var(--border)'}`,
-                                       background: deliveryMode==='manual' ? 'var(--brand-light)' : 'var(--bg-card)',
-                                       color: deliveryMode==='manual' ? 'var(--brand)' : 'var(--text-secondary)' }}>
-                                       📌{manualPos ? ' ✓' : ' Mapa'}
-                                       </button>
-                                       {/* Address search — inline */}
-                                       <AddressSearchBar
-                                       active={deliveryMode === 'search'}
-                                       currentLabel={searchPos?.label}
-                                       onSelect={pos => { setSearchPos(pos); setDeliveryMode('search'); setShowManualMap(false); }}
-                                       />
-                                       </div>
-                                       {deliveryMode === 'home' && auth.user?.address && (
-                                         <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.25rem' }}>
-                                         {auth.user.address}
-                                         </div>
-                                       )}
-                                       {deliveryMode === 'search' && searchPos?.label && (
-                                         <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.25rem' }}>
-                                         🔍 {searchPos.label}
-                                         </div>
-                                       )}
-                                       {deliveryMode === 'manual' && manualPos?.label && (
-                                         <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.25rem' }}>
-                                         📌 {manualPos.label}
-                                         </div>
-                                       )}
-                                       {deliveryMode === 'manual' && showManualMap && (
-                                         <ManualPinMap
-                                         initialPos={gpsPos || (hasHomePin ? { lat:homeLatNum, lng:homeLngNum } : null)}
-                                         mapRef={manualMapRef}
-                                         onConfirm={pos => { setManualPos(pos); setShowManualMap(false); }}
-                                         onCancel={() => { setShowManualMap(false); if (!manualPos) setDeliveryMode('current'); }}
+                                         <AddressSearchBar
+                                         active={!!searchPos}
+                                         currentLabel={searchPos?.label}
+                                         onSelect={pos => { setSearchPos(pos); setDeliveryMode('search'); }}
                                          />
-                                       )}
-                                       </div>
+                                         {searchPos?.label && (
+                                           <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.25rem', display:'flex', alignItems:'center', gap:'0.3rem' }}>
+                                           <span>📍 {searchPos.label}</span>
+                                           <button onClick={() => { setSearchPos(null); setDeliveryMode('current'); }}
+                                           style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-tertiary)', fontSize:'0.7rem', minHeight:'unset', padding:0 }}>✕</button>
+                                           </div>
+                                         )}
+                                         </div>
 
-                                       {!hasAddress && (
-                                         <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem', fontWeight:600 }}>
-                                         Guarda tu dirección en Perfil antes de pedir
-                                         </p>
-                                       )}
-                                       {deliveryMode === 'manual' && !manualPos && !showManualMap && (
-                                         <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem' }}>
-                                         Confirma tu ubicación en el mapa para continuar
-                                         </p>
-                                       )}
+                                         {!hasAddress && (
+                                           <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem', fontWeight:600 }}>
+                                           Guarda tu dirección en Perfil antes de pedir
+                                           </p>
+                                         )}
 
-                                       <button className="btn-primary"
-                                       style={{ width:'100%', fontSize:'1rem', fontWeight:800, padding:'0.75rem' }}
-                                       disabled={!canOrder || ordering || itemCount === 0 || (deliveryMode==='manual' && !manualPos)}
-                                       onClick={createOrder}>
-                                       {ordering ? 'Procesando…'
-                                         : itemCount === 0 ? 'Selecciona productos'
+                                         {/* Botón principal */}
+                                         <button className="btn-primary"
+                                         style={{ width:'100%', fontSize:'1rem', fontWeight:800, padding:'0.75rem' }}
+                                         disabled={!canOrder || ordering || itemCount === 0}
+                                         onClick={() => {
+                                           // Si el MDP no es efectivo, redirigir a pagos para configurar
+                                           if (paymentMethod !== 'cash') {
+                                             navigate('/customer/pagos');
+                                             return;
+                                           }
+                                           createOrder();
+                                         }}>
+                                         {ordering ? 'Procesando…'
+                                           : itemCount === 0 ? 'Selecciona productos'
+          : paymentMethod !== 'cash' ? `Configurar pago · ${fmt(total)}`
           : `Hacer pedido · ${fmt(total)}`}
           </button>
           </div>
