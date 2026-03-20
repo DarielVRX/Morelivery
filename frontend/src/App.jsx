@@ -81,7 +81,7 @@ function LandingScreen() {
       width:'100%', maxWidth:'680px', justifyContent:'center',
     }}>
     {APPS.map(app => (
-      <Link key={app.key} to={`/${app.key}/login`} style={{ textDecoration:'none', flex:'1 1 200px' }}>
+      <Link key={app.key} to={`/${app.key}/login`} style={{ textDecoration:'none', flex:'1 1 200px', justifyContent:'center' }}>
       <div style={{
         display:'flex', alignItems:'center', gap:'1rem',
         padding:'1.25rem 1.25rem',
