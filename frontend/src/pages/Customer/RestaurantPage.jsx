@@ -194,44 +194,45 @@ function AddressSearchBar({ active, onSelect }) {
     setOpen(false); setShowMap(false); setResults([]); setInputVal('');
   }
 
-  // Collapsed button
+  // Collapsed — same pin button as Home header
   if (!open && !showMap) {
     return (
-      <button ref={wrapRef} onClick={() => setOpen(true)}
-      style={{ padding:'0.3rem 0.6rem', borderRadius:6, fontSize:'0.78rem',
-        cursor:'pointer', minHeight:'unset',
-        border:`1.5px solid ${active ? 'var(--brand)' : 'var(--border)'}`,
-            background: active ? 'var(--brand-light)' : 'var(--bg-card)',
-            color: active ? 'var(--brand)' : 'var(--text-secondary)' }}>
-            🔍{active ? ' ✓' : ' Buscar dirección'}
-            </button>
+      <button ref={wrapRef} onClick={() => setOpen(true)} title="Dirección de entrega"
+      style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.3)',
+        borderRadius:8, width:32, height:32, display:'flex', alignItems:'center',
+        justifyContent:'center', cursor:'pointer', flexShrink:0, minHeight:'unset', padding:0 }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+        <circle cx="12" cy="9" r="2.5"/>
+        </svg>
+        </button>
     );
   }
 
   return (
-    <div ref={wrapRef} style={{ position:'relative', flex:1, minWidth:180, zIndex:100 }}>
-    {/* Input row */}
+    <div ref={wrapRef} style={{ position:'relative', flexShrink:0 }}>
+    {/* Input row — white on gradient, matching Home */}
     <div style={{ display:'flex', alignItems:'center', gap:4,
-      border:'1.5px solid var(--brand)', borderRadius:6,
-          background:'var(--bg-card)', padding:'2px 4px' }}>
+      background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.35)',
+          borderRadius:10, padding:'4px 6px', minWidth:220 }}>
           <input
           autoFocus={!showMap}
           value={inputVal}
           onChange={e => { setInputVal(e.target.value); doSearch(e.target.value); }}
           placeholder="Buscar dirección…"
-          style={{ flex:1, border:'none', outline:'none', fontSize:'0.78rem',
-            background:'none', color:'var(--text-primary)', padding:'0.2rem 0' }}
+          style={{ flex:1, border:'none', outline:'none', fontSize:'13px',
+            background:'none', color:'#fff', padding:'0.2rem 0', minWidth:0 }}
             />
-            {searching && <span style={{ fontSize:'0.7rem', color:'var(--text-tertiary)', flexShrink:0 }}>…</span>}
+            {searching && <span style={{ fontSize:'11px', color:'rgba(255,255,255,0.6)', flexShrink:0 }}>…</span>}
             <button onClick={() => setShowMap(v => !v)} title="Elegir en mapa"
-            style={{ background: showMap ? 'var(--brand)' : 'none', border:'none',
-              cursor:'pointer', padding:'2px 5px', borderRadius:4, minHeight:'unset',
-              color: showMap ? '#fff' : 'var(--text-tertiary)', fontSize:'0.8rem', flexShrink:0 }}>
+            style={{ background: showMap ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.15)', border:'none',
+              cursor:'pointer', padding:'3px 5px', borderRadius:5, minHeight:'unset', flexShrink:0,
+              color:'rgba(255,255,255,0.9)', fontSize:'0.8rem' }}>
               🗺
               </button>
               <button onClick={closeAll}
-              style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-tertiary)',
-                fontSize:'0.75rem', minHeight:'unset', padding:'0 2px', flexShrink:0 }}>✕</button>
+              style={{ background:'none', border:'none', cursor:'pointer', color:'rgba(255,255,255,0.7)',
+                fontSize:'13px', padding:'2px 4px', minHeight:'unset', flexShrink:0 }}>✕</button>
                 </div>
 
                 {/* Results dropdown */}
@@ -287,7 +288,7 @@ export default function RestaurantPage() {
   const [loading,       setLoading]       = useState(true);
   const [msg,           setMsg]           = useState('');
   const [ordering,      setOrdering]      = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [paymentMethod] = useState('cash'); // MDP se configura en /customer/pagos
   const [tipCents,      setTipCents]      = useState(0);
   const [sortBy,        setSortBy]        = useState('default');
   const [searchPos,     setSearchPos]     = useState(null); // {lat,lng,label}
@@ -461,6 +462,7 @@ export default function RestaurantPage() {
         </>
     )}
     <div style={{ position:'relative', padding:'1rem 1rem 1.25rem', display:'flex', flexDirection:'column', gap:'0.5rem' }}>
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
     <button onClick={() => navigate(-1)}
     style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.3)',
       borderRadius:8, color:'#fff', padding:'0.3rem 0.65rem', fontSize:'0.82rem',
@@ -471,6 +473,8 @@ export default function RestaurantPage() {
       </svg>
       Volver
       </button>
+      <AddressSearchBar active={!!searchPos} onSelect={pos => setSearchPos(pos)} />
+      </div>
 
       <div style={{ display:'flex', gap:'0.875rem', alignItems:'flex-start' }}>
       {restaurant?.profile_photo
@@ -605,53 +609,39 @@ export default function RestaurantPage() {
 
                 <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
                   textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
-                  Método de pago
+                  Agradecimiento al conductor
                   </p>
-                  <div style={{ display:'flex', gap:'0.4rem', marginBottom:'1rem' }}>
-                  {[['cash','💵 Efectivo'],['card','💳 Tarjeta'],['spei','🏦 SPEI']].map(([val, label]) => (
-                    <button key={val} onClick={() => setPaymentMethod(val)}
-                    className={paymentMethod===val ? 'btn-primary btn-sm' : 'btn-sm'}
-                    style={{ flex:1, fontSize:'0.78rem' }}>
-                    {label}
-                    </button>
-                  ))}
+                  <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', marginBottom:'1rem' }}>
+                  {[{pct:0,label:'—'},{pct:5,label:'5%'},{pct:10,label:'10%'},{pct:20,label:'20%'}].map(({pct, label}) => {
+                    const v = pct === 0 ? 0 : Math.round(subtotal * pct / 100);
+                    const sel = tipCents === v;
+                    return (
+                      <button key={pct} onClick={() => setTipCents(v)}
+                      style={{ padding:'0.25rem 0.55rem', cursor:'pointer', fontSize:'0.78rem',
+                        border:`1.5px solid ${sel ? 'var(--success)' : 'var(--border)'}`,
+                            borderRadius:6, background: sel ? 'var(--success-bg)' : 'var(--bg-card)',
+                            color: sel ? 'var(--success)' : 'var(--text-secondary)',
+                            fontWeight: sel ? 700 : 400, minHeight:'unset' }}>
+                            {label}{pct > 0 && subtotal > 0 ? ` (${fmt(v)})` : ''}
+                            </button>
+                    );
+                  })}
                   </div>
 
-                  <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
-                    textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
-                    Agradecimiento al conductor
-                    </p>
-                    <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', marginBottom:'1rem' }}>
-                    {[{pct:0,label:'—'},{pct:5,label:'5%'},{pct:10,label:'10%'},{pct:20,label:'20%'}].map(({pct, label}) => {
-                      const v = pct === 0 ? 0 : Math.round(subtotal * pct / 100);
-                      const sel = tipCents === v;
-                      return (
-                        <button key={pct} onClick={() => setTipCents(v)}
-                        style={{ padding:'0.25rem 0.55rem', cursor:'pointer', fontSize:'0.78rem',
-                          border:`1.5px solid ${sel ? 'var(--success)' : 'var(--border)'}`,
-                              borderRadius:6, background: sel ? 'var(--success-bg)' : 'var(--bg-card)',
-                              color: sel ? 'var(--success)' : 'var(--text-secondary)',
-                              fontWeight: sel ? 700 : 400, minHeight:'unset' }}>
-                              {label}{pct > 0 && subtotal > 0 ? ` (${fmt(v)})` : ''}
-                              </button>
-                      );
-                    })}
-                    </div>
-
-                    <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)',
-                      borderTop:'1px solid var(--border-light)', paddingTop:'0.6rem' }}>
-                      {[['Subtotal', subtotal],['Servicio (5%)', serviceFee],['Envío (10%)', deliveryFee]].map(([label, val]) => (
-                        <div key={label} style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.15rem' }}>
-                        <span>{label}</span><span>{fmt(val)}</span>
-                        </div>
-                      ))}
-                      {tipCents > 0 && (
-                        <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)', marginBottom:'0.15rem' }}>
-                        <span>Agradecimiento</span><span>+{fmt(tipCents)}</span>
-                        </div>
-                      )}
-                      <div style={{ display:'flex', justifyContent:'space-between', fontWeight:800,
-                        fontSize:'0.95rem', color:'var(--text-primary)', marginTop:'0.4rem',
+                  <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)',
+                    borderTop:'1px solid var(--border-light)', paddingTop:'0.6rem' }}>
+                    {[['Subtotal', subtotal],['Servicio (5%)', serviceFee],['Envío (10%)', deliveryFee]].map(([label, val]) => (
+                      <div key={label} style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.15rem' }}>
+                      <span>{label}</span><span>{fmt(val)}</span>
+                      </div>
+                    ))}
+                    {tipCents > 0 && (
+                      <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)', marginBottom:'0.15rem' }}>
+                      <span>Agradecimiento</span><span>+{fmt(tipCents)}</span>
+                      </div>
+                    )}
+                    <div style={{ display:'flex', justifyContent:'space-between', fontWeight:800,
+                      fontSize:'0.95rem', color:'var(--text-primary)', marginTop:'0.4rem',
                                                       paddingTop:'0.4rem', borderTop:'1px solid var(--border)' }}>
                                                       <span>Total</span><span>{fmt(total)}</span>
                                                       </div>
@@ -667,38 +657,36 @@ export default function RestaurantPage() {
                                          padding:'0.75rem 1rem', paddingBottom:'calc(0.75rem + env(safe-area-inset-bottom, 0px))',
                                          boxShadow:'0 -4px 20px rgba(0,0,0,0.1)' }}>
 
-                                         <div style={{ marginBottom:'0.5rem' }}>
-                                         <div style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
-                                           textTransform:'uppercase', letterSpacing:'0.04em', marginBottom:'0.35rem' }}>
-                                           Enviar a
+                                         {searchPos?.label && (
+                                           <div style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginBottom:'0.5rem',
+                                             display:'flex', alignItems:'center', gap:'0.3rem' }}>
+                                             <span>📍 {searchPos.label}</span>
+                                             <button onClick={() => setSearchPos(null)}
+                                             style={{ background:'none', border:'none', cursor:'pointer',
+                                               color:'var(--text-tertiary)', fontSize:'0.7rem', minHeight:'unset', padding:0 }}>✕</button>
+                                               </div>
+                                         )}
+                                         {!searchPos && (
+                                           <div style={{ fontSize:'0.78rem', color:'var(--warn)', marginBottom:'0.5rem', fontWeight:600 }}>
+                                           Toca 📍 en el encabezado para indicar dónde entregar
                                            </div>
-                                           <AddressSearchBar active={!!searchPos} onSelect={pos => setSearchPos(pos)} />
-                                           {searchPos?.label && (
-                                             <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.25rem',
-                                               display:'flex', alignItems:'center', gap:'0.3rem' }}>
-                                               <span>📍 {searchPos.label}</span>
-                                               <button onClick={() => setSearchPos(null)}
-                                               style={{ background:'none', border:'none', cursor:'pointer',
-                                                 color:'var(--text-tertiary)', fontSize:'0.7rem', minHeight:'unset', padding:0 }}>✕</button>
-                                                 </div>
-                                           )}
-                                           </div>
+                                         )}
 
-                                           {!hasAddress && (
-                                             <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem', fontWeight:600 }}>
-                                             Guarda tu dirección en Perfil antes de pedir
-                                             </p>
-                                           )}
+                                         {!hasAddress && (
+                                           <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem', fontWeight:600 }}>
+                                           Guarda tu dirección en Perfil antes de pedir
+                                           </p>
+                                         )}
 
-                                           <button className="btn-primary"
-                                           style={{ width:'100%', fontSize:'1rem', fontWeight:800, padding:'0.75rem' }}
-                                           disabled={!canOrder || ordering || itemCount === 0}
-                                           onClick={() => {
-                                             if (paymentMethod !== 'cash') { navigate('/customer/pagos'); return; }
-                                             createOrder();
-                                           }}>
-                                           {ordering ? 'Procesando…'
-                                             : itemCount === 0 ? 'Selecciona productos'
+                                         <button className="btn-primary"
+                                         style={{ width:'100%', fontSize:'1rem', fontWeight:800, padding:'0.75rem' }}
+                                         disabled={!canOrder || ordering || itemCount === 0}
+                                         onClick={() => {
+                                           if (paymentMethod !== 'cash') { navigate('/customer/pagos'); return; }
+                                           createOrder();
+                                         }}>
+                                         {ordering ? 'Procesando…'
+                                           : itemCount === 0 ? 'Selecciona productos'
             : paymentMethod !== 'cash' ? `Configurar pago · ${fmt(total)}`
             : `Hacer pedido · ${fmt(total)}`}
             </button>
