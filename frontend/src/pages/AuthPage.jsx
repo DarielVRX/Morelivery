@@ -1,12 +1,26 @@
 // frontend/src/pages/AuthPage.jsx
-// Inputs no controlados (useRef) para cero re-renders al tipear.
-// Lee localStorage directamente para el redirect — sin consumir AuthContext
-// en el ciclo de render, lo que elimina el jank causado por re-renders del árbol.
+// ─────────────────────────────────────────────────────────────────────────────
+//  Cambios respecto a la versión anterior
+//  • Login con correo electrónico (ya no username)
+//  • Login con Google (Google Identity Services — gratuito)
+//  • Registro: correo, nombre completo, alias, contraseña con validación
+//    - username se genera automáticamente desde alias (sin consulta al usuario)
+//    - dirección estructurada con autorrelleno de CP (igual que Profile)
+//      → obligatoria solo para "restaurant"; opcional para customer/driver
+//  • Flujo "Olvidé mi contraseña" (solicita reset por email)
+//  • Dark mode persistido
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../api/client';
 
+// ── Constante: Client ID de Google (configura en .env) ──────────────────────
+// VITE_GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+
+// ── Dark mode ────────────────────────────────────────────────────────────────
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
     const saved = localStorage.getItem('theme');
@@ -20,82 +34,295 @@ function useDarkMode() {
   return [dark, setDark];
 }
 
+// ── Utilidad: genera username desde alias ────────────────────────────────────
+// Limpia el alias, lo pone en minúsculas sin espacios ni caracteres especiales.
+// Si el alias ya tiene ≥3 chars de sufijo se omite la generación adicional;
+// el backend decide si hay colisión y añade sufijo random — aquí solo enviamos
+// el candidato base. Ver comentario en auth.routes.suggestions.js.
+function buildUsernameCandidate(alias = '') {
+  return alias
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')   // quitar tildes
+  .replace(/[^a-z0-9._-]/g, '')      // solo chars válidos
+  .slice(0, 30)
+  || 'user';
+}
+
+// ── Validación de contraseña ─────────────────────────────────────────────────
+function validatePassword(pwd) {
+  if (pwd.length < 8)             return 'Mínimo 8 caracteres';
+  if (!/[A-Z]/.test(pwd))         return 'Al menos una mayúscula';
+  if (!/[0-9]/.test(pwd))         return 'Al menos un número';
+  return null;
+}
+
+// ── Fetch colonias desde CP (idéntico al de Profile) ────────────────────────
+async function fetchColoniasByPostal(cp) {
+  try {
+    // Sin token en registro — el endpoint debe ser público o aceptar anon
+    const result = await apiFetch(`/auth/postal/${cp}`);
+    return {
+      estado:   result?.estado   || '',
+      ciudad:   result?.ciudad   || '',
+      colonias: Array.isArray(result?.colonias) ? result.colonias : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ── Componente raíz ──────────────────────────────────────────────────────────
 export default function AuthPage({ mode = 'login' }) {
   return <AuthForm mode={mode} />;
 }
 
-// AuthForm es un componente separado que sí puede usar context y state
-// sin arrastrar el redirect al ciclo de re-render.
+// ── AuthForm ─────────────────────────────────────────────────────────────────
 function AuthForm({ mode }) {
   const { login } = useAuth();
   const navigate  = useNavigate();
   const [dark, setDark] = useDarkMode();
 
-  const usernameRef    = useRef(null);
-  const passwordRef    = useRef(null);
-  const displayNameRef = useRef(null);
-  const addressRef     = useRef(null);
+  // ── Modo activo: 'login' | 'register' | 'forgot'
+  const [view, setView] = useState(mode); // se puede cambiar inline sin navegar
 
-  const [role,    setRole]    = useState('customer');
-  const [message, setMessage] = useState('');
+  // ── Campos comunes
+  const emailRef    = useRef(null);
+  const passwordRef = useRef(null);
 
-  const isLogin = mode === 'login';
+  // ── Campos registro
+  const [fullName,    setFullName]    = useState('');
+  const [alias,       setAlias]       = useState('');
+  const [regEmail,    setRegEmail]    = useState('');
+  const [regPwd,      setRegPwd]      = useState('');
+  const [regPwdConf,  setRegPwdConf]  = useState('');
+  const [role,        setRole]        = useState('customer');
+  const [pwdError,    setPwdError]    = useState('');
 
-  const [installPromptEvent, setInstallPromptEvent] = useState(null);
+  // ── Dirección estructurada (registro)
+  const [postalCode,   setPostalCode]   = useState('');
+  const [estado,       setEstado]       = useState('');
+  const [ciudad,       setCiudad]       = useState('');
+  const [colonia,      setColonia]      = useState('');
+  const [coloniasList, setColoniasList] = useState([]);
+  const [calle,        setCalle]        = useState('');
+  const [numero,       setNumero]       = useState('');
+  const [cpLoading,    setCpLoading]    = useState(false);
+  const [cpError,      setCpError]      = useState('');
+  const cpTimerRef     = useRef(null);
+  const lastCp         = useRef('');
 
+  // ── Forgot password
+  const [forgotEmail,  setForgotEmail]  = useState('');
+
+  // ── PWA install prompt
+  const [installPrompt, setInstallPrompt] = useState(null);
+
+  // ── Mensajes globales
+  const [message, setMessage] = useState({ text: '', ok: false });
+  const [loading, setLoading] = useState(false);
+
+  // ── Inyectar Google GSI script ──────────────────────────────────────────
   useEffect(() => {
-    const onBeforeInstallPrompt = (e) => {
-      e.preventDefault();
-      setInstallPromptEvent(e);
-    };
-    window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+    if (!GOOGLE_CLIENT_ID) return;
+    if (document.getElementById('google-gsi')) return;
+    const s = document.createElement('script');
+    s.id  = 'google-gsi';
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    document.head.appendChild(s);
   }, []);
 
-  const installPwa = useCallback(async () => {
-    if (!installPromptEvent) return;
-    installPromptEvent.prompt();
-    await installPromptEvent.userChoice.catch(() => null);
-    setInstallPromptEvent(null);
-  }, [installPromptEvent]);
+  // ── PWA install prompt ──────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => { e.preventDefault(); setInstallPrompt(e); };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
 
-
-  const submit = useCallback(async () => {
-    const username    = usernameRef.current?.value?.trim()    || '';
-    const password    = passwordRef.current?.value            || '';
-    const displayName = displayNameRef.current?.value?.trim() || '';
-    const address     = addressRef.current?.value?.trim()     || '';
-
-  try {
-    if (!isLogin) {
-      await apiFetch('/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          username, password, role,
-          displayName: displayName || undefined,
-          address: ['customer','restaurant'].includes(role) ? address : undefined,
-        })
-      });
-      setMessage('Registro exitoso. Ya puedes iniciar sesión.');
-      return;
+  // ── Autorrelleno CP ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const cp = postalCode.trim();
+    if (cp.length !== 5 || !/^\d{5}$/.test(cp)) {
+      setCpError(''); setColoniasList([]); return;
     }
+    if (cp === lastCp.current) return;
+    clearTimeout(cpTimerRef.current);
+    cpTimerRef.current = setTimeout(async () => {
+      setCpLoading(true); setCpError('');
+      const res = await fetchColoniasByPostal(cp);
+      setCpLoading(false);
+      lastCp.current = cp;
+      if (!res) {
+        setCpError('CP no encontrado — llena estado, ciudad y colonia manualmente');
+        setColoniasList([]);
+      } else {
+        setEstado(res.estado);
+        setCiudad(res.ciudad);
+        setColoniasList(res.colonias);
+        if (res.colonias.length > 0) setColonia(res.colonias[0]);
+      }
+    }, 600);
+  }, [postalCode]);
+
+  // ── Validar contraseña en tiempo real ───────────────────────────────────
+  useEffect(() => {
+    if (!regPwd) { setPwdError(''); return; }
+    setPwdError(validatePassword(regPwd) || '');
+  }, [regPwd]);
+
+  const msg = (text, ok = false) => setMessage({ text, ok });
+
+  // ── Construir dirección completa ────────────────────────────────────────
+  function buildAddress() {
+    const parts = [calle, numero].filter(Boolean).join(' ');
+    return [parts, colonia, ciudad, estado, postalCode].filter(Boolean).join(', ');
+  }
+
+  // ── SUBMIT LOGIN ────────────────────────────────────────────────────────
+  const submitLogin = useCallback(async () => {
+    const email    = emailRef.current?.value?.trim()    || '';
+    const password = passwordRef.current?.value         || '';
+  if (!email || !password) { msg('Ingresa tu correo y contraseña'); return; }
+  setLoading(true);
+  try {
     const data = await apiFetch('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ email, password }),
     });
     login({ token: data.token, user: data.user });
     navigate(`/${data.user.role}`);
-  } catch (error) {
-    setMessage(error.message);
+  } catch (e) {
+    msg(e.message);
+  } finally {
+    setLoading(false);
   }
-  }, [isLogin, role, login, navigate]);
+  }, [login, navigate]);
 
-  function handleKey(e) { if (e.key === 'Enter') submit(); }
+  // ── SUBMIT GOOGLE LOGIN ─────────────────────────────────────────────────
+  const handleGoogleResponse = useCallback(async (response) => {
+    setLoading(true);
+    try {
+      const data = await apiFetch('/auth/google', {
+        method: 'POST',
+        body: JSON.stringify({ credential: response.credential }),
+      });
+      login({ token: data.token, user: data.user });
+      navigate(`/${data.user.role}`);
+    } catch (e) {
+      msg(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [login, navigate]);
 
+  // Renderizar botón Google cuando el script cargue
+  const googleBtnRef = useRef(null);
+  useEffect(() => {
+    if (view !== 'login' || !GOOGLE_CLIENT_ID) return;
+    const render = () => {
+      if (!window.google || !googleBtnRef.current) return;
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback:  handleGoogleResponse,
+      });
+      window.google.accounts.id.renderButton(googleBtnRef.current, {
+        theme: dark ? 'filled_black' : 'outline',
+        size:  'large',
+        width: '100%',
+        text:  'continue_with',
+        locale: 'es',
+      });
+    };
+    // Si el script ya cargó
+    if (window.google) { render(); return; }
+    const interval = setInterval(() => { if (window.google) { clearInterval(interval); render(); } }, 200);
+    return () => clearInterval(interval);
+  }, [view, dark, handleGoogleResponse]);
+
+  // ── SUBMIT REGISTER ─────────────────────────────────────────────────────
+  const submitRegister = useCallback(async () => {
+    if (!fullName.trim())      { msg('Ingresa tu nombre completo'); return; }
+    if (!alias.trim())         { msg('Ingresa un alias/apodo'); return; }
+    if (!regEmail.trim())      { msg('Ingresa tu correo electrónico'); return; }
+    if (!/\S+@\S+\.\S+/.test(regEmail)) { msg('Correo inválido'); return; }
+    const pwdErr = validatePassword(regPwd);
+    if (pwdErr)                { msg(pwdErr); return; }
+    if (regPwd !== regPwdConf) { msg('Las contraseñas no coinciden'); return; }
+    // Dirección obligatoria solo para restaurant
+    if (role === 'restaurant' && (!postalCode || !calle)) {
+      msg('Ingresa la dirección completa de tu tienda'); return;
+    }
+
+    const usernameCandidate = buildUsernameCandidate(alias);
+    const addressFull = (['customer','restaurant'].includes(role) && (postalCode || calle))
+    ? buildAddress()
+    : undefined;
+
+    setLoading(true);
+    try {
+      await apiFetch('/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          email:    regEmail.trim(),
+                             password: regPwd,
+                             fullName: fullName.trim(),
+                             alias:    alias.trim(),
+                             username: usernameCandidate,   // backend valida unicidad y ajusta
+                             role,
+                             address:     addressFull,
+                             postalCode:  postalCode  || undefined,
+                             estado:      estado      || undefined,
+                             ciudad:      ciudad      || undefined,
+                             colonia:     colonia     || undefined,
+                             calle:       calle       || undefined,
+                             numero:      numero      || undefined,
+                             // displayName para restaurant
+                             displayName: role === 'restaurant' ? (alias.trim() || undefined) : undefined,
+        }),
+      });
+      msg('¡Registro exitoso! Ya puedes iniciar sesión.', true);
+      setView('login');
+    } catch (e) {
+      msg(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [fullName, alias, regEmail, regPwd, regPwdConf, role, postalCode, estado, ciudad, colonia, calle, numero]);
+
+  // ── SUBMIT FORGOT PASSWORD ──────────────────────────────────────────────
+  const submitForgot = useCallback(async () => {
+    if (!/\S+@\S+\.\S+/.test(forgotEmail)) { msg('Ingresa un correo válido'); return; }
+    setLoading(true);
+    try {
+      await apiFetch('/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify({ email: forgotEmail.trim() }),
+      });
+      msg('Si el correo está registrado recibirás un enlace para restablecer tu contraseña.', true);
+    } catch (e) {
+      msg(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [forgotEmail]);
+
+  function handleKey(e, fn) { if (e.key === 'Enter') fn(); }
+
+  // ── Cambiar de vista (limpia mensajes) ──────────────────────────────────
+  function goTo(v) { setMessage({ text: '', ok: false }); setView(v); }
+
+  // ── RENDER ──────────────────────────────────────────────────────────────
   return (
     <section className="auth-card">
+
+    {/* Header */}
     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'0.25rem' }}>
-    <h2 style={{ margin:0 }}>{isLogin ? 'Iniciar sesión' : 'Crear cuenta'}</h2>
+    <h2 style={{ margin:0 }}>
+    {view === 'login'    && 'Iniciar sesión'}
+    {view === 'register' && 'Crear cuenta'}
+    {view === 'forgot'   && 'Recuperar contraseña'}
+    </h2>
     <button
     onClick={() => setDark(d => !d)}
     title={dark ? 'Modo claro' : 'Modo oscuro'}
@@ -109,18 +336,131 @@ function AuthForm({ mode }) {
     {dark ? '☀️' : '🌙'}
     </button>
     </div>
-    <p>{isLogin ? 'Ingresa con tu usuario y contraseña.' : 'Completa los datos para registrarte.'}</p>
 
-    <div className="row">
-    <label>Usuario
-    <input ref={usernameRef} defaultValue="" placeholder="Tu nombre de usuario"
-    autoComplete="username" onKeyDown={handleKey} />
-    </label>
-    <label>Contraseña
-    <input ref={passwordRef} defaultValue="" type="password" placeholder="Tu contraseña"
-    autoComplete="current-password" onKeyDown={handleKey} />
-    </label>
-    {!isLogin && (
+    <p style={{ marginBottom:'1rem', color:'var(--text-secondary)', fontSize:'0.875rem' }}>
+    {view === 'login'    && 'Ingresa con tu correo y contraseña.'}
+    {view === 'register' && 'Completa los datos para registrarte.'}
+    {view === 'forgot'   && 'Te enviaremos un enlace para restablecer tu contraseña.'}
+    </p>
+
+    {/* ── VISTA: LOGIN ────────────────────────────────────────────────── */}
+    {view === 'login' && (
+      <>
+      <div className="row">
+      <label>Correo electrónico
+      <input
+      ref={emailRef}
+      defaultValue=""
+      type="email"
+      placeholder="tu@correo.com"
+      autoComplete="email"
+      onKeyDown={e => handleKey(e, submitLogin)}
+      />
+      </label>
+      <label>Contraseña
+      <input
+      ref={passwordRef}
+      defaultValue=""
+      type="password"
+      placeholder="Tu contraseña"
+      autoComplete="current-password"
+      onKeyDown={e => handleKey(e, submitLogin)}
+      />
+      </label>
+      </div>
+
+      {/* Olvidé mi contraseña */}
+      <div style={{ textAlign:'right', marginTop:'-0.25rem', marginBottom:'0.75rem' }}>
+      <button
+      type="button"
+      onClick={() => goTo('forgot')}
+      style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.8rem', padding:0 }}
+      >
+      ¿Olvidaste tu contraseña?
+      </button>
+      </div>
+
+      <div className="row">
+      <button className="btn-primary" onClick={submitLogin} disabled={loading}>
+      {loading ? 'Ingresando…' : 'Iniciar sesión'}
+      </button>
+
+      {/* Separador */}
+      {GOOGLE_CLIENT_ID && (
+        <>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', margin:'0.25rem 0' }}>
+        <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
+        <span style={{ fontSize:'0.75rem', color:'var(--text-secondary)', whiteSpace:'nowrap' }}>o continúa con</span>
+        <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
+        </div>
+        {/* Google renderiza aquí su botón */}
+        <div ref={googleBtnRef} style={{ width:'100%' }} />
+        </>
+      )}
+
+      {installPrompt && (
+        <button
+        type="button"
+        className="btn-sm"
+        onClick={async () => {
+          installPrompt.prompt();
+          await installPrompt.userChoice.catch(() => null);
+          setInstallPrompt(null);
+        }}
+        style={{ marginTop:'0.4rem' }}
+        >
+        Instalar app (PWA)
+        </button>
+      )}
+
+      <button
+      type="button"
+      onClick={() => goTo('register')}
+      style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}
+      >
+      ¿No tienes cuenta? <strong>Regístrate</strong>
+      </button>
+      </div>
+      </>
+    )}
+
+    {/* ── VISTA: REGISTER ─────────────────────────────────────────────── */}
+    {view === 'register' && (
+      <>
+      {/* Datos personales */}
+      <div className="row">
+      <label>Nombre completo
+      <input
+      value={fullName}
+      onChange={e => setFullName(e.target.value)}
+      placeholder="Ej: Juan García López"
+      autoComplete="name"
+      />
+      </label>
+
+      <label>
+      Alias / Apodo
+      <input
+      value={alias}
+      onChange={e => setAlias(e.target.value)}
+      placeholder="Ej: JuanG"
+      autoComplete="nickname"
+      />
+      <span style={{ fontSize:'0.73rem', color:'var(--text-secondary)', marginTop:'0.2rem', display:'block' }}>
+      Así te verán los demás. Tu nombre de usuario se genera automáticamente.
+      </span>
+      </label>
+
+      <label>Correo electrónico
+      <input
+      value={regEmail}
+      onChange={e => setRegEmail(e.target.value)}
+      type="email"
+      placeholder="tu@correo.com"
+      autoComplete="email"
+      />
+      </label>
+
       <label>Tipo de cuenta
       <select value={role} onChange={e => setRole(e.target.value)}>
       <option value="customer">Cliente</option>
@@ -128,45 +468,210 @@ function AuthForm({ mode }) {
       <option value="driver">Conductor</option>
       </select>
       </label>
-    )}
+      </div>
 
-    {installPromptEvent && (
-      <button type="button" className="btn-sm" onClick={installPwa} style={{ marginTop:'0.4rem' }}>
-      Instalar app (PWA)
-      </button>
-    )}
+      {/* Contraseña */}
+      <div className="row" style={{ marginTop:'0.5rem' }}>
+      <label>
+      Contraseña
+      <input
+      value={regPwd}
+      onChange={e => setRegPwd(e.target.value)}
+      type="password"
+      placeholder="Mínimo 8 caracteres"
+      autoComplete="new-password"
+      />
+      {pwdError && (
+        <span style={{ fontSize:'0.73rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>
+        {pwdError}
+        </span>
+      )}
+      </label>
+      <label>Confirmar contraseña
+      <input
+      value={regPwdConf}
+      onChange={e => setRegPwdConf(e.target.value)}
+      type="password"
+      placeholder="Repite la contraseña"
+      autoComplete="new-password"
+      />
+      </label>
+
+      {/* Indicador visual fuerza contraseña */}
+      {regPwd.length > 0 && (
+        <PasswordStrength pwd={regPwd} />
+      )}
+      </div>
+
+      {/* Dirección — obligatoria solo para restaurant, opcional para los demás */}
+      <div style={{ marginTop:'0.75rem' }}>
+      <p style={{ fontWeight:700, fontSize:'0.82rem', marginBottom:'0.5rem', color:'var(--text-secondary)' }}>
+      {role === 'restaurant'
+        ? 'Dirección de la tienda (requerida)'
+    : 'Dirección (opcional — puedes configurarla después)'}
+    </p>
+    <AddressBlock
+    postalCode={postalCode} setPostalCode={setPostalCode}
+    estado={estado}         setEstado={setEstado}
+    ciudad={ciudad}         setCiudad={setCiudad}
+    colonia={colonia}       setColonia={setColonia}
+    coloniasList={coloniasList}
+    calle={calle}           setCalle={setCalle}
+    numero={numero}         setNumero={setNumero}
+    cpLoading={cpLoading}   cpError={cpError}
+    />
     </div>
 
-    {!isLogin && role === 'restaurant' && (
-      <div className="row">
-      <label>Nombre de la tienda
-      <input ref={displayNameRef} defaultValue="" placeholder="Ej: Tacos El Güero" onKeyDown={handleKey} />
-      </label>
-      </div>
-    )}
-    {!isLogin && ['customer','restaurant'].includes(role) && (
-      <div className="row">
-      <label>Dirección
-      <input ref={addressRef} defaultValue="" placeholder="Ej: Av. Revolución 1234, Col. Centro" onKeyDown={handleKey} />
-      </label>
-      </div>
-    )}
-
-    <div className="row">
-    <button className="btn-primary" onClick={submit}>
-    {isLogin ? 'Iniciar sesión' : 'Registrarse'}
+    <div className="row" style={{ marginTop:'0.75rem' }}>
+    <button className="btn-primary" onClick={submitRegister} disabled={loading}>
+    {loading ? 'Registrando…' : 'Crear cuenta'}
     </button>
-    {isLogin
-      ? <Link to="/register" style={{ fontSize:'0.875rem', textAlign:'center' }}>¿No tienes cuenta? Regístrate</Link>
-      : <Link to="/login"    style={{ fontSize:'0.875rem', textAlign:'center' }}>¿Ya tienes cuenta? Inicia sesión</Link>
-    }
+    <button
+    type="button"
+    onClick={() => goTo('login')}
+    style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}
+    >
+    ¿Ya tienes cuenta? <strong>Inicia sesión</strong>
+    </button>
     </div>
+    </>
+    )}
 
-    {message && (
-      <p className={`flash ${message.startsWith('Registro') ? 'flash-ok' : 'flash-error'}`}>
-      {message}
+    {/* ── VISTA: FORGOT PASSWORD ──────────────────────────────────────── */}
+    {view === 'forgot' && (
+      <>
+      <div className="row">
+      <label>Correo electrónico de tu cuenta
+      <input
+      value={forgotEmail}
+      onChange={e => setForgotEmail(e.target.value)}
+      type="email"
+      placeholder="tu@correo.com"
+      autoComplete="email"
+      onKeyDown={e => handleKey(e, submitForgot)}
+      />
+      </label>
+      </div>
+      <div className="row" style={{ marginTop:'0.5rem' }}>
+      <button className="btn-primary" onClick={submitForgot} disabled={loading}>
+      {loading ? 'Enviando…' : 'Enviar enlace de recuperación'}
+      </button>
+      <button
+      type="button"
+      onClick={() => goTo('login')}
+      style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}
+      >
+      ← Volver al inicio de sesión
+      </button>
+      </div>
+      </>
+    )}
+
+    {/* ── Mensaje flash ───────────────────────────────────────────────── */}
+    {message.text && (
+      <p className={`flash ${message.ok ? 'flash-ok' : 'flash-error'}`} style={{ marginTop:'0.75rem' }}>
+      {message.text}
       </p>
     )}
     </section>
+  );
+}
+
+// ── Sub-componente: bloque de dirección ──────────────────────────────────────
+function AddressBlock({
+  postalCode, setPostalCode,
+  estado, setEstado,
+  ciudad, setCiudad,
+  colonia, setColonia,
+  coloniasList,
+  calle, setCalle,
+  numero, setNumero,
+  cpLoading, cpError,
+}) {
+  const BUSY = { opacity:0.7, pointerEvents:'none' };
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem' }}>
+    {/* CP */}
+    <label>
+    Código postal
+    <div style={{ position:'relative', ...(cpLoading ? BUSY : {}) }}>
+    <input
+    value={postalCode}
+    onChange={e => setPostalCode(e.target.value.replace(/\D/g,'').slice(0,5))}
+    placeholder="Ej: 44100"
+    maxLength={5}
+    inputMode="numeric"
+    />
+    {cpLoading && (
+      <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.75rem', color:'var(--text-secondary)' }}>
+      Buscando…
+      </span>
+    )}
+    </div>
+    {cpError && <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>{cpError}</span>}
+    </label>
+
+    {/* Estado / Ciudad */}
+    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.55rem' }}>
+    <label>Estado
+    <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Jalisco" disabled={cpLoading} />
+    </label>
+    <label>Municipio / Ciudad
+    <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Guadalajara" disabled={cpLoading} />
+    </label>
+    </div>
+
+    {/* Colonia */}
+    <label>
+    Colonia
+    {coloniasList.length > 0 ? (
+      <select value={colonia} onChange={e => setColonia(e.target.value)} disabled={cpLoading}>
+      <option value="">Seleccionar colonia…</option>
+      {coloniasList.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+    ) : (
+      <input value={colonia} onChange={e => setColonia(e.target.value)} placeholder="Ej: Col. Centro" disabled={cpLoading} />
+    )}
+    </label>
+
+    {/* Calle + Número */}
+    <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:'0.55rem', alignItems:'end' }}>
+    <label>Calle
+    <input value={calle} onChange={e => setCalle(e.target.value)} placeholder="Ej: Av. Revolución" />
+    </label>
+    <label style={{ width:90 }}>Número
+    <input value={numero} onChange={e => setNumero(e.target.value)} placeholder="1234" />
+    </label>
+    </div>
+    </div>
+  );
+}
+
+// ── Sub-componente: indicador de fuerza de contraseña ────────────────────────
+function PasswordStrength({ pwd }) {
+  let score = 0;
+  if (pwd.length >= 8)         score++;
+  if (/[A-Z]/.test(pwd))       score++;
+  if (/[0-9]/.test(pwd))       score++;
+  if (/[^A-Za-z0-9]/.test(pwd)) score++;
+
+  const labels = ['Muy débil', 'Débil', 'Regular', 'Fuerte', 'Muy fuerte'];
+  const colors = ['#e53e3e', '#dd6b20', '#d69e2e', '#38a169', '#2b6cb0'];
+
+  return (
+    <div style={{ marginTop:'0.3rem' }}>
+    <div style={{ display:'flex', gap:3 }}>
+    {[0,1,2,3].map(i => (
+      <div key={i} style={{
+        flex:1, height:4, borderRadius:2,
+        background: i < score ? colors[score] : 'var(--border)',
+                         transition:'background 0.3s',
+      }} />
+    ))}
+    </div>
+    <span style={{ fontSize:'0.72rem', color: colors[score] || 'var(--text-secondary)', marginTop:'0.2rem', display:'block' }}>
+    {labels[score] || ''}
+    </span>
+    </div>
   );
 }
