@@ -82,7 +82,6 @@ function AuthForm({ mode, appKey }) {
   const { login } = useAuth();
   const navigate  = useNavigate();
   const [searchParams] = useSearchParams();
-  const [dark, setDark] = useDarkMode();
 
   const [view, setView] = useState(mode);
 
@@ -249,7 +248,8 @@ function AuthForm({ mode, appKey }) {
       window.google.accounts.id.renderButton(googleBtnRef.current, {
         theme:  dark ? 'filled_black' : 'outline',
         size:   'large',
-        width:  360,
+        width:  100%,
+        maxwidth: '360px',
         text:   'continue_with',
         locale: 'es',
       });
