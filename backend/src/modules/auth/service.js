@@ -1,11 +1,14 @@
 // backend/modules/auth/service.js
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { query } from '../../config/db.js';
-import { env } from '../../config/env.js';
-import { AppError } from '../../utils/errors.js';
-import { logEvent } from '../../utils/logger.js';
+import bcrypt         from 'bcryptjs';
+import jwt            from 'jsonwebtoken';
+import nodemailer     from 'nodemailer';
+import { OAuth2Client } from 'google-auth-library';
+import { query }      from '../../config/db.js';
+import { env }        from '../../config/env.js';
+import { AppError }   from '../../utils/errors.js';
+import { logEvent }   from '../../utils/logger.js';
 
+// ── Legado: mantener pseudoEmail para no romper usuarios existentes ───────────
 function normalizeUsername(username) { return username.trim().toLowerCase(); }
 function pseudoEmailFromUsername(username) { return `${normalizeUsername(username)}@local.test`; }
 
@@ -15,98 +18,285 @@ export function cleanRestaurantName(name) {
   return name.trim().replace(/\s+(kitchen|restaurant)$/i, '');
 }
 
+// ── Google OAuth client ───────────────────────────────────────────────────────
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// ── Nodemailer (Gmail App Password) ──────────────────────────────────────────
+const mailer = nodemailer.createTransport({
+  host:   process.env.SMTP_HOST || 'smtp.gmail.com',
+  port:   Number(process.env.SMTP_PORT) || 587,
+  secure: false,
+  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+});
+
+// ── Utilidad: resolver username único ────────────────────────────────────────
+// El frontend manda un candidato (alias limpio). Si ya existe,
+// agrega sufijo de 3 chars hasta encontrar uno libre — sin avisar al usuario.
+async function resolveUniqueUsername(candidate) {
+  const base = candidate
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9._-]/g, '')
+    .slice(0, 27) || 'user';
+
+  // Verificar contra pseudoEmails legacy Y contra campo real_email
+  const taken = await query('SELECT 1 FROM users WHERE email = $1', [pseudoEmailFromUsername(base)]);
+  if (taken.rowCount === 0) return base;
+
+  for (let i = 0; i < 20; i++) {
+    const suffix = Math.random().toString(36).slice(2, 5);
+    const candidate2 = `${base}${suffix}`;
+    const r = await query('SELECT 1 FROM users WHERE email = $1', [pseudoEmailFromUsername(candidate2)]);
+    if (r.rowCount === 0) return candidate2;
+  }
+  return `${base}${Date.now().toString(36).slice(-4)}`;
+}
+
+// ── REGISTER ─────────────────────────────────────────────────────────────────
+// Nuevo flujo: recibe email real, fullName, alias.
+// Internamente sigue usando pseudoEmail en el campo `email` para login legacy,
+// y guarda el email real en `real_email` (nuevo campo).
+//
+// Verificación de email:
+//   - Se genera un token y se guarda en `email_verify_token` + `email_verify_expires`
+//   - email_verified queda en FALSE pero NO bloquea el login
+//   - El envío del correo está comentado con TODO — descomenta cuando estés listo
 export async function registerUser(payload) {
-  const username    = normalizeUsername(payload.username);
+  const realEmail = payload.email.trim().toLowerCase();
+
+  // Verificar email real único
+  try {
+    const existingReal = await query('SELECT id FROM users WHERE real_email = $1', [realEmail]);
+    if (existingReal.rowCount > 0) throw new AppError(409, 'Este correo ya está registrado');
+  } catch (e) {
+    if (e instanceof AppError) throw e;
+    if (e?.code !== '42703') throw e;
+  }
+
+  // Resolver username único desde candidato
+  const usernameCandidate = payload.username || payload.alias;
+  const username    = await resolveUniqueUsername(usernameCandidate);
   const pseudoEmail = pseudoEmailFromUsername(username);
 
-  const existing = await query('SELECT id FROM users WHERE email = $1', [pseudoEmail]);
-  if (existing.rowCount > 0) throw new AppError(409, 'Ese nombre de usuario ya está registrado');
+  // Verificar pseudoEmail único (doble check)
+  const existingPseudo = await query('SELECT id FROM users WHERE email = $1', [pseudoEmail]);
+  if (existingPseudo.rowCount > 0) throw new AppError(409, 'Nombre de usuario ya en uso');
 
-  const passwordHash  = await bcrypt.hash(payload.password, 12);
-  const userAddress   = payload.role === 'customer' ? payload.address || null : null;
+  const passwordHash = await bcrypt.hash(payload.password, 12);
 
+  // Token de verificación de email (guardado, pero envío desactivado por ahora)
+  const verifyToken   = jwt.sign({ email: realEmail, purpose: 'email-verify' }, env.jwtSecret, { expiresIn: '48h' });
+  const verifyExpires = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+
+  // Dirección
+  const addressFull = payload.address ||
+    [payload.calle, payload.numero, payload.colonia, payload.ciudad, payload.estado, payload.postalCode]
+      .filter(Boolean).join(', ') || null;
+  const userAddress = ['customer','restaurant'].includes(payload.role) ? addressFull : null;
+
+  // Insertar usuario — intenta con todos los campos nuevos, fallback si columnas no existen
   let result;
   try {
     result = await query(
-      'INSERT INTO users(full_name, alias, email, password_hash, role, address) VALUES($1,$2,$3,$4,$5,$6) RETURNING id, full_name, alias, email, role, address',
-      [username, payload.displayName?.trim() || username, pseudoEmail, passwordHash, payload.role, userAddress]
+      `INSERT INTO users
+         (full_name, alias, email, real_email, password_hash, role, address,
+          postal_code, colonia, estado, ciudad,
+          email_verified, email_verify_token, email_verify_expires)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, false,$12,$13)
+       RETURNING id, full_name, alias, email, real_email, role, address`,
+      [
+        payload.fullName.trim(),
+        payload.alias.trim(),
+        pseudoEmail,
+        realEmail,
+        passwordHash,
+        payload.role,
+        userAddress,
+        payload.postalCode || null,
+        payload.colonia    || null,
+        payload.estado     || null,
+        payload.ciudad     || null,
+        verifyToken,
+        verifyExpires,
+      ]
     );
-  } catch (error) {
-    if (error?.code === '42703') {
+  } catch (e) {
+    if (e?.code === '42703') {
+      // Fallback: columnas nuevas no existen aún — insertar sin ellas
       result = await query(
-        'INSERT INTO users(full_name, alias, email, password_hash, role) VALUES($1,$2,$3,$4,$5) RETURNING id, full_name, alias, email, role',
-        [username, payload.displayName?.trim() || username, pseudoEmail, passwordHash, payload.role]
+        `INSERT INTO users(full_name, alias, email, password_hash, role, address)
+         VALUES($1,$2,$3,$4,$5,$6)
+         RETURNING id, full_name, alias, email, role, address`,
+        [payload.fullName.trim(), payload.alias.trim(), pseudoEmail, passwordHash, payload.role, userAddress]
       );
-    } else throw error;
+    } else throw e;
   }
+
+  // ── VERIFICACIÓN DE EMAIL — descomenta cuando estés listo ────────────────
+  // Paso 1: Agrega EMAIL_VERIFICATION_ENABLED=true en Render
+  // Paso 2: Descomenta el bloque de abajo
+  //
+  // if (process.env.EMAIL_VERIFICATION_ENABLED === 'true') {
+  //   const frontUrl  = process.env.FRONTEND_URL || 'http://localhost:5173';
+  //   const verifyUrl = `${frontUrl}/verify-email?token=${verifyToken}`;
+  //   try {
+  //     await mailer.sendMail({
+  //       from:    `"Morelivery" <${process.env.SMTP_USER}>`,
+  //       to:      realEmail,
+  //       subject: 'Confirma tu correo en Morelivery',
+  //       html: `
+  //         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+  //           <h2 style="color:#1a202c">Confirma tu correo 📬</h2>
+  //           <p>Hola ${payload.alias}, haz clic para verificar tu cuenta:</p>
+  //           <p style="margin:24px 0">
+  //             <a href="${verifyUrl}"
+  //                style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700">
+  //               Verificar correo
+  //             </a>
+  //           </p>
+  //           <p style="color:#718096;font-size:13px">El enlace expira en 48 horas.</p>
+  //         </div>
+  //       `,
+  //     });
+  //   } catch (err) {
+  //     logEvent('auth.verify_email_send_error', { userId: result.rows[0]?.id, error: err.message });
+  //   }
+  // }
+
+  // ── BLOQUEAR LOGIN SIN VERIFICAR — descomenta en loginUser cuando actives lo de arriba ──
+  // Busca la función loginUser y agrega esto justo después del check de user.status:
+  //
+  // if (user.email_verified === false) {
+  //   throw new AppError(403, 'Verifica tu correo antes de ingresar');
+  // }
 
   const user = result.rows[0];
 
+  // Restaurant: crear registro en restaurants
   if (user.role === 'restaurant') {
-    const restName = cleanRestaurantName(payload.displayName || username);
+    const restName = cleanRestaurantName(payload.displayName || payload.alias || payload.fullName);
     try {
       await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1,$2,$3)',
         [user.id, restName, 'General']);
-    } catch (error) {
-      if (error?.code === '42703') await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1,$2,$3)', [user.id, restName, 'General']);
-      else throw error;
+    } catch (e) {
+      if (e?.code !== '42703') throw e;
     }
   }
 
+  // Driver: crear driver_profile
   if (user.role === 'driver') {
-    await query('INSERT INTO driver_profiles(user_id, vehicle_type, is_verified, is_available) VALUES($1,$2,true,true)', [user.id, 'bike']);
+    await query(
+      'INSERT INTO driver_profiles(user_id, vehicle_type, is_verified, is_available) VALUES($1,$2,true,true)',
+      [user.id, 'bike']
+    );
   }
 
   return { id: user.id, username, role: user.role };
 }
 
+// ── LOGIN ─────────────────────────────────────────────────────────────────────
+// Acepta { email, password } (nuevo) o { username, password } (legado).
 export async function loginUser(payload) {
-  const username    = normalizeUsername(payload.username);
-  const pseudoEmail = pseudoEmailFromUsername(username);
-
   let result;
-  try {
-    result = await query('SELECT id, full_name, alias, email, password_hash, role, status, address FROM users WHERE email = $1', [pseudoEmail]);
-  } catch (error) {
-    if (error?.code === '42703') result = await query('SELECT id, full_name, alias, email, password_hash, role, status FROM users WHERE email = $1', [pseudoEmail]);
-    else throw error;
+
+  if (payload.email) {
+    // Nuevo: buscar por real_email
+    const realEmail = payload.email.trim().toLowerCase();
+    try {
+      result = await query(
+        'SELECT id, full_name, alias, email, real_email, password_hash, role, status, address FROM users WHERE real_email = $1',
+        [realEmail]
+      );
+    } catch (e) {
+      if (e?.code === '42703') {
+        // columna real_email no existe — intentar pseudoEmail por si acaso
+        result = await query(
+          'SELECT id, full_name, alias, email, password_hash, role, status, address FROM users WHERE email = $1',
+          [pseudoEmailFromUsername(realEmail.split('@')[0])]
+        );
+      } else throw e;
+    }
+    if (result.rowCount === 0) {
+      logEvent('auth.login_error', { email: realEmail, reason: 'user_not_found' });
+      throw new AppError(401, 'Credenciales inválidas');
+    }
+  } else {
+    // Legado: buscar por pseudoEmail (username@local.test)
+    const username    = normalizeUsername(payload.username);
+    const pseudoEmail = pseudoEmailFromUsername(username);
+    try {
+      result = await query(
+        'SELECT id, full_name, alias, email, password_hash, role, status, address FROM users WHERE email = $1',
+        [pseudoEmail]
+      );
+    } catch (e) {
+      if (e?.code === '42703') result = await query(
+        'SELECT id, full_name, alias, email, password_hash, role, status FROM users WHERE email = $1',
+        [pseudoEmail]
+      );
+      else throw e;
+    }
+    if (result.rowCount === 0) {
+      logEvent('auth.login_error', { username: payload.username, reason: 'user_not_found' });
+      throw new AppError(401, 'Credenciales inválidas');
+    }
   }
 
-  if (result.rowCount === 0) { logEvent('auth.login_error', { username, reason: 'user_not_found' }); throw new AppError(401, 'Credenciales inválidas'); }
-
   const user = result.rows[0];
-  if (user.status !== 'active') { logEvent('auth.login_error', { username, reason: 'suspended' }); throw new AppError(403, 'Cuenta suspendida'); }
+  if (user.status !== 'active') {
+    logEvent('auth.login_error', { userId: user.id, reason: 'suspended' });
+    throw new AppError(403, 'Cuenta suspendida');
+  }
 
   const matches = await bcrypt.compare(payload.password, user.password_hash);
-  if (!matches) { logEvent('auth.login_error', { username, reason: 'bad_password' }); throw new AppError(401, 'Credenciales inválidas'); }
+  if (!matches) {
+    logEvent('auth.login_error', { userId: user.id, reason: 'bad_password' });
+    throw new AppError(401, 'Credenciales inválidas');
+  }
 
+  // username para el token: extraer del pseudoEmail
+  const username = user.email.replace(/@local\.test$/, '');
   const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 
-  let profile = { address: user.address || null, alias: user.alias || user.full_name || username, needsAddress: false, lat: null, lng: null, home_lat: null, home_lng: null, postal_code: null, colonia: null, estado: null, ciudad: null };
+  // Perfil extendido (idéntico al código original)
+  let profile = {
+    address: user.address || null,
+    alias: user.alias || user.full_name || username,
+    needsAddress: false,
+    lat: null, lng: null, home_lat: null, home_lng: null,
+    postal_code: null, colonia: null, estado: null, ciudad: null,
+  };
 
-  // Todos los datos de perfil personal se leen desde users para evitar duplicados con restaurants.
   try {
-    const r = await query('SELECT address, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM users WHERE id = $1', [user.id]);
-    profile.address     = r.rows[0]?.address      ?? profile.address;
-    profile.lat         = r.rows[0]?.lat          ?? null;
-    profile.lng         = r.rows[0]?.lng          ?? null;
-    profile.home_lat    = r.rows[0]?.home_lat     ?? null;
-    profile.home_lng    = r.rows[0]?.home_lng     ?? null;
-    profile.postal_code = r.rows[0]?.postal_code  ?? null;
-    profile.colonia     = r.rows[0]?.colonia      ?? null;
-    profile.estado      = r.rows[0]?.estado       ?? null;
-    profile.ciudad      = r.rows[0]?.ciudad       ?? null;
+    const r = await query(
+      'SELECT address, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM users WHERE id = $1',
+      [user.id]
+    );
+    Object.assign(profile, {
+      address:     r.rows[0]?.address     ?? profile.address,
+      lat:         r.rows[0]?.lat         ?? null,
+      lng:         r.rows[0]?.lng         ?? null,
+      home_lat:    r.rows[0]?.home_lat    ?? null,
+      home_lng:    r.rows[0]?.home_lng    ?? null,
+      postal_code: r.rows[0]?.postal_code ?? null,
+      colonia:     r.rows[0]?.colonia     ?? null,
+      estado:      r.rows[0]?.estado      ?? null,
+      ciudad:      r.rows[0]?.ciudad      ?? null,
+    });
   } catch (_) {}
 
   if (user.role === 'restaurant') {
     try {
-      const r = await query('SELECT id, name, category, is_open, profile_photo FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
+      const r = await query(
+        'SELECT id, name, category, is_open, profile_photo FROM restaurants WHERE owner_user_id = $1 LIMIT 1',
+        [user.id]
+      );
       profile.restaurant = r.rows[0] || null;
-    } catch (error) {
-      if (error?.code === '42703') {
+    } catch (e) {
+      if (e?.code === '42703') {
         const r = await query('SELECT id, name, is_open FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [user.id]);
         profile.restaurant = r.rows[0] || null;
-      } else throw error;
+      } else throw e;
     }
   }
 
@@ -114,18 +304,207 @@ export async function loginUser(payload) {
     try {
       const r = await query('SELECT driver_number, is_available FROM driver_profiles WHERE user_id = $1', [user.id]);
       profile.driver = r.rows[0] || { driver_number: null, is_available: true };
-    } catch (error) {
-      if (error?.code === '42703') {
+    } catch (e) {
+      if (e?.code === '42703') {
         const r = await query('SELECT is_available FROM driver_profiles WHERE user_id = $1', [user.id]);
         profile.driver = { driver_number: null, is_available: r.rows[0]?.is_available ?? true };
-      } else throw error;
+      } else throw e;
     }
   }
 
-  if (['customer', 'restaurant'].includes(user.role) && !profile.address) profile.needsAddress = true;
+  if (['customer','restaurant'].includes(user.role) && !profile.address) profile.needsAddress = true;
 
   return { token, user: { id: user.id, username, role: user.role, ...profile } };
 }
+
+// ── GOOGLE LOGIN / REGISTRO ───────────────────────────────────────────────────
+export async function googleLogin(credential) {
+  if (!process.env.GOOGLE_CLIENT_ID) throw new AppError(501, 'Google login no configurado');
+
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken:  credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    payload = ticket.getPayload();
+  } catch {
+    throw new AppError(401, 'Token de Google inválido');
+  }
+
+  const { email, name, given_name, sub: googleId } = payload;
+  const realEmail = email.toLowerCase();
+
+  // Buscar usuario existente por real_email o google_id
+  let user;
+  try {
+    const r = await query(
+      'SELECT * FROM users WHERE real_email = $1 OR google_id = $2 LIMIT 1',
+      [realEmail, googleId]
+    );
+    user = r.rows[0];
+  } catch (e) {
+    if (e?.code === '42703') {
+      // Columnas nuevas no existen — buscar solo por email
+      const r = await query('SELECT * FROM users WHERE email = $1 LIMIT 1', [realEmail]);
+      user = r.rows[0];
+    } else throw e;
+  }
+
+  if (!user) {
+    // Registro automático con role 'customer'
+    const alias    = given_name || name?.split(' ')[0] || 'user';
+    const fullName = name || realEmail.split('@')[0];
+    const username = await resolveUniqueUsername(alias);
+    const pseudoEmail = pseudoEmailFromUsername(username);
+
+    try {
+      const r = await query(
+        `INSERT INTO users(full_name, alias, email, real_email, google_id, role, status)
+         VALUES($1,$2,$3,$4,$5,'customer','active')
+         RETURNING *`,
+        [fullName, alias, pseudoEmail, realEmail, googleId]
+      );
+      user = r.rows[0];
+    } catch (e) {
+      if (e?.code === '42703') {
+        // Fallback sin columnas nuevas
+        const r = await query(
+          `INSERT INTO users(full_name, alias, email, role, status)
+           VALUES($1,$2,$3,'customer','active') RETURNING *`,
+          [fullName, alias, pseudoEmail]
+        );
+        user = r.rows[0];
+      } else throw e;
+    }
+  } else {
+    // Vincular google_id si no lo tenía
+    try {
+      if (!user.google_id) {
+        await query('UPDATE users SET google_id=$1 WHERE id=$2', [googleId, user.id]);
+      }
+    } catch (_) {}
+  }
+
+  const username = user.email.replace(/@local\.test$/, '');
+  const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
+
+  return {
+    token,
+    user: {
+      id:           user.id,
+      username,
+      role:         user.role,
+      alias:        user.alias || user.full_name || username,
+      address:      user.address || null,
+      needsAddress: ['customer','restaurant'].includes(user.role) && !user.address,
+    },
+  };
+}
+
+// ── FORGOT PASSWORD ───────────────────────────────────────────────────────────
+// Genera token JWT de 15min y envía email. Siempre responde OK (no revela si existe).
+// ── VERIFY EMAIL ──────────────────────────────────────────────────────────────
+// Ruta: GET /auth/verify-email?token=xxx
+// Ya funciona — solo falta activar el envío del correo en registerUser (ver TODO arriba).
+export async function verifyEmail(token) {
+  let payload;
+  try {
+    payload = jwt.verify(token, env.jwtSecret);
+  } catch {
+    throw new AppError(401, 'Enlace inválido o expirado');
+  }
+
+  if (payload.purpose !== 'email-verify') throw new AppError(401, 'Token inválido');
+
+  try {
+    const r = await query(
+      `UPDATE users
+         SET email_verified = true, email_verify_token = NULL, email_verify_expires = NULL
+       WHERE real_email = $1 AND email_verified = false
+       RETURNING id`,
+      [payload.email]
+    );
+    if (r.rowCount === 0) {
+      // Ya verificado o no existe — silencioso, no es error
+    }
+  } catch (e) {
+    if (e?.code === '42703') return; // columnas no existen aún, ignorar
+    throw e;
+  }
+}
+
+// ── FORGOT PASSWORD ───────────────────────────────────────────────────────────
+export async function forgotPassword(email) {
+  const realEmail = email.trim().toLowerCase();
+
+  let user;
+  try {
+    const r = await query('SELECT id, alias, full_name FROM users WHERE real_email = $1', [realEmail]);
+    user = r.rows[0];
+  } catch (_) {
+    // Si columna no existe, silencioso
+    return;
+  }
+
+  if (!user) return; // silencioso — no revelar si el email existe
+
+  const resetToken = jwt.sign(
+    { userId: user.id, purpose: 'password-reset' },
+    process.env.RESET_TOKEN_SECRET || env.jwtSecret,
+    { expiresIn: '15m' }
+  );
+
+  const name     = user.alias || user.full_name || 'usuario';
+  const frontUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const resetUrl = `${frontUrl}/reset-password?token=${resetToken}`;
+
+  try {
+    await mailer.sendMail({
+      from:    `"Morelivery" <${process.env.SMTP_USER}>`,
+      to:      realEmail,
+      subject: 'Recupera tu contraseña en Morelivery',
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+          <h2 style="color:#1a202c;margin-bottom:8px">Hola, ${name} 👋</h2>
+          <p style="color:#4a5568">Recibimos una solicitud para restablecer la contraseña de tu cuenta.</p>
+          <p style="margin:24px 0">
+            <a href="${resetUrl}"
+               style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">
+              Restablecer contraseña
+            </a>
+          </p>
+          <p style="color:#718096;font-size:13px">
+            Este enlace expira en <strong>15 minutos</strong>.<br>
+            Si no solicitaste esto, ignora este correo — tu contraseña no cambiará.
+          </p>
+          <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
+          <p style="color:#a0aec0;font-size:12px">Morelivery · No responder este correo</p>
+        </div>
+      `,
+    });
+  } catch (err) {
+    logEvent('auth.forgot_password_email_error', { userId: user.id, error: err.message });
+  }
+}
+
+// ── RESET PASSWORD ────────────────────────────────────────────────────────────
+export async function resetPassword(token, newPassword) {
+  let payload;
+  try {
+    payload = jwt.verify(token, process.env.RESET_TOKEN_SECRET || env.jwtSecret);
+  } catch {
+    throw new AppError(401, 'Enlace inválido o expirado');
+  }
+
+  if (payload.purpose !== 'password-reset') throw new AppError(401, 'Token inválido');
+
+  const newHash = await bcrypt.hash(newPassword, 12);
+  const r = await query('UPDATE users SET password_hash=$1 WHERE id=$2 RETURNING id', [newHash, payload.userId]);
+  if (r.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
+}
+
+// ── Funciones existentes — SIN CAMBIOS ───────────────────────────────────────
 
 export async function updateProfileAddress(userId, role, address, displayName, lat, lng, homeLat, homeLng, postalCode, colonia, estado, ciudad) {
   const updates = [];
@@ -206,17 +585,17 @@ export async function updateProfileAddress(userId, role, address, displayName, l
   }
 
   return {
-    address: row.address ?? address ?? null,
-    displayName: row.alias ?? row.full_name ?? displayName ?? null,
-    alias: row.alias ?? row.full_name ?? displayName ?? null,
-    lat: row.lat ?? null,
-    lng: row.lng ?? null,
-    home_lat: row.home_lat ?? null,
-    home_lng: row.home_lng ?? null,
+    address:     row.address     ?? address     ?? null,
+    displayName: row.alias       ?? row.full_name ?? displayName ?? null,
+    alias:       row.alias       ?? row.full_name ?? displayName ?? null,
+    lat:         row.lat         ?? null,
+    lng:         row.lng         ?? null,
+    home_lat:    row.home_lat    ?? null,
+    home_lng:    row.home_lng    ?? null,
     postal_code: row.postal_code ?? null,
-    colonia: row.colonia ?? null,
-    estado: row.estado ?? null,
-    ciudad: row.ciudad ?? null,
+    colonia:     row.colonia     ?? null,
+    estado:      row.estado      ?? null,
+    ciudad:      row.ciudad      ?? null,
   };
 }
 
@@ -253,8 +632,8 @@ export async function deleteAccount(userId, role) {
 }
 
 export async function updateLoginUsername(userId, role, currentPassword, newUsername) {
-  const normalized = normalizeUsername(newUsername);
-  const newEmail   = pseudoEmailFromUsername(normalized);
+  const normalized  = normalizeUsername(newUsername);
+  const newEmail    = pseudoEmailFromUsername(normalized);
   const r = await query('SELECT password_hash FROM users WHERE id=$1', [userId]);
   if (r.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
   const matches = await bcrypt.compare(currentPassword, r.rows[0].password_hash);

@@ -12,7 +12,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../api/client';
 
@@ -41,12 +41,12 @@ function useDarkMode() {
 // el candidato base. Ver comentario en auth.routes.suggestions.js.
 function buildUsernameCandidate(alias = '') {
   return alias
-  .toLowerCase()
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')   // quitar tildes
-  .replace(/[^a-z0-9._-]/g, '')      // solo chars válidos
-  .slice(0, 30)
-  || 'user';
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')   // quitar tildes
+    .replace(/[^a-z0-9._-]/g, '')      // solo chars válidos
+    .slice(0, 30)
+    || 'user';
 }
 
 // ── Validación de contraseña ─────────────────────────────────────────────────
@@ -73,30 +73,41 @@ async function fetchColoniasByPostal(cp) {
 }
 
 // ── Componente raíz ──────────────────────────────────────────────────────────
-export default function AuthPage({ mode = 'login' }) {
-  return <AuthForm mode={mode} />;
+export default function AuthPage({ mode = 'login', appKey = null }) {
+  return <AuthForm mode={mode} appKey={appKey} />;
 }
 
 // ── AuthForm ─────────────────────────────────────────────────────────────────
-function AuthForm({ mode }) {
+function AuthForm({ mode, appKey }) {
   const { login } = useAuth();
   const navigate  = useNavigate();
+  const [searchParams] = useSearchParams();
   const [dark, setDark] = useDarkMode();
 
-  // ── Modo activo: 'login' | 'register' | 'forgot'
-  const [view, setView] = useState(mode); // se puede cambiar inline sin navegar
+  const [view, setView] = useState(mode);
+
+  // Banner "correo verificado" si viene ?verified=1 desde el enlace del email
+  const [verifiedBanner, setVerifiedBanner] = useState(searchParams.get('verified') === '1');
+
+  // Banner post-registro — muestra aviso sin bloquear
+  const [showVerifyHint, setShowVerifyHint] = useState(false);
 
   // ── Campos comunes
   const emailRef    = useRef(null);
   const passwordRef = useRef(null);
 
-  // ── Campos registro
+  // ── Campos registro — role preseleccionado desde appKey si viene de /:appKey/register
   const [fullName,    setFullName]    = useState('');
+
   const [alias,       setAlias]       = useState('');
   const [regEmail,    setRegEmail]    = useState('');
   const [regPwd,      setRegPwd]      = useState('');
   const [regPwdConf,  setRegPwdConf]  = useState('');
-  const [role,        setRole]        = useState('customer');
+  // Si viene de /:appKey/register, preseleccionar el rol correspondiente
+  const validRoles = ['customer', 'restaurant', 'driver'];
+  const [role, setRole] = useState(
+    validRoles.includes(appKey) ? appKey : 'customer'
+  );
   const [pwdError,    setPwdError]    = useState('');
 
   // ── Dirección estructurada (registro)
@@ -183,21 +194,27 @@ function AuthForm({ mode }) {
   const submitLogin = useCallback(async () => {
     const email    = emailRef.current?.value?.trim()    || '';
     const password = passwordRef.current?.value         || '';
-  if (!email || !password) { msg('Ingresa tu correo y contraseña'); return; }
-  setLoading(true);
-  try {
-    const data = await apiFetch('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    });
-    login({ token: data.token, user: data.user });
-    navigate(`/${data.user.role}`);
-  } catch (e) {
-    msg(e.message);
-  } finally {
-    setLoading(false);
-  }
-  }, [login, navigate]);
+    if (!email || !password) { msg('Ingresa tu correo y contraseña'); return; }
+    setLoading(true);
+    try {
+      const data = await apiFetch('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+      // Si venimos de /:appKey/login, validar que el rol coincida
+      if (appKey && data.user.role !== appKey) {
+        const labels = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
+        msg(`Esta cuenta es de tipo "${labels[data.user.role] || data.user.role}". Accede desde la sección correcta.`);
+        return;
+      }
+      login({ token: data.token, user: data.user });
+      navigate(`/${data.user.role}`);
+    } catch (e) {
+      msg(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [appKey, login, navigate]);
 
   // ── SUBMIT GOOGLE LOGIN ─────────────────────────────────────────────────
   const handleGoogleResponse = useCallback(async (response) => {
@@ -256,8 +273,8 @@ function AuthForm({ mode }) {
 
     const usernameCandidate = buildUsernameCandidate(alias);
     const addressFull = (['customer','restaurant'].includes(role) && (postalCode || calle))
-    ? buildAddress()
-    : undefined;
+      ? buildAddress()
+      : undefined;
 
     setLoading(true);
     try {
@@ -265,23 +282,24 @@ function AuthForm({ mode }) {
         method: 'POST',
         body: JSON.stringify({
           email:    regEmail.trim(),
-                             password: regPwd,
-                             fullName: fullName.trim(),
-                             alias:    alias.trim(),
-                             username: usernameCandidate,   // backend valida unicidad y ajusta
-                             role,
-                             address:     addressFull,
-                             postalCode:  postalCode  || undefined,
-                             estado:      estado      || undefined,
-                             ciudad:      ciudad      || undefined,
-                             colonia:     colonia     || undefined,
-                             calle:       calle       || undefined,
-                             numero:      numero      || undefined,
-                             // displayName para restaurant
-                             displayName: role === 'restaurant' ? (alias.trim() || undefined) : undefined,
+          password: regPwd,
+          fullName: fullName.trim(),
+          alias:    alias.trim(),
+          username: usernameCandidate,   // backend valida unicidad y ajusta
+          role,
+          address:     addressFull,
+          postalCode:  postalCode  || undefined,
+          estado:      estado      || undefined,
+          ciudad:      ciudad      || undefined,
+          colonia:     colonia     || undefined,
+          calle:       calle       || undefined,
+          numero:      numero      || undefined,
+          // displayName para restaurant
+          displayName: role === 'restaurant' ? (alias.trim() || undefined) : undefined,
         }),
       });
       msg('¡Registro exitoso! Ya puedes iniciar sesión.', true);
+      setShowVerifyHint(true);
       setView('login');
     } catch (e) {
       msg(e.message);
@@ -316,263 +334,279 @@ function AuthForm({ mode }) {
   return (
     <section className="auth-card">
 
-    {/* Header */}
-    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'0.25rem' }}>
-    <h2 style={{ margin:0 }}>
-    {view === 'login'    && 'Iniciar sesión'}
-    {view === 'register' && 'Crear cuenta'}
-    {view === 'forgot'   && 'Recuperar contraseña'}
-    </h2>
-    <button
-    onClick={() => setDark(d => !d)}
-    title={dark ? 'Modo claro' : 'Modo oscuro'}
-    style={{
-      background:'none', border:'1px solid var(--border)',
-          borderRadius:8, width:34, height:34,
-          display:'flex', alignItems:'center', justifyContent:'center',
-          cursor:'pointer', fontSize:'1rem', color:'var(--text-secondary)', flexShrink:0,
-    }}
-    >
-    {dark ? '☀️' : '🌙'}
-    </button>
-    </div>
-
-    <p style={{ marginBottom:'1rem', color:'var(--text-secondary)', fontSize:'0.875rem' }}>
-    {view === 'login'    && 'Ingresa con tu correo y contraseña.'}
-    {view === 'register' && 'Completa los datos para registrarte.'}
-    {view === 'forgot'   && 'Te enviaremos un enlace para restablecer tu contraseña.'}
-    </p>
-
-    {/* ── VISTA: LOGIN ────────────────────────────────────────────────── */}
-    {view === 'login' && (
-      <>
-      <div className="row">
-      <label>Correo electrónico
-      <input
-      ref={emailRef}
-      defaultValue=""
-      type="email"
-      placeholder="tu@correo.com"
-      autoComplete="email"
-      onKeyDown={e => handleKey(e, submitLogin)}
-      />
-      </label>
-      <label>Contraseña
-      <input
-      ref={passwordRef}
-      defaultValue=""
-      type="password"
-      placeholder="Tu contraseña"
-      autoComplete="current-password"
-      onKeyDown={e => handleKey(e, submitLogin)}
-      />
-      </label>
+      {/* Header */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'0.25rem' }}>
+        <h2 style={{ margin:0 }}>
+          {view === 'login'    && 'Iniciar sesión'}
+          {view === 'register' && 'Crear cuenta'}
+          {view === 'forgot'   && 'Recuperar contraseña'}
+        </h2>
+        <button
+          onClick={() => setDark(d => !d)}
+          title={dark ? 'Modo claro' : 'Modo oscuro'}
+          style={{
+            background:'none', border:'1px solid var(--border)',
+            borderRadius:8, width:34, height:34,
+            display:'flex', alignItems:'center', justifyContent:'center',
+            cursor:'pointer', fontSize:'1rem', color:'var(--text-secondary)', flexShrink:0,
+          }}
+        >
+          {dark ? '☀️' : '🌙'}
+        </button>
       </div>
 
-      {/* Olvidé mi contraseña */}
-      <div style={{ textAlign:'right', marginTop:'-0.25rem', marginBottom:'0.75rem' }}>
-      <button
-      type="button"
-      onClick={() => goTo('forgot')}
-      style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.8rem', padding:0 }}
-      >
-      ¿Olvidaste tu contraseña?
-      </button>
-      </div>
+      <p style={{ marginBottom:'1rem', color:'var(--text-secondary)', fontSize:'0.875rem' }}>
+        {view === 'login'    && 'Ingresa con tu correo y contraseña.'}
+        {view === 'register' && 'Completa los datos para registrarte.'}
+        {view === 'forgot'   && 'Te enviaremos un enlace para restablecer tu contraseña.'}
+      </p>
 
-      <div className="row">
-      <button className="btn-primary" onClick={submitLogin} disabled={loading}>
-      {loading ? 'Ingresando…' : 'Iniciar sesión'}
-      </button>
-
-      {/* Separador */}
-      {GOOGLE_CLIENT_ID && (
-        <>
-        <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', margin:'0.25rem 0' }}>
-        <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
-        <span style={{ fontSize:'0.75rem', color:'var(--text-secondary)', whiteSpace:'nowrap' }}>o continúa con</span>
-        <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
+      {/* Banner: correo verificado exitosamente */}
+      {verifiedBanner && (
+        <div style={{ background:'#f0fff4', border:'1px solid #9ae6b4', borderRadius:8, padding:'0.65rem 0.9rem', marginBottom:'0.75rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem' }}>
+          <span style={{ fontSize:'0.85rem', color:'#276749' }}>✅ Correo verificado. Ya puedes iniciar sesión.</span>
+          <button onClick={() => setVerifiedBanner(false)} style={{ background:'none', border:'none', cursor:'pointer', color:'#276749', fontSize:'1rem', lineHeight:1 }}>✕</button>
         </div>
-        {/* Google renderiza aquí su botón */}
-        <div ref={googleBtnRef} style={{ width:'100%' }} />
+      )}
+
+      {/* Banner: post-registro — avisa sin bloquear (envío de correo desactivado por ahora) */}
+      {showVerifyHint && view === 'login' && (
+        <div style={{ background:'#fffbeb', border:'1px solid #f6e05e', borderRadius:8, padding:'0.65rem 0.9rem', marginBottom:'0.75rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem' }}>
+          <span style={{ fontSize:'0.82rem', color:'#744210' }}>📬 Próximamente recibirás un correo para verificar tu cuenta.</span>
+          <button onClick={() => setShowVerifyHint(false)} style={{ background:'none', border:'none', cursor:'pointer', color:'#744210', fontSize:'1rem', lineHeight:1 }}>✕</button>
+        </div>
+      )}
+
+      {/* ── VISTA: LOGIN ────────────────────────────────────────────────── */}
+      {view === 'login' && (
+        <>
+          <div className="row">
+            <label>Correo electrónico
+              <input
+                ref={emailRef}
+                defaultValue=""
+                type="email"
+                placeholder="tu@correo.com"
+                autoComplete="email"
+                onKeyDown={e => handleKey(e, submitLogin)}
+              />
+            </label>
+            <label>Contraseña
+              <input
+                ref={passwordRef}
+                defaultValue=""
+                type="password"
+                placeholder="Tu contraseña"
+                autoComplete="current-password"
+                onKeyDown={e => handleKey(e, submitLogin)}
+              />
+            </label>
+          </div>
+
+          {/* Olvidé mi contraseña */}
+          <div style={{ textAlign:'right', marginTop:'-0.25rem', marginBottom:'0.75rem' }}>
+            <button
+              type="button"
+              onClick={() => goTo('forgot')}
+              style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.8rem', padding:0 }}
+            >
+              ¿Olvidaste tu contraseña?
+            </button>
+          </div>
+
+          <div className="row">
+            <button className="btn-primary" onClick={submitLogin} disabled={loading}>
+              {loading ? 'Ingresando…' : 'Iniciar sesión'}
+            </button>
+
+            {/* Separador */}
+            {GOOGLE_CLIENT_ID && (
+              <>
+                <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', margin:'0.25rem 0' }}>
+                  <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
+                  <span style={{ fontSize:'0.75rem', color:'var(--text-secondary)', whiteSpace:'nowrap' }}>o continúa con</span>
+                  <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
+                </div>
+                {/* Google renderiza aquí su botón */}
+                <div ref={googleBtnRef} style={{ width:'100%' }} />
+              </>
+            )}
+
+            {installPrompt && (
+              <button
+                type="button"
+                className="btn-sm"
+                onClick={async () => {
+                  installPrompt.prompt();
+                  await installPrompt.userChoice.catch(() => null);
+                  setInstallPrompt(null);
+                }}
+                style={{ marginTop:'0.4rem' }}
+              >
+                Instalar app (PWA)
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => goTo('register')}
+              style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}
+            >
+              ¿No tienes cuenta? <strong>Regístrate</strong>
+            </button>
+          </div>
         </>
       )}
 
-      {installPrompt && (
-        <button
-        type="button"
-        className="btn-sm"
-        onClick={async () => {
-          installPrompt.prompt();
-          await installPrompt.userChoice.catch(() => null);
-          setInstallPrompt(null);
-        }}
-        style={{ marginTop:'0.4rem' }}
-        >
-        Instalar app (PWA)
-        </button>
+      {/* ── VISTA: REGISTER ─────────────────────────────────────────────── */}
+      {view === 'register' && (
+        <>
+          {/* Datos personales */}
+          <div className="row">
+            <label>Nombre completo
+              <input
+                value={fullName}
+                onChange={e => setFullName(e.target.value)}
+                placeholder="Ej: Juan García López"
+                autoComplete="name"
+              />
+            </label>
+
+            <label>
+              Alias / Apodo
+              <input
+                value={alias}
+                onChange={e => setAlias(e.target.value)}
+                placeholder="Ej: JuanG"
+                autoComplete="nickname"
+              />
+              <span style={{ fontSize:'0.73rem', color:'var(--text-secondary)', marginTop:'0.2rem', display:'block' }}>
+                Así te verán los demás. Tu nombre de usuario se genera automáticamente.
+              </span>
+            </label>
+
+            <label>Correo electrónico
+              <input
+                value={regEmail}
+                onChange={e => setRegEmail(e.target.value)}
+                type="email"
+                placeholder="tu@correo.com"
+                autoComplete="email"
+              />
+            </label>
+
+            <label>Tipo de cuenta
+              <select value={role} onChange={e => setRole(e.target.value)}>
+                <option value="customer">Cliente</option>
+                <option value="restaurant">Tienda</option>
+                <option value="driver">Conductor</option>
+              </select>
+            </label>
+          </div>
+
+          {/* Contraseña */}
+          <div className="row" style={{ marginTop:'0.5rem' }}>
+            <label>
+              Contraseña
+              <input
+                value={regPwd}
+                onChange={e => setRegPwd(e.target.value)}
+                type="password"
+                placeholder="Mínimo 8 caracteres"
+                autoComplete="new-password"
+              />
+              {pwdError && (
+                <span style={{ fontSize:'0.73rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>
+                  {pwdError}
+                </span>
+              )}
+            </label>
+            <label>Confirmar contraseña
+              <input
+                value={regPwdConf}
+                onChange={e => setRegPwdConf(e.target.value)}
+                type="password"
+                placeholder="Repite la contraseña"
+                autoComplete="new-password"
+              />
+            </label>
+
+            {/* Indicador visual fuerza contraseña */}
+            {regPwd.length > 0 && (
+              <PasswordStrength pwd={regPwd} />
+            )}
+          </div>
+
+          {/* Dirección — obligatoria solo para restaurant, opcional para los demás */}
+          <div style={{ marginTop:'0.75rem' }}>
+            <p style={{ fontWeight:700, fontSize:'0.82rem', marginBottom:'0.5rem', color:'var(--text-secondary)' }}>
+              {role === 'restaurant'
+                ? 'Dirección de la tienda (requerida)'
+                : 'Dirección (opcional — puedes configurarla después)'}
+            </p>
+            <AddressBlock
+              postalCode={postalCode} setPostalCode={setPostalCode}
+              estado={estado}         setEstado={setEstado}
+              ciudad={ciudad}         setCiudad={setCiudad}
+              colonia={colonia}       setColonia={setColonia}
+              coloniasList={coloniasList}
+              calle={calle}           setCalle={setCalle}
+              numero={numero}         setNumero={setNumero}
+              cpLoading={cpLoading}   cpError={cpError}
+            />
+          </div>
+
+          <div className="row" style={{ marginTop:'0.75rem' }}>
+            <button className="btn-primary" onClick={submitRegister} disabled={loading}>
+              {loading ? 'Registrando…' : 'Crear cuenta'}
+            </button>
+            <button
+              type="button"
+              onClick={() => goTo('login')}
+              style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}
+            >
+              ¿Ya tienes cuenta? <strong>Inicia sesión</strong>
+            </button>
+          </div>
+        </>
       )}
 
-      <button
-      type="button"
-      onClick={() => goTo('register')}
-      style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}
-      >
-      ¿No tienes cuenta? <strong>Regístrate</strong>
-      </button>
-      </div>
-      </>
-    )}
-
-    {/* ── VISTA: REGISTER ─────────────────────────────────────────────── */}
-    {view === 'register' && (
-      <>
-      {/* Datos personales */}
-      <div className="row">
-      <label>Nombre completo
-      <input
-      value={fullName}
-      onChange={e => setFullName(e.target.value)}
-      placeholder="Ej: Juan García López"
-      autoComplete="name"
-      />
-      </label>
-
-      <label>
-      Alias / Apodo
-      <input
-      value={alias}
-      onChange={e => setAlias(e.target.value)}
-      placeholder="Ej: JuanG"
-      autoComplete="nickname"
-      />
-      <span style={{ fontSize:'0.73rem', color:'var(--text-secondary)', marginTop:'0.2rem', display:'block' }}>
-      Así te verán los demás. Tu nombre de usuario se genera automáticamente.
-      </span>
-      </label>
-
-      <label>Correo electrónico
-      <input
-      value={regEmail}
-      onChange={e => setRegEmail(e.target.value)}
-      type="email"
-      placeholder="tu@correo.com"
-      autoComplete="email"
-      />
-      </label>
-
-      <label>Tipo de cuenta
-      <select value={role} onChange={e => setRole(e.target.value)}>
-      <option value="customer">Cliente</option>
-      <option value="restaurant">Tienda</option>
-      <option value="driver">Conductor</option>
-      </select>
-      </label>
-      </div>
-
-      {/* Contraseña */}
-      <div className="row" style={{ marginTop:'0.5rem' }}>
-      <label>
-      Contraseña
-      <input
-      value={regPwd}
-      onChange={e => setRegPwd(e.target.value)}
-      type="password"
-      placeholder="Mínimo 8 caracteres"
-      autoComplete="new-password"
-      />
-      {pwdError && (
-        <span style={{ fontSize:'0.73rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>
-        {pwdError}
-        </span>
+      {/* ── VISTA: FORGOT PASSWORD ──────────────────────────────────────── */}
+      {view === 'forgot' && (
+        <>
+          <div className="row">
+            <label>Correo electrónico de tu cuenta
+              <input
+                value={forgotEmail}
+                onChange={e => setForgotEmail(e.target.value)}
+                type="email"
+                placeholder="tu@correo.com"
+                autoComplete="email"
+                onKeyDown={e => handleKey(e, submitForgot)}
+              />
+            </label>
+          </div>
+          <div className="row" style={{ marginTop:'0.5rem' }}>
+            <button className="btn-primary" onClick={submitForgot} disabled={loading}>
+              {loading ? 'Enviando…' : 'Enviar enlace de recuperación'}
+            </button>
+            <button
+              type="button"
+              onClick={() => goTo('login')}
+              style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}
+            >
+              ← Volver al inicio de sesión
+            </button>
+          </div>
+        </>
       )}
-      </label>
-      <label>Confirmar contraseña
-      <input
-      value={regPwdConf}
-      onChange={e => setRegPwdConf(e.target.value)}
-      type="password"
-      placeholder="Repite la contraseña"
-      autoComplete="new-password"
-      />
-      </label>
 
-      {/* Indicador visual fuerza contraseña */}
-      {regPwd.length > 0 && (
-        <PasswordStrength pwd={regPwd} />
+      {/* ── Mensaje flash ───────────────────────────────────────────────── */}
+      {message.text && (
+        <p className={`flash ${message.ok ? 'flash-ok' : 'flash-error'}`} style={{ marginTop:'0.75rem' }}>
+          {message.text}
+        </p>
       )}
-      </div>
-
-      {/* Dirección — obligatoria solo para restaurant, opcional para los demás */}
-      <div style={{ marginTop:'0.75rem' }}>
-      <p style={{ fontWeight:700, fontSize:'0.82rem', marginBottom:'0.5rem', color:'var(--text-secondary)' }}>
-      {role === 'restaurant'
-        ? 'Dirección de la tienda (requerida)'
-    : 'Dirección (opcional — puedes configurarla después)'}
-    </p>
-    <AddressBlock
-    postalCode={postalCode} setPostalCode={setPostalCode}
-    estado={estado}         setEstado={setEstado}
-    ciudad={ciudad}         setCiudad={setCiudad}
-    colonia={colonia}       setColonia={setColonia}
-    coloniasList={coloniasList}
-    calle={calle}           setCalle={setCalle}
-    numero={numero}         setNumero={setNumero}
-    cpLoading={cpLoading}   cpError={cpError}
-    />
-    </div>
-
-    <div className="row" style={{ marginTop:'0.75rem' }}>
-    <button className="btn-primary" onClick={submitRegister} disabled={loading}>
-    {loading ? 'Registrando…' : 'Crear cuenta'}
-    </button>
-    <button
-    type="button"
-    onClick={() => goTo('login')}
-    style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}
-    >
-    ¿Ya tienes cuenta? <strong>Inicia sesión</strong>
-    </button>
-    </div>
-    </>
-    )}
-
-    {/* ── VISTA: FORGOT PASSWORD ──────────────────────────────────────── */}
-    {view === 'forgot' && (
-      <>
-      <div className="row">
-      <label>Correo electrónico de tu cuenta
-      <input
-      value={forgotEmail}
-      onChange={e => setForgotEmail(e.target.value)}
-      type="email"
-      placeholder="tu@correo.com"
-      autoComplete="email"
-      onKeyDown={e => handleKey(e, submitForgot)}
-      />
-      </label>
-      </div>
-      <div className="row" style={{ marginTop:'0.5rem' }}>
-      <button className="btn-primary" onClick={submitForgot} disabled={loading}>
-      {loading ? 'Enviando…' : 'Enviar enlace de recuperación'}
-      </button>
-      <button
-      type="button"
-      onClick={() => goTo('login')}
-      style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}
-      >
-      ← Volver al inicio de sesión
-      </button>
-      </div>
-      </>
-    )}
-
-    {/* ── Mensaje flash ───────────────────────────────────────────────── */}
-    {message.text && (
-      <p className={`flash ${message.ok ? 'flash-ok' : 'flash-error'}`} style={{ marginTop:'0.75rem' }}>
-      {message.text}
-      </p>
-    )}
     </section>
   );
 }
@@ -591,58 +625,58 @@ function AddressBlock({
   const BUSY = { opacity:0.7, pointerEvents:'none' };
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem' }}>
-    {/* CP */}
-    <label>
-    Código postal
-    <div style={{ position:'relative', ...(cpLoading ? BUSY : {}) }}>
-    <input
-    value={postalCode}
-    onChange={e => setPostalCode(e.target.value.replace(/\D/g,'').slice(0,5))}
-    placeholder="Ej: 44100"
-    maxLength={5}
-    inputMode="numeric"
-    />
-    {cpLoading && (
-      <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.75rem', color:'var(--text-secondary)' }}>
-      Buscando…
-      </span>
-    )}
-    </div>
-    {cpError && <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>{cpError}</span>}
-    </label>
+      {/* CP */}
+      <label>
+        Código postal
+        <div style={{ position:'relative', ...(cpLoading ? BUSY : {}) }}>
+          <input
+            value={postalCode}
+            onChange={e => setPostalCode(e.target.value.replace(/\D/g,'').slice(0,5))}
+            placeholder="Ej: 44100"
+            maxLength={5}
+            inputMode="numeric"
+          />
+          {cpLoading && (
+            <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.75rem', color:'var(--text-secondary)' }}>
+              Buscando…
+            </span>
+          )}
+        </div>
+        {cpError && <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>{cpError}</span>}
+      </label>
 
-    {/* Estado / Ciudad */}
-    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.55rem' }}>
-    <label>Estado
-    <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Jalisco" disabled={cpLoading} />
-    </label>
-    <label>Municipio / Ciudad
-    <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Guadalajara" disabled={cpLoading} />
-    </label>
-    </div>
+      {/* Estado / Ciudad */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.55rem' }}>
+        <label>Estado
+          <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Jalisco" disabled={cpLoading} />
+        </label>
+        <label>Municipio / Ciudad
+          <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Guadalajara" disabled={cpLoading} />
+        </label>
+      </div>
 
-    {/* Colonia */}
-    <label>
-    Colonia
-    {coloniasList.length > 0 ? (
-      <select value={colonia} onChange={e => setColonia(e.target.value)} disabled={cpLoading}>
-      <option value="">Seleccionar colonia…</option>
-      {coloniasList.map(c => <option key={c} value={c}>{c}</option>)}
-      </select>
-    ) : (
-      <input value={colonia} onChange={e => setColonia(e.target.value)} placeholder="Ej: Col. Centro" disabled={cpLoading} />
-    )}
-    </label>
+      {/* Colonia */}
+      <label>
+        Colonia
+        {coloniasList.length > 0 ? (
+          <select value={colonia} onChange={e => setColonia(e.target.value)} disabled={cpLoading}>
+            <option value="">Seleccionar colonia…</option>
+            {coloniasList.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        ) : (
+          <input value={colonia} onChange={e => setColonia(e.target.value)} placeholder="Ej: Col. Centro" disabled={cpLoading} />
+        )}
+      </label>
 
-    {/* Calle + Número */}
-    <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:'0.55rem', alignItems:'end' }}>
-    <label>Calle
-    <input value={calle} onChange={e => setCalle(e.target.value)} placeholder="Ej: Av. Revolución" />
-    </label>
-    <label style={{ width:90 }}>Número
-    <input value={numero} onChange={e => setNumero(e.target.value)} placeholder="1234" />
-    </label>
-    </div>
+      {/* Calle + Número */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:'0.55rem', alignItems:'end' }}>
+        <label>Calle
+          <input value={calle} onChange={e => setCalle(e.target.value)} placeholder="Ej: Av. Revolución" />
+        </label>
+        <label style={{ width:90 }}>Número
+          <input value={numero} onChange={e => setNumero(e.target.value)} placeholder="1234" />
+        </label>
+      </div>
     </div>
   );
 }
@@ -660,18 +694,18 @@ function PasswordStrength({ pwd }) {
 
   return (
     <div style={{ marginTop:'0.3rem' }}>
-    <div style={{ display:'flex', gap:3 }}>
-    {[0,1,2,3].map(i => (
-      <div key={i} style={{
-        flex:1, height:4, borderRadius:2,
-        background: i < score ? colors[score] : 'var(--border)',
-                         transition:'background 0.3s',
-      }} />
-    ))}
-    </div>
-    <span style={{ fontSize:'0.72rem', color: colors[score] || 'var(--text-secondary)', marginTop:'0.2rem', display:'block' }}>
-    {labels[score] || ''}
-    </span>
+      <div style={{ display:'flex', gap:3 }}>
+        {[0,1,2,3].map(i => (
+          <div key={i} style={{
+            flex:1, height:4, borderRadius:2,
+            background: i < score ? colors[score] : 'var(--border)',
+            transition:'background 0.3s',
+          }} />
+        ))}
+      </div>
+      <span style={{ fontSize:'0.72rem', color: colors[score] || 'var(--text-secondary)', marginTop:'0.2rem', display:'block' }}>
+        {labels[score] || ''}
+      </span>
     </div>
   );
 }

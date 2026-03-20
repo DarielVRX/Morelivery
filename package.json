@@ -14,6 +14,8 @@
     "start:backend": "npm --workspace backend run start"
   },
   "dependencies": {
+    "google-auth-library": "^10.6.2",
+    "nodemailer": "^8.0.3",
     "pg": "^8.20.0"
   }
 }
