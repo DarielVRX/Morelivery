@@ -135,7 +135,7 @@ function LandingScreen() {
                       width:'100%',
                       boxSizing:'border-box',
       }} className="landing-btn">
-      <span style={{ fontSize:'3rem', lineHeight:1, marginTop:'3rem' }}>{app.icon}</span>
+      <span style={{ fontSize:'3rem', lineHeight:1, marginTop:'2rem' }}>{app.icon}</span>
       <div style={{ textAlign:'center' }}>
       <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#1a1a1a' }}>{app.label}</div>
       <div style={{ fontSize:'0.68rem', color:'#555' }}>{app.description}</div>
