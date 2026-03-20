@@ -88,7 +88,7 @@ function LandingScreen() {
         background:'var(--brand-light)',
                       border:'1.5px solid var(--border)',
                       borderRadius:8,
-                      width:'min(100%, 100px)',
+                      width:'min(100%, 200px)',
                       maxWidth:'200px',
                       justifyContent:'center',
                       aspectRatio: '1 / 1',
