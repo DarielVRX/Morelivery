@@ -3,6 +3,15 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 
+// ── MapLibre tile styles — same as DriverMap ─────────────────────────────────
+const STADIA_KEY  = import.meta.env?.VITE_STADIA_KEY || '';
+const STYLE_LIGHT = STADIA_KEY
+? `https://tiles.stadiamaps.com/styles/alidade_smooth.json?api_key=${STADIA_KEY}`
+: 'https://tiles.openfreemap.org/styles/bright';
+const STYLE_DARK  = STADIA_KEY
+? `https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json?api_key=${STADIA_KEY}`
+: 'https://tiles.openfreemap.org/styles/bright';
+
 // ── Leaflet helpers ───────────────────────────────────────────────────────────
 function ensureLeafletCSS() {
   if (document.getElementById('leaflet-css')) return;
@@ -127,12 +136,7 @@ function StarPicker({ value, onChange, label }) {
   );
 }
 
-// ── Address search bar with manual map pick ───────────────────────────────────
-// Search: Nominatim (más confiable en bbox Morelia que Photon)
-// Map pick: MapLibre + mismos layers que DriverMap (Stadia/OpenFreeMap)
-var STADIA_KEY  = typeof import.meta !== 'undefined' ? (import.meta.env?.VITE_STADIA_KEY || '') : '';
-var STYLE_LIGHT = STADIA_KEY ? `https://tiles.stadiamaps.com/styles/alidade_smooth.json?api_key=${STADIA_KEY}` : 'https://tiles.openfreemap.org/styles/bright';
-var STYLE_DARK  = STADIA_KEY ? `https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json?api_key=${STADIA_KEY}` : 'https://tiles.openfreemap.org/styles/bright';
+// ── Nominatim forward geocoding ───────────────────────────────────────────────
 
 async function nominatimForward(q) {
   try {
@@ -147,6 +151,7 @@ async function nominatimForward(q) {
   } catch (_) { return []; }
 }
 
+// ── Address search bar with manual map pick ──────────────────────────────────
 function AddressSearchBar({ active, currentLabel, onSelect }) {
   const [open,      setOpen]      = useState(false);
   const [showMap,   setShowMap]   = useState(false);
