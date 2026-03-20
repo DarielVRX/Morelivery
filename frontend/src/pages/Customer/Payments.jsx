@@ -300,9 +300,6 @@ export default function CustomerPayments() {
   const [cvv,      setCvv]      = useState('');
   const [name,     setName]     = useState('');
 
-  // SPEI fields
-  const [speiRef,  setSpeiRef]  = useState('');
-
   // GPS para el AddressSearchBar
   useEffect(() => {
     if (!navigator.geolocation) return;
@@ -334,7 +331,6 @@ export default function CustomerPayments() {
     .catch(() => setMethods([
       { id:'cash', label:'Efectivo al entregar',      available:true },
       { id:'card', label:'Tarjeta de crédito/débito', available:true },
-      { id:'spei', label:'SPEI / Transferencia',      available:true },
     ]))
     .finally(() => setLoading(false));
   }, [auth.token]);
@@ -379,7 +375,6 @@ export default function CustomerPayments() {
         delivery_lat:     deliveryLat,
         delivery_lng:     deliveryLng,
         ...(method === 'card' ? { card_name: name, card_last4: cardNum.replace(/\s/g,'').slice(-4) } : {}),
-        ...(method === 'spei' ? { spei_ref: speiRef } : {}),
       };
       await apiFetch('/orders', { method: 'POST', body: JSON.stringify(body) }, auth.token);
       clearPendingOrder();
@@ -447,7 +442,7 @@ export default function CustomerPayments() {
     Elige cómo quieres pagar tus pedidos.
     </p>
 
-    // Selector de método
+    {/*Selector de método*/}
     <div style={{ display:'flex', flexDirection:'column', gap:'0.5rem', marginBottom:'1.5rem' }}>
     {methods.map(m => (
       <label key={m.id} style={{
@@ -512,27 +507,6 @@ export default function CustomerPayments() {
             </div>
     )}
 
-    {/* ── Formulario SPEI ── */}
-    {method === 'spei' && (
-      <div style={{ background:'var(--bg-sunken)', border:'1px solid #bfdbfe',
-        borderRadius:10, padding:'1rem', marginBottom:'1rem' }}>
-        <div style={{ fontSize:'0.875rem', fontWeight:700, color:'var(--text-secondary)', marginBottom:'0.75rem' }}>
-        🏦 Transferencia SPEI
-        </div>
-        <label style={{ display:'block', marginBottom:'0.6rem', fontSize:'0.82rem', fontWeight:600 }}>
-        Referencia (opcional)
-        <input type="text" value={speiRef} onChange={e => setSpeiRef(e.target.value)}
-        placeholder="Número de referencia o concepto"
-        style={{ display:'block', width:'100%', marginTop:4, boxSizing:'border-box' }} />
-        </label>
-        <div style={{ padding:'0.5rem 0.75rem', background:'#eff6ff',
-          border:'1px solid #bfdbfe', borderRadius:8, fontSize:'0.78rem', color:'#1e40af' }}>
-          ℹ️ Al confirmar recibirás la CLABE destino y el monto a transferir.
-          Procesador pendiente de integración.
-          </div>
-          </div>
-    )}
-
     <button className="btn-primary"
     style={{ width:'100%', padding:'0.75rem', fontSize:'0.95rem' }}
     disabled={sending || !draft}
@@ -540,8 +514,7 @@ export default function CustomerPayments() {
     {sending ? 'Procesando…'
       : !draft ? 'Sin pedido pendiente'
       : method === 'cash' ? 'Confirmar pedido — Efectivo'
-      : method === 'card' ? 'Confirmar pedido — Tarjeta'
-  : 'Confirmar pedido — SPEI'}
+      : method === 'card' ? 'Confirmar pedido — Tarjeta'}
   </button>
 
   {!draft && (
