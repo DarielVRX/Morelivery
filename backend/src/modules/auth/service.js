@@ -201,44 +201,36 @@ export async function loginUser(payload) {
   let result;
 
   if (payload.email) {
-    // Nuevo: buscar por real_email
-    const realEmail = payload.email.trim().toLowerCase();
-    try {
-      result = await query(
-        'SELECT id, full_name, alias, email, real_email, password_hash, role, status, address FROM users WHERE real_email = $1',
-        [realEmail]
-      );
-    } catch (e) {
-      if (e?.code === '42703') {
-        // columna real_email no existe — intentar pseudoEmail por si acaso
-        result = await query(
-          'SELECT id, full_name, alias, email, password_hash, role, status, address FROM users WHERE email = $1',
-          [pseudoEmailFromUsername(realEmail.split('@')[0])]
-        );
-      } else throw e;
-    }
-    if (result.rowCount === 0) {
-      logEvent('auth.login_error', { email: realEmail, reason: 'user_not_found' });
-      throw new AppError(401, 'Credenciales inválidas');
-    }
-  } else {
-    // Legado: buscar por pseudoEmail (username@local.test)
-    const username    = normalizeUsername(payload.username);
-    const pseudoEmail = pseudoEmailFromUsername(username);
-    try {
+    const rawEmail = payload.email.trim().toLowerCase();
+
+    // Detectar si es un pseudoEmail legacy
+    const isLegacy = rawEmail.endsWith('@local.test');
+
+    if (isLegacy) {
+      // Flujo legacy — buscar por email directo
       result = await query(
         'SELECT id, full_name, alias, email, password_hash, role, status, address FROM users WHERE email = $1',
-        [pseudoEmail]
+        [rawEmail]
       );
-    } catch (e) {
-      if (e?.code === '42703') result = await query(
-        'SELECT id, full_name, alias, email, password_hash, role, status FROM users WHERE email = $1',
-        [pseudoEmail]
-      );
-      else throw e;
+    } else {
+      // Flujo nuevo — buscar por real_email
+      try {
+        result = await query(
+          'SELECT id, full_name, alias, email, real_email, password_hash, role, status, address FROM users WHERE real_email = $1',
+          [rawEmail]
+        );
+      } catch (e) {
+        if (e?.code === '42703') {
+          result = await query(
+            'SELECT id, full_name, alias, email, password_hash, role, status, address FROM users WHERE email = $1',
+            [pseudoEmailFromUsername(rawEmail.split('@')[0])]
+          );
+        } else throw e;
+      }
     }
+
     if (result.rowCount === 0) {
-      logEvent('auth.login_error', { username: payload.username, reason: 'user_not_found' });
+      logEvent('auth.login_error', { email: rawEmail, reason: 'user_not_found' });
       throw new AppError(401, 'Credenciales inválidas');
     }
   }
