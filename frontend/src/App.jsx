@@ -40,14 +40,14 @@ function ThemeToggle({ dark, setDark }) {
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const CustomerHome     = lazy(() => import('./pages/Customer/Home'));
-const CustomerOrders   = lazy(() => import('./pages/Customer/Orders'));
+import CustomerOrders from './pages/Customer/Orders';
 const CustomerPayments = lazy(() => import('./pages/Customer/Payments'));
 const RestaurantPage   = lazy(() => import('./pages/Customer/RestaurantPage'));
 const RestaurantMenu     = lazy(() => import('./pages/Restaurant/Menu'));
-const RestaurantOrders   = lazy(() => import('./pages/Restaurant/Orders'));
+import RestaurantOrders from './pages/Restaurant/Orders';
 const RestaurantSchedule = lazy(() => import('./pages/Restaurant/Schedule'));
 const DriverHome     = lazy(() => import('./pages/Driver/Home'));
-const DriverOrders   = lazy(() => import('./pages/Driver/Orders'));
+import DriverOrders     from './pages/Driver/Orders';
 const DriverEarnings = lazy(() => import('./pages/Driver/Earnings'));
 const AdminDashboard = lazy(() => import('./pages/Admin/Dashboard'));
 const ProfilePage    = lazy(() => import('./pages/Profile'));
