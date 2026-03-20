@@ -57,7 +57,10 @@ export default function Layout({ children }) {
     <Link to={auth.user ? `/${role}` : '/'} className="brand-block" style={{ textDecoration:'none' }}>
     <img className="brand-logo" src="/logo.svg" alt="Morelivery" />
     <div>
-    <h1>Morelivery</h1>
+    <h1>
+    <span style={{ color:'#e3aaaa' }}>More</span>
+    <span style={{ color:'var(--brand)' }}>livery</span>
+    </h1>
     {role && <span className="role-pill">{ROLE_LABELS[role] || role}</span>}
     </div>
     </Link>
