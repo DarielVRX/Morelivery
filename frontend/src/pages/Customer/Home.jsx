@@ -42,41 +42,68 @@ function RestaurantCard({ r, isHero, distKm, onClick }) {
 
   if (isHero) {
     return (
-      <div className="restaurant-hero-card" onClick={onClick}>
-      <div className="restaurant-hero-bg">
-      {r.profile_photo ? <img src={r.profile_photo} alt={r.name} /> : <span>🏪</span>}
+      <div className="restaurant-hero-card" onClick={onClick} style={{
+        borderRadius:14, overflow:'hidden', position:'relative', cursor:'pointer',
+        marginBottom:12, boxShadow:'0 4px 20px rgba(185,80,80,0.22)',
+            border:'2px solid #c97b7b',
+      }}>
+      <div className="restaurant-hero-bg" style={{ position:'relative' }}>
+      {r.profile_photo
+        ? <img src={r.profile_photo} alt={r.name} style={{ width:'100%', height:180, objectFit:'cover', display:'block' }} />
+        : <div style={{ width:'100%', height:180, background:'linear-gradient(135deg,#c97b7b,#9e4f4f)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <span style={{ fontSize:'3.5rem' }}>🏪</span>
+        </div>
+      }
+      {/* gradient overlay */}
+      <div style={{ position:'absolute', inset:0, background:'linear-gradient(to top, rgba(120,30,30,0.82) 0%, rgba(80,20,20,0.2) 60%, transparent 100%)' }} />
       </div>
-      <div className="restaurant-hero-overlay">
-      <span className="restaurant-hero-tag">⭐ Destacado</span>
-      <div className="restaurant-hero-name">{r.name}</div>
-      <div className="restaurant-hero-sub">
-      {stars && `★ ${Number(r.rating_avg).toFixed(1)} · `}
-      {r.category && `${r.category} · `}
-      {r.is_open ? 'Abierto ahora' : 'Cerrado'}
-      {distKm != null && ` · ${distKm < 1 ? `${Math.round(distKm*1000)}m` : `${distKm.toFixed(1)}km`}`}
-      </div>
-      </div>
-      </div>
+      <div style={{ position:'absolute', bottom:0, left:0, right:0, padding:'0.75rem 1rem' }}>
+      <span style={{ display:'inline-block', background:'#e3aaaa', color:'#5a1a1a', fontSize:'0.68rem', fontWeight:800,
+        borderRadius:20, padding:'0.15rem 0.55rem', marginBottom:'0.3rem', letterSpacing:'0.03em' }}>
+        ⭐ Destacado
+        </span>
+        <div style={{ fontWeight:900, fontSize:'1.1rem', color:'#fff', lineHeight:1.2, marginBottom:'0.2rem',
+          textShadow:'0 1px 4px rgba(0,0,0,0.5)' }}>{r.name}</div>
+          <div style={{ fontSize:'0.78rem', color:'rgba(255,255,255,0.85)' }}>
+          {stars && `★ ${Number(r.rating_avg).toFixed(1)} · `}
+          {r.category && `${r.category} · `}
+          {r.is_open ? 'Abierto ahora' : 'Cerrado'}
+          {distKm != null && ` · ${distKm < 1 ? `${Math.round(distKm*1000)}m` : `${distKm.toFixed(1)}km`}`}
+          </div>
+          </div>
+          </div>
     );
   }
 
   return (
-    <div className="restaurant-card" onClick={onClick}>
-    <div className="restaurant-card-bg">
-    {r.profile_photo ? <img src={r.profile_photo} alt={r.name} /> : <span>🏪</span>}
-    <div className="restaurant-card-overlay" />
+    <div className="restaurant-card" onClick={onClick} style={{
+      borderRadius:10, overflow:'hidden', cursor:'pointer',
+      border:'1px solid var(--border)',
+          background:'var(--bg-card)',
+          boxShadow:'0 1px 6px rgba(0,0,0,0.06)',
+          transition:'transform 0.15s, box-shadow 0.15s',
+    }}>
+    <div style={{ position:'relative' }}>
+    {r.profile_photo
+      ? <img src={r.profile_photo} alt={r.name} style={{ width:'100%', height:100, objectFit:'cover', display:'block', opacity: r.is_open ? 1 : 0.55 }} />
+      : <div style={{ width:'100%', height:100, background:'linear-gradient(135deg,#e3aaaa33,#c97b7b22)', display:'flex', alignItems:'center', justifyContent:'center', opacity: r.is_open ? 1 : 0.55 }}>
+      <span style={{ fontSize:'2rem' }}>🏪</span>
+      </div>
+    }
+    <div style={{ position:'absolute', inset:0, background:'linear-gradient(to top, rgba(0,0,0,0.35) 0%, transparent 60%)' }} />
     </div>
-    <div className="restaurant-card-body">
-    <div className="restaurant-card-name" style={{ opacity: r.is_open ? 1 : 0.55 }}>{r.name}</div>
-    <div className="restaurant-card-meta">
-    {stars && <><span className="restaurant-card-stars">★ {Number(r.rating_avg).toFixed(1)}</span><span>·</span></>}
+    <div style={{ padding:'0.5rem 0.65rem 0.6rem' }}>
+    <div style={{ fontWeight:700, fontSize:'0.875rem', color:'var(--text-primary)', opacity: r.is_open ? 1 : 0.55, marginBottom:'0.15rem' }}>{r.name}</div>
+    <div style={{ display:'flex', alignItems:'center', gap:'0.3rem', fontSize:'0.75rem', color:'var(--text-tertiary)', flexWrap:'wrap' }}>
+    {stars && <span style={{ color:'#c97b7b', fontWeight:700 }}>★ {Number(r.rating_avg).toFixed(1)}</span>}
+    {stars && r.category && <span>·</span>}
     {r.category && <span>{r.category}</span>}
     {distKm != null && <><span>·</span><span>{distKm < 1 ? `${Math.round(distKm*1000)}m` : `${distKm.toFixed(1)}km`}</span></>}
     </div>
-    <div style={{ marginTop:4 }}>
+    <div style={{ marginTop:'0.3rem' }}>
     {r.is_open
-      ? <span className="badge-open">● Abierto</span>
-      : <span className="badge-closed">Cerrado</span>
+      ? <span style={{ fontSize:'0.68rem', fontWeight:700, color:'#16a34a' }}>● Abierto</span>
+      : <span style={{ fontSize:'0.68rem', color:'var(--text-tertiary)' }}>Cerrado</span>
     }
     </div>
     </div>
@@ -111,16 +138,21 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
     setSearching(true);
     debounceRef.current = setTimeout(async () => {
       try {
-        const r = await fetch(
-          `https://photon.komoot.io/api/?q=${encodeURIComponent(val)}&bbox=-102.1,-101.0,19.4,20.0&limit=5&lang=es`,
-                              { headers: { 'Accept-Language': 'es' } }
-        );
+        const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(val + ' Morelia')}&limit=6&lang=es&bbox=-101.5,19.5,-100.9,19.9`;
+        const r = await fetch(url);
         const data = await r.json();
         const items = (data.features || []).map(f => {
           const p = f.properties || {};
-          const parts = [p.name, p.street && p.housenumber ? `${p.street} ${p.housenumber}` : p.street, p.city || p.town].filter(Boolean);
+          const parts = [
+            p.name !== p.street ? p.name : null,
+            p.street,
+            p.housenumber,
+            p.suburb || p.district,
+            p.city || p.town || 'Morelia',
+          ].filter(Boolean);
+          const deduped = parts.filter((v, i) => v !== parts[i-1]);
           return {
-            label: parts.join(', ') || p.name || 'Sin nombre',
+            label: deduped.join(', ') || p.name || 'Sin nombre',
                                                 lat: f.geometry?.coordinates[1],
                                                 lng: f.geometry?.coordinates[0],
           };
