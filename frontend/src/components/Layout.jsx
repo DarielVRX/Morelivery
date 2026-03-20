@@ -53,82 +53,80 @@ export default function Layout({ children }) {
 
   return (
     <div className="app-shell">
-    <header className="app-header">
-    <Link to={auth.user ? `/${role}` : '/'} className="brand-block" style={{ textDecoration:'none' }}>
-    <img className="brand-logo" src="/logo.svg" alt="Morelivery" />
-    <div>
-    <h1>
-    <span style={{ color:'#e3aaaa' }}>More</span>
-    <span style={{ color:'var(--brand)' }}>livery</span>
-    </h1>
-    {role && <span className="role-pill">{ROLE_LABELS[role] || role}</span>}
-    </div>
-    </Link>
+      <header className="app-header">
+        <Link to={auth.user ? `/${role}` : '/'} className="brand-block" style={{ textDecoration:'none' }}>
+          <img className="brand-logo" src="/logo.svg" alt="Morelivery" />
+          <div>
+            <h1 style={{ color:'inherit' }}>
+              <span style={{ color:'#e3aaaa' }}>More</span>
+              <span style={{ color:'var(--text-primary)' }}>livery</span>
+            </h1>
+            {role && <span className="role-pill">{ROLE_LABELS[role] || role}</span>}
+          </div>
+        </Link>
 
-    {auth.user && items.length > 0 && (
-      <nav className="nav-desktop" aria-label="Navegación principal">
-      {items.map(({ to, label }) => (
-        <Link key={to} to={to} className={isActive(to, location.pathname) ? 'active' : ''}>{label}</Link>
-      ))}
-      <button onClick={logout}>Salir</button>
-      </nav>
-    )}
+        {auth.user && items.length > 0 && (
+          <nav className="nav-desktop" aria-label="Navegación principal">
+            {items.map(({ to, label }) => (
+              <Link key={to} to={to} className={isActive(to, location.pathname) ? 'active' : ''}>{label}</Link>
+            ))}
+            <button onClick={logout}>Salir</button>
+          </nav>
+        )}
 
-    <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', flexShrink:0 }}>
-    {/* Theme toggle */}
-    <button
-    className="header-icon-btn"
-    onClick={toggle}
-    title={isDark ? 'Tema claro' : 'Tema oscuro'}
-    aria-label="Tema"
-    style={{ fontSize:'1rem' }}>
-    {isDark ? '☀️' : '🌙'}
-    </button>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', flexShrink:0 }}>
+          <button
+            className="header-icon-btn"
+            onClick={toggle}
+            title={isDark ? 'Tema claro' : 'Tema oscuro'}
+            aria-label="Tema"
+            style={{ fontSize:'1rem' }}>
+            {isDark ? '☀️' : '🌙'}
+          </button>
 
-    {/* Profile */}
-    {auth.user && (
-      <button
-      onClick={() => navigate('/profile')}
-      className={`user-name-btn${location.pathname === '/profile' ? ' active' : ''}`}
-      title="Mi perfil">
-      {displayName}
-      </button>
-    )}
-    </div>
-    </header>
+          {auth.user && (
+            <button
+              onClick={() => navigate('/profile')}
+              className={`user-name-btn${location.pathname === '/profile' ? ' active' : ''}`}
+              title="Mi perfil">
+              {displayName}
+            </button>
+          )}
+        </div>
+      </header>
 
-    {shouldAskAddress && (
-      <div style={{ background:'var(--warn-bg)', borderBottom:'1px solid var(--warn-border)', padding:'0.75rem 1.25rem' }}>
-      <p style={{ fontSize:'0.85rem', fontWeight:600, color:'var(--warn)', marginBottom:'0.5rem' }}>
-      Agrega tu dirección para poder hacer pedidos
-      </p>
-      <div style={{ display:'flex', gap:'0.5rem', maxWidth:420 }}>
-      <input value={address} onChange={e => setAddress(e.target.value)}
-      placeholder="Tu dirección de entrega"
-      onKeyDown={e => e.key === 'Enter' && saveAddress()} />
-      <button className="btn-primary" onClick={saveAddress} style={{ whiteSpace:'nowrap' }}>Guardar</button>
-      </div>
-      </div>
-    )}
+      {shouldAskAddress && (
+        <div style={{ background:'var(--warn-bg)', borderBottom:'1px solid var(--warn-border)', padding:'0.75rem 1.25rem' }}>
+          <p style={{ fontSize:'0.85rem', fontWeight:600, color:'var(--warn)', marginBottom:'0.5rem' }}>
+            Agrega tu dirección para poder hacer pedidos
+          </p>
+          <div style={{ display:'flex', gap:'0.5rem', maxWidth:420 }}>
+            <input value={address} onChange={e => setAddress(e.target.value)}
+              placeholder="Tu dirección de entrega"
+              onKeyDown={e => e.key === 'Enter' && saveAddress()} />
+            <button className="btn-primary" onClick={saveAddress} style={{ whiteSpace:'nowrap' }}>Guardar</button>
+          </div>
+        </div>
+      )}
 
-    <main className="page-content">{children}</main>
+      <main className="page-content">{children}</main>
 
-    {auth.user && items.length > 0 && (
-      <nav className="nav-mobile" aria-label="Navegación">
-      {items.map(({ to, label, Icon }) => (
-        <button key={to}
-        className={`nav-mobile-item${isActive(to, location.pathname) ? ' active' : ''}`}
-        onClick={() => navigate(to)} aria-label={label}>
-        <Icon /><span>{label}</span>
-        </button>
-      ))}
-      <button
-      className={`nav-mobile-item${location.pathname === '/profile' ? ' active' : ''}`}
-      onClick={() => navigate('/profile')} aria-label="Perfil">
-      <IconProfile /><span>Perfil</span>
-      </button>
-      </nav>
-    )}
+      {auth.user && items.length > 0 && (
+        <nav className="nav-mobile" aria-label="Navegación">
+          {items.map(({ to, label, Icon }) => (
+            <button key={to}
+              className={`nav-mobile-item${isActive(to, location.pathname) ? ' active' : ''}`}
+              onClick={() => navigate(to)} aria-label={label}>
+              <Icon /><span>{label}</span>
+            </button>
+          ))}
+          <button
+            className={`nav-mobile-item${location.pathname === '/profile' ? ' active' : ''}`}
+            onClick={() => navigate('/profile')} aria-label="Perfil">
+            <IconProfile /><span>Perfil</span>
+          </button>
+        </nav>
+      )}
     </div>
   );
 }
