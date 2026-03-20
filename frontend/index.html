@@ -41,10 +41,15 @@
     <script>
       (function() {
         try {
-          var stored = localStorage.getItem('theme');
-          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          var isDark = stored === 'dark' || (!stored && prefersDark);
-          if (isDark) document.documentElement.setAttribute('data-theme', 'dark');
+            var stored = localStorage.getItem('theme');
+            var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            var isDark = stored === 'dark' || stored === 'light' ? stored === 'dark' : prefersDark;
+
+            // Guarda si no había nada
+            if (!stored) localStorage.setItem('theme', isDark ? 'dark' : 'light');
+
+            if (isDark) document.documentElement.setAttribute('data-theme', 'dark');
+            else document.documentElement.setAttribute('data-theme', 'light');
 
           // Actualizar theme-color del navegador dinámicamente
           var themeColorMeta = document.querySelector('meta[name="theme-color"][media*="light"]');
