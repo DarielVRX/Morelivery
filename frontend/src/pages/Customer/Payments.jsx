@@ -514,7 +514,7 @@ export default function CustomerPayments() {
     {sending ? 'Procesando…'
       : !draft ? 'Sin pedido pendiente'
       : method === 'cash' ? 'Confirmar pedido — Efectivo'
-      : method === 'card' ? 'Confirmar pedido — Tarjeta':
+      : method === 'card' ? 'Confirmar pedido — Tarjeta'
       : 'Confirmar pedido'}
   </button>
 
