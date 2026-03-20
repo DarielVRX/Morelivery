@@ -131,10 +131,10 @@ function LandingScreen() {
               width:'100%',
               boxSizing:'border-box',
             }} className="landing-btn">
-              <span style={{ fontSize:'3rem', lineHeight:1, marginTop:'2rem' }}>{app.icon}</span>
+              <span style={{ fontSize:'5rem', lineHeight:1, marginTop:'2rem' }}>{app.icon}</span>
               <div style={{ textAlign:'center' }}>
-                <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#1a1a1a' }}>{app.label}</div>
-                <div style={{ fontSize:'0.68rem', color:'#555' }}>{app.description}</div>
+                <div style={{ fontWeight:700, fontSize:'1rem', color:'#1a1a1a' }}>{app.label}</div>
+                <div style={{ fontSize:'0.9rem', color:'#555' }}>{app.description}</div>
               </div>
             </div>
           </Link>
@@ -153,7 +153,6 @@ function AuthScreen({ mode = 'login' }) {
   const { appKey } = useParams();
   const { auth }   = useAuth();
   const app        = findApp(appKey);
-  const [dark, setDark] = useDarkMode();
 
   // Si ya está logueado con ESTE mismo rol, redirigir a su home
   if (auth.user && auth.user.role === appKey)
@@ -182,7 +181,6 @@ function AuthScreen({ mode = 'login' }) {
           <img src="/logo.svg" alt="" style={{ width:24, height:24 }} />
           <strong style={{ fontSize:'0.95rem' }}>Morelivery</strong>
         </div>
-        <ThemeToggle dark={dark} setDark={setDark} />
       </header>
 
       <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:'2rem 1.25rem' }}>
@@ -190,12 +188,10 @@ function AuthScreen({ mode = 'login' }) {
 
           {/* Ícono y título del rol */}
           <div style={{ textAlign:'center', marginBottom:'1rem' }}>
-            <span style={{ fontSize:'5rem' }}>{app.icon || '🔐'}</span>
-            {mode === 'register' && (
-              <p style={{ margin:'0.3rem 0 0', fontWeight:700, fontSize:'0.9rem', color:'var(--text-secondary)' }}>
-              {app.label}
-              </p>
-            )}
+          <span style={{ fontSize:'5rem' }}>{app.icon || '🔐'}</span>
+          <p style={{ margin:'0.3rem 0 0', fontWeight:700, fontSize:'0.9rem', color:'var(--text-secondary)' }}>
+          {app.label}
+          </p>
           </div>
 
           {/* Aviso si hay sesión activa de otro rol */}
