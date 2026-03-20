@@ -1,13 +1,5 @@
 <!doctype html>
 <html lang="es">
-<script>
-  (function() {
-    const saved = localStorage.getItem('theme');
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const theme = saved || (prefersDark ? 'dark' : 'light');
-    document.documentElement.setAttribute('data-theme', theme);
-  })();
-</script>
   <head>
     <meta charset="UTF-8" />
 
@@ -49,7 +41,7 @@
     <script>
       (function() {
         try {
-          var stored = localStorage.getItem('morelivery_theme');
+          var stored = localStorage.getItem('theme');
           var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
           var isDark = stored === 'dark' || (!stored && prefersDark);
           if (isDark) document.documentElement.setAttribute('data-theme', 'dark');
