@@ -89,7 +89,8 @@ function LandingScreen() {
                       border:'1.5px solid var(--border)',
                       borderRadius:8,
                       width:'100%',
-                      maxWidth:'100px',
+                      maxWidth:'150px',
+                      justifyContent:'center'
                       aspectRatio: '1 / 1',
                       cursor:'pointer',
                       transition:'transform 0.15s, box-shadow 0.15s',
