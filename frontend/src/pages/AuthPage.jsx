@@ -237,8 +237,10 @@ function AuthForm({ mode, appKey }) {
   const googleBtnRef = useRef(null);
   useEffect(() => {
     if (view !== 'login' || !GOOGLE_CLIENT_ID) return;
+    if (googleInitialized.current) return; // ← evita doble init
     const render = () => {
       if (!window.google || !googleBtnRef.current) return;
+      googleInitialized.current = true;
       window.google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
         callback:  handleGoogleResponse,
@@ -246,7 +248,7 @@ function AuthForm({ mode, appKey }) {
       window.google.accounts.id.renderButton(googleBtnRef.current, {
         theme: dark ? 'filled_black' : 'outline',
         size:  'large',
-        width: '100%',
+        width: 360,   // ← número fijo en px, no string
         text:  'continue_with',
         locale: 'es',
       });
@@ -428,7 +430,9 @@ function AuthForm({ mode, appKey }) {
                   <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
                 </div>
                 {/* Google renderiza aquí su botón */}
-                <div ref={googleBtnRef} style={{ width:'100%' }} />
+                <div ref={googleBtnRef} style={{ width:'100%' }}>
+                <div ref={googleBtnRef} id="g_id_signin" />
+                </div>
               </>
             )}
 
