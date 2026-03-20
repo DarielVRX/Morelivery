@@ -8,12 +8,12 @@ const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
 function buildUsernameCandidate(alias = '') {
   return alias
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9._-]/g, '')
-    .slice(0, 30)
-    || 'user';
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9._-]/g, '')
+  .slice(0, 30)
+  || 'user';
 }
 
 function validatePassword(pwd) {
@@ -133,25 +133,25 @@ function AuthForm({ mode, appKey }) {
   const submitLogin = useCallback(async () => {
     const email    = emailRef.current?.value?.trim()    || '';
     const password = passwordRef.current?.value         || '';
-    if (!email || !password) { msg('Ingresa tu correo y contraseña'); return; }
-    setLoading(true);
-    try {
-      const data = await apiFetch('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-      });
-      if (appKey && data.user.role !== appKey) {
-        const labels = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
-        msg(`Esta cuenta es de tipo "${labels[data.user.role] || data.user.role}". Accede desde la sección correcta.`);
-        return;
-      }
-      login({ token: data.token, user: data.user });
-      navigate(`/${data.user.role}`);
-    } catch (e) {
-      msg(e.message);
-    } finally {
-      setLoading(false);
+  if (!email || !password) { msg('Ingresa tu correo y contraseña'); return; }
+  setLoading(true);
+  try {
+    const data = await apiFetch('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+    if (appKey && data.user.role !== appKey) {
+      const labels = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
+      msg(`Esta cuenta es de tipo "${labels[data.user.role] || data.user.role}". Accede desde la sección correcta.`);
+      return;
     }
+    login({ token: data.token, user: data.user });
+    navigate(`/${data.user.role}`);
+  } catch (e) {
+    msg(e.message);
+  } finally {
+    setLoading(false);
+  }
   }, [appKey, login, navigate]);
 
   const handleGoogleResponse = useCallback(async (response) => {
@@ -183,13 +183,13 @@ function AuthForm({ mode, appKey }) {
         callback:  handleGoogleResponse,
       });
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-      window.google.accounts.id.renderButton(googleBtnRef.current, {
-        theme:  isDark ? 'filled_black' : 'outline',
-        size:   'large',
-        width:  360,
-        text:   'continue_with',
-        locale: 'es',
-      });
+  window.google.accounts.id.renderButton(googleBtnRef.current, {
+    theme:  isDark ? 'filled_black' : 'outline',
+    size:   'large',
+    width:  360,
+    text:   'continue_with',
+    locale: 'es',
+  });
     };
     if (window.google) { render(); return; }
     const interval = setInterval(() => { if (window.google) { clearInterval(interval); render(); } }, 200);
@@ -210,8 +210,8 @@ function AuthForm({ mode, appKey }) {
 
     const usernameCandidate = buildUsernameCandidate(alias);
     const addressFull = (['customer','restaurant'].includes(role) && (postalCode || calle))
-      ? buildAddress()
-      : undefined;
+    ? buildAddress()
+    : undefined;
 
     setLoading(true);
     try {
@@ -219,19 +219,19 @@ function AuthForm({ mode, appKey }) {
         method: 'POST',
         body: JSON.stringify({
           email:       regEmail.trim(),
-          password:    regPwd,
-          fullName:    fullName.trim(),
-          alias:       alias.trim(),
-          username:    usernameCandidate,
-          role,
-          address:     addressFull,
-          postalCode:  postalCode  || undefined,
-          estado:      estado      || undefined,
-          ciudad:      ciudad      || undefined,
-          colonia:     colonia     || undefined,
-          calle:       calle       || undefined,
-          numero:      numero      || undefined,
-          displayName: role === 'restaurant' ? (alias.trim() || undefined) : undefined,
+                             password:    regPwd,
+                             fullName:    fullName.trim(),
+                             alias:       alias.trim(),
+                             username:    usernameCandidate,
+                             role,
+                             address:     addressFull,
+                             postalCode:  postalCode  || undefined,
+                             estado:      estado      || undefined,
+                             ciudad:      ciudad      || undefined,
+                             colonia:     colonia     || undefined,
+                             calle:       calle       || undefined,
+                             numero:      numero      || undefined,
+                             displayName: role === 'restaurant' ? (alias.trim() || undefined) : undefined,
         }),
       });
       msg('¡Registro exitoso! Ya puedes iniciar sesión.', true);
@@ -266,210 +266,210 @@ function AuthForm({ mode, appKey }) {
   return (
     <section className="auth-card">
 
-      <div style={{ marginBottom:'0.25rem' }}>
-        <h2 style={{ margin:0 }}>
-          {view === 'login'    && 'Iniciar sesión'}
-          {view === 'register' && 'Crear cuenta'}
-          {view === 'forgot'   && 'Recuperar contraseña'}
-        </h2>
+    <div style={{ marginBottom:'0.25rem' }}>
+    <h2 style={{ margin:0 }}>
+    {view === 'login'    && 'Iniciar sesión'}
+    {view === 'register' && 'Crear cuenta'}
+    {view === 'forgot'   && 'Recuperar contraseña'}
+    </h2>
+    </div>
+
+    <p style={{ marginBottom:'1rem', color:'var(--text-secondary)', fontSize:'0.875rem' }}>
+    {view === 'login'    && 'Ingresa con tu correo y contraseña.'}
+    {view === 'register' && 'Completa los datos para registrarte.'}
+    {view === 'forgot'   && 'Te enviaremos un enlace para restablecer tu contraseña.'}
+    </p>
+
+    {verifiedBanner && (
+      <div style={{ background:'#f0fff4', border:'1px solid #9ae6b4', borderRadius:8, padding:'0.65rem 0.9rem', marginBottom:'0.75rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem' }}>
+      <span style={{ fontSize:'0.85rem', color:'#276749' }}>✅ Correo verificado. Ya puedes iniciar sesión.</span>
+      <button onClick={() => setVerifiedBanner(false)} style={{ background:'none', border:'none', cursor:'pointer', color:'#276749', fontSize:'1rem', lineHeight:1 }}>✕</button>
+      </div>
+    )}
+
+    {showVerifyHint && view === 'login' && (
+      <div style={{ background:'#fffbeb', border:'1px solid #f6e05e', borderRadius:8, padding:'0.65rem 0.9rem', marginBottom:'0.75rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem' }}>
+      <span style={{ fontSize:'0.82rem', color:'#744210' }}>📬 Próximamente recibirás un correo para verificar tu cuenta.</span>
+      <button onClick={() => setShowVerifyHint(false)} style={{ background:'none', border:'none', cursor:'pointer', color:'#744210', fontSize:'1rem', lineHeight:1 }}>✕</button>
+      </div>
+    )}
+
+    {/* ── LOGIN ── */}
+    {view === 'login' && (
+      <>
+      <div className="row">
+      <label>Correo electrónico
+      <input
+      ref={emailRef}
+      defaultValue=""
+      type="email"
+      placeholder="tu@correo.com"
+      autoComplete="email"
+      onKeyDown={e => handleKey(e, submitLogin)}
+      />
+      </label>
+      <label>Contraseña
+      <input
+      ref={passwordRef}
+      defaultValue=""
+      type="password"
+      placeholder="Tu contraseña"
+      autoComplete="current-password"
+      onKeyDown={e => handleKey(e, submitLogin)}
+      />
+      </label>
       </div>
 
-      <p style={{ marginBottom:'1rem', color:'var(--text-secondary)', fontSize:'0.875rem' }}>
-        {view === 'login'    && 'Ingresa con tu correo y contraseña.'}
-        {view === 'register' && 'Completa los datos para registrarte.'}
-        {view === 'forgot'   && 'Te enviaremos un enlace para restablecer tu contraseña.'}
+      <div style={{ textAlign:'right', marginTop:'-0.25rem', marginBottom:'0.75rem' }}>
+      <button
+      type="button"
+      onClick={() => goTo('forgot')}
+      style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.8rem', padding:0 }}
+      >
+      ¿Olvidaste tu contraseña?
+      </button>
+      </div>
+
+      <div className="row">
+      <button className="btn-primary" onClick={submitLogin} disabled={loading}>
+      {loading ? 'Ingresando…' : 'Iniciar sesión'}
+      </button>
+
+      {GOOGLE_CLIENT_ID && (
+        <>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', margin:'0.25rem 0' }}>
+        <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
+        <span style={{ fontSize:'0.75rem', color:'var(--text-secondary)', whiteSpace:'nowrap' }}>o continúa con</span>
+        <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
+        </div>
+        {/* overflow-x hidden recorta el desborde lateral en móvil sin cortar el iframe verticalmente */}
+        <div style={{ overflowX:'hidden', borderRadius:4 }}>
+        <div ref={googleBtnRef} style={{ display:'flex', justifyContent:'center' }} />
+        </div>
+        </>
+      )}
+
+      {installPrompt && (
+        <button
+        type="button"
+        className="btn-sm"
+        onClick={async () => {
+          installPrompt.prompt();
+          await installPrompt.userChoice.catch(() => null);
+          setInstallPrompt(null);
+        }}
+        style={{ marginTop:'0.4rem' }}
+        >
+        Instalar app (PWA)
+        </button>
+      )}
+
+      <button
+      type="button"
+      onClick={() => goTo('register')}
+      style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}
+      >
+      ¿No tienes cuenta? <strong>Regístrate</strong>
+      </button>
+      </div>
+      </>
+    )}
+
+    {/* ── REGISTER ── */}
+    {view === 'register' && (
+      <>
+      <div className="row">
+      <label>Nombre completo
+      <input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Ej: Juan García López" autoComplete="name" />
+      </label>
+      <label>
+      Alias / Apodo
+      <input value={alias} onChange={e => setAlias(e.target.value)} placeholder="Ej: JuanG" autoComplete="nickname" />
+      <span style={{ fontSize:'0.73rem', color:'var(--text-secondary)', marginTop:'0.2rem', display:'block' }}>
+      Así te verán los demás. Tu nombre de usuario se genera automáticamente.
+      </span>
+      </label>
+      <label>Correo electrónico
+      <input value={regEmail} onChange={e => setRegEmail(e.target.value)} type="email" placeholder="tu@correo.com" autoComplete="email" />
+      </label>
+      {!appKey && (
+        <label>Tipo de cuenta
+        <select value={role} onChange={e => setRole(e.target.value)}>
+        <option value="customer">Cliente</option>
+        <option value="restaurant">Tienda</option>
+        <option value="driver">Conductor</option>
+        </select>
+        </label>
+      )}
+      </div>
+
+      <div className="row" style={{ marginTop:'0.5rem' }}>
+      <label>
+      Contraseña
+      <input value={regPwd} onChange={e => setRegPwd(e.target.value)} type="password" placeholder="Mínimo 8 caracteres" autoComplete="new-password" />
+      {pwdError && (
+        <span style={{ fontSize:'0.73rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>{pwdError}</span>
+      )}
+      </label>
+      <label>Confirmar contraseña
+      <input value={regPwdConf} onChange={e => setRegPwdConf(e.target.value)} type="password" placeholder="Repite la contraseña" autoComplete="new-password" />
+      </label>
+      {regPwd.length > 0 && <PasswordStrength pwd={regPwd} />}
+      </div>
+
+      <div style={{ marginTop:'0.75rem' }}>
+      <p style={{ fontWeight:700, fontSize:'0.82rem', marginBottom:'0.5rem', color:'var(--text-secondary)' }}>
+      {role === 'restaurant' ? 'Dirección de la tienda (requerida)' : 'Dirección (opcional — puedes configurarla después)'}
       </p>
+      <AddressBlock
+      postalCode={postalCode} setPostalCode={setPostalCode}
+      estado={estado}         setEstado={setEstado}
+      ciudad={ciudad}         setCiudad={setCiudad}
+      colonia={colonia}       setColonia={setColonia}
+      coloniasList={coloniasList}
+      calle={calle}           setCalle={setCalle}
+      numero={numero}         setNumero={setNumero}
+      cpLoading={cpLoading}   cpError={cpError}
+      />
+      </div>
 
-      {verifiedBanner && (
-        <div style={{ background:'#f0fff4', border:'1px solid #9ae6b4', borderRadius:8, padding:'0.65rem 0.9rem', marginBottom:'0.75rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem' }}>
-          <span style={{ fontSize:'0.85rem', color:'#276749' }}>✅ Correo verificado. Ya puedes iniciar sesión.</span>
-          <button onClick={() => setVerifiedBanner(false)} style={{ background:'none', border:'none', cursor:'pointer', color:'#276749', fontSize:'1rem', lineHeight:1 }}>✕</button>
-        </div>
-      )}
+      <div className="row" style={{ marginTop:'0.75rem' }}>
+      <button className="btn-primary" onClick={submitRegister} disabled={loading}>
+      {loading ? 'Registrando…' : 'Crear cuenta'}
+      </button>
+      <button type="button" onClick={() => goTo('login')}
+      style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}>
+      ¿Ya tienes cuenta? <strong>Inicia sesión</strong>
+      </button>
+      </div>
+      </>
+    )}
 
-      {showVerifyHint && view === 'login' && (
-        <div style={{ background:'#fffbeb', border:'1px solid #f6e05e', borderRadius:8, padding:'0.65rem 0.9rem', marginBottom:'0.75rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem' }}>
-          <span style={{ fontSize:'0.82rem', color:'#744210' }}>📬 Próximamente recibirás un correo para verificar tu cuenta.</span>
-          <button onClick={() => setShowVerifyHint(false)} style={{ background:'none', border:'none', cursor:'pointer', color:'#744210', fontSize:'1rem', lineHeight:1 }}>✕</button>
-        </div>
-      )}
+    {/* ── FORGOT PASSWORD ── */}
+    {view === 'forgot' && (
+      <>
+      <div className="row">
+      <label>Correo electrónico de tu cuenta
+      <input value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} type="email" placeholder="tu@correo.com" autoComplete="email" onKeyDown={e => handleKey(e, submitForgot)} />
+      </label>
+      </div>
+      <div className="row" style={{ marginTop:'0.5rem' }}>
+      <button className="btn-primary" onClick={submitForgot} disabled={loading}>
+      {loading ? 'Enviando…' : 'Enviar enlace de recuperación'}
+      </button>
+      <button type="button" onClick={() => goTo('login')}
+      style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}>
+      ← Volver al inicio de sesión
+      </button>
+      </div>
+      </>
+    )}
 
-      {/* ── LOGIN ── */}
-      {view === 'login' && (
-        <>
-          <div className="row">
-            <label>Correo electrónico
-              <input
-                ref={emailRef}
-                defaultValue=""
-                type="email"
-                placeholder="tu@correo.com"
-                autoComplete="email"
-                onKeyDown={e => handleKey(e, submitLogin)}
-              />
-            </label>
-            <label>Contraseña
-              <input
-                ref={passwordRef}
-                defaultValue=""
-                type="password"
-                placeholder="Tu contraseña"
-                autoComplete="current-password"
-                onKeyDown={e => handleKey(e, submitLogin)}
-              />
-            </label>
-          </div>
-
-          <div style={{ textAlign:'right', marginTop:'-0.25rem', marginBottom:'0.75rem' }}>
-            <button
-              type="button"
-              onClick={() => goTo('forgot')}
-              style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.8rem', padding:0 }}
-            >
-              ¿Olvidaste tu contraseña?
-            </button>
-          </div>
-
-          <div className="row">
-            <button className="btn-primary" onClick={submitLogin} disabled={loading}>
-              {loading ? 'Ingresando…' : 'Iniciar sesión'}
-            </button>
-
-            {GOOGLE_CLIENT_ID && (
-              <>
-                <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', margin:'0.25rem 0' }}>
-                  <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
-                  <span style={{ fontSize:'0.75rem', color:'var(--text-secondary)', whiteSpace:'nowrap' }}>o continúa con</span>
-                  <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
-                </div>
-                {/* Sin overflow:hidden — el iframe de One Tap es más alto que el botón estándar */}
-                <div style={{ display:'flex', justifyContent:'center' }}>
-                  <div ref={googleBtnRef} />
-                </div>
-              </>
-            )}
-
-            {installPrompt && (
-              <button
-                type="button"
-                className="btn-sm"
-                onClick={async () => {
-                  installPrompt.prompt();
-                  await installPrompt.userChoice.catch(() => null);
-                  setInstallPrompt(null);
-                }}
-                style={{ marginTop:'0.4rem' }}
-              >
-                Instalar app (PWA)
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => goTo('register')}
-              style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}
-            >
-              ¿No tienes cuenta? <strong>Regístrate</strong>
-            </button>
-          </div>
-        </>
-      )}
-
-      {/* ── REGISTER ── */}
-      {view === 'register' && (
-        <>
-          <div className="row">
-            <label>Nombre completo
-              <input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Ej: Juan García López" autoComplete="name" />
-            </label>
-            <label>
-              Alias / Apodo
-              <input value={alias} onChange={e => setAlias(e.target.value)} placeholder="Ej: JuanG" autoComplete="nickname" />
-              <span style={{ fontSize:'0.73rem', color:'var(--text-secondary)', marginTop:'0.2rem', display:'block' }}>
-                Así te verán los demás. Tu nombre de usuario se genera automáticamente.
-              </span>
-            </label>
-            <label>Correo electrónico
-              <input value={regEmail} onChange={e => setRegEmail(e.target.value)} type="email" placeholder="tu@correo.com" autoComplete="email" />
-            </label>
-            {!appKey && (
-              <label>Tipo de cuenta
-                <select value={role} onChange={e => setRole(e.target.value)}>
-                  <option value="customer">Cliente</option>
-                  <option value="restaurant">Tienda</option>
-                  <option value="driver">Conductor</option>
-                </select>
-              </label>
-            )}
-          </div>
-
-          <div className="row" style={{ marginTop:'0.5rem' }}>
-            <label>
-              Contraseña
-              <input value={regPwd} onChange={e => setRegPwd(e.target.value)} type="password" placeholder="Mínimo 8 caracteres" autoComplete="new-password" />
-              {pwdError && (
-                <span style={{ fontSize:'0.73rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>{pwdError}</span>
-              )}
-            </label>
-            <label>Confirmar contraseña
-              <input value={regPwdConf} onChange={e => setRegPwdConf(e.target.value)} type="password" placeholder="Repite la contraseña" autoComplete="new-password" />
-            </label>
-            {regPwd.length > 0 && <PasswordStrength pwd={regPwd} />}
-          </div>
-
-          <div style={{ marginTop:'0.75rem' }}>
-            <p style={{ fontWeight:700, fontSize:'0.82rem', marginBottom:'0.5rem', color:'var(--text-secondary)' }}>
-              {role === 'restaurant' ? 'Dirección de la tienda (requerida)' : 'Dirección (opcional — puedes configurarla después)'}
-            </p>
-            <AddressBlock
-              postalCode={postalCode} setPostalCode={setPostalCode}
-              estado={estado}         setEstado={setEstado}
-              ciudad={ciudad}         setCiudad={setCiudad}
-              colonia={colonia}       setColonia={setColonia}
-              coloniasList={coloniasList}
-              calle={calle}           setCalle={setCalle}
-              numero={numero}         setNumero={setNumero}
-              cpLoading={cpLoading}   cpError={cpError}
-            />
-          </div>
-
-          <div className="row" style={{ marginTop:'0.75rem' }}>
-            <button className="btn-primary" onClick={submitRegister} disabled={loading}>
-              {loading ? 'Registrando…' : 'Crear cuenta'}
-            </button>
-            <button type="button" onClick={() => goTo('login')}
-              style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}>
-              ¿Ya tienes cuenta? <strong>Inicia sesión</strong>
-            </button>
-          </div>
-        </>
-      )}
-
-      {/* ── FORGOT PASSWORD ── */}
-      {view === 'forgot' && (
-        <>
-          <div className="row">
-            <label>Correo electrónico de tu cuenta
-              <input value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} type="email" placeholder="tu@correo.com" autoComplete="email" onKeyDown={e => handleKey(e, submitForgot)} />
-            </label>
-          </div>
-          <div className="row" style={{ marginTop:'0.5rem' }}>
-            <button className="btn-primary" onClick={submitForgot} disabled={loading}>
-              {loading ? 'Enviando…' : 'Enviar enlace de recuperación'}
-            </button>
-            <button type="button" onClick={() => goTo('login')}
-              style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontSize:'0.875rem', textAlign:'center', padding:'0.25rem 0' }}>
-              ← Volver al inicio de sesión
-            </button>
-          </div>
-        </>
-      )}
-
-      {message.text && (
-        <p className={`flash ${message.ok ? 'flash-ok' : 'flash-error'}`} style={{ marginTop:'0.75rem' }}>
-          {message.text}
-        </p>
-      )}
+    {message.text && (
+      <p className={`flash ${message.ok ? 'flash-ok' : 'flash-error'}`} style={{ marginTop:'0.75rem' }}>
+      {message.text}
+      </p>
+    )}
     </section>
   );
 }
@@ -479,52 +479,52 @@ function AddressBlock({ postalCode, setPostalCode, estado, setEstado, ciudad, se
   const BUSY = { opacity:0.7, pointerEvents:'none' };
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem' }}>
-      <label>
-        Código postal
-        <div style={{ position:'relative', ...(cpLoading ? BUSY : {}) }}>
-          <input
-            value={postalCode}
-            onChange={e => setPostalCode(e.target.value.replace(/\D/g,'').slice(0,5))}
-            placeholder="Ej: 44100" maxLength={5} inputMode="numeric"
-          />
-          {cpLoading && (
-            <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.75rem', color:'var(--text-secondary)' }}>
-              Buscando…
-            </span>
-          )}
-        </div>
-        {cpError && <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>{cpError}</span>}
-      </label>
+    <label>
+    Código postal
+    <div style={{ position:'relative', ...(cpLoading ? BUSY : {}) }}>
+    <input
+    value={postalCode}
+    onChange={e => setPostalCode(e.target.value.replace(/\D/g,'').slice(0,5))}
+    placeholder="Ej: 44100" maxLength={5} inputMode="numeric"
+    />
+    {cpLoading && (
+      <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.75rem', color:'var(--text-secondary)' }}>
+      Buscando…
+      </span>
+    )}
+    </div>
+    {cpError && <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>{cpError}</span>}
+    </label>
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.55rem' }}>
-        <label>Estado
-          <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Jalisco" disabled={cpLoading} />
-        </label>
-        <label>Municipio / Ciudad
-          <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Guadalajara" disabled={cpLoading} />
-        </label>
-      </div>
+    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.55rem' }}>
+    <label>Estado
+    <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Jalisco" disabled={cpLoading} />
+    </label>
+    <label>Municipio / Ciudad
+    <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Guadalajara" disabled={cpLoading} />
+    </label>
+    </div>
 
-      <label>
-        Colonia
-        {coloniasList.length > 0 ? (
-          <select value={colonia} onChange={e => setColonia(e.target.value)} disabled={cpLoading}>
-            <option value="">Seleccionar colonia…</option>
-            {coloniasList.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-        ) : (
-          <input value={colonia} onChange={e => setColonia(e.target.value)} placeholder="Ej: Col. Centro" disabled={cpLoading} />
-        )}
-      </label>
+    <label>
+    Colonia
+    {coloniasList.length > 0 ? (
+      <select value={colonia} onChange={e => setColonia(e.target.value)} disabled={cpLoading}>
+      <option value="">Seleccionar colonia…</option>
+      {coloniasList.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+    ) : (
+      <input value={colonia} onChange={e => setColonia(e.target.value)} placeholder="Ej: Col. Centro" disabled={cpLoading} />
+    )}
+    </label>
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:'0.55rem', alignItems:'end' }}>
-        <label>Calle
-          <input value={calle} onChange={e => setCalle(e.target.value)} placeholder="Ej: Av. Revolución" />
-        </label>
-        <label style={{ width:90 }}>Número
-          <input value={numero} onChange={e => setNumero(e.target.value)} placeholder="1234" />
-        </label>
-      </div>
+    <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:'0.55rem', alignItems:'end' }}>
+    <label>Calle
+    <input value={calle} onChange={e => setCalle(e.target.value)} placeholder="Ej: Av. Revolución" />
+    </label>
+    <label style={{ width:90 }}>Número
+    <input value={numero} onChange={e => setNumero(e.target.value)} placeholder="1234" />
+    </label>
+    </div>
     </div>
   );
 }
@@ -542,18 +542,18 @@ function PasswordStrength({ pwd }) {
 
   return (
     <div style={{ marginTop:'0.3rem' }}>
-      <div style={{ display:'flex', gap:3 }}>
-        {[0,1,2,3].map(i => (
-          <div key={i} style={{
-            flex:1, height:4, borderRadius:2,
-            background: i < score ? colors[score] : 'var(--border)',
-            transition:'background 0.3s',
-          }} />
-        ))}
-      </div>
-      <span style={{ fontSize:'0.72rem', color: colors[score] || 'var(--text-secondary)', marginTop:'0.2rem', display:'block' }}>
-        {labels[score] || ''}
-      </span>
+    <div style={{ display:'flex', gap:3 }}>
+    {[0,1,2,3].map(i => (
+      <div key={i} style={{
+        flex:1, height:4, borderRadius:2,
+        background: i < score ? colors[score] : 'var(--border)',
+                         transition:'background 0.3s',
+      }} />
+    ))}
+    </div>
+    <span style={{ fontSize:'0.72rem', color: colors[score] || 'var(--text-secondary)', marginTop:'0.2rem', display:'block' }}>
+    {labels[score] || ''}
+    </span>
     </div>
   );
 }
