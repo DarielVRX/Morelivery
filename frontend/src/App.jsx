@@ -1,10 +1,44 @@
 // frontend/src/App.jsx
-import { lazy, memo, Suspense, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import SplitLayout from './components/SplitLayout';
 import { apiFetch } from './api/client';
+
+// ─── Dark mode hook ───────────────────────────────────────────────────────────
+function useDarkMode() {
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem('theme');
+    if (saved) return saved === 'dark';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    localStorage.setItem('theme', dark ? 'dark' : 'light');
+  }, [dark]);
+
+  return [dark, setDark];
+}
+
+function ThemeToggle({ dark, setDark }) {
+  return (
+    <button
+    onClick={() => setDark(d => !d)}
+    title={dark ? 'Modo claro' : 'Modo oscuro'}
+    style={{
+      background: 'none', border: '1px solid var(--border)',
+          borderRadius: 8, width: 34, height: 34,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', fontSize: '1rem', color: 'var(--text-secondary)',
+          flexShrink: 0,
+    }}
+    >
+    {dark ? '☀️' : '🌙'}
+    </button>
+  );
+}
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const CustomerHome    = lazy(() => import('./pages/Customer/Home'));
@@ -52,6 +86,7 @@ function ProtectedAny({ children }) {
 // ─── Pantalla de inicio ───────────────────────────────────────────────────────
 function LandingScreen() {
   const { auth } = useAuth();
+  const [dark, setDark] = useDarkMode();
   if (auth.user) {
     const app = findApp(auth.user.role);
     return <Navigate to={app?.home || '/'} replace />;
@@ -63,7 +98,12 @@ function LandingScreen() {
           display:'flex', flexDirection:'column',
           alignItems:'center', justifyContent:'center',
           padding:'2rem 1.25rem',
+          position:'relative',
     }}>
+    {/* Theme toggle — top right */}
+    <div style={{ position:'absolute', top:'1rem', right:'1.25rem' }}>
+    <ThemeToggle dark={dark} setDark={setDark} />
+    </div>
     {/* Marca */}
     <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'0.5rem', marginBottom:'2.5rem' }}>
     <img src="/logo.svg" alt="Morelivery" style={{ width:60, height:60 }} />
@@ -119,6 +159,7 @@ const AuthScreen = memo(function AuthScreen({ mode = 'login' }) {
   const app        = findApp(appKey);
   const { auth, login } = useAuth();
   const navigate   = useNavigate();
+  const [dark, setDark] = useDarkMode();
 
   // Inputs no controlados — refs para evitar re-renders
   const usernameRef    = useRef(null);
@@ -201,6 +242,7 @@ return (
   <img src="/logo.svg" alt="" style={{ width:24, height:24 }} />
   <strong style={{ fontSize:'0.95rem' }}>Morelivery</strong>
   </div>
+  <ThemeToggle dark={dark} setDark={setDark} />
   </header>
 
   <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:'2rem 1.25rem' }}>

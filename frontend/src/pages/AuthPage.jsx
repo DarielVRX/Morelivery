@@ -7,6 +7,19 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../api/client';
 
+function useDarkMode() {
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem('theme');
+    if (saved) return saved === 'dark';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    localStorage.setItem('theme', dark ? 'dark' : 'light');
+  }, [dark]);
+  return [dark, setDark];
+}
+
 export default function AuthPage({ mode = 'login' }) {
   return <AuthForm mode={mode} />;
 }
@@ -16,6 +29,7 @@ export default function AuthPage({ mode = 'login' }) {
 function AuthForm({ mode }) {
   const { login } = useAuth();
   const navigate  = useNavigate();
+  const [dark, setDark] = useDarkMode();
 
   const usernameRef    = useRef(null);
   const passwordRef    = useRef(null);
@@ -80,7 +94,21 @@ function AuthForm({ mode }) {
 
   return (
     <section className="auth-card">
-    <h2>{isLogin ? 'Iniciar sesión' : 'Crear cuenta'}</h2>
+    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'0.25rem' }}>
+    <h2 style={{ margin:0 }}>{isLogin ? 'Iniciar sesión' : 'Crear cuenta'}</h2>
+    <button
+    onClick={() => setDark(d => !d)}
+    title={dark ? 'Modo claro' : 'Modo oscuro'}
+    style={{
+      background:'none', border:'1px solid var(--border)',
+          borderRadius:8, width:34, height:34,
+          display:'flex', alignItems:'center', justifyContent:'center',
+          cursor:'pointer', fontSize:'1rem', color:'var(--text-secondary)', flexShrink:0,
+    }}
+    >
+    {dark ? '☀️' : '🌙'}
+    </button>
+    </div>
     <p>{isLogin ? 'Ingresa con tu usuario y contraseña.' : 'Completa los datos para registrarte.'}</p>
 
     <div className="row">
