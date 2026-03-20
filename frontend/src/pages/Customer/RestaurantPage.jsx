@@ -341,8 +341,8 @@ export default function RestaurantPage() {
     {/* Hero header */}
     <div style={{
       background: restaurant?.profile_photo
-      ? 'var(--bg-sunken)'
-      : 'var(--promo-gradient)',
+      ? '#2a1a1a'
+      : 'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)',
           position: 'relative', overflow: 'hidden',
           minHeight: 140,
     }}>
