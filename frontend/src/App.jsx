@@ -88,6 +88,7 @@ function LandingScreen() {
         background:'var(--brand-light)',
                       border:'1.5px solid var(--border)',
                       borderRadius:8,
+                      aspectRatio: '1 / 1'
                       cursor:'pointer',
                       transition:'transform 0.15s, box-shadow 0.15s',
                       height:'100%',
