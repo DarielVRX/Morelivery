@@ -75,8 +75,8 @@ export default function DriverMap({
     const el = containerRef.current;
     if (el) {
       el.style.filter = dark
-        ? 'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9) contrast(2.5)'
-        : 'contrast(2.0) saturate(1.4) brightness(0.1)';
+        ? 'invert(1) contrast(1.1) hue-rotate(180deg) brightness(0.85) saturate(1.5)'
+        : 'contrast(1.1) saturate(1.8) brightness(0.9) grayscale(0.1)';
     }
   }
 
