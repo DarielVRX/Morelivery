@@ -138,29 +138,22 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
     setSearching(true);
     debounceRef.current = setTimeout(async () => {
       try {
-        const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(val + ' Morelia')}&limit=6&lang=es&bbox=-101.5,19.5,-100.9,19.9`;
-        const r = await fetch(url);
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(val + ', Morelia, Michoacán')}&format=json&addressdetails=1&limit=6&countrycodes=mx&accept-language=es&viewbox=-101.5,19.9,-100.9,19.5&bounded=1`;
+        const r = await fetch(url, { headers: { 'Accept-Language':'es', 'User-Agent':'Morelivery/1.0' } });
         const data = await r.json();
-        const items = (data.features || []).map(f => {
-          const p = f.properties || {};
-          const parts = [
-            p.name !== p.street ? p.name : null,
-            p.street,
-            p.housenumber,
-            p.suburb || p.district,
-            p.city || p.town || 'Morelia',
-          ].filter(Boolean);
-          const deduped = parts.filter((v, i) => v !== parts[i-1]);
+        const items = (data || []).map(item => {
+          const a = item.address || {};
+          const parts = [a.road, a.house_number, a.suburb || a.neighbourhood, a.city || 'Morelia'].filter(Boolean);
           return {
-            label: deduped.join(', ') || p.name || 'Sin nombre',
-                                                lat: f.geometry?.coordinates[1],
-                                                lng: f.geometry?.coordinates[0],
+            label: parts.join(', ') || item.display_name?.split(',').slice(0,3).join(',') || 'Sin nombre',
+                                       lat: Number(item.lat),
+                                       lng: Number(item.lon),
           };
         }).filter(i => i.lat && i.lng);
         setResults(items);
       } catch (_) { setResults([]); }
       finally { setSearching(false); }
-    }, 350);
+    }, 400);
   }
 
   function selectGPS() {
