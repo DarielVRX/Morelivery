@@ -24,13 +24,14 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // ── Nodemailer (Gmail App Password) ──────────────────────────────────────────
 const mailer = nodemailer.createTransport({
-  host:   'smtp.gmail.com',
-  port:   465,
-  secure: true,
-  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-  connectionTimeout: 5000,
-  greetingTimeout:   5000,
-  socketTimeout:     5000,
+  service: 'gmail',
+  auth: {
+    type:         'OAuth2',
+    user:         process.env.GMAIL_USER,
+    clientId:     process.env.GMAIL_CLIENT_ID,
+    clientSecret: process.env.GMAIL_CLIENT_SECRET,
+    refreshToken: process.env.GMAIL_REFRESH_TOKEN,
+  },
 });
 // ── Utilidad: resolver username único ────────────────────────────────────────
 // El frontend manda un candidato (alias limpio). Si ya existe,
