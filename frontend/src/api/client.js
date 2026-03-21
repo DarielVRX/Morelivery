@@ -20,7 +20,7 @@ export async function apiFetch(path, options = {}, token = null) {
 
   if (!res.ok) {
     // Token expirado o inválido — disparar evento global para que AuthContext haga logout
-    if (res.status === 401 && token) {
+    if (res.status === 401 && token && !options.skipLogoutOn401) {
       window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
     }
     let message = `Error ${res.status}`;

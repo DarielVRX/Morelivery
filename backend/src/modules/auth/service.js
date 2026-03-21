@@ -457,7 +457,7 @@ export async function forgotPassword(email) {
   try {
     await sendGmail({
       to:      realEmail,
-      subject: 'Recupera tu contraseña en Morelivery',
+      subject: 'Recupera tu contrase\u00F1a en Morelivery',
       html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
       <h2 style="color:#1a202c;margin-bottom:8px">Hola, ${name} 👋</h2>
@@ -633,10 +633,9 @@ export async function updateProfileAddress(userId, role, address, displayName, l
 export async function changePassword(userId, currentPassword, newPassword) {
   const r = await query('SELECT password_hash FROM users WHERE id = $1', [userId]);
   if (r.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
-  if (currentPassword) {
-    const matches = await bcrypt.compare(currentPassword, r.rows[0].password_hash);
-    if (!matches) throw new AppError(401, 'Contraseña actual incorrecta');
-  }
+  if (!currentPassword) throw new AppError(400, 'La contraseña actual es requerida');
+  const matches = await bcrypt.compare(currentPassword, r.rows[0].password_hash);
+  if (!matches) throw new AppError(401, 'Contraseña actual incorrecta');
   const newHash = await bcrypt.hash(newPassword, 12);
   await query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, userId]);
 }
@@ -648,6 +647,7 @@ export async function deleteAccount(userId, role, currentPassword) {
   const { password_hash: hash, google_id: googleId } = pwdRow.rows[0];
 
   if (currentPassword) {
+    if (!hash) throw new AppError(400, 'Esta cuenta usa Google — no tiene contraseña');
     const matches = await bcrypt.compare(currentPassword, hash);
     if (!matches) throw new AppError(401, 'Contraseña incorrecta');
   } else if (!googleId) {
