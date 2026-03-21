@@ -316,7 +316,12 @@ export default function RestaurantMenu() {
       </div>
 
       {/* ── Alerta coordenadas faltantes ─────────────────────────────────── */}
-      {restaurantData && !Number.isFinite(Number(restaurantData.lat)) && (
+      {restaurantData && (() => {
+        const _mLat = Number(restaurantData.lat), _mLng = Number(restaurantData.lng);
+        const _mOk = Number.isFinite(_mLat) && Number.isFinite(_mLng)
+          && _mLat > 19.5 && _mLat < 20.0 && _mLng > -101.6 && _mLng < -100.8;
+        return !_mOk;
+      })() && (
         <div style={{
           display:'flex', alignItems:'flex-start', gap:'0.6rem',
           background:'#fffbeb', border:'1px solid #fde68a',
