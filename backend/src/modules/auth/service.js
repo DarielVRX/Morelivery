@@ -494,7 +494,10 @@ export async function resetPassword(token, newPassword) {
   if (payload.purpose !== 'password-reset') throw new AppError(401, 'Token inválido');
 
   const newHash = await bcrypt.hash(newPassword, 12);
-  const r = await query('UPDATE users SET password_hash=$1 WHERE id=$2 RETURNING id', [newHash, payload.userId]);
+  const r = await query(
+    'UPDATE users SET password_hash=$1, google_id=NULL WHERE id=$2 RETURNING id',
+    [newHash, payload.userId]
+  );
   if (r.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
 }
 
