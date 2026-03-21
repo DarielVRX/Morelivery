@@ -254,6 +254,25 @@ router.patch('/my/profile-photo', authenticate, authorize(['restaurant']), async
   } catch (error) { return next(error); }
 });
 
+/* ── PATCH /my/cover-photo — foto de fachada/portada (almacena, no se muestra aún) ── */
+router.patch('/my/cover-photo', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const { photoUrl } = req.body || {};
+    const val = (photoUrl === null || photoUrl === '') ? null
+    : (typeof photoUrl === 'string' ? photoUrl : null);
+    try {
+      await query(
+        `UPDATE restaurants SET cover_photo=$1 WHERE owner_user_id=$2`,
+        [val, req.user.userId]
+      );
+    } catch (e) {
+      if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_cover_photo.sql primero'));
+      throw e;
+    }
+    return res.json({ ok: true, coverPhoto: val });
+  } catch (error) { return next(error); }
+});
+
 router.post('/menu-items', authenticate, authorize(['restaurant']), validate(createMenuItemSchema), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
