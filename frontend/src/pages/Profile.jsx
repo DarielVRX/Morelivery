@@ -531,8 +531,7 @@ export default function ProfilePage() {
     if (!deletePwd.trim()) { setDeleteMsg('Ingresa tu contraseña para confirmar'); setDeleteErr(true); return; }
     setDeleteLoading(true);
     try {
-      await apiFetch('/auth/account', { method: 'DELETE', body: JSON.stringify({ password: deletePwd }) }, auth.token);
-      logout();
+      await apiFetch('/auth/account', { method: 'DELETE', body: JSON.stringify({ password: deletePwd }), skipLogoutOn401: true }, auth.token);
     } catch (e) {
       setDeleteMsg(e.message); setDeleteErr(true);
     } finally {
@@ -621,10 +620,10 @@ export default function ProfilePage() {
     }
     try {
       if (changingPwd) {
-        await apiFetch('/auth/password', { method:'PATCH', body: JSON.stringify({ currentPassword, newPassword }) }, auth.token);
+        await apiFetch('/auth/password', { method:'PATCH', body: JSON.stringify({ currentPassword, newPassword }), skipLogoutOn401: true }, auth.token);
       }
       if (changingUser) {
-        await apiFetch('/auth/login-username', { method:'PATCH', body: JSON.stringify({ currentPassword, newUsername: loginUsername.trim() }) }, auth.token);
+        await apiFetch('/auth/login-username', { method:'PATCH', body: JSON.stringify({ currentPassword, newUsername: loginUsername.trim() }), skipLogoutOn401: true }, auth.token);
         patchUser({ username: loginUsername.trim() });
       }
       setPwdMsg(changingPwd && changingUser ? 'Contraseña y nombre de usuario actualizados' : changingPwd ? 'Contraseña actualizada' : 'Nombre de usuario actualizado');
