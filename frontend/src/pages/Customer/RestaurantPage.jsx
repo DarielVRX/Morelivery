@@ -193,7 +193,46 @@ export default function RestaurantPage() {
     <div style={{ padding:'3rem', textAlign:'center', color:'var(--text-tertiary)' }}>Cargando…</div>
   );
 
-  return (
+  // Restaurante sin ubicación configurada — página deshabilitada
+  if (restaurant && restLat === null) return (
+    <div style={{ backgroundColor:'var(--bg-base)', minHeight:'100vh' }}>
+      <div style={{
+        background:'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)',
+        position:'relative', overflow:'hidden', minHeight:120,
+        padding:'1rem 1rem 1.25rem', display:'flex', flexDirection:'column', gap:'0.5rem',
+      }}>
+        <button onClick={() => navigate(-1)}
+          style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.3)',
+            borderRadius:8, color:'#fff', padding:'0.3rem 0.65rem', fontSize:'0.82rem',
+            fontWeight:600, cursor:'pointer', alignSelf:'flex-start', minHeight:'unset',
+            display:'flex', alignItems:'center', gap:'0.3rem', width:'fit-content' }}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Volver
+        </button>
+        <div style={{ display:'flex', gap:'0.875rem', alignItems:'center' }}>
+          <div style={{ width:48, height:48, borderRadius:'50%', background:'rgba(255,255,255,0.2)',
+            border:'2px solid rgba(255,255,255,0.4)', display:'flex', alignItems:'center',
+            justifyContent:'center', flexShrink:0, color:'rgba(255,255,255,0.8)' }}>
+            <IconStore />
+          </div>
+          <h2 style={{ fontSize:'1.1rem', fontWeight:900, color:'#fff', margin:0, letterSpacing:'-0.02em' }}>
+            {restaurant.name}
+          </h2>
+        </div>
+      </div>
+      <div style={{ padding:'2.5rem 1.5rem', textAlign:'center' }}>
+        <div style={{ fontSize:'2.5rem', marginBottom:'0.75rem' }}>📍</div>
+        <div style={{ fontWeight:800, fontSize:'1rem', color:'var(--text-primary)', marginBottom:'0.5rem' }}>
+          Tienda sin ubicación configurada
+        </div>
+        <p style={{ fontSize:'0.88rem', color:'var(--text-secondary)', lineHeight:1.5, maxWidth:300, margin:'0 auto' }}>
+          Esta tienda aún no ha configurado su dirección. No es posible realizar pedidos hasta que el restaurante complete su perfil.
+        </p>
+      </div>
+    </div>
+  );
     <div style={{ backgroundColor:'var(--bg-base)', minHeight:'100vh' }}>
 
       {/* Toast de ubicación */}
