@@ -4,10 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/server.js",
-    "start": "node src/server.js",
-    "lint": "echo 'No linter configured yet'",
-    "test": "node --test"
+    "install:all": "npm install --workspaces",
+    "dev:frontend": "npm --workspace frontend run dev",
+    "dev:backend": "npm --workspace backend run dev",
+    "build:frontend": "npm --workspace frontend run build",
+    "start:backend": "npm --workspace backend run start",
+    "start": "npm --workspace backend run start"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
