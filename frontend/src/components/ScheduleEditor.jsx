@@ -63,8 +63,8 @@ export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChan
     <div>
       {/* ── Estado actual + controles manuales ── */}
       <div style={{ display:'flex', alignItems:'center', flexWrap:'wrap', gap:'0.75rem',
-        padding:'0.75rem 1rem', background:'#f9fafb', borderRadius:8,
-        border:'1px solid #e5e7eb', marginBottom:'1rem' }}>
+        padding:'0.75rem 1rem', background:'var(--bg-sunken)', borderRadius:8,
+        border:'1px solid var(--border)', marginBottom:'1rem' }}>
         <div style={{ flex: '0 0 auto' }}>
           <span style={{ color: isOpen ? '#16a34a' : '#dc2626', fontWeight: 700, fontSize: '1rem' }}>
             {isOpen ? '● Abierto' : '● Cerrado'}
@@ -74,20 +74,20 @@ export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChan
         <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
           <button onClick={() => doToggle(true)}  disabled={toggling || override === true}
             style={{ padding:'0.3rem 0.75rem', borderRadius:6, border:'none', cursor:'pointer',
-              background: override === true  ? '#16a34a' : '#e5e7eb',
-              color:      override === true  ? '#fff'    : '#374151', fontWeight:600, fontSize:'0.82rem' }}>
+              background: override === true  ? '#16a34a' : 'var(--border)',
+              color:      override === true  ? 'var(--bg-card)'    : 'var(--text-primary)', fontWeight:600, fontSize:'0.82rem' }}>
             Abrir ahora
           </button>
           <button onClick={() => doToggle(false)} disabled={toggling || override === false}
             style={{ padding:'0.3rem 0.75rem', borderRadius:6, border:'none', cursor:'pointer',
-              background: override === false ? '#dc2626' : '#e5e7eb',
-              color:      override === false ? '#fff'    : '#374151', fontWeight:600, fontSize:'0.82rem' }}>
+              background: override === false ? '#dc2626' : 'var(--border)',
+              color:      override === false ? 'var(--bg-card)'    : 'var(--text-primary)', fontWeight:600, fontSize:'0.82rem' }}>
             Cerrar ahora
           </button>
           {override !== null && (
             <button onClick={() => doToggle(null)} disabled={toggling}
-              style={{ padding:'0.3rem 0.75rem', borderRadius:6, border:'1px solid #e5e7eb',
-                background:'#fff', cursor:'pointer', fontSize:'0.82rem' }}>
+              style={{ padding:'0.3rem 0.75rem', borderRadius:6, border:'1px solid var(--border)',
+                background:'var(--bg-card)', cursor:'pointer', fontSize:'0.82rem' }}>
               Seguir horario
             </button>
           )}
@@ -98,7 +98,7 @@ export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChan
       <div style={{ overflowX:'auto' }}>
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.875rem' }}>
           <thead>
-            <tr style={{ background:'#f9fafb', borderBottom:'1px solid #e5e7eb' }}>
+            <tr style={{ background:'var(--bg-sunken)', borderBottom:'1px solid var(--border)' }}>
               <th style={{ padding:'0.45rem 0.75rem', textAlign:'left' }}>Día</th>
               <th style={{ padding:'0.45rem 0.75rem', textAlign:'center' }}>Cerrado</th>
               <th style={{ padding:'0.45rem 0.75rem', textAlign:'center' }}>Apertura</th>
@@ -117,14 +117,16 @@ export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChan
                 <td style={{ padding:'0.45rem 0.75rem', textAlign:'center' }}>
                   <input type="time" value={day.opens_at || ''} disabled={day.is_closed}
                     onChange={e => updateDay(i, 'opens_at', e.target.value)}
-                    style={{ padding:'0.2rem 0.4rem', borderRadius:4, border:'1px solid #e5e7eb',
-                      width:90, fontSize:'0.875rem', background: day.is_closed ? '#f9fafb' : '#fff' }} />
+                    style={{ padding:'0.2rem 0.4rem', borderRadius:4, border:'1px solid var(--border)',
+                      width:90, fontSize:'0.875rem', background: day.is_closed ? 'var(--bg-sunken)' : 'var(--bg-card)',
+                                       color: 'var(--text-primary)' }} />
                 </td>
                 <td style={{ padding:'0.45rem 0.75rem', textAlign:'center' }}>
                   <input type="time" value={day.closes_at || ''} disabled={day.is_closed}
                     onChange={e => updateDay(i, 'closes_at', e.target.value)}
-                    style={{ padding:'0.2rem 0.4rem', borderRadius:4, border:'1px solid #e5e7eb',
-                      width:90, fontSize:'0.875rem', background: day.is_closed ? '#f9fafb' : '#fff' }} />
+                    style={{ padding:'0.2rem 0.4rem', borderRadius:4, border:'1px solid var(--border)',
+                      width:90, fontSize:'0.875rem', background: day.is_closed ? 'var(--bg-sunken)' : 'var(--bg-card)',
+                                       color: 'var(--text-primary)' }} />
                 </td>
               </tr>
             ))}
