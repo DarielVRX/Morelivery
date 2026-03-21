@@ -439,7 +439,7 @@ export async function verifyEmail(token) {
 // Reemplaza toda la función forgotPassword (líneas 434-485)
 export async function forgotPassword(email) {
   const realEmail = email.trim().toLowerCase();
-
+  logEvent('auth.forgot_password_attempt', { smtp_user: process.env.SMTP_USER, to: realEmail });
   let user;
   try {
     const r = await query('SELECT id, alias, full_name FROM users WHERE real_email = $1', [realEmail]);
