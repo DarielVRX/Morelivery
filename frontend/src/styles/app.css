@@ -98,7 +98,7 @@ a:hover{text-decoration:underline;}
 .brand-block h1{font-size:1.1rem;font-weight:900;letter-spacing:-.5px;color:var(--brand);}
 .brand-logo{height:28px;width:28px;object-fit:contain;}
 
-.header-icon-btn{width:36px;height:36px;border-radius:50%;background:var(--bg-raised);border:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;position:relative;transition:background var(--t-fast);flex-shrink:0;color:var(--text-secondary);min-height:unset;}
+.header-icon-btn{width:36px;height:36px;border-radius:50%;background:var(--bg-raised);border:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;position:relative;transition:background var(--t-fast);flex-shrink:0;color:var(--text-primary);min-height:unset;}
 .header-icon-btn:hover{background:var(--bg-sunken);}
 .header-icon-btn .dot-alert{position:absolute;top:5px;right:5px;width:8px;height:8px;border-radius:50%;background:var(--warn);border:2px solid var(--bg-card);}
 [data-theme="dark"] .header-icon-btn .dot-alert{border-color:#141414;}
