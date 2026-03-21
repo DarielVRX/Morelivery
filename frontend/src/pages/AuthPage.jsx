@@ -20,6 +20,20 @@ import { apiFetch } from '../api/client';
 // VITE_GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
+// ── Dark mode ────────────────────────────────────────────────────────────────
+function useDarkMode() {
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem('theme');
+    if (saved) return saved === 'dark';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    localStorage.setItem('theme', dark ? 'dark' : 'light');
+  }, [dark]);
+  return [dark, setDark];
+}
+
 // ── Utilidad: genera username desde alias ────────────────────────────────────
 // Limpia el alias, lo pone en minúsculas sin espacios ni caracteres especiales.
 // Si el alias ya tiene ≥3 chars de sufijo se omite la generación adicional;
@@ -231,19 +245,19 @@ function AuthForm({ mode, appKey }) {
         client_id: GOOGLE_CLIENT_ID,
         callback:  handleGoogleResponse,
       });
-      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  window.google.accounts.id.renderButton(googleBtnRef.current, {
-    theme:  isDark ? 'filled_black' : 'outline',
-    size:   'large',
-    width:  360,
-    text:   'continue_with',
-    locale: 'es',
-  });
+      window.google.accounts.id.renderButton(googleBtnRef.current, {
+        theme:  dark ? 'filled_black' : 'outline',
+        size:   'large',
+        width:  '100%',
+        maxwidth: '360px',
+        text:   'continue_with',
+        locale: 'es',
+      });
     };
     if (window.google) { render(); return; }
     const interval = setInterval(() => { if (window.google) { clearInterval(interval); render(); } }, 200);
     return () => clearInterval(interval);
-  }, [view, handleGoogleResponse]);
+  }, [view, dark, handleGoogleResponse]);
 
   // ── SUBMIT REGISTER ─────────────────────────────────────────────────────
   const submitRegister = useCallback(async () => {
@@ -323,13 +337,24 @@ function AuthForm({ mode, appKey }) {
     <section className="auth-card">
 
     {/* Header */}
-    {/* Header */}
-    <div style={{ marginBottom:'0.25rem' }}>
+    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'0.25rem' }}>
     <h2 style={{ margin:0 }}>
     {view === 'login'    && 'Iniciar sesión'}
     {view === 'register' && 'Crear cuenta'}
     {view === 'forgot'   && 'Recuperar contraseña'}
     </h2>
+    <button
+    onClick={() => setDark(d => !d)}
+    title={dark ? 'Modo claro' : 'Modo oscuro'}
+    style={{
+      background:'none', border:'1px solid var(--border)',
+          borderRadius:8, width:34, height:34,
+          display:'flex', alignItems:'center', justifyContent:'center',
+          cursor:'pointer', fontSize:'1rem', color:'var(--text-secondary)', flexShrink:0,
+    }}
+    >
+    {dark ? '☀️' : '🌙'}
+    </button>
     </div>
 
     <p style={{ marginBottom:'1rem', color:'var(--text-secondary)', fontSize:'0.875rem' }}>
