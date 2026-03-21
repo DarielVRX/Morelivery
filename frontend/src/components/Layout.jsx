@@ -77,14 +77,14 @@ export default function Layout({ children }) {
         )}
 
         <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', flexShrink:0 }}>
-          <button
-            style={{ color: 'var(--text-primary)' }}
-            className="header-icon-btn"
-            onClick={toggle}
-            title={isDark ? 'Tema claro' : 'Tema oscuro'}
-            aria-label="Tema">
-            {isDark ? <IconSun /> : <IconMoon />}
-          </button>
+            <button
+              className="header-icon-btn"
+              onClick={toggle}
+              title={isDark ? 'Tema claro' : 'Tema oscuro'}
+              aria-label="Tema"
+              style={{ color:'var(--text-primary)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+              {isDark ? <IconSun /> : <IconMoon />}
+            </button>
 
           {auth.user && (
             <button
