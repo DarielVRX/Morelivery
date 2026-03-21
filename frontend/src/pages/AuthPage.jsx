@@ -6,14 +6,34 @@ import { apiFetch } from '../api/client';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
-function buildUsernameCandidate(alias = '') {
-  return alias
-  .toLowerCase()
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .replace(/[^a-z0-9._-]/g, '')
-  .slice(0, 30)
-  || 'user';
+function buildUsernameCandidate(alias = '', suffix = '') {
+  const base = alias
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9._-]/g, '')
+    .slice(0, 28)
+    || 'user';
+  return suffix ? `${base}${suffix}` : base;
+}
+
+async function makeUniqueUsername(alias) {
+  const base = buildUsernameCandidate(alias);
+  // Intentar sin sufijo primero, luego con sufijos aleatorios
+  const candidates = [base];
+  for (let i = 0; i < 4; i++) {
+    candidates.push(buildUsernameCandidate(alias, Math.floor(10 + Math.random() * 90).toString()));
+  }
+  for (const candidate of candidates) {
+    try {
+      await apiFetch(`/auth/check-username?username=${encodeURIComponent(candidate)}`);
+      return candidate; // disponible
+    } catch {
+      // tomado, intentar siguiente
+    }
+  }
+  // fallback con timestamp
+  return buildUsernameCandidate(alias, Date.now().toString().slice(-4));
 }
 
 function validatePassword(pwd) {
@@ -157,6 +177,13 @@ function AuthForm({ mode, appKey }) {
   const roleRef = useRef(role);
   useEffect(() => { roleRef.current = role; }, [role]);
 
+  // Asegurar que roleRef tiene el valor correcto al montar (appKey puede llegar después del render inicial)
+  useEffect(() => {
+    if (appKey && validRoles.includes(appKey)) {
+      roleRef.current = appKey;
+    }
+  }, [appKey]);
+
   const handleGoogleResponse = useCallback(async (response) => {
     setLoading(true);
     try {
@@ -214,7 +241,7 @@ function AuthForm({ mode, appKey }) {
       msg('Ingresa la dirección completa de tu tienda'); return;
     }
 
-    const usernameCandidate = buildUsernameCandidate(alias);
+    const usernameCandidate = await makeUniqueUsername(alias);
     const addressFull = (['customer','restaurant'].includes(role) && (postalCode || calle))
     ? buildAddress()
     : undefined;
@@ -348,6 +375,21 @@ function AuthForm({ mode, appKey }) {
         <span style={{ fontSize:'0.75rem', color:'var(--text-secondary)', whiteSpace:'nowrap' }}>o continúa con</span>
         <hr style={{ flex:1, border:'none', borderTop:'1px solid var(--border)' }} />
         </div>
+        {!appKey && (
+          <div style={{ display:'flex', gap:'0.4rem', justifyContent:'center', marginBottom:'0.4rem' }}>
+            {[['customer','Cliente'],['restaurant','Tienda'],['driver','Conductor']].map(([val, label]) => (
+              <button key={val} type="button" onClick={() => setRole(val)}
+                style={{ padding:'0.2rem 0.65rem', fontSize:'0.75rem', cursor:'pointer',
+                  border:`1.5px solid ${role === val ? 'var(--brand)' : 'var(--border)'}`,
+                  borderRadius:6,
+                  background: role === val ? 'var(--brand-light)' : 'var(--bg-card)',
+                  color: role === val ? 'var(--brand)' : 'var(--text-secondary)',
+                  fontWeight: role === val ? 700 : 400, minHeight:'unset' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         <div style={{ display:'flex', justifyContent:'center' }}>
         <div ref={googleBtnRef} />
         </div>

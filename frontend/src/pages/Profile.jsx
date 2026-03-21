@@ -10,20 +10,25 @@ const STYLE_DARK  = STADIA_KEY
   ? `https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json?api_key=${STADIA_KEY}`
   : 'https://tiles.openfreemap.org/styles/bright';
 
-// ── CP AddressSearchBar — siempre abierto, solo CP numérico ──────────────────
-function CPSearchBar({ onSelectPos }) {
-  const [showMap,   setShowMap]   = useState(false);
-  const [pinPlaced, setPinPlaced] = useState(false);
-  const [inputVal,  setInputVal]  = useState('');
-  const [results,   setResults]   = useState([]);
-  const [searching, setSearching] = useState(false);
+// ── CP SearchBar — usa backend postal, muestra colonias, persiste CP ──────────
+function CPSearchBar({ token, onSelectAddress }) {
+  // onSelectAddress({ lat?, lng?, estado, ciudad, colonia })
+  const [showMap,    setShowMap]    = useState(false);
+  const [pinPlaced,  setPinPlaced]  = useState(false);
+  const [cpVal,      setCpVal]      = useState('');
+  const [colonias,   setColonias]   = useState([]); // lista de colonias del CP
+  const [cpLoading,  setCpLoading]  = useState(false);
+  const [cpError,    setCpError]    = useState('');
   const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsToast,   setGpsToast]   = useState(false);
+  const [cpContext,  setCpContext]   = useState(null); // { estado, ciudad } del CP
   const debounceRef = useRef(null);
   const wrapRef     = useRef(null);
   const mapContRef  = useRef(null);
   const mapRef      = useRef(null);
   const markerRef   = useRef(null);
   const pendingPos  = useRef(null);
+  const lastCp      = useRef('');
 
   // Inicializar mapa MapLibre cuando showMap = true
   useEffect(() => {
@@ -76,38 +81,53 @@ function CPSearchBar({ onSelectPos }) {
   async function confirmMapPin() {
     const pos = pendingPos.current;
     if (!pos) return;
-    onSelectPos({ lat: pos.lat, lng: pos.lng });
-    setShowMap(false); setResults([]); setInputVal('');
+    onSelectAddress({ lat: pos.lat, lng: pos.lng });
+    setShowMap(false);
   }
 
-  function doSearch(val) {
-    clearTimeout(debounceRef.current);
+  function handleCpChange(val) {
     const cp = val.replace(/\D/g, '').slice(0, 5);
-    setInputVal(cp);
-    if (cp.length !== 5) { setResults([]); setSearching(false); return; }
-    setSearching(true);
+    setCpVal(cp);
+    setCpError('');
+    if (cp.length !== 5) { setColonias([]); setCpContext(null); return; }
+    if (cp === lastCp.current) return;
+    clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
+      setCpLoading(true);
       try {
-        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cp + ', Morelia, Michoacán')}&format=json&addressdetails=1&limit=4&countrycodes=mx&accept-language=es`;
-        const r = await fetch(url, { headers: { 'Accept-Language': 'es', 'User-Agent': 'Morelivery/1.0' } });
-        const data = await r.json();
-        const items = (data || []).map(item => {
-          const a = item.address || {};
-          const parts = [a.road, a.suburb || a.neighbourhood, a.city || 'Morelia'].filter(Boolean);
-          return { label: parts.join(', ') || item.display_name?.split(',').slice(0, 3).join(',') || cp, lat: Number(item.lat), lng: Number(item.lon) };
-        }).filter(i => i.lat && i.lng);
-        setResults(items);
-      } catch (_) { setResults([]); }
-      finally { setSearching(false); }
-    }, 400);
+        const result = await apiFetch(`/auth/postal/${cp}`, {}, token);
+        lastCp.current = cp;
+        if (!result || !result.colonias?.length) {
+          setCpError('CP no encontrado');
+          setColonias([]); setCpContext(null);
+        } else {
+          setColonias(result.colonias);
+          setCpContext({ estado: result.estado || '', ciudad: result.ciudad || '' });
+          setCpError('');
+        }
+      } catch {
+        setCpError('Error al buscar el CP');
+        setColonias([]); setCpContext(null);
+      } finally {
+        setCpLoading(false);
+      }
+    }, 600);
+  }
+
+  function selectColonia(colonia) {
+    onSelectAddress({
+      estado:  cpContext?.estado  || '',
+      ciudad:  cpContext?.ciudad  || '',
+      colonia,
+    });
+    setColonias([]); // cerrar lista, pero CP se queda
   }
 
   function selectGPS() {
     setGpsLoading(true);
     navigator.geolocation?.getCurrentPosition(
       pos => {
-        onSelectPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setResults([]); setInputVal('');
+        onSelectAddress({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         setGpsLoading(false);
       },
       () => setGpsLoading(false),
@@ -115,31 +135,55 @@ function CPSearchBar({ onSelectPos }) {
     );
   }
 
+  function handleGpsClick() {
+    // Mostrar toast y lanzar GPS
+    setGpsToast(true);
+    setTimeout(() => setGpsToast(false), 3500);
+    selectGPS();
+  }
+
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
+      {/* Toast GPS */}
+      {gpsToast && (
+        <div style={{ position:'absolute', bottom:'calc(100% + 8px)', left:0, right:0, zIndex:300,
+          background:'var(--brand)', color:'#fff', borderRadius:8, padding:'0.5rem 0.75rem',
+          fontSize:'0.78rem', fontWeight:600, display:'flex', alignItems:'center', gap:'0.4rem',
+          boxShadow:'0 4px 16px rgba(0,0,0,0.18)' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+            <circle cx="12" cy="9" r="2.5"/>
+          </svg>
+          La ubicación por GPS es la más precisa para entregas
+        </div>
+      )}
+
       {/* Barra siempre visible */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px',
         background: 'var(--bg-sunken)', border: '1px solid var(--border)',
         borderRadius: 10, padding: '4px 6px' }}>
-        <button type="button" onClick={selectGPS} disabled={gpsLoading}
-          title="Usar mi ubicación GPS"
+
+        {/* Botón GPS — icono pin */}
+        <button type="button" onClick={handleGpsClick} disabled={gpsLoading}
+          title="Usar mi ubicación GPS — más precisa"
           style={{ background: 'none', border: 'none', cursor: gpsLoading ? 'default' : 'pointer',
             padding: '4px', borderRadius: 6, display: 'flex', alignItems: 'center',
-            opacity: gpsLoading ? 0.5 : 1, minHeight: 'unset', flexShrink: 0 }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="4.5"/>
-            <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
-            <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
-            <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
-            <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
+            opacity: gpsLoading ? 0.5 : 1, minHeight: 'unset', flexShrink: 0, color:'var(--brand)' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+            <circle cx="12" cy="9" r="2.5"/>
           </svg>
         </button>
-        <input value={inputVal} inputMode="numeric" maxLength={5}
-          onChange={e => doSearch(e.target.value)}
+
+        <input value={cpVal} inputMode="numeric" maxLength={5}
+          onChange={e => handleCpChange(e.target.value)}
           placeholder="Código postal…"
           style={{ flex: 1, background: 'none', border: 'none', outline: 'none',
             color: 'var(--text-primary)', fontSize: '13px', minWidth: 0 }} />
-        {searching && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', flexShrink: 0 }}>…</span>}
+
+        {cpLoading && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', flexShrink: 0 }}>…</span>}
+
+        {/* Botón mapa */}
         <button type="button" onClick={() => setShowMap(true)} title="Elegir en mapa"
           style={{ background: 'var(--bg-raised)', border: 'none', cursor: 'pointer',
             padding: '3px 5px', borderRadius: 5, minHeight: 'unset', flexShrink: 0,
@@ -151,23 +195,33 @@ function CPSearchBar({ onSelectPos }) {
         </button>
       </div>
 
-      {/* Dropdown resultados */}
-      {results.length > 0 && (
+      {cpError && <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.25rem', display:'block' }}>{cpError}</span>}
+
+      {/* Dropdown colonias */}
+      {colonias.length > 0 && (
         <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
           background: 'var(--bg-card)', border: '1px solid var(--border)',
-          borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.18)', zIndex: 200, overflow: 'hidden' }}>
-          {results.map((item, i) => (
-            <button type="button" key={i} onClick={() => { onSelectPos(item); setResults([]); setInputVal(''); }}
+          borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.18)', zIndex: 200, overflow: 'hidden',
+          maxHeight: 200, overflowY: 'auto' }}>
+          {cpContext && (
+            <div style={{ padding:'0.35rem 0.875rem', fontSize:'0.72rem', fontWeight:700,
+              color:'var(--text-tertiary)', borderBottom:'1px solid var(--border-light)',
+              textTransform:'uppercase', letterSpacing:'0.04em' }}>
+              {[cpContext.ciudad, cpContext.estado].filter(Boolean).join(', ')}
+            </div>
+          )}
+          {colonias.map((col, i) => (
+            <button type="button" key={i} onClick={() => selectColonia(col)}
               style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none',
-                borderBottom: i < results.length - 1 ? '1px solid var(--border-light)' : 'none',
-                padding: '0.55rem 0.875rem', cursor: 'pointer', fontSize: '0.82rem',
+                borderBottom: i < colonias.length - 1 ? '1px solid var(--border-light)' : 'none',
+                padding: '0.5rem 0.875rem', cursor: 'pointer', fontSize: '0.82rem',
                 color: 'var(--text-primary)', display: 'block', minHeight: 'unset' }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
                   <circle cx="12" cy="9" r="2.5"/>
                 </svg>
-                {item.label}
+                {col}
               </span>
             </button>
           ))}
@@ -617,7 +671,16 @@ export default function ProfilePage() {
     {/* Código postal */}
     <div>
       <span style={{ fontSize:'0.875rem', fontWeight:500, display:'block', marginBottom:'0.3rem' }}>Código postal</span>
-      <CPSearchBar onSelectPos={pos => { setHomeLat(pos.lat); setHomeLng(pos.lng); }} />
+      <CPSearchBar
+        token={auth.token}
+        onSelectAddress={({ lat, lng, estado: e, ciudad: c, colonia: col }) => {
+          if (lat != null) setHomeLat(lat);
+          if (lng != null) setHomeLng(lng);
+          if (e   != null) setEstado(e);
+          if (c   != null) setCiudad(c);
+          if (col != null) { setColonia(col); coloniaRef.current = col; }
+        }}
+      />
     </div>
 
     {/* Estado y Ciudad — auto-rellenados o manuales */}
