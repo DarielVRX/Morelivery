@@ -237,6 +237,8 @@ export default function RestaurantPage() {
       </div>
     </div>
   );
+
+  return (
     <div style={{ backgroundColor:'var(--bg-base)', minHeight:'100vh' }}>
 
       {/* Toast de ubicación */}
