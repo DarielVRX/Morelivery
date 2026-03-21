@@ -4,6 +4,12 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 import { DriverMap, FeeBreakdown, fmt, HISTORY_PAGE, IconChat, IconChevronDown, IconChevronUp, IconStarEmpty, IconStarFilled, OrderChat, STATUS_LABELS, TipInput, toDraft } from '../../features/customer/orders/components';
 
+const STATUS_COLOR = {
+  created:'#f59e0b', assigned:'#3b82f6', accepted:'#8b5cf6',
+  preparing:'#f97316', ready:'#16a34a', on_the_way:'#0891b2',
+  delivered:'#16a34a', cancelled:'#dc2626', pending_driver:'#ef4444',
+};
+
 
 export default function CustomerOrders() {
   const { auth } = useAuth();
