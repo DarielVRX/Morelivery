@@ -519,4 +519,5 @@ export default function RestaurantPage() {
         </div>
       )}
     </div>
+  );
 }
