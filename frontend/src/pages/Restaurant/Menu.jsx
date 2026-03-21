@@ -176,6 +176,15 @@ export default function RestaurantMenu() {
   } = useLocalImage();
   const ppFileRef = useRef(null);
 
+  // ─── Foto de fachada/portada (se almacena, no se muestra aún) ────────────
+  const [editingCover, setEditingCover] = useState(false);
+  const [savingCover, setSavingCover]   = useState(false);
+  const [coverSaved,  setCoverSaved]    = useState(false);
+  const {
+    preview: cvPreview, dataUrl: cvDataUrl, pick: cvPick, clear: cvClear
+  } = useLocalImage();
+  const cvFileRef = useRef(null);
+
   async function saveProfilePhoto() {
     if (!ppDataUrl) return;
     setSavingPP(true);
@@ -187,6 +196,20 @@ export default function RestaurantMenu() {
       setEditingPP(false); ppClear();
     } catch (e) { setMsg(e.message); }
     finally { setSavingPP(false); }
+  }
+
+  async function saveCoverPhoto() {
+    if (!cvDataUrl) return;
+    setSavingCover(true);
+    try {
+      await apiFetch('/restaurants/my/cover-photo', {
+        method: 'PATCH', body: JSON.stringify({ photoUrl: cvDataUrl })
+      }, auth.token);
+      setCoverSaved(true);
+      setTimeout(() => setCoverSaved(false), 2500);
+      setEditingCover(false); cvClear();
+    } catch (e) { setMsg(e.message); }
+    finally { setSavingCover(false); }
   }
 
   async function load() {
@@ -280,7 +303,7 @@ export default function RestaurantMenu() {
   return (
     <div style={{ backgroundColor: 'var(--bg-base)', minHeight:'100vh', padding:'1rem' }}>
       {/* ── Encabezado Gestión de menú ─────────────────────────────────── */}
-      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'var(--promo-gradient)', color:'#fff' }}>
+      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)', color:'#fff' }}>
         <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{display:'block',flexShrink:0}}>
             <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
@@ -342,24 +365,26 @@ export default function RestaurantMenu() {
         </div>
         {/* Portada */}
         <button
-          onClick={() => { setEditingPP(e => !e); ppClear(); }}
+          onClick={() => { setEditingCover(e => !e); cvClear(); }}
           title="Subir foto de portada o fachada"
           style={{
             flexShrink:0, display:'flex', flexDirection:'column', alignItems:'center', gap:'0.2rem',
             background:'var(--bg-raised)', border:'1px dashed var(--border)', borderRadius:8,
             padding:'0.5rem 0.65rem', cursor:'pointer', minHeight:'unset',
             color:'var(--text-secondary)',
+            transition:'background 0.15s',
           }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2"/>
             <circle cx="8.5" cy="8.5" r="1.5"/>
             <polyline points="21 15 16 10 5 21"/>
           </svg>
-          <span style={{ fontSize:'0.65rem', fontWeight:600, textAlign:'center', lineHeight:1.2 }}>Foto de fachada</span>
+          <span style={{ fontSize:'0.65rem', fontWeight:600, textAlign:'center', lineHeight:1.2 }}>Foto
+'}fachada</span>
         </button>
       </div>
 
-      {/* Editor de foto de tienda */}
+      {/* Editor de foto de perfil */}
       {editingProfilePhoto && (
         <div style={{ marginBottom:'1rem', padding:'0.875rem 1rem', background:'var(--bg-card)',
           borderRadius:10, border:'1px solid #e3aaaa' }}>
@@ -391,6 +416,39 @@ export default function RestaurantMenu() {
         </div>
       )}
 
+
+      {/* Editor de foto de fachada */}
+      {editingCover && (
+        <div style={{ marginBottom:'1rem', padding:'0.875rem 1rem', background:'var(--bg-card)',
+          borderRadius:10, border:'1px solid var(--border)' }}>
+          <p style={{ fontWeight:700, fontSize:'0.85rem', color:'var(--text-primary)', marginBottom:'0.25rem' }}>
+            Foto de fachada / portada
+          </p>
+          <p style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginBottom:'0.5rem', lineHeight:1.4 }}>
+            Sube una foto que ayude a identificar físicamente tu establecimiento. Se almacenará para uso futuro.
+            {coverSaved && <span style={{ color:'var(--success)', fontWeight:700, marginLeft:'0.5rem' }}>✓ Guardada</span>}
+          </p>
+          <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+            <button className="btn-sm" onClick={() => cvFileRef.current?.click()}>
+              Seleccionar archivo
+            </button>
+            <input ref={cvFileRef} type="file" accept="image/*" style={{ display:'none' }}
+              onChange={e => cvPick(e.target.files?.[0])} />
+            {cvPreview && (
+              <img src={cvPreview} alt="Preview fachada"
+                style={{ width:60, height:48, borderRadius:6, objectFit:'cover', border:'1px solid var(--border)' }} />
+            )}
+            <button className="btn-primary btn-sm"
+              disabled={savingCover || !cvPreview}
+              onClick={saveCoverPhoto}>
+              {savingCover ? 'Guardando…' : 'Guardar fachada'}
+            </button>
+            <button className="btn-sm" onClick={() => { setEditingCover(false); cvClear(); }}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
       {/* Lista de productos */}
       {products.length === 0
         ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin productos en el menú.</p>

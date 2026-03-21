@@ -124,7 +124,7 @@ export default function RestaurantSchedule() {
     <div style={{ backgroundColor:'var(--bg-base)', minHeight:'100vh', padding:'1rem' }}>
 
       {/* ── Encabezado Horario ─────────────────────────────────────────── */}
-      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'var(--promo-gradient)', color:'#fff' }}>
+      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)', color:'#fff' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <div>
             <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>

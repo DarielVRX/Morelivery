@@ -330,9 +330,10 @@ export default function RestaurantOrders() {
       {/* ── Encabezado con banner estilo RestaurantPage ──────────────────── */}
       <div style={{
         flexShrink: 0,
-        background: 'var(--promo-gradient)',
+        background: 'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)',
         padding: '0.75rem 1rem 0',
         zIndex: 30,
+        color: '#fff',
       }}>
         {/* Título + subtítulo */}
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.45rem' }}>
