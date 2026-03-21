@@ -95,7 +95,6 @@ export default function Layout({ children }) {
               onClick={toggle}
               title={isDark ? 'Tema claro' : 'Tema oscuro'}
               aria-label="Tema"
-              style={{ color:'red' , display:'flex', alignItems:'center', justifyContent:'center' }}>
               {isDark ? <IconSun /> : <IconMoon />}
             </button>
 
