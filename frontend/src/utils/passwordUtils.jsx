@@ -1,4 +1,4 @@
-// frontend/src/utils/passwordUtils.js
+// frontend/src/utils/passwordUtils.jsx
 
 export function validatePassword(pwd) {
   if (pwd.length < 8)     return 'Mínimo 8 caracteres';
