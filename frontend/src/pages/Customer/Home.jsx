@@ -3,6 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { savePendingOrder, schedulePendingOrderExpiry, cancelPendingOrderExpiry } from '../../utils/pendingOrder';
+// ── Iconos SVG ────────────────────────────────────────────────────────────────
+function IconPin()      { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>; }
+function IconMap()      { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>; }
+function IconSearch()   { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>; }
+function IconWarning()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>; }
+function IconStore()    { return <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>; }
+function IconStoreXL()  { return <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>; }
+
+
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 function toDraft(items=[]) { const d={}; items.forEach(i=>{ d[i.menuItemId]=i.quantity; }); return d; }
@@ -51,7 +60,7 @@ function RestaurantCard({ r, isHero, distKm, onClick }) {
           {r.profile_photo
             ? <img src={r.profile_photo} alt={r.name} style={{ width:'100%', height:180, objectFit:'cover', display:'block' }} />
             : <div style={{ width:'100%', height:180, background:'linear-gradient(135deg,#c97b7b,#9e4f4f)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                <span style={{ fontSize:'3.5rem' }}>🏪</span>
+                <span style={{color:'rgba(255,255,255,0.7)'}}><IconStoreXL /></span>
               </div>
           }
           {/* gradient overlay */}
@@ -83,7 +92,7 @@ function RestaurantCard({ r, isHero, distKm, onClick }) {
         {r.profile_photo
           ? <img src={r.profile_photo} alt={r.name} style={{ width:'100%', height:100, objectFit:'cover', display:'block', opacity: r.is_open ? 1 : 0.55 }} />
           : <div style={{ width:'100%', height:100, background:'linear-gradient(135deg,#e3aaaa33,#c97b7b22)', display:'flex', alignItems:'center', justifyContent:'center', opacity: r.is_open ? 1 : 0.55 }}>
-              <span style={{ fontSize:'2rem' }}>🏪</span>
+              <span style={{color:'var(--text-tertiary)'}}><IconStore /></span>
             </div>
         }
         <div style={{ position:'absolute', inset:0, background:'linear-gradient(to top, rgba(0,0,0,0.35) 0%, transparent 60%)' }} />
@@ -285,7 +294,7 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
           <button onClick={() => { setShowMap(true); setOpen(false); }} title="Elegir en mapa"
             style={{ background:'rgba(255,255,255,0.2)', border:'none', cursor:'pointer',
               padding:'3px 5px', borderRadius:5, minHeight:'unset', flexShrink:0,
-              color:'rgba(255,255,255,0.9)', fontSize:'0.8rem' }}>🗺</button>
+              color:'rgba(255,255,255,0.9)' }}><IconMap /></button>
           {hasHome && (
             <button onClick={selectHome} title="Casa"
               style={{ background:'none', border:'none', cursor:'pointer', padding:'4px',
@@ -314,7 +323,7 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
                 borderBottom: i < results.length-1 ? '1px solid var(--border-light)' : 'none',
                 padding:'0.55rem 0.875rem', cursor:'pointer', fontSize:'0.82rem',
                 color:'var(--text-primary)', display:'block', minHeight:'unset' }}>
-              📍 {item.label}
+              <span style={{display:'inline-flex',alignItems:'center',gap:'0.35rem'}}><IconPin />{item.label}</span>
             </button>
           ))}
         </div>
@@ -328,7 +337,7 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
           <div className="addr-map-modal">
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
               padding:'0.75rem 1rem', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-              <span style={{ fontWeight:700, fontSize:'0.95rem' }}>📍 Elige tu ubicación</span>
+              <span style={{ fontWeight:700, fontSize:'0.95rem', display:'flex', alignItems:'center', gap:'0.4rem' }}><IconPin />Elige tu ubicación</span>
               <button onClick={() => setShowMap(false)}
                 style={{ background:'none', border:'none', cursor:'pointer', fontSize:'1.1rem',
                   color:'var(--text-tertiary)', minHeight:'unset', padding:'2px 6px' }}>✕</button>
@@ -337,7 +346,7 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
             <div style={{ display:'flex', gap:'0.5rem', padding:'0.75rem 1rem',
               borderTop:'1px solid var(--border)', background:'var(--bg-card)', flexShrink:0 }}>
               <span style={{ flex:1, fontSize:'0.78rem', color:'var(--text-tertiary)', alignSelf:'center' }}>
-                {pinPlaced ? '📍 Pin colocado — confirma o muévelo' : 'Toca el mapa para colocar un pin'}
+                {pinPlaced ? <span style={{display:'inline-flex',alignItems:'center',gap:'0.3rem'}}><IconPin />Pin colocado — confirma o muévelo</span> : 'Toca el mapa para colocar un pin'}
               </span>
               <button onClick={confirmMapPin} disabled={!pinPlaced}
                 className="btn-primary btn-sm" style={{ opacity: pinPlaced ? 1 : 0.45 }}>
@@ -654,7 +663,7 @@ export default function CustomerHome() {
 
         {/* Search bar */}
         <div className="search-bar" style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.25)' }}>
-          <span className="search-bar-icon" style={{ color:'rgba(255,255,255,0.7)' }}>🔍</span>
+          <span className="search-bar-icon" style={{ color:'rgba(255,255,255,0.7)', display:'flex' }}><IconSearch /></span>
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
@@ -681,7 +690,7 @@ export default function CustomerHome() {
             disabled={!userPos}
             style={!distanceActive ? { background:'rgba(255,255,255,0.12)', borderColor:'rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.85)', opacity: userPos ? 1 : 0.45 } : { opacity: userPos ? 1 : 0.45 }}
           >
-            📍 Distancia {distanceActive && distanceIcon}
+            <span style={{display:'inline-flex',alignItems:'center',gap:'0.25rem'}}><IconPin />Distancia {distanceActive && distanceIcon}</span>
           </button>
         </div>
       </div>
@@ -689,7 +698,7 @@ export default function CustomerHome() {
       {/* ── Restaurant list ───────────────────────────────────────────── */}
       {filtered.length === 0 ? (
         <div style={{ textAlign:'center', padding:'2rem', color:'var(--text-tertiary)' }}>
-          <div style={{ fontSize:'2.5rem', marginBottom:'0.5rem' }}>🔍</div>
+          <div style={{ marginBottom:'0.5rem', display:'flex', justifyContent:'center', color:'var(--text-tertiary)', fontSize:'2.5rem' }}><svg width='40' height='40' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round'><circle cx='11' cy='11' r='8'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg></div>
           <div style={{ fontWeight:600 }}>Sin resultados</div>
           <div style={{ fontSize:'0.85rem', marginTop:'0.25rem' }}>
             {query ? `No encontramos "${query}"` : 'No hay tiendas disponibles'}

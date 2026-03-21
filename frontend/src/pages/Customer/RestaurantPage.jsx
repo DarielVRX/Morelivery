@@ -3,6 +3,15 @@ import { readPendingOrder, savePendingOrder, schedulePendingOrderExpiry, cancelP
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+// ── Iconos SVG ────────────────────────────────────────────────────────────────
+function IconPin()      { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>; }
+function IconMap()      { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>; }
+function IconSearch()   { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>; }
+function IconWarning()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>; }
+function IconStore()    { return <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>; }
+function IconStoreXL()  { return <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>; }
+
+
 
 // ── MapLibre tile styles — same as DriverMap ─────────────────────────────────
 const STADIA_KEY  = import.meta.env?.VITE_STADIA_KEY || '';
@@ -224,7 +233,7 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
           <button onClick={() => { setShowMap(true); setOpen(false); }} title="Elegir en mapa"
             style={{ background:'rgba(255,255,255,0.2)', border:'none', cursor:'pointer',
               padding:'3px 5px', borderRadius:5, minHeight:'unset', flexShrink:0,
-              color:'rgba(255,255,255,0.9)', fontSize:'0.8rem' }}>🗺</button>
+              color:'rgba(255,255,255,0.9)' }}><IconMap /></button>
           {hasHome && (
             <button onClick={selectHome} title="Casa"
               style={{ background:'none', border:'none', cursor:'pointer', padding:'4px',
@@ -252,7 +261,7 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
                 borderBottom: i < results.length-1 ? '1px solid var(--border-light)' : 'none',
                 padding:'0.55rem 0.875rem', cursor:'pointer', fontSize:'0.82rem',
                 color:'var(--text-primary)', display:'block', minHeight:'unset' }}>
-              📍 {item.label}
+              <span style={{display:'inline-flex',alignItems:'center',gap:'0.35rem'}}><IconPin />{item.label}</span>
             </button>
           ))}
         </div>
@@ -265,7 +274,7 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
           <div className="addr-map-modal">
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
               padding:'0.75rem 1rem', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-              <span style={{ fontWeight:700, fontSize:'0.95rem' }}>📍 Elige tu ubicación</span>
+              <span style={{ fontWeight:700, fontSize:'0.95rem', display:'flex', alignItems:'center', gap:'0.4rem' }}><IconPin />Elige tu ubicación</span>
               <button onClick={() => setShowMap(false)}
                 style={{ background:'none', border:'none', cursor:'pointer', fontSize:'1.1rem',
                   color:'var(--text-tertiary)', minHeight:'unset', padding:'2px 6px' }}>✕</button>
@@ -274,7 +283,7 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
             <div style={{ display:'flex', gap:'0.5rem', padding:'0.75rem 1rem',
               borderTop:'1px solid var(--border)', background:'var(--bg-card)', flexShrink:0 }}>
               <span style={{ flex:1, fontSize:'0.78rem', color:'var(--text-tertiary)', alignSelf:'center' }}>
-                {pinPlaced ? '📍 Pin colocado — confirma o muévelo' : 'Toca el mapa para colocar un pin'}
+                {pinPlaced ? <span style={{display:'inline-flex',alignItems:'center',gap:'0.3rem'}}><IconPin />Pin colocado — confirma o muévelo</span> : 'Toca el mapa para colocar un pin'}
               </span>
               <button onClick={confirmMapPin} disabled={!pinPlaced}
                 className="btn-primary btn-sm" style={{ opacity: pinPlaced ? 1 : 0.45 }}>
@@ -510,7 +519,7 @@ export default function RestaurantPage() {
           color: toast.type === 'warn' ? 'var(--warn)' : 'var(--text-primary)',
           animation:'fadeInDown 0.25s ease',
         }}>
-          {toast.type === 'warn' ? '⚠️' : '📍'} {toast.msg}
+          <span style={{display:'inline-flex',alignItems:'center',gap:'0.4rem'}}>{toast.type === 'warn' ? <IconWarning /> : <IconPin />}{toast.msg}</span>
           <button onClick={() => setToast(null)}
             style={{ background:'none', border:'none', cursor:'pointer', fontSize:'0.9rem',
               color:'var(--text-tertiary)', minHeight:'unset', padding:'0 2px', marginLeft:4 }}>✕</button>
@@ -590,7 +599,7 @@ export default function RestaurantPage() {
               : <div style={{ width:56, height:56, borderRadius:'50%',
                   background:'rgba(255,255,255,0.2)', border:'2px solid rgba(255,255,255,0.4)',
                   display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                  <span style={{ fontSize:'1.5rem' }}>🏪</span>
+                  <span style={{color:'rgba(255,255,255,0.7)'}}><IconStore /></span>
                 </div>
             }
             <div style={{ flex:1 }}>
@@ -611,8 +620,8 @@ export default function RestaurantPage() {
                   </span>
                 )}
                 {distKm !== null && (
-                  <span style={{ fontSize:'0.75rem', color:'rgba(255,255,255,0.8)' }}>
-                    📍 {distKm < 1 ? `${Math.round(distKm*1000)}m` : `${distKm.toFixed(1)}km`}
+                  <span style={{ fontSize:'0.75rem', color:'rgba(255,255,255,0.8)', display:'inline-flex', alignItems:'center', gap:'0.2rem' }}>
+                    <IconPin />{distKm < 1 ? `${Math.round(distKm*1000)}m` : `${distKm.toFixed(1)}km`}
                   </span>
                 )}
                 <span style={{
@@ -622,7 +631,7 @@ export default function RestaurantPage() {
                   border:`1px solid ${isClosed ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.5)'}`,
                   borderRadius:10, padding:'0.15rem 0.55rem',
                 }}>
-                  {isClosed ? '● Cerrado' : '● Abierto'}
+                  {isClosed ? '· Cerrado' : '· Abierto'}
                 </span>
               </div>
             </div>
@@ -766,7 +775,7 @@ export default function RestaurantPage() {
           {searchPos?.label && (
             <div style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginBottom:'0.5rem',
               display:'flex', alignItems:'center', gap:'0.3rem' }}>
-              <span>📍 {searchPos.label}</span>
+              <span style={{display:'inline-flex',alignItems:'center',gap:'0.3rem'}}><IconPin />{searchPos.label}</span>
               <button onClick={() => setSearchPos(null)}
                 style={{ background:'none', border:'none', cursor:'pointer',
                   color:'var(--text-tertiary)', fontSize:'0.7rem', minHeight:'unset', padding:0 }}>✕</button>
@@ -774,7 +783,7 @@ export default function RestaurantPage() {
           )}
           {!searchPos && (
             <div style={{ fontSize:'0.78rem', color:'var(--warn)', marginBottom:'0.5rem', fontWeight:600 }}>
-              Toca 📍 en el encabezado para indicar dónde entregar
+              <span style={{display:'inline-flex',alignItems:'center',gap:'0.3rem'}}>Toca <IconPin /> en el encabezado para indicar dónde entregar</span>
             </div>
           )}
 

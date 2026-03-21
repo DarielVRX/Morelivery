@@ -89,8 +89,8 @@ function BrandName({ size = '2rem' }) {
 }
 
 // ─── Iconos utilitarios ───────────────────────────────────────────────────────
-function IconSun()  { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>; }
-function IconMoon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>; }
+function IconSun()  { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18" style={{display:'block'}}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>; }
+function IconMoon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18" style={{display:'block'}}><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>; }
 
 // ─── Guards ───────────────────────────────────────────────────────────────────
 function ProtectedRole({ role, children }) {
@@ -131,7 +131,7 @@ function LandingScreen() {
             background: 'none', border: '1px solid var(--border)',
             borderRadius: 8, width: 34, height: 34,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', fontSize: '1rem', color: 'var(--text-secondary)',
+            cursor: 'pointer', color: 'var(--text-secondary)',
             flexShrink: 0,
           }}
         >
@@ -223,7 +223,7 @@ function AuthScreen({ mode = 'login' }) {
             background: 'none', border: '1px solid var(--border)',
             borderRadius: 8, width: 34, height: 34,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', fontSize: '1rem', color: 'var(--text-secondary)',
+            cursor: 'pointer', color: 'var(--text-secondary)',
             flexShrink: 0,
           }}
         >
