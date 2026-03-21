@@ -355,8 +355,7 @@ export default function RestaurantMenu() {
             <circle cx="8.5" cy="8.5" r="1.5"/>
             <polyline points="21 15 16 10 5 21"/>
           </svg>
-          <span style={{ fontSize:'0.65rem', fontWeight:600, textAlign:'center', lineHeight:1.2 }}>Foto de{'
-'}fachada</span>
+          <span style={{ fontSize:'0.65rem', fontWeight:600, textAlign:'center', lineHeight:1.2 }}>Foto de fachada</span>
         </button>
       </div>
 
