@@ -7,6 +7,11 @@
 - Se separó la configuración transversal (CORS, Helmet, JSON, cookies, healthchecks) en `backend/src/bootstrap/middleware.js`.
 - Se encapsularon los schedulers del motor en `backend/src/bootstrap/schedulers.js` para facilitar agregar nuevos loops sin seguir creciendo `server.js`.
 
+### 1.1 Segmentación inicial del frontend
+- `frontend/src/pages/Customer/Home.jsx` se recortó moviendo búsqueda de direcciones, tarjetas de restaurantes e indicadores de sugerencias a `frontend/src/features/customer/home/`.
+- `frontend/src/pages/Driver/Home.jsx` se recortó moviendo el status/header y la capa principal de mapa/acciones a `frontend/src/features/driver/home/`.
+- Se agregó `frontend/src/utils/errorMessage.js` para centralizar mensajes de error visibles en UI y evitar ramas repetidas.
+
 ### 2. Consolidación del esquema SQL
 - `database/schema.sql` ahora representa el estado canónico completo de la base de datos.
 - Se integraron en un único archivo las columnas, índices, tablas auxiliares, trigger de `accepted_at` y defaults de `engine_params` que antes estaban repartidos en migraciones incrementales.
@@ -57,6 +62,7 @@ Estas unificaciones **no se aplicaron ahora** para no romper compatibilidad con 
 
 ## Recomendación de siguiente fase
 1. Dividir `backend/src/modules/orders/routes.js` por subdominios: creación, lifecycle, chat/reportes y ratings.
-2. Introducir tests de integración mínimos sobre flujos críticos de pedido.
-3. Resolver la funcionalidad incompleta de push notifications.
-4. Normalizar el modelo de incidencias geográficas.
+2. Continuar el troceo del frontend empezando por `Admin/Dashboard.jsx`, `Customer/Orders.jsx`, `Profile.jsx` y `Customer/RestaurantPage.jsx`.
+3. Introducir tests de integración mínimos sobre flujos críticos de pedido.
+4. Resolver la funcionalidad incompleta de push notifications.
+5. Normalizar el modelo de incidencias geográficas.
