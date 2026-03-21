@@ -31,7 +31,6 @@ router.post('/register', authRateLimit, validate(registerSchema), async (req, re
   try {
     if (req.body.role === 'admin')
       return next(new AppError(403, 'El registro de administradores no está disponible públicamente'));
-    // Dirección obligatoria para restaurant
     if (req.body.role === 'restaurant' && !req.body.postalCode && !req.body.calle && !req.body.address)
       return next(new AppError(400, 'La dirección de la tienda es requerida'));
     const user = await registerUser(req.body);
@@ -39,7 +38,15 @@ router.post('/register', authRateLimit, validate(registerSchema), async (req, re
   } catch (error) { return next(error); }
 });
 
-// Reemplaza el handler de /auth/google
+/* ── POST /auth/login ────────────────────────────────────────────────────── */
+router.post('/login', authRateLimit, validate(loginSchema), async (req, res, next) => {
+  try {
+    const result = await loginUser(req.body);
+    return res.json(result);
+  } catch (error) { return next(error); }
+});
+
+/* ── POST /auth/google ───────────────────────────────────────────────────── */
 router.post('/google', authRateLimit, validate(googleAuthSchema), async (req, res, next) => {
   try {
     const role = ['customer', 'restaurant', 'driver'].includes(req.body.role) ? req.body.role : 'customer';
@@ -48,19 +55,10 @@ router.post('/google', authRateLimit, validate(googleAuthSchema), async (req, re
   } catch (error) { return next(error); }
 });
 
-/* ── POST /auth/google ───────────────────────────────────────────────────── */
-router.post('/google', authRateLimit, validate(googleAuthSchema), async (req, res, next) => {
-  try {
-    const result = await googleLogin(req.body.credential);
-    return res.json(result);
-  } catch (error) { return next(error); }
-});
-
 /* ── POST /auth/forgot-password ──────────────────────────────────────────── */
-// Siempre responde 200 — no revela si el email existe (anti-enumeración)
 router.post('/forgot-password', authRateLimit, validate(forgotPasswordSchema), async (req, res, next) => {
   try {
-    await forgotPassword(req.body.email); // fire-and-forget del email
+    await forgotPassword(req.body.email);
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
@@ -74,20 +72,15 @@ router.post('/reset-password', authRateLimit, validate(resetPasswordSchema), asy
 });
 
 /* ── GET /auth/verify-email?token=xxx ────────────────────────────────────── */
-// Ya funciona. Por ahora el correo no se envía (ver TODO en registerUser).
-// Cuando actives EMAIL_VERIFICATION_ENABLED=true en Render, este endpoint
-// ya estará listo para recibir los clics del enlace.
 router.get('/verify-email', async (req, res, next) => {
   try {
     await verifyEmail(String(req.query.token || ''));
-    // Redirige al frontend con mensaje de éxito
     const frontUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     return res.redirect(`${frontUrl}/login?verified=1`);
   } catch (error) { return next(error); }
 });
 
 /* ── GET /auth/postal/:cp ────────────────────────────────────────────────── */
-// Sin authenticate — se llama desde el registro (sin token aún)
 router.get('/postal/:cp', async (req, res, next) => {
   try {
     const cp = String(req.params.cp || '').trim();
