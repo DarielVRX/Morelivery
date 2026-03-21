@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { apiFetch } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import { validatePassword, PasswordStrength } from '../utils/passwordUtils';
 
 const STADIA_KEY  = import.meta.env?.VITE_STADIA_KEY || '';
 const STYLE_LIGHT = STADIA_KEY
@@ -616,7 +617,8 @@ export default function ProfilePage() {
     if (changingUser && usernameStatus === 'checking') { setPwdMsg('Espera — verificando disponibilidad del usuario'); setPwdErr(true); return; }
     if (changingPwd) {
       if (newPassword !== confirmPassword) { setPwdMsg('Las contraseñas no coinciden'); setPwdErr(true); return; }
-      if (newPassword.length < 6) { setPwdMsg('Mínimo 6 caracteres'); setPwdErr(true); return; }
+      const pwdValidation = validatePassword(newPassword);  // ← agregar
+      if (pwdValidation) { setPwdMsg(pwdValidation); setPwdErr(true); return; }  // ← agregar
     }
     try {
       if (changingPwd) {
@@ -910,10 +912,13 @@ export default function ProfilePage() {
   autoComplete="new-password" placeholder="Dejar vacío para no cambiar" />
   </label>
   {newPassword && (
+    <>
+    <PasswordStrength pwd={newPassword} />
     <label>Confirmar nueva contraseña
     <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
     autoComplete="new-password" />
     </label>
+    </>
   )}
   </div>
   <button className="btn-primary btn-sm" onClick={changePasswordAndLogin}
