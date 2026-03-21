@@ -551,6 +551,44 @@ export async function updateProfileAddress(userId, role, address, displayName, l
   };
 }
 
+// ── VERIFICACIÓN DE EMAIL — descomenta cuando estés listo ────────────────
+// Paso 1: Agrega EMAIL_VERIFICATION_ENABLED=true en Render
+// Paso 2: Descomenta el bloque de abajo
+//
+// if (process.env.EMAIL_VERIFICATION_ENABLED === 'true') {
+//   const frontUrl  = process.env.FRONTEND_URL || 'http://localhost:5173';
+//   const verifyUrl = `${frontUrl}/verify-email?token=${verifyToken}`;
+//   try {
+//     await mailer.sendMail({
+//       from:    `"Morelivery" <${process.env.SMTP_USER}>`,
+//       to:      realEmail,
+//       subject: 'Confirma tu correo en Morelivery',
+//       html: `
+//         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+//           <h2 style="color:#1a202c">Confirma tu correo 📬</h2>
+//           <p>Hola ${payload.alias}, haz clic para verificar tu cuenta:</p>
+//           <p style="margin:24px 0">
+//             <a href="${verifyUrl}"
+//                style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700">
+//               Verificar correo
+//             </a>
+//           </p>
+//           <p style="color:#718096;font-size:13px">El enlace expira en 48 horas.</p>
+//         </div>
+//       `,
+//     });
+//   } catch (err) {
+//     logEvent('auth.verify_email_send_error', { userId: result.rows[0]?.id, error: err.message });
+//   }
+// }
+
+// ── BLOQUEAR LOGIN SIN VERIFICAR — descomenta en loginUser cuando actives lo de arriba ──
+// Busca la función loginUser y agrega esto justo después del check de user.status:
+//
+// if (user.email_verified === false) {
+//   throw new AppError(403, 'Verifica tu correo antes de ingresar');
+// }
+
 export async function changePassword(userId, currentPassword, newPassword) {
   const r = await query('SELECT password_hash FROM users WHERE id = $1', [userId]);
   if (r.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
