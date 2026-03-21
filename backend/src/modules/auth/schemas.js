@@ -61,7 +61,7 @@ export const resetPasswordSchema = z.object({
   newPassword: z.string().min(8).max(64),
 });
 
-// ── Google OAuth ──────────────────────────────────────────────────────────────
 export const googleAuthSchema = z.object({
   credential: z.string().min(10),
+  role: z.enum(['customer', 'restaurant', 'driver']).default('customer'),
 });

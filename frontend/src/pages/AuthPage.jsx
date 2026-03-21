@@ -154,12 +154,13 @@ function AuthForm({ mode, appKey }) {
   }
   }, [appKey, login, navigate]);
 
+  // Reemplaza handleGoogleResponse (líneas 157-171)
   const handleGoogleResponse = useCallback(async (response) => {
     setLoading(true);
     try {
       const data = await apiFetch('/auth/google', {
         method: 'POST',
-        body: JSON.stringify({ credential: response.credential }),
+        body: JSON.stringify({ credential: response.credential, role }),
       });
       login({ token: data.token, user: data.user });
       navigate(`/${data.user.role}`);
@@ -168,7 +169,7 @@ function AuthForm({ mode, appKey }) {
     } finally {
       setLoading(false);
     }
-  }, [login, navigate]);
+  }, [login, navigate, role]);
 
   const googleBtnRef      = useRef(null);
   const googleInitialized = useRef(false);

@@ -39,10 +39,11 @@ router.post('/register', authRateLimit, validate(registerSchema), async (req, re
   } catch (error) { return next(error); }
 });
 
-/* ── POST /auth/login ────────────────────────────────────────────────────── */
-router.post('/login', authRateLimit, validate(loginSchema), async (req, res, next) => {
+// Reemplaza el handler de /auth/google
+router.post('/google', authRateLimit, validate(googleAuthSchema), async (req, res, next) => {
   try {
-    const result = await loginUser(req.body);
+    const role = ['customer', 'restaurant', 'driver'].includes(req.body.role) ? req.body.role : 'customer';
+    const result = await googleLogin(req.body.credential, role);
     return res.json(result);
   } catch (error) { return next(error); }
 });
