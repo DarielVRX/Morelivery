@@ -4,6 +4,16 @@ import { useAuth } from '../../contexts/AuthContext';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
+// ── Iconos SVG ────────────────────────────────────────────────────────────────
+function IconMenu() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{ display:'block' }}>
+      <path d="M3 6h18M3 12h18M3 18h18"/>
+      <circle cx="19" cy="6" r="2" fill="currentColor" stroke="none"/>
+    </svg>
+  );
+}
+
 // ── VolumeHelper ──────────────────────────────────────────────────────────────
 // Regla métrica real: muestra una regla en pantalla con marcas de centímetro.
 // El restaurantero puede poner el empaque junto al teléfono y medir directamente.
@@ -408,7 +418,10 @@ export default function RestaurantMenu() {
     <div style={{ backgroundColor: 'var(--bg-base)', minHeight:'100vh', padding:'1rem' }}>
       {/* ── Encabezado Gestión de menú ─────────────────────────────────── */}
       <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'var(--promo-gradient)', color:'#fff' }}>
-        <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>📋 Gestión de menú</div>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>
+          <IconMenu />
+          Gestión de menú
+        </div>
         <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Productos, precios e imagen de tu tienda</div>
       </div>
 

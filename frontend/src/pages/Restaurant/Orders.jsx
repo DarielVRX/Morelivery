@@ -6,11 +6,30 @@ import { useAppBadge } from '../../hooks/useAppBadge';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
-// Desglose para Tienda — lo que recibe neto
+// ── Iconos SVG ────────────────────────────────────────────────────────────────
+function IconOrders() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{ display:'block' }}>
+      <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
+      <rect x="9" y="3" width="6" height="4" rx="1"/>
+      <path d="M9 12h6M9 16h4"/>
+    </svg>
+  );
+}
+function IconClock() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display:'block' }}>
+      <circle cx="12" cy="12" r="10"/>
+      <polyline points="12 6 12 12 16 14"/>
+    </svg>
+  );
+}
+
+// ── Desglose para Tienda ──────────────────────────────────────────────────────
 function FeeBreakdown({ order }) {
-  const sub     = order.total_cents           || 0;
-  const resFee  = order.restaurant_fee_cents  || 0;
-  const neto    = sub - resFee;
+  const sub    = order.total_cents           || 0;
+  const resFee = order.restaurant_fee_cents  || 0;
+  const neto   = sub - resFee;
   if (!sub) return null;
   return (
     <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)', borderTop:'1px solid var(--border-light)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
@@ -43,6 +62,53 @@ function buildInitial(items = []) {
   const m = {}; items.forEach(i => { m[i.menuItemId] = i.quantity; }); return m;
 }
 
+// ── Control de tiempo de preparación ─────────────────────────────────────────
+// En Orders es temporal (sesión): no persiste en DB, solo afecta la sesión actual
+// hasta que el restaurante cierre. Visible en el header de Activos.
+function PrepTimeControl({ value, onChange, onSave, saving }) {
+  const OPTS = [5, 10, 15, 20, 30, 45, 60];
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap',
+      padding: '0.5rem 0.75rem',
+      background: 'rgba(255,255,255,0.12)',
+      borderRadius: 8,
+      border: '1px solid rgba(255,255,255,0.2)',
+      marginBottom: '0.5rem',
+    }}>
+      <span style={{ display:'inline-flex', alignItems:'center', gap:'0.3rem', color:'rgba(255,255,255,0.9)', fontSize:'0.78rem', fontWeight:700, flexShrink:0 }}>
+        <IconClock />
+        Prep. hoy:
+      </span>
+      <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', flex:1 }}>
+        {OPTS.map(m => (
+          <button key={m} onClick={() => onChange(m)}
+            style={{
+              padding: '0.18rem 0.55rem', border: 'none', borderRadius: 6, cursor: 'pointer',
+              fontSize: '0.72rem', fontWeight: value === m ? 800 : 500,
+              background: value === m ? '#fff' : 'rgba(255,255,255,0.15)',
+              color: value === m ? 'var(--brand)' : 'rgba(255,255,255,0.85)',
+              minHeight: 'unset',
+            }}>
+            {m}m
+          </button>
+        ))}
+      </div>
+      <button onClick={onSave} disabled={saving}
+        style={{
+          padding: '0.2rem 0.65rem', border: '1px solid rgba(255,255,255,0.4)',
+          borderRadius: 6, cursor: saving ? 'default' : 'pointer',
+          fontSize: '0.72rem', fontWeight: 700,
+          background: saving ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.22)',
+          color: '#fff', minHeight: 'unset', flexShrink: 0,
+          opacity: saving ? 0.6 : 1,
+        }}>
+        {saving ? '…' : 'Aplicar'}
+      </button>
+    </div>
+  );
+}
+
 export default function RestaurantOrders() {
   const { auth } = useAuth();
   const [orders, setOrders]     = useState([]);
@@ -62,10 +128,12 @@ export default function RestaurantOrders() {
   const [readyCooldown, setReadyCooldown]   = useState({});
   const [suggDrafts, setSuggDrafts]         = useState({});
   // ── Banners del motor de cocina ───────────────────────────────────────────
-  const [kitchenBanners, setKitchenBanners] = useState([]); // [{ id, type, message, orderId }]
+  const [kitchenBanners, setKitchenBanners] = useState([]);
+  // ── Tiempo de preparación temporal (sesión) ───────────────────────────────
+  const [prepMins, setPrepMins]   = useState(15);
+  const [prepSaving, setPrepSaving] = useState(false);
   const loadDataRef = useRef(null);
 
-  // Handler para eventos SSE del motor de cocina + restaurante
   const handleKitchenEvent = useCallback((data) => {
     const bannerId = `${data.type}-${Date.now()}`;
     const duration = data.type === 'order_cancelled_preparing' ? 30_000 : 12_000;
@@ -103,7 +171,6 @@ export default function RestaurantOrders() {
 
   useEffect(() => { loadDataRef.current = loadData; });
   useEffect(() => { loadData(); }, [auth.token]);
-  // Polling 5s: fallback si SSE pierde eventos
   useEffect(() => {
     if (!auth.token) return;
     const id = setInterval(() => loadDataRef.current?.(), 5000);
@@ -111,13 +178,23 @@ export default function RestaurantOrders() {
   }, [auth.token]);
   useRealtimeOrders(auth.token, () => loadDataRef.current?.(), () => {}, undefined, undefined, undefined, handleKitchenEvent);
 
+  async function savePrepTime() {
+    setPrepSaving(true);
+    const secs = Math.round(prepMins * 60);
+    try {
+      await apiFetch('/restaurants/my/prep-estimate',
+        { method: 'PATCH', body: JSON.stringify({ prep_time_estimate_s: secs }) },
+        auth.token);
+    } catch (e) { setMsg(e.message); }
+    finally { setPrepSaving(false); }
+  }
+
   async function updatePrepEstimate(minutes) {
     const secs = Math.round(minutes * 60);
     try {
       await apiFetch('/restaurants/my/prep-estimate',
         { method: 'PATCH', body: JSON.stringify({ prep_time_estimate_s: secs }) },
-        auth.token
-      );
+        auth.token);
       loadData();
     } catch (e) { setMsg(e.message); }
   }
@@ -131,8 +208,10 @@ export default function RestaurantOrders() {
   }, [orders.length]);
 
   async function changeStatus(orderId, status) {
-    try { await apiFetch(`/orders/${orderId}/status`, { method:'PATCH', body: JSON.stringify({ status }) }, auth.token); loadData(); }
-    catch (e) { setMsg(e.message); }
+    try {
+      await apiFetch(`/orders/${orderId}/status`, { method:'PATCH', body: JSON.stringify({ status }) }, auth.token);
+      loadData();
+    } catch (e) { setMsg(e.message); }
   }
 
   function adjustSugg(orderId, menuItemId, delta) {
@@ -142,7 +221,7 @@ export default function RestaurantOrders() {
     });
   }
 
-  const READY_COOLDOWN_SECS = 5 * 60; // 5 min tras enviar sugerencia
+  const READY_COOLDOWN_SECS = 5 * 60;
 
   async function sendSuggestion(order) {
     const draft = suggDrafts[order.id] || {};
@@ -155,7 +234,6 @@ export default function RestaurantOrders() {
     } catch (e) { setMsg(e.message); }
   }
 
-  // Countdown del botón Listo (5 min tras enviar sugerencia)
   useEffect(() => {
     const id = setInterval(() => {
       setReadyCooldown(prev => {
@@ -192,15 +270,7 @@ export default function RestaurantOrders() {
   const active = useMemo(() => orders.filter(o => !['delivered','cancelled'].includes(o.status)), [orders]);
   const past   = useMemo(() => orders.filter(o =>  ['delivered','cancelled'].includes(o.status)), [orders]);
 
-  // Badge del ícono de la app = pedidos activos pendientes de acción
   useAppBadge(active.filter(o => ['created','pending_driver'].includes(o.status)).length);
-
-  const tabStyle = (t) => ({
-    padding: '0.4rem 1rem', cursor:'pointer', border:'none', borderRadius:6, fontWeight:600,
-    fontSize:'0.875rem', transition:'background 0.15s',
-    background: tab === t ? 'var(--brand)' : 'var(--gray-100)',
-    color:      tab === t ? '#fff'         : 'var(--gray-600)',
-  });
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
@@ -247,24 +317,52 @@ export default function RestaurantOrders() {
           </div>
         </div>
       )}
-      {/* ── Encabezado fijo ─────────────────────────────────────────── */}
+
+      {/* ── Encabezado con banner estilo RestaurantPage ──────────────────── */}
       <div style={{
-        flexShrink:0, background:'var(--bg-card)', borderBottom:'2px solid var(--border)',
-        padding:'0.65rem 1rem 0', zIndex:30,
-        boxShadow:'0 1px 4px rgba(0,0,0,0.04)'
+        flexShrink: 0,
+        background: 'var(--promo-gradient)',
+        padding: '0.75rem 1rem 0',
+        zIndex: 30,
       }}>
-        <div style={{ fontWeight:800, fontSize:'1rem', color:'var(--brand)', letterSpacing:'-0.01em', marginBottom:'0.4rem' }}>
-          Mis pedidos
+        {/* Título + subtítulo */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.45rem' }}>
+          <div>
+            <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', color:'#fff' }}>
+              <IconOrders />
+              <span style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>Mis pedidos</span>
+            </div>
+            <div style={{ fontSize:'0.75rem', color:'rgba(255,255,255,0.8)', marginTop:'0.1rem' }}>
+              {active.length > 0 ? `${active.length} pedido${active.length !== 1 ? 's' : ''} activo${active.length !== 1 ? 's' : ''}` : 'Sin pedidos activos'}
+            </div>
+          </div>
+          {active.filter(o => ['created','pending_driver'].includes(o.status)).length > 0 && (
+            <span style={{ fontWeight:700, fontSize:'0.82rem', padding:'0.2rem 0.65rem',
+              background:'rgba(255,255,255,0.2)', borderRadius:20,
+              border:'1px solid rgba(255,255,255,0.3)', color:'#fff' }}>
+              ● {active.filter(o => ['created','pending_driver'].includes(o.status)).length} nuevo{active.filter(o => ['created','pending_driver'].includes(o.status)).length !== 1 ? 's' : ''}
+            </span>
+          )}
         </div>
-        <div style={{ display:'flex', gap:0, borderTop:'1px solid var(--border-light)' }}>
+
+        {/* Control de tiempo de preparación (temporal — solo hoy) */}
+        <PrepTimeControl
+          value={prepMins}
+          onChange={setPrepMins}
+          onSave={savePrepTime}
+          saving={prepSaving}
+        />
+
+        {/* Tabs */}
+        <div style={{ display:'flex', gap:0, borderTop:'1px solid rgba(255,255,255,0.2)' }}>
           {[['active','Activos'],['past','Historial']].map(([val, label]) => (
             <button key={val} onClick={() => setTab(val)}
               style={{
                 flex:1, background:'none', border:'none', cursor:'pointer',
                 padding:'0.4rem 0.5rem', fontSize:'0.78rem', fontWeight: tab===val ? 800 : 500,
-                color: tab===val ? 'var(--brand)' : 'var(--gray-500)',
-                borderBottom: tab===val ? '2px solid var(--brand)' : '2px solid transparent',
-                marginBottom:'-1px', transition:'color 0.15s'
+                color: tab===val ? '#fff' : 'rgba(255,255,255,0.6)',
+                borderBottom: tab===val ? '2px solid #fff' : '2px solid transparent',
+                marginBottom: '-1px', transition:'color 0.15s',
               }}>
               {label}
             </button>
@@ -283,13 +381,13 @@ export default function RestaurantOrders() {
         const isCancel   = banner.type === 'order_cancelled_preparing';
         const isArrival  = banner.type === 'driver_arrival';
         const isEstimate = banner.type === 'prep_estimate_updated';
-        const bg     = isCancel ? 'var(--danger-bg)' : isArrival ? 'var(--success-bg)' : isEstimate ? 'var(--warn-bg)' : 'var(--success-bg)';
-        const bdr    = isCancel ? 'var(--danger-border)' : isArrival ? 'var(--success-border)' : isEstimate ? 'var(--warn-border)' : 'var(--success-border)';
-        const icon   = isCancel ? '⚠️' : isArrival ? '🛵' : isEstimate ? '⏱️' : '🍳';
-        const title  = isCancel  ? 'Pedido cancelado mientras preparabas'
-                     : isArrival ? `Conductor llegó — ${banner.driverName || 'Driver'} recogió`
-                     : isEstimate ? 'Estimado de preparación actualizado'
-                     : 'Pedido marcado como listo automáticamente';
+        const bg   = isCancel ? 'var(--danger-bg)' : isArrival ? 'var(--success-bg)' : isEstimate ? 'var(--warn-bg)' : 'var(--success-bg)';
+        const bdr  = isCancel ? 'var(--danger-border)' : isArrival ? 'var(--success-border)' : isEstimate ? 'var(--warn-border)' : 'var(--success-border)';
+        const icon = isCancel ? '⚠️' : isArrival ? '🛵' : isEstimate ? '⏱️' : '🍳';
+        const title = isCancel  ? 'Pedido cancelado mientras preparabas'
+                    : isArrival ? `Conductor llegó — ${banner.driverName || 'Driver'} recogió`
+                    : isEstimate ? 'Estimado de preparación actualizado'
+                    : 'Pedido marcado como listo automáticamente';
         return (
           <div key={banner.bannerId} style={{
             background: bg, border: `1px solid ${bdr}`,
@@ -297,25 +395,25 @@ export default function RestaurantOrders() {
             borderRadius: 8, padding: '0.65rem 0.875rem', marginBottom: '0.5rem',
             fontSize: '0.82rem', lineHeight: 1.4, position: 'relative',
           }}>
-            <div style={{ fontWeight: 700, marginBottom: '0.2rem', color: 'var(--text-primary)', paddingRight: '1.5rem' }}>
+            <div style={{ fontWeight:700, marginBottom:'0.2rem', color:'var(--text-primary)', paddingRight:'1.5rem' }}>
               {icon} {title}
             </div>
-            {banner.message && <div style={{ color: 'var(--text-secondary)' }}>{banner.message}</div>}
+            {banner.message && <div style={{ color:'var(--text-secondary)' }}>{banner.message}</div>}
             {isCancel && banner.note && (
-              <div style={{ marginTop: '0.3rem', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+              <div style={{ marginTop:'0.3rem', fontSize:'0.78rem', color:'var(--text-secondary)' }}>
                 Motivo: <em>{banner.note}</em>
               </div>
             )}
             {isEstimate && banner.newEstimate && (
-              <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+              <div style={{ marginTop:'0.4rem', display:'flex', gap:'0.5rem', alignItems:'center' }}>
+                <span style={{ fontSize:'0.75rem', color:'var(--text-secondary)' }}>
                   Nuevo estimado: <strong>{Math.round(banner.newEstimate / 60)} min</strong>
                 </span>
-                <button className="btn-sm" style={{ fontSize: '0.72rem' }}
+                <button className="btn-sm" style={{ fontSize:'0.72rem' }}
                   onClick={() => updatePrepEstimate(Math.round(banner.newEstimate / 60))}>
                   Confirmar
                 </button>
-                <button className="btn-sm" style={{ fontSize: '0.72rem' }}
+                <button className="btn-sm" style={{ fontSize:'0.72rem' }}
                   onClick={() => {
                     const mins = window.prompt('Corregir estimado (minutos):', String(Math.round(banner.newEstimate / 60)));
                     if (mins && Number(mins) > 0) updatePrepEstimate(Number(mins));
@@ -325,8 +423,8 @@ export default function RestaurantOrders() {
               </div>
             )}
             <button onClick={() => setKitchenBanners(prev => prev.filter(b => b.bannerId !== banner.bannerId))}
-              style={{ position: 'absolute', top: 8, right: 8, background: 'none', border: 'none',
-                cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-tertiary)', minHeight: 'unset' }}>✕</button>
+              style={{ position:'absolute', top:8, right:8, background:'none', border:'none',
+                cursor:'pointer', fontSize:'0.85rem', color:'var(--text-tertiary)', minHeight:'unset' }}>✕</button>
           </div>
         );
       })}
@@ -373,7 +471,6 @@ export default function RestaurantOrders() {
                     )}
                     <FeeBreakdown order={order} />
                     <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginTop:'0.4rem' }}>
-                      {/* Preparing y Ready independientes — no requieren secuencia */}
                       {!['preparing','ready','on_the_way','delivered','cancelled'].includes(order.status) && (
                         <button className="btn-sm" onClick={() => changeStatus(order.id, 'preparing')}>En preparación</button>
                       )}
@@ -424,7 +521,6 @@ export default function RestaurantOrders() {
                           ))}
                         </div>
                         <p style={{ fontSize:'0.75rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>Sugerencia:</p>
-                        {/* Total en tiempo real de la sugerencia */}
                         {(() => {
                           const draft = suggDrafts[order.id] || {};
                           const total = products.reduce((s, p) => s + (draft[p.id] || 0) * p.price_cents, 0);
@@ -477,7 +573,7 @@ export default function RestaurantOrders() {
           : (
             <ul className="orders-tab-panel reverse" style={{ listStyle:'none', padding:0 }}>
               {past.slice(0, 50).map(o => {
-                const color   = STATUS_COLOR[o.status] || '#9ca3af';
+                const color    = STATUS_COLOR[o.status] || '#9ca3af';
                 const isPastExp = expanded === ('h_'+o.id);
                 return (
                   <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden' }}>

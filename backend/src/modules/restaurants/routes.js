@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
-import { resetPrepEstimateOnOpen } from '../../engine/kitchen.js';
+import { resetPrepEstimateOnOpen, recordManualCorrection } from '../../engine/kitchen.js';
 import { createMenuItemSchema, updateMenuItemSchema } from './schemas.js';
 import { AppError } from '../../utils/errors.js';
 
@@ -346,6 +346,13 @@ router.patch('/my/prep-estimate', authenticate, authorize(['restaurant']), async
       return next(new AppError(400, 'El estimado debe estar entre 30 segundos y 2 horas'));
     }
 
+    // Leer estimado actual para la marca de corrección
+    const prev = await query(
+      'SELECT prep_time_estimate_s FROM restaurants WHERE id = $1',
+      [restaurantId]
+    );
+    const previousS = prev.rows[0]?.prep_time_estimate_s ?? null;
+
     const r = await query(
       `UPDATE restaurants
        SET prep_time_estimate_s = $1, prep_estimate_updated_at = NOW()
@@ -353,6 +360,12 @@ router.patch('/my/prep-estimate', authenticate, authorize(['restaurant']), async
        RETURNING id, prep_time_estimate_s`,
       [val, restaurantId]
     );
+
+    // Registrar marca de corrección manual (fire-and-forget, no bloquea)
+    if (previousS !== null && previousS !== val) {
+      recordManualCorrection(restaurantId, previousS, val).catch(() => {});
+    }
+
     return res.json({ restaurant: r.rows[0] });
   } catch (error) { return next(error); }
 });
