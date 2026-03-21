@@ -193,6 +193,15 @@ export async function loginUser(payload) {
     }
   }
 
+  const user = result.rows[0];
+  if (user.status === 'suspended') throw new AppError(403, 'Cuenta suspendida');
+
+  const passwordMatch = await bcrypt.compare(payload.password, user.password_hash);
+  if (!passwordMatch) {
+    logEvent('auth.login_error', { userId: user.id, reason: 'wrong_password' });
+    throw new AppError(401, 'Credenciales inválidas');
+  }
+
   const username = user.email.replace(/@local\.test$/, '');
   const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 
@@ -327,7 +336,7 @@ export async function googleLogin(credential, role = 'customer') {
       try {
         await query(
           'INSERT INTO driver_profiles(user_id, vehicle_type, is_verified, is_available) VALUES($1,$2,true,true)',
-          [user.id, 'bike']
+                    [user.id, 'bike']
         );
       } catch (e) {
         if (e?.code !== '23505') throw e;
@@ -658,7 +667,7 @@ export async function deleteAccount(userId, role, currentPassword) {
     const r = await query(
       `SELECT 1 FROM orders o JOIN restaurants rest ON rest.id=o.restaurant_id
       WHERE rest.owner_user_id=$1 AND o.status=ANY($2::text[]) LIMIT 1`,
-      [userId, PENDING_STATUSES]
+                          [userId, PENDING_STATUSES]
     );
     hasPending = r.rowCount > 0;
   }
