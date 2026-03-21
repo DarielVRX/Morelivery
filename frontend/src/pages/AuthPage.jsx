@@ -545,10 +545,10 @@ function AddressBlock({ postalCode, setPostalCode, estado, setEstado, ciudad, se
 
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.55rem' }}>
     <label>Estado
-    <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Jalisco" disabled={cpLoading} />
+    <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Michoacán" disabled={cpLoading} />
     </label>
     <label>Municipio / Ciudad
-    <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Guadalajara" disabled={cpLoading} />
+    <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Morelia" disabled={cpLoading} />
     </label>
     </div>
 

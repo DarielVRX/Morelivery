@@ -323,6 +323,26 @@ export async function googleLogin(credential, role = 'customer') {
         user = r.rows[0];
       } else throw e;
     }
+
+    // Crear perfil de rol igual que registerUser
+    if (role === 'restaurant') {
+      const restName = cleanRestaurantName(alias);
+      try {
+        await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1,$2,$3)',
+                    [user.id, restName, 'General']);
+      } catch (e) {
+        if (e?.code !== '42703' && e?.code !== '23505') throw e;
+      }
+    } else if (role === 'driver') {
+      try {
+        await query(
+          'INSERT INTO driver_profiles(user_id, vehicle_type, is_verified, is_available) VALUES($1,$2,true,true)',
+          [user.id, 'bike']
+        );
+      } catch (e) {
+        if (e?.code !== '23505') throw e;
+      }
+    }
   } else {
     try {
       if (!user.google_id) {
@@ -334,17 +354,38 @@ export async function googleLogin(credential, role = 'customer') {
   const username = user.email.replace(/@local\.test$/, '');
   const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 
-  return {
-    token,
-    user: {
-      id:           user.id,
-      username,
-      role:         user.role,
-      alias:        user.alias || user.full_name || username,
-      address:      user.address || null,
-      needsAddress: ['customer','restaurant'].includes(user.role) && !user.address,
-    },
+  // Cargar datos de rol para la respuesta (igual que loginUser)
+  let profile = {
+    alias:        user.alias || user.full_name || username,
+    address:      user.address || null,
+    needsAddress: ['customer','restaurant'].includes(role) && !user.address,
   };
+
+  if (role === 'restaurant') {
+    try {
+      const r = await query(
+        'SELECT id, name, category, is_open, profile_photo FROM restaurants WHERE owner_user_id=$1 LIMIT 1',
+        [user.id]
+      );
+      profile.restaurant = r.rows[0] || null;
+    } catch (e) {
+      if (e?.code === '42703') {
+        const r = await query('SELECT id, name FROM restaurants WHERE owner_user_id=$1 LIMIT 1', [user.id]);
+        profile.restaurant = r.rows[0] || null;
+      } else throw e;
+    }
+  }
+
+  if (role === 'driver') {
+    try {
+      const r = await query('SELECT driver_number, is_available FROM driver_profiles WHERE user_id=$1', [user.id]);
+      profile.driver = r.rows[0] || { driver_number: null, is_available: true };
+    } catch (_) {
+      profile.driver = { driver_number: null, is_available: true };
+    }
+  }
+
+  return { token, user: { id: user.id, username, role: user.role, ...profile } };
 }
 
 // ── VERIFY EMAIL ──────────────────────────────────────────────────────────────
@@ -600,7 +641,19 @@ export async function changePassword(userId, currentPassword, newPassword) {
   await query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, userId]);
 }
 
-export async function deleteAccount(userId, role) {
+export async function deleteAccount(userId, role, currentPassword) {
+  // Verificar contraseña
+  const pwdRow = await query('SELECT password_hash, google_id FROM users WHERE id=$1', [userId]).catch(() => ({ rows: [], rowCount: 0 }));
+  if (pwdRow.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
+  const { password_hash: hash, google_id: googleId } = pwdRow.rows[0];
+
+  if (currentPassword) {
+    const matches = await bcrypt.compare(currentPassword, hash);
+    if (!matches) throw new AppError(401, 'Contraseña incorrecta');
+  } else if (!googleId) {
+    throw new AppError(400, 'Ingresa tu contraseña para confirmar');
+  }
+
   let hasPending = false;
   if (role === 'customer') {
     const r = await query(`SELECT 1 FROM orders WHERE customer_id=$1 AND status=ANY($2::text[]) LIMIT 1`, [userId, PENDING_STATUSES]);
@@ -612,12 +665,27 @@ export async function deleteAccount(userId, role) {
     const r = await query(
       `SELECT 1 FROM orders o JOIN restaurants rest ON rest.id=o.restaurant_id
       WHERE rest.owner_user_id=$1 AND o.status=ANY($2::text[]) LIMIT 1`,
-                          [userId, PENDING_STATUSES]
+      [userId, PENDING_STATUSES]
     );
     hasPending = r.rowCount > 0;
   }
   if (hasPending) throw new AppError(409, 'No puedes eliminar tu cuenta mientras tengas pedidos activos. Completa o cancela tus pedidos primero.');
-  await query('DELETE FROM users WHERE id = $1', [userId]);
+
+  // Limpiar FKs antes de borrar user
+  try {
+    if (role === 'driver') {
+      await query('DELETE FROM driver_profiles WHERE user_id=$1', [userId]);
+    }
+    if (role === 'restaurant') {
+      const rest = await query('SELECT id FROM restaurants WHERE owner_user_id=$1', [userId]);
+      if (rest.rows[0]) {
+        await query('UPDATE orders SET restaurant_id=NULL WHERE restaurant_id=$1', [rest.rows[0].id]).catch(() => {});
+        await query('DELETE FROM restaurants WHERE id=$1', [rest.rows[0].id]);
+      }
+    }
+  } catch (_) {}
+
+  await query('DELETE FROM users WHERE id=$1', [userId]);
   return { ok: true };
 }
 

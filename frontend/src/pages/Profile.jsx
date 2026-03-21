@@ -22,13 +22,23 @@ function CPSearchBar({ token, onSelectAddress }) {
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsToast,   setGpsToast]   = useState(false);
   const [cpContext,  setCpContext]   = useState(null); // { estado, ciudad } del CP
-  const debounceRef = useRef(null);
-  const wrapRef     = useRef(null);
-  const mapContRef  = useRef(null);
-  const mapRef      = useRef(null);
-  const markerRef   = useRef(null);
-  const pendingPos  = useRef(null);
-  const lastCp      = useRef('');
+  const debounceRef  = useRef(null);
+  const wrapRef      = useRef(null);
+  const mapContRef   = useRef(null);
+  const mapRef       = useRef(null);
+  const markerRef    = useRef(null);
+  const pendingPos   = useRef(null);
+  const lastCp       = useRef('');
+  const toastShownRef = useRef(false);
+
+  // Mostrar toast una vez al montar para incentivar uso del GPS
+  useEffect(() => {
+    if (toastShownRef.current) return;
+    toastShownRef.current = true;
+    const t1 = setTimeout(() => setGpsToast(true), 500);
+    const t2 = setTimeout(() => setGpsToast(false), 4200);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, []);
 
   // Inicializar mapa MapLibre cuando showMap = true
   useEffect(() => {
@@ -116,11 +126,12 @@ function CPSearchBar({ token, onSelectAddress }) {
 
   function selectColonia(colonia) {
     onSelectAddress({
-      estado:  cpContext?.estado  || '',
-      ciudad:  cpContext?.ciudad  || '',
+      estado:     cpContext?.estado  || '',
+      ciudad:     cpContext?.ciudad  || '',
       colonia,
+      postalCode: cpVal,
     });
-    setColonias([]); // cerrar lista, pero CP se queda
+    setColonias([]); // cerrar lista, CP se queda
   }
 
   function selectGPS() {
@@ -136,9 +147,6 @@ function CPSearchBar({ token, onSelectAddress }) {
   }
 
   function handleGpsClick() {
-    // Mostrar toast y lanzar GPS
-    setGpsToast(true);
-    setTimeout(() => setGpsToast(false), 3500);
     selectGPS();
   }
 
@@ -159,16 +167,18 @@ function CPSearchBar({ token, onSelectAddress }) {
       )}
 
       {/* Barra siempre visible */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '4px',
+      <div style={{ display: 'flex', alignItems: 'center',
         background: 'var(--bg-sunken)', border: '1px solid var(--border)',
-        borderRadius: 10, padding: '4px 6px' }}>
+        borderRadius: 10, overflow: 'hidden' }}>
 
-        {/* Botón GPS — icono pin */}
+        {/* Botón GPS — icono pin, separado visualmente */}
         <button type="button" onClick={handleGpsClick} disabled={gpsLoading}
           title="Usar mi ubicación GPS — más precisa"
-          style={{ background: 'none', border: 'none', cursor: gpsLoading ? 'default' : 'pointer',
-            padding: '4px', borderRadius: 6, display: 'flex', alignItems: 'center',
-            opacity: gpsLoading ? 0.5 : 1, minHeight: 'unset', flexShrink: 0, color:'var(--brand)' }}>
+          style={{ background: 'var(--brand-light)', border: 'none',
+            borderRight: '1px solid var(--border)',
+            cursor: gpsLoading ? 'default' : 'pointer',
+            padding: '6px 8px', display: 'flex', alignItems: 'center',
+            opacity: gpsLoading ? 0.5 : 1, minHeight: 'unset', flexShrink: 0, color: 'var(--brand)' }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
             <circle cx="12" cy="9" r="2.5"/>
@@ -179,14 +189,15 @@ function CPSearchBar({ token, onSelectAddress }) {
           onChange={e => handleCpChange(e.target.value)}
           placeholder="Código postal…"
           style={{ flex: 1, background: 'none', border: 'none', outline: 'none',
-            color: 'var(--text-primary)', fontSize: '13px', minWidth: 0 }} />
+            color: 'var(--text-primary)', fontSize: '13px', minWidth: 0, padding: '6px 8px' }} />
 
-        {cpLoading && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', flexShrink: 0 }}>…</span>}
+        {cpLoading && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', flexShrink: 0, paddingRight: '4px' }}>…</span>}
 
-        {/* Botón mapa */}
+        {/* Botón mapa — separado visualmente */}
         <button type="button" onClick={() => setShowMap(true)} title="Elegir en mapa"
-          style={{ background: 'var(--bg-raised)', border: 'none', cursor: 'pointer',
-            padding: '3px 5px', borderRadius: 5, minHeight: 'unset', flexShrink: 0,
+          style={{ background: 'var(--bg-raised)', border: 'none',
+            borderLeft: '1px solid var(--border)',
+            cursor: 'pointer', padding: '6px 8px', minHeight: 'unset', flexShrink: 0,
             color: 'var(--text-secondary)', display: 'flex', alignItems: 'center' }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
@@ -233,6 +244,19 @@ function CPSearchBar({ token, onSelectAddress }) {
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)',
           display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           onClick={e => { if (e.target === e.currentTarget) setShowMap(false); }}>
+          <style>{`
+            .addr-map-modal {
+              background: var(--bg-card);
+              display: flex; flex-direction: column;
+              width: 100%; height: 100dvh;
+            }
+            @media (min-width: 520px) {
+              .addr-map-modal {
+                width: 500px; height: 70dvh; max-height: 600px;
+                border-radius: 12px;
+              }
+            }
+          `}</style>
           <div className="addr-map-modal">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
@@ -319,17 +343,19 @@ export default function ProfilePage() {
   const user = auth.user;
 
   // Datos personales
-  const [alias, setAlias]             = useState(user?.alias || user?.display_name || user?.full_name || '');
-  // Descomponer address guardado en calle + número al inicializar
+  const [alias, setAlias] = useState(user?.alias || user?.display_name || user?.full_name || '');
+  // Calle y número — desde campos estructurados si existen, fallback a parsear address string
   const _savedAddress = user?.address && user.address !== 'address-pending' ? user.address : '';
-  const _calleInit    = _savedAddress.replace(/\s+\d+[a-zA-Z]?\s*$/, '').trim();
-  const _numInit      = _savedAddress.match(/\s+(\d+[a-zA-Z]?)\s*$/)?.[1] || '';
-  const [calle,   setCalle]   = useState(_calleInit);
-  const [numero,  setNumero]  = useState(_numInit);
+  const _hasStructured = !!(user?.calle || user?.numero);
+  const _calleInit = user?.calle || (_hasStructured ? '' : _savedAddress.replace(/,\s*\d{5}\s*$/, '').replace(/,\s*[^,]+$/, '').replace(/,\s*[^,]+$/, '').replace(/,\s*[^,]+$/, '').replace(/\s+\d+[a-zA-Z]?\s*$/, '').trim());
+  const _numInit   = user?.numero || (_hasStructured ? '' : _savedAddress.match(/\s+(\d+[a-zA-Z]?)\s*(?:,|$)/)?.[1] || '');
+  const [calle,  setCalle]  = useState(_calleInit);
+  const [numero, setNumero] = useState(_numInit);
   const [profileMsg, setProfileMsg]   = useState('');
   const [profileErr, setProfileErr]   = useState(false);
 
   // Dirección estructurada
+  const [postalCode,   setPostalCode]   = useState(user?.postal_code || '');
   const [estado,       setEstado]       = useState(user?.estado   || '');
   const [ciudad,       setCiudad]       = useState(user?.ciudad   || '');
   const [colonia,      setColonia]      = useState(user?.colonia  || '');
@@ -494,9 +520,25 @@ export default function ProfilePage() {
   const [pwdErr,  setPwdErr]  = useState(false);
   const usernameTimerRef = useRef(null);
 
-  // Eliminar cuenta
-  const [deleteMsg, setDeleteMsg] = useState('');
-  const [deleteErr, setDeleteErr] = useState(false);
+  const [deleteMsg,      setDeleteMsg]      = useState('');
+  const [deleteErr,      setDeleteErr]      = useState(false);
+  const [deleteConfirm,  setDeleteConfirm]  = useState(false);
+  const [deletePwd,      setDeletePwd]      = useState('');
+  const [deleteLoading,  setDeleteLoading]  = useState(false);
+
+  async function deleteAccount() {
+    if (!deleteConfirm) { setDeleteConfirm(true); return; }
+    if (!deletePwd.trim()) { setDeleteMsg('Ingresa tu contraseña para confirmar'); setDeleteErr(true); return; }
+    setDeleteLoading(true);
+    try {
+      await apiFetch('/auth/account', { method: 'DELETE', body: JSON.stringify({ password: deletePwd }) }, auth.token);
+      logout();
+    } catch (e) {
+      setDeleteMsg(e.message); setDeleteErr(true);
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
 
   function handleUsernameChange(val) {
     setLoginUsername(val);
@@ -534,6 +576,7 @@ export default function ProfilePage() {
       const body = {
         displayName:  alias.trim(),
         address:      finalAddress || undefined,
+        postalCode:   postalCode   || undefined,
         colonia:      colonia      || undefined,
         estado:       estado       || undefined,
         ciudad:       ciudad       || undefined,
@@ -589,14 +632,6 @@ export default function ProfilePage() {
       setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
       setUsernameStatus('idle');
     } catch (e) { setPwdMsg(e.message); setPwdErr(true); }
-  }
-
-  async function deleteAccount() {
-    if (!window.confirm('¿Eliminar tu cuenta permanentemente? Esta acción no se puede deshacer.')) return;
-    try {
-      await apiFetch('/auth/account', { method:'DELETE' }, auth.token);
-      logout();
-    } catch (e) { setDeleteMsg(e.message); setDeleteErr(true); }
   }
 
   const avatarLetter = (alias[0] || '?').toUpperCase();
@@ -673,12 +708,13 @@ export default function ProfilePage() {
       <span style={{ fontSize:'0.875rem', fontWeight:500, display:'block', marginBottom:'0.3rem' }}>Código postal</span>
       <CPSearchBar
         token={auth.token}
-        onSelectAddress={({ lat, lng, estado: e, ciudad: c, colonia: col }) => {
-          if (lat != null) setHomeLat(lat);
-          if (lng != null) setHomeLng(lng);
-          if (e   != null) setEstado(e);
-          if (c   != null) setCiudad(c);
-          if (col != null) { setColonia(col); coloniaRef.current = col; }
+        onSelectAddress={({ lat, lng, estado: e, ciudad: c, colonia: col, postalCode: cp }) => {
+          if (lat != null)  setHomeLat(lat);
+          if (lng != null)  setHomeLng(lng);
+          if (e   != null)  setEstado(e);
+          if (c   != null)  setCiudad(c);
+          if (col != null)  { setColonia(col); coloniaRef.current = col; }
+          if (cp  != null)  setPostalCode(cp);
         }}
       />
     </div>
@@ -891,9 +927,31 @@ export default function ProfilePage() {
   {/* Administración */}
   <Collapsible title="Administración de cuenta">
   <p style={{ fontSize:'0.85rem', color:'var(--gray-600)', marginBottom:'0.75rem' }}>
-  Eliminar tu cuenta es permanente. No podrás recuperarla ni tienes pedidos activos pendientes.
+  Eliminar tu cuenta es permanente e irreversible.
   </p>
-  <button className="btn-danger btn-sm" onClick={deleteAccount}>Eliminar cuenta</button>
+  {!deleteConfirm ? (
+    <button className="btn-danger btn-sm" onClick={deleteAccount}>Eliminar cuenta</button>
+  ) : (
+    <div style={{ display:'flex', flexDirection:'column', gap:'0.5rem' }}>
+      <p style={{ fontSize:'0.82rem', color:'var(--error)', fontWeight:600, margin:0 }}>
+        ¿Seguro? Esta acción no se puede deshacer.
+      </p>
+      <label style={{ fontSize:'0.82rem' }}>
+        Ingresa tu contraseña para confirmar
+        <input type="password" value={deletePwd} onChange={e => setDeletePwd(e.target.value)}
+          autoComplete="current-password" placeholder="Tu contraseña"
+          style={{ marginTop:'0.25rem' }} />
+      </label>
+      <div style={{ display:'flex', gap:'0.5rem' }}>
+        <button className="btn-danger btn-sm" onClick={deleteAccount} disabled={deleteLoading}>
+          {deleteLoading ? 'Eliminando…' : 'Confirmar eliminación'}
+        </button>
+        <button className="btn-sm" onClick={() => { setDeleteConfirm(false); setDeletePwd(''); setDeleteMsg(''); }}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )}
   <Flash text={deleteMsg} isError={deleteErr} />
   </Collapsible>
 

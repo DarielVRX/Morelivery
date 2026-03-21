@@ -13,6 +13,7 @@ import {
 } from './service.js';
 import { AppError } from '../../utils/errors.js';
 import { authRateLimit } from '../../middlewares/rateLimit.js';
+import { query } from '../../config/db.js';
 
 const router = Router();
 
@@ -77,6 +78,18 @@ router.get('/verify-email', async (req, res, next) => {
     await verifyEmail(String(req.query.token || ''));
     const frontUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     return res.redirect(`${frontUrl}/login?verified=1`);
+  } catch (error) { return next(error); }
+});
+
+/* ── GET /auth/check-username ────────────────────────────────────────────── */
+router.get('/check-username', async (req, res, next) => {
+  try {
+    const username = String(req.query.username || '').trim().toLowerCase();
+    if (!username || username.length < 3) return next(new AppError(400, 'Username muy corto'));
+    const pseudoEmail = `${username}@local.test`;
+    const r = await query('SELECT 1 FROM users WHERE email=$1 LIMIT 1', [pseudoEmail]);
+    if (r.rowCount > 0) return next(new AppError(409, 'Username no disponible'));
+    return res.json({ available: true });
   } catch (error) { return next(error); }
 });
 
@@ -177,7 +190,8 @@ router.patch('/password', authenticate, async (req, res, next) => {
 /* ── DELETE /auth/account ────────────────────────────────────────────────── */
 router.delete('/account', authenticate, async (req, res, next) => {
   try {
-    await deleteAccount(req.user.userId, req.user.role);
+    const { password } = req.body || {};
+    await deleteAccount(req.user.userId, req.user.role, password || null);
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
