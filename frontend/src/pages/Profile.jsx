@@ -1,6 +1,247 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { apiFetch } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+
+const STADIA_KEY  = import.meta.env?.VITE_STADIA_KEY || '';
+const STYLE_LIGHT = STADIA_KEY
+  ? `https://tiles.stadiamaps.com/styles/alidade_smooth.json?api_key=${STADIA_KEY}`
+  : 'https://tiles.openfreemap.org/styles/bright';
+const STYLE_DARK  = STADIA_KEY
+  ? `https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json?api_key=${STADIA_KEY}`
+  : 'https://tiles.openfreemap.org/styles/bright';
+
+// ── CP AddressSearchBar ───────────────────────────────────────────────────────
+// Mismo patrón que RestaurantPage/Payments pero limitado a búsqueda por CP.
+function CPSearchBar({ onSelectPos }) {
+  const [open,      setOpen]      = useState(false);
+  const [showMap,   setShowMap]   = useState(false);
+  const [pinPlaced, setPinPlaced] = useState(false);
+  const [inputVal,  setInputVal]  = useState('');
+  const [results,   setResults]   = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const debounceRef = useRef(null);
+  const wrapRef     = useRef(null);
+  const mapContRef  = useRef(null);
+  const mapRef      = useRef(null);
+  const markerRef   = useRef(null);
+  const pendingPos  = useRef(null);
+
+  useEffect(() => {
+    function handler(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target) && !showMap) {
+        setOpen(false); setResults([]);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showMap]);
+
+  // Inicializar mapa MapLibre cuando showMap = true
+  useEffect(() => {
+    if (!showMap) return;
+    let cancelled = false;
+    async function init() {
+      await new Promise(r => setTimeout(r, 30));
+      if (cancelled || !mapContRef.current) return;
+      const { ensureMapLibreCSS, ensureMapLibreJS } = await import('../utils/mapLibre');
+      ensureMapLibreCSS();
+      const ml = await ensureMapLibreJS();
+      if (cancelled || !mapContRef.current) return;
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const map = new ml.Map({
+        container: mapContRef.current,
+        style: isDark ? STYLE_DARK : STYLE_LIGHT,
+        center: [-101.195, 19.706], zoom: 13, attributionControl: false,
+      });
+      map.addControl(new ml.NavigationControl({ showCompass: false }), 'top-right');
+      map.once('load', () => {
+        if (!STADIA_KEY && isDark && mapContRef.current)
+          mapContRef.current.style.filter = 'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)';
+        map.resize();
+      });
+      map.on('click', e => {
+        if (cancelled) return;
+        const pos = { lat: e.lngLat.lat, lng: e.lngLat.lng };
+        pendingPos.current = pos;
+        setPinPlaced(true);
+        if (markerRef.current) {
+          markerRef.current.setLngLat([pos.lng, pos.lat]);
+        } else {
+          const el = document.createElement('div');
+          el.style.cssText = 'font-size:24px;line-height:1;filter:drop-shadow(0 2px 4px #0005)';
+          el.textContent = '📍';
+          markerRef.current = new ml.Marker({ element: el, anchor: 'bottom' })
+            .setLngLat([pos.lng, pos.lat]).addTo(map);
+        }
+      });
+      mapRef.current = map;
+    }
+    init().catch(() => {});
+    return () => {
+      cancelled = true;
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+      markerRef.current = null; pendingPos.current = null; setPinPlaced(false);
+    };
+  }, [showMap]);
+
+  async function confirmMapPin() {
+    const pos = pendingPos.current;
+    if (!pos) return;
+    onSelectPos({ lat: pos.lat, lng: pos.lng });
+    setShowMap(false); setOpen(false); setResults([]); setInputVal('');
+  }
+
+  function doSearch(val) {
+    clearTimeout(debounceRef.current);
+    const cp = val.replace(/\D/g, '').slice(0, 5);
+    setInputVal(cp);
+    if (cp.length !== 5) { setResults([]); setSearching(false); return; }
+    setSearching(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cp + ', Morelia, Michoacán')}&format=json&addressdetails=1&limit=4&countrycodes=mx&accept-language=es`;
+        const r = await fetch(url, { headers: { 'Accept-Language': 'es', 'User-Agent': 'Morelivery/1.0' } });
+        const data = await r.json();
+        const items = (data || []).map(item => {
+          const a = item.address || {};
+          const parts = [a.road, a.suburb || a.neighbourhood, a.city || 'Morelia'].filter(Boolean);
+          return { label: parts.join(', ') || item.display_name?.split(',').slice(0, 3).join(',') || cp, lat: Number(item.lat), lng: Number(item.lon) };
+        }).filter(i => i.lat && i.lng);
+        setResults(items);
+      } catch (_) { setResults([]); }
+      finally { setSearching(false); }
+    }, 400);
+  }
+
+  function selectGPS() {
+    setGpsLoading(true);
+    navigator.geolocation?.getCurrentPosition(
+      pos => {
+        onSelectPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setOpen(false); setResults([]); setInputVal('');
+        setGpsLoading(false);
+      },
+      () => setGpsLoading(false),
+      { timeout: 6000, maximumAge: 30000 }
+    );
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      {!open && !showMap && (
+        <button type="button" onClick={() => setOpen(true)}
+          style={{ display: 'flex', alignItems: 'center', gap: '0.4rem',
+            background: 'var(--brand-light)', border: '1px solid var(--brand)',
+            borderRadius: 8, padding: '0.3rem 0.65rem', cursor: 'pointer',
+            fontSize: '0.78rem', fontWeight: 600, color: 'var(--brand)', minHeight: 'unset' }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+            <circle cx="12" cy="9" r="2.5"/>
+          </svg>
+          Buscar CP en mapa
+        </button>
+      )}
+
+      {open && !showMap && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px',
+          background: 'var(--bg-sunken)', border: '1px solid var(--border)',
+          borderRadius: 10, padding: '4px 6px', minWidth: 220 }}>
+          <button type="button" onClick={selectGPS} disabled={gpsLoading}
+            title="Usar mi ubicación GPS"
+            style={{ background: 'none', border: 'none', cursor: 'pointer',
+              padding: '4px', borderRadius: 6, display: 'flex', alignItems: 'center',
+              minHeight: 'unset', flexShrink: 0 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="4.5"/>
+              <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+              <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
+              <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
+              <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
+            </svg>
+          </button>
+          <input autoFocus value={inputVal} inputMode="numeric" maxLength={5}
+            onChange={e => doSearch(e.target.value)}
+            placeholder="Código postal…"
+            style={{ flex: 1, background: 'none', border: 'none', outline: 'none',
+              color: 'var(--text-primary)', fontSize: '13px', minWidth: 0 }} />
+          {searching && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', flexShrink: 0 }}>…</span>}
+          <button type="button" onClick={() => { setShowMap(true); setOpen(false); }} title="Elegir en mapa"
+            style={{ background: 'var(--bg-raised)', border: 'none', cursor: 'pointer',
+              padding: '3px 5px', borderRadius: 5, minHeight: 'unset', flexShrink: 0,
+              color: 'var(--text-secondary)', display: 'flex', alignItems: 'center' }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
+              <line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>
+            </svg>
+          </button>
+          <button type="button" onClick={() => { setOpen(false); setResults([]); setInputVal(''); }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--text-tertiary)', fontSize: '13px', padding: '2px 4px',
+              minHeight: 'unset', flexShrink: 0 }}>✕</button>
+        </div>
+      )}
+
+      {open && !showMap && results.length > 0 && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+          background: 'var(--bg-card)', border: '1px solid var(--border)',
+          borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.18)', zIndex: 200, overflow: 'hidden' }}>
+          {results.map((item, i) => (
+            <button type="button" key={i} onClick={() => { onSelectPos(item); setOpen(false); setResults([]); setInputVal(''); }}
+              style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none',
+                borderBottom: i < results.length - 1 ? '1px solid var(--border-light)' : 'none',
+                padding: '0.55rem 0.875rem', cursor: 'pointer', fontSize: '0.82rem',
+                color: 'var(--text-primary)', display: 'block', minHeight: 'unset' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+                  <circle cx="12" cy="9" r="2.5"/>
+                </svg>
+                {item.label}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {showMap && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={e => { if (e.target === e.currentTarget) setShowMap(false); }}>
+          <div className="addr-map-modal">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <span style={{ fontWeight: 700, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+                  <circle cx="12" cy="9" r="2.5"/>
+                </svg>
+                Elige tu ubicación
+              </span>
+              <button type="button" onClick={() => setShowMap(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.1rem',
+                  color: 'var(--text-tertiary)', minHeight: 'unset', padding: '2px 6px' }}>✕</button>
+            </div>
+            <div ref={mapContRef} style={{ flex: 1, width: '100%', minHeight: 0 }} />
+            <div style={{ display: 'flex', gap: '0.5rem', padding: '0.75rem 1rem',
+              borderTop: '1px solid var(--border)', background: 'var(--bg-card)', flexShrink: 0 }}>
+              <span style={{ flex: 1, fontSize: '0.78rem', color: 'var(--text-tertiary)', alignSelf: 'center' }}>
+                {pinPlaced
+                  ? <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>📍 Pin colocado — confirma o muévelo</span>
+                  : 'Toca el mapa para colocar un pin'}
+              </span>
+              <button type="button" onClick={confirmMapPin} disabled={!pinPlaced}
+                className="btn-primary btn-sm" style={{ opacity: pinPlaced ? 1 : 0.45 }}>
+                Confirmar
+              </button>
+              <button type="button" onClick={() => setShowMap(false)} className="btn-sm">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Collapsible({ title, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -107,11 +348,89 @@ export default function ProfilePage() {
   );
   const [notifMsg, setNotifMsg] = useState('');
   const [highPriorityNotifs, setHighPriorityNotifs] = useState(() => {
-    try { localStorage.getItem('morelivery_notif_priority') === 'high'; } catch { return false; }
+    try { return localStorage.getItem('morelivery_notif_priority') === 'high'; } catch { return false; }
   });
   const [notifEnabled, setNotifEnabled] = useState(() => {
     try { return localStorage.getItem('morelivery_notif_enabled') !== '0'; } catch { return true; }
   });
+
+  // PWA: instalación y preferencias
+  const [deferredInstall, setDeferredInstall] = useState(null);
+  const [isInstalled, setIsInstalled]         = useState(
+    typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches
+  );
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('morelivery_theme') || 'system'; } catch { return 'system'; }
+  });
+  const [reducedMotion, setReducedMotion] = useState(() => {
+    try { return localStorage.getItem('morelivery_reduced_motion') === '1'; } catch { return false; }
+  });
+  const [offlineCacheMsg, setOfflineCacheMsg] = useState('');
+
+  useEffect(() => {
+    const handler = e => { e.preventDefault(); setDeferredInstall(e); };
+    window.addEventListener('beforeinstallprompt', handler);
+    const mq = window.matchMedia('(display-mode: standalone)');
+    const mqHandler = e => setIsInstalled(e.matches);
+    mq.addEventListener('change', mqHandler);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handler);
+      mq.removeEventListener('change', mqHandler);
+    };
+  }, []);
+
+  function applyTheme(val) {
+    setTheme(val);
+    try { localStorage.setItem('morelivery_theme', val); } catch (_) {}
+    const root = document.documentElement;
+    if (val === 'dark')  root.setAttribute('data-theme', 'dark');
+    else if (val === 'light') root.removeAttribute('data-theme');
+    else {
+      // system
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (prefersDark) root.setAttribute('data-theme', 'dark');
+      else root.removeAttribute('data-theme');
+    }
+  }
+
+  function toggleReducedMotion() {
+    setReducedMotion(prev => {
+      const next = !prev;
+      try { localStorage.setItem('morelivery_reduced_motion', next ? '1' : '0'); } catch (_) {}
+      document.documentElement.style.setProperty('--transition-speed', next ? '0ms' : '');
+      return next;
+    });
+  }
+
+  async function triggerInstallPrompt() {
+    if (!deferredInstall) return;
+    deferredInstall.prompt();
+    const { outcome } = await deferredInstall.userChoice;
+    if (outcome === 'accepted') { setIsInstalled(true); setDeferredInstall(null); }
+  }
+
+  async function refreshOfflineCache() {
+    setOfflineCacheMsg('');
+    if (!('serviceWorker' in navigator)) {
+      setOfflineCacheMsg('Service Worker no disponible en este navegador.');
+      return;
+    }
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg?.waiting) {
+        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        setOfflineCacheMsg('Actualización aplicada. Recarga para ver cambios.');
+      } else if (reg) {
+        await reg.update();
+        setOfflineCacheMsg('Caché verificado — estás en la versión más reciente.');
+      } else {
+        setOfflineCacheMsg('Sin service worker registrado.');
+      }
+    } catch {
+      setOfflineCacheMsg('Error al verificar la actualización.');
+    }
+    setTimeout(() => setOfflineCacheMsg(''), 5000);
+  }
 
   async function enablePushNotifications() {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -180,8 +499,6 @@ export default function ProfilePage() {
   // Eliminar cuenta
   const [deleteMsg, setDeleteMsg] = useState('');
   const [deleteErr, setDeleteErr] = useState(false);
-
-  useEffect(() => { coloniaRef.current = colonia; }, [colonia]);
 
   const lastSearchedCp = useRef(user?.postal_code || '');
 
@@ -500,31 +817,37 @@ export default function ProfilePage() {
     <input value={alias} onChange={e => setAlias(e.target.value)} placeholder="Ej: Juan García" />
     </label>
 
-    {/* Código postal */}
-    <label>
-    Código postal
-    <div style={{ position:'relative', ...(cpLoading ? BUSY_FIELD_STYLE : {}) }}>
-    <input
-    value={postalCode}
-    onChange={e => setPostalCode(e.target.value.replace(/\D/g, '').slice(0, 5))}
-    placeholder="Ej: 44100"
-    maxLength={5}
-    inputMode="numeric"
-    />
-    {cpLoading && (
-      <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.75rem', color:'var(--gray-400)' }}>
-      Buscando…
-      </span>
-    )}
+    {/* Código postal con buscador en mapa */}
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.25rem' }}>
+        <span style={{ fontSize:'0.875rem', fontWeight:500 }}>Código postal</span>
+        <CPSearchBar onSelectPos={pos => {
+          // Solo guardamos lat/lng del centro de zona; el CP se sigue editando a mano en el input de abajo
+          setHomeLat(pos.lat); setHomeLng(pos.lng);
+        }} />
+      </div>
+      <div style={{ position:'relative', ...(cpLoading ? BUSY_FIELD_STYLE : {}) }}>
+        <input
+          value={postalCode}
+          onChange={e => setPostalCode(e.target.value.replace(/\D/g, '').slice(0, 5))}
+          placeholder="Ej: 58000"
+          maxLength={5}
+          inputMode="numeric"
+        />
+        {cpLoading && (
+          <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.75rem', color:'var(--gray-400)' }}>
+            Buscando…
+          </span>
+        )}
+      </div>
+      {cpError && <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>{cpError}</span>}
     </div>
-    {cpError && <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>{cpError}</span>}
-    </label>
 
     {/* Estado y Ciudad — auto-rellenados o manuales */}
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.55rem' }}>
     <label>
     Estado
-    <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Jalisco" disabled={cpLoading} />
+    <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Michoacán" disabled={cpLoading} />
     </label>
     <label>
     Municipio / Ciudad
@@ -536,14 +859,14 @@ export default function ProfilePage() {
     <label>
     Colonia
     {coloniasList.length > 0 ? (
-      <select value={colonia} onChange={e => setColonia(e.target.value)} disabled={cpLoading}>
+      <select value={colonia} onChange={e => { setColonia(e.target.value); coloniaRef.current = e.target.value; }} disabled={cpLoading}>
       <option value="">Seleccionar colonia…</option>
       {coloniasList.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
     ) : (
       <input
       value={colonia}
-      onChange={e => setColonia(e.target.value)}
+      onChange={e => { setColonia(e.target.value); coloniaRef.current = e.target.value; }}
       placeholder="Ej: Col. Centro"
       disabled={cpLoading}
       />
@@ -564,92 +887,158 @@ export default function ProfilePage() {
     </label>
     </div>
 
-
-    <div style={{ padding:'0.6rem 0.7rem', border:'1px solid var(--gray-200)', borderRadius:8, background:'#fafafa' }}>
-    <div style={{ display:'flex', justifyContent:'space-between', gap:'0.5rem', alignItems:'center', flexWrap:'wrap' }}>
-    <span style={{ fontSize:'0.78rem', color:'var(--gray-600)' }}>
-    Notificaciones push:{' '}
-    <strong>
-    {notifStatus === 'granted'
-      ? (notifEnabled ? 'Activo' : 'Pausado')
-      : notifStatus === 'denied'
-      ? 'Bloqueado'
-      : notifStatus === 'default'
-      ? 'Pendiente'
-  : 'No soportado'}
-  </strong>
-  </span>
-  <button type="button" className="btn-sm" onClick={toggleNotifEnabled}>
-  {notifStatus === 'granted' && notifEnabled ? 'Pausar notificaciones' : 'Activar notificaciones'}
-  </button>
-  </div>
-  {notifMsg && <div style={{ marginTop:'0.35rem', fontSize:'0.74rem', color:'var(--gray-500)' }}>{notifMsg}</div>}
-
-  <div style={{ marginTop:'0.45rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-  <span style={{ fontSize:'0.76rem', color:'var(--gray-600)' }}>Notificaciones de alta prioridad</span>
-  <button type="button" className="btn-sm" onClick={toggleHighPriorityNotifs}>
-  {highPriorityNotifs ? 'Activadas' : 'Desactivadas'}
-  </button>
-  </div>
-  </div>
-
-  {/* Botón Buscar pin */}
-  <div style={{ display:'flex', gap:'0.4rem', alignItems:'center' }}>
-  <button
-  type="button"
-  className="btn-sm btn-primary"
-  onClick={searchPin}
-  disabled={searchLoading || cpLoading || pinSaving}
-  style={{ whiteSpace:'nowrap' }}
-  >
-  {searchLoading ? 'Buscando…' : '📍 Buscar en mapa'}
-  </button>
-  {hasHomePin && (
-    <span style={{ fontSize:'0.75rem', color:'var(--success)', fontWeight:600 }}>
-    🏠 Pin guardado
-    </span>
-  )}
-  {hasHomePin && (
-    <button
-    type="button"
-    disabled={pinSaving}
-    onClick={async () => { await persistHomePin(null, null); }}
-    style={{ background:'none', border:'none', color:'var(--error)', cursor:'pointer', fontSize:'0.75rem', fontWeight:600, marginLeft:'auto' }}
-    >
-    {pinSaving ? 'Borrando…' : 'Borrar'}
-    </button>
-  )}
-  </div>
-  {searchError && <span style={{ fontSize:'0.72rem', color:'var(--error)', display:'block' }}>{searchError}</span>}
-
-  {/* Modal mapa pin */}
-  {showPinMap && (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:9999, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'1rem' }}>
-    <div style={{ background:'var(--bg-card)', borderRadius:12, width:'100%', maxWidth:480, overflow:'hidden', boxShadow:'0 8px 32px rgba(0,0,0,0.25)' }}>
-    <div style={{ padding:'0.75rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid var(--gray-200)' }}>
-    <span style={{ fontWeight:700, fontSize:'0.9rem' }}>Confirmar ubicación</span>
-    <button onClick={() => setShowPinMap(false)} style={{ background:'none', border:'none', cursor:'pointer', fontSize:'1.2rem', color:'var(--gray-400)' }}>✕</button>
+    {/* Pin casa — botón buscar + estado + borrar */}
+    <div style={{ display:'flex', gap:'0.4rem', alignItems:'center', flexWrap:'wrap' }}>
+      <button
+        type="button"
+        className="btn-sm btn-primary"
+        onClick={searchPin}
+        disabled={searchLoading || cpLoading || pinSaving}
+        style={{ whiteSpace:'nowrap' }}
+      >
+        {searchLoading ? 'Buscando…' : '📍 Buscar en mapa'}
+      </button>
+      {hasHomePin && (
+        <span style={{ fontSize:'0.75rem', color:'var(--success)', fontWeight:600 }}>🏠 Pin guardado</span>
+      )}
+      {hasHomePin && (
+        <button type="button" disabled={pinSaving}
+          onClick={async () => { await persistHomePin(null, null); }}
+          style={{ background:'none', border:'none', color:'var(--error)', cursor:'pointer', fontSize:'0.75rem', fontWeight:600, marginLeft:'auto' }}>
+          {pinSaving ? 'Borrando…' : 'Borrar'}
+        </button>
+      )}
     </div>
-    <p style={{ fontSize:'0.78rem', color:'var(--gray-500)', margin:'0.5rem 1rem 0' }}>
-    Arrastra el pin o toca el mapa para ajustar la ubicación exacta.
-    </p>
-    <div ref={pinMapRef} style={{ height:320, width:'100%' }} />
-    <div style={{ padding:'0.75rem 1rem', display:'flex', gap:'0.5rem', justifyContent:'flex-end', borderTop:'1px solid var(--gray-200)' }}>
-    <button className="btn-sm" onClick={() => setShowPinMap(false)}>Cancelar</button>
-    <button className="btn-sm btn-primary" disabled={pinSaving} onClick={async () => {
-      if (!pinMapResult) return;
-      const saved = await persistHomePin(pinMapResult.lat, pinMapResult.lng);
-      if (saved) setShowPinMap(false);
-    }}>
-    {pinSaving ? 'Guardando…' : 'Confirmar pin'}
-    </button>
+    {searchError && <span style={{ fontSize:'0.72rem', color:'var(--error)', display:'block' }}>{searchError}</span>}
+
+    {/* Modal mapa pin */}
+    {showPinMap && (
+      <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:9999, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'1rem' }}>
+      <div style={{ background:'var(--bg-card)', borderRadius:12, width:'100%', maxWidth:480, overflow:'hidden', boxShadow:'0 8px 32px rgba(0,0,0,0.25)' }}>
+      <div style={{ padding:'0.75rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid var(--gray-200)' }}>
+      <span style={{ fontWeight:700, fontSize:'0.9rem' }}>Confirmar ubicación</span>
+      <button onClick={() => setShowPinMap(false)} style={{ background:'none', border:'none', cursor:'pointer', fontSize:'1.2rem', color:'var(--gray-400)' }}>✕</button>
+      </div>
+      <p style={{ fontSize:'0.78rem', color:'var(--gray-500)', margin:'0.5rem 1rem 0' }}>
+      Arrastra el pin o toca el mapa para ajustar la ubicación exacta.
+      </p>
+      <div ref={pinMapRef} style={{ height:320, width:'100%' }} />
+      <div style={{ padding:'0.75rem 1rem', display:'flex', gap:'0.5rem', justifyContent:'flex-end', borderTop:'1px solid var(--gray-200)' }}>
+      <button className="btn-sm" onClick={() => setShowPinMap(false)}>Cancelar</button>
+      <button className="btn-sm btn-primary" disabled={pinSaving} onClick={async () => {
+        if (!pinMapResult) return;
+        const saved = await persistHomePin(pinMapResult.lat, pinMapResult.lng);
+        if (saved) setShowPinMap(false);
+      }}>
+      {pinSaving ? 'Guardando…' : 'Confirmar pin'}
+      </button>
+      </div>
+      </div>
+      </div>
+    )}
     </div>
-    </div>
-    </div>
-  )}
-  </div>
   <button className="btn-primary btn-sm" onClick={saveProfile}>Guardar cambios</button>
   <Flash text={profileMsg} isError={profileErr} />
+  </Collapsible>
+
+  {/* ── Configuración ── */}
+  <Collapsible title="Configuración">
+  <div style={{ display:'flex', flexDirection:'column', gap:'0.75rem' }}>
+
+    {/* Notificaciones */}
+    <div>
+      <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
+        textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
+        Notificaciones
+      </p>
+      <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+          <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>
+            Push:{' '}
+            <strong>
+              {notifStatus === 'granted' ? (notifEnabled ? 'Activo' : 'Pausado')
+                : notifStatus === 'denied' ? 'Bloqueado'
+                : notifStatus === 'default' ? 'Pendiente'
+                : 'No soportado'}
+            </strong>
+          </span>
+          <button type="button" className="btn-sm" onClick={toggleNotifEnabled}>
+            {notifStatus === 'granted' && notifEnabled ? 'Pausar' : 'Activar'}
+          </button>
+        </div>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+          <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Alta prioridad</span>
+          <button type="button" className="btn-sm" onClick={toggleHighPriorityNotifs}>
+            {highPriorityNotifs ? 'Activadas' : 'Desactivadas'}
+          </button>
+        </div>
+        {notifMsg && <div style={{ fontSize:'0.74rem', color:'var(--gray-500)' }}>{notifMsg}</div>}
+      </div>
+    </div>
+
+    {/* Apariencia */}
+    <div>
+      <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
+        textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
+        Apariencia
+      </p>
+      <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+          <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Tema</span>
+          <div style={{ display:'flex', gap:'0.25rem' }}>
+            {[['system','Auto'],['light','Claro'],['dark','Oscuro']].map(([val, label]) => (
+              <button key={val} type="button" onClick={() => applyTheme(val)}
+                style={{ padding:'0.2rem 0.55rem', fontSize:'0.75rem', cursor:'pointer',
+                  border:`1.5px solid ${theme === val ? 'var(--brand)' : 'var(--border)'}`,
+                  borderRadius:6,
+                  background: theme === val ? 'var(--brand-light)' : 'var(--bg-card)',
+                  color: theme === val ? 'var(--brand)' : 'var(--text-secondary)',
+                  fontWeight: theme === val ? 700 : 400, minHeight:'unset' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+          <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Reducir animaciones</span>
+          <button type="button" className="btn-sm" onClick={toggleReducedMotion}>
+            {reducedMotion ? 'Activado' : 'Desactivado'}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    {/* Aplicación (PWA) */}
+    <div>
+      <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
+        textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
+        Aplicación
+      </p>
+      <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+        {!isInstalled && deferredInstall && (
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+            <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Instalar en pantalla de inicio</span>
+            <button type="button" className="btn-sm btn-primary" onClick={triggerInstallPrompt}>
+              Instalar
+            </button>
+          </div>
+        )}
+        {isInstalled && (
+          <div style={{ fontSize:'0.82rem', color:'var(--success)', fontWeight:600 }}>
+            ✓ App instalada
+          </div>
+        )}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+          <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Verificar actualización</span>
+          <button type="button" className="btn-sm" onClick={refreshOfflineCache}>
+            Actualizar
+          </button>
+        </div>
+        {offlineCacheMsg && <div style={{ fontSize:'0.74rem', color:'var(--gray-500)' }}>{offlineCacheMsg}</div>}
+      </div>
+    </div>
+
+  </div>
   </Collapsible>
 
   {/* Seguridad */}
