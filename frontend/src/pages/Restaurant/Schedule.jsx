@@ -25,10 +25,8 @@ function IconClock() {
   );
 }
 
-// ── Control de tiempo de preparación default ──────────────────────────────────
-// En Schedule es el valor default que se guarda en DB y se usa al abrir cada día.
+// ── Control de tiempo de preparación predeterminado ─────────────────────────
 function PrepTimeDefault({ value, onChange, onSave, saving, saved }) {
-  const OPTS = [5, 10, 15, 20, 30, 45, 60];
   return (
     <div style={{
       background: 'var(--bg-card)',
@@ -38,9 +36,11 @@ function PrepTimeDefault({ value, onChange, onSave, saving, saved }) {
       marginBottom: '1.25rem',
     }}>
       <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', marginBottom:'0.6rem' }}>
-        <span style={{ display:'inline-flex', alignItems:'center', color:'var(--brand)' }}><IconClock /></span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'block',flexShrink:0}}>
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        </svg>
         <span style={{ fontWeight:700, fontSize:'0.88rem', color:'var(--text-primary)' }}>
-          Tiempo de preparación default
+          Tiempo de preparación predeterminado
         </span>
         {saved && (
           <span style={{ fontSize:'0.72rem', color:'var(--success)', fontWeight:700, marginLeft:'auto' }}>
@@ -51,25 +51,36 @@ function PrepTimeDefault({ value, onChange, onSave, saving, saved }) {
       <p style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginBottom:'0.65rem', lineHeight:1.4 }}>
         Estimado inicial al comenzar el día. El motor lo puede ajustar automáticamente según el historial.
       </p>
-      <div style={{ display:'flex', gap:'0.3rem', flexWrap:'wrap', marginBottom:'0.65rem' }}>
-        {OPTS.map(m => (
-          <button key={m} onClick={() => onChange(m)}
+      <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', marginBottom:'0.65rem' }}>
+        <button onClick={() => onChange(Math.max(1, value - 1))}
+          style={{ width:36, height:36, borderRadius:8, border:'1px solid var(--border)',
+            background:'var(--bg-raised)', color:'var(--text-primary)', cursor:'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            fontSize:'1.1rem', fontWeight:700, minHeight:'unset', flexShrink:0 }}>−</button>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.3rem' }}>
+          <input
+            type="text" inputMode="numeric"
+            value={value}
+            onChange={e => { const n = parseInt(e.target.value, 10); if (!isNaN(n) && n > 0) onChange(n); }}
             style={{
-              padding: '0.3rem 0.7rem', border: '1px solid', borderRadius: 6, cursor: 'pointer',
-              fontSize: '0.78rem', fontWeight: value === m ? 800 : 500,
-              background: value === m ? 'var(--brand)' : 'var(--bg-raised)',
-              color: value === m ? '#fff' : 'var(--text-secondary)',
-              borderColor: value === m ? 'var(--brand)' : 'var(--border)',
-              minHeight: 'unset',
-            }}>
-            {m} min
-          </button>
-        ))}
+              width:56, textAlign:'center',
+              fontWeight:800, fontSize:'1.1rem',
+              border:'1px solid var(--border)', borderRadius:8,
+              padding:'0.3rem 0', color:'var(--text-primary)',
+            }}
+          />
+          <span style={{ fontSize:'0.85rem', color:'var(--text-secondary)' }}>min</span>
+        </div>
+        <button onClick={() => onChange(value + 1)}
+          style={{ width:36, height:36, borderRadius:8, border:'1px solid var(--border)',
+            background:'var(--bg-raised)', color:'var(--text-primary)', cursor:'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            fontSize:'1.1rem', fontWeight:700, minHeight:'unset', flexShrink:0 }}>+</button>
       </div>
       <button onClick={onSave} disabled={saving}
         className="btn-primary btn-sm"
         style={{ opacity: saving ? 0.65 : 1 }}>
-        {saving ? 'Guardando…' : 'Guardar como default'}
+        {saving ? 'Guardando…' : 'Guardar como predeterminado'}
       </button>
     </div>
   );

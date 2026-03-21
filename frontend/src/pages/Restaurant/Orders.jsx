@@ -63,13 +63,10 @@ function buildInitial(items = []) {
 }
 
 // ── Control de tiempo de preparación ─────────────────────────────────────────
-// En Orders es temporal (sesión): no persiste en DB, solo afecta la sesión actual
-// hasta que el restaurante cierre. Visible en el header de Activos.
 function PrepTimeControl({ value, onChange, onSave, saving }) {
-  const OPTS = [5, 10, 15, 20, 30, 45, 60];
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap',
+      display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap',
       padding: '0.5rem 0.75rem',
       background: 'rgba(255,255,255,0.12)',
       borderRadius: 8,
@@ -77,22 +74,34 @@ function PrepTimeControl({ value, onChange, onSave, saving }) {
       marginBottom: '0.5rem',
     }}>
       <span style={{ display:'inline-flex', alignItems:'center', gap:'0.3rem', color:'rgba(255,255,255,0.9)', fontSize:'0.78rem', fontWeight:700, flexShrink:0 }}>
-        <IconClock />
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}>
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        </svg>
         Prep. hoy:
       </span>
-      <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', flex:1 }}>
-        {OPTS.map(m => (
-          <button key={m} onClick={() => onChange(m)}
-            style={{
-              padding: '0.18rem 0.55rem', border: 'none', borderRadius: 6, cursor: 'pointer',
-              fontSize: '0.72rem', fontWeight: value === m ? 800 : 500,
-              background: value === m ? '#fff' : 'rgba(255,255,255,0.15)',
-              color: value === m ? 'var(--brand)' : 'rgba(255,255,255,0.85)',
-              minHeight: 'unset',
-            }}>
-            {m}m
-          </button>
-        ))}
+      <div style={{ display:'flex', alignItems:'center', gap:'0.25rem', flex:1 }}>
+        <button onClick={() => onChange(Math.max(1, value - 1))}
+          style={{ width:28, height:28, borderRadius:6, border:'1px solid rgba(255,255,255,0.35)',
+            background:'rgba(255,255,255,0.15)', color:'#fff', cursor:'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            fontSize:'1rem', fontWeight:700, minHeight:'unset', flexShrink:0 }}>−</button>
+        <input
+          type="text" inputMode="numeric"
+          value={value}
+          onChange={e => { const n = parseInt(e.target.value, 10); if (!isNaN(n) && n > 0) onChange(n); }}
+          style={{
+            width:44, textAlign:'center', background:'rgba(255,255,255,0.15)',
+            border:'1px solid rgba(255,255,255,0.35)', borderRadius:6,
+            color:'#fff', fontWeight:700, fontSize:'0.88rem',
+            padding:'0.2rem 0', minHeight:'unset',
+          }}
+        />
+        <span style={{ color:'rgba(255,255,255,0.8)', fontSize:'0.75rem', flexShrink:0 }}>min</span>
+        <button onClick={() => onChange(value + 1)}
+          style={{ width:28, height:28, borderRadius:6, border:'1px solid rgba(255,255,255,0.35)',
+            background:'rgba(255,255,255,0.15)', color:'#fff', cursor:'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            fontSize:'1rem', fontWeight:700, minHeight:'unset', flexShrink:0 }}>+</button>
       </div>
       <button onClick={onSave} disabled={saving}
         style={{

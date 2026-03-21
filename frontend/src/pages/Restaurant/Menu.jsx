@@ -4,16 +4,6 @@ import { useAuth } from '../../contexts/AuthContext';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
-// ── Iconos SVG ────────────────────────────────────────────────────────────────
-function IconMenu() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{ display:'block' }}>
-      <path d="M3 6h18M3 12h18M3 18h18"/>
-      <circle cx="19" cy="6" r="2" fill="currentColor" stroke="none"/>
-    </svg>
-  );
-}
-
 // ── VolumeHelper ──────────────────────────────────────────────────────────────
 // Regla métrica real: muestra una regla en pantalla con marcas de centímetro.
 // El restaurantero puede poner el empaque junto al teléfono y medir directamente.
@@ -41,36 +31,11 @@ var PRESETS = [
 // Mochila referencia = 25L (para guías)
 var BAG_LITERS = 25;
 
-// Píxeles CSS por centímetro real (W3C: 1in = 96px, 1in = 2.54cm)
-var CSS_PX_PER_CM = 96 / 2.54; // ≈ 37.795
-
-// La regla muestra 10 cm
-var RULER_CM = 10;
-var RULER_PX = Math.round(CSS_PX_PER_CM * RULER_CM); // ≈ 378 px CSS
 
 function VolumeHelper({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
-  // ── Zoom compensation ────────────────────────────────────────────────────────
-  // window.devicePixelRatio changes when the user zooms in the browser.
-  // At 100% zoom, devicePixelRatio = 1 (or 2 on retina at 100%).
-  // At 200% zoom, devicePixelRatio doubles relative to the base retina value.
-  // We detect the browser zoom level as: screen.width / window.innerWidth
-  // This is the CSS zoom factor — multiply RULER_PX by its inverse to compensate.
-  const [zoomFactor, setZoomFactor] = useState(() => {
-    try { return window.screen.width / window.innerWidth; } catch { return 1; }
-  });
-
-  useEffect(() => {
-    function update() {
-      try { setZoomFactor(window.screen.width / window.innerWidth); } catch {}
-    }
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, []);
-
-  // Close on outside click
   useEffect(() => {
     if (!open) return;
     function handler(e) {
@@ -88,7 +53,6 @@ function VolumeHelper({ value, onChange }) {
 
   return (
     <div ref={ref} style={{ marginTop: 6 }}>
-      {/* Trigger button */}
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
@@ -99,116 +63,21 @@ function VolumeHelper({ value, onChange }) {
           fontWeight: 600, minHeight: 'unset', textDecoration: 'underline',
           textUnderlineOffset: 2,
         }}>
-        📐 {open ? 'Cerrar regla' : 'Ver regla de volumen'}
+        📐 {open ? 'Ocultar guías' : 'Ver guías de volumen'}
       </button>
 
       {open && (
         <div style={{
-          marginTop: 8,
-          padding: '12px 14px',
+          marginTop: 8, padding: '10px 12px',
           background: 'var(--bg-raised)',
           border: '1px solid var(--border)',
           borderRadius: 10,
         }}>
-
-          {/* Header */}
-          <div style={{
-            fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
-            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8,
-          }}>
-            Regla métrica — pon el empaque junto a la pantalla
-          </div>
-
-          {/* ── Regla física real ───────────────────────────────────────────
-               Compensa el zoom del navegador leyendo window.devicePixelRatio
-               en tiempo de ejecución. La regla siempre mide 10 cm físicos.
-               Técnica: leer el zoom actual con screen.width/window.innerWidth,
-               luego aplicar scale(1/zoomFactor) al contenedor via transform.
-          ────────────────────────────────────────────────────────────────── */}
-          <div style={{
-            width: RULER_PX,
-            position: 'relative',
-            userSelect: 'none',
-            transformOrigin: 'top left',
-            transform: `scale(${(1 / zoomFactor).toFixed(6)})`,
-            // Reserve actual visual height after scaling so layout doesn't collapse
-            height: Math.round(36 / zoomFactor),
-            marginBottom: 14,
-          }}>
-            {/* Cuerpo de la regla */}
-            <div style={{
-              width: RULER_PX,
-              height: 32,
-              background: '#f5e97a',          // amarillo regla clásica
-              border: '1.5px solid #b8a000',
-              borderRadius: '3px 3px 0 0',
-              position: 'relative',
-              overflow: 'visible',
-            }}>
-              {/* Marcas de cm */}
-              {Array.from({ length: RULER_CM + 1 }, (_, i) => {
-                const x = Math.round(i * CSS_PX_PER_CM);
-                const isMajor = i % 2 === 0;
-                const tickH   = isMajor ? 14 : 8;
-                return (
-                  <div key={i} style={{
-                    position: 'absolute',
-                    left: x,
-                    bottom: 0,
-                    width: 1,
-                    height: tickH,
-                    background: '#7a6a00',
-                  }}>
-                    {isMajor && i > 0 && (
-                      <span style={{
-                        position: 'absolute',
-                        bottom: tickH + 2,
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        fontSize: 9,
-                        fontWeight: 700,
-                        color: '#5a4d00',
-                        fontFamily: 'monospace',
-                        whiteSpace: 'nowrap',
-                      }}>{i}</span>
-                    )}
-                  </div>
-                );
-              })}
-              {/* Marcas de medio cm (0.5, 1.5, ...) */}
-              {Array.from({ length: RULER_CM }, (_, i) => {
-                const x = Math.round((i + 0.5) * CSS_PX_PER_CM);
-                return (
-                  <div key={`h${i}`} style={{
-                    position: 'absolute',
-                    left: x, bottom: 0,
-                    width: 1, height: 5,
-                    background: '#b8a000',
-                  }} />
-                );
-              })}
-              {/* Etiqueta "cm" al final */}
-              <span style={{
-                position: 'absolute',
-                right: 4, bottom: 4,
-                fontSize: 8, color: '#7a6a00',
-                fontFamily: 'monospace', fontWeight: 700,
-              }}>cm</span>
-            </div>
-            {/* Borde inferior de la regla */}
-            <div style={{
-              width: RULER_PX, height: 4,
-              background: '#b8a000',
-              borderRadius: '0 0 2px 2px',
-            }} />
-          </div>
-
-          {/* ── Guías de referencia (sin mini-barras, solo texto) ─────────── */}
           <div style={{
             fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
             textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5,
           }}>
-            Guías
+            Referencias de volumen
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {PRESETS.map(p => {
@@ -235,12 +104,6 @@ function VolumeHelper({ value, onChange }) {
                 </button>
               );
             })}
-          </div>
-
-          <div style={{
-            marginTop: 10, fontSize: 10, color: 'var(--text-tertiary)', lineHeight: 1.4,
-          }}>
-            💡 Pon el empaque junto a la regla para estimar su tamaño en centímetros.
           </div>
         </div>
       )}
@@ -419,7 +282,11 @@ export default function RestaurantMenu() {
       {/* ── Encabezado Gestión de menú ─────────────────────────────────── */}
       <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'var(--promo-gradient)', color:'#fff' }}>
         <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>
-          <IconMenu />
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{display:'block',flexShrink:0}}>
+            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
+            <rect x="9" y="3" width="6" height="4" rx="1"/>
+            <path d="M9 12h6M9 16h4"/>
+          </svg>
           Gestión de menú
         </div>
         <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Productos, precios e imagen de tu tienda</div>
@@ -444,9 +311,10 @@ export default function RestaurantMenu() {
         </div>
       )}
 
-      {/* ── Foto de perfil de la tienda ── */}
+      {/* ── Foto de perfil + nombre + portada ── */}
       <div style={{ display:'flex', alignItems:'center', gap:'0.875rem', marginBottom:'1.25rem',
         padding:'0.875rem 1rem', background:'var(--bg-card)', borderRadius:10, border:'1px solid var(--border)' }}>
+        {/* Avatar con botón de edición */}
         <div style={{ position:'relative', flexShrink:0 }}>
           {profilePhoto
             ? <img src={profilePhoto} alt="Foto de tienda"
@@ -465,12 +333,31 @@ export default function RestaurantMenu() {
             <span style={{ color:'#fff', fontSize:'1rem', lineHeight:1, fontWeight:300, marginTop:'-1px' }}>+</span>
           </button>
         </div>
-        <div>
-          <div style={{ fontWeight:700, fontSize:'0.9rem', color:'#8a5e5e' }}>
-            {auth.user?.restaurant?.name || 'Mi tienda'}
+        {/* Nombre */}
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontWeight:800, fontSize:'1.15rem', color:'var(--text-primary)', letterSpacing:'-0.01em', lineHeight:1.2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+            {auth.user?.restaurant?.name || restaurantData?.name || 'Mi tienda'}
           </div>
-
+          <div style={{ fontSize:'0.75rem', color:'var(--text-tertiary)', marginTop:'0.15rem' }}>Perfil de tienda</div>
         </div>
+        {/* Portada */}
+        <button
+          onClick={() => { setEditingPP(e => !e); ppClear(); }}
+          title="Subir foto de portada o fachada"
+          style={{
+            flexShrink:0, display:'flex', flexDirection:'column', alignItems:'center', gap:'0.2rem',
+            background:'var(--bg-raised)', border:'1px dashed var(--border)', borderRadius:8,
+            padding:'0.5rem 0.65rem', cursor:'pointer', minHeight:'unset',
+            color:'var(--text-secondary)',
+          }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <circle cx="8.5" cy="8.5" r="1.5"/>
+            <polyline points="21 15 16 10 5 21"/>
+          </svg>
+          <span style={{ fontSize:'0.65rem', fontWeight:600, textAlign:'center', lineHeight:1.2 }}>Foto de{'
+'}fachada</span>
+        </button>
       </div>
 
       {/* Editor de foto de tienda */}
@@ -527,14 +414,14 @@ export default function RestaurantMenu() {
                     <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.4rem' }}>
                       <label style={{ flex:1 }}>
                         Unidades por empaque
-                        <input type="number" value={pkgUnits} onChange={e=>setPkgUnits(e.target.value)}
-                          min="1" step="1" placeholder="1"
+                        <input type="text" inputMode="numeric" value={pkgUnits} onChange={e=>setPkgUnits(e.target.value)}
+                          placeholder="1"
                           title="Cuántas unidades incluye un empaque (ej: 6 nuggets = 6)" />
                       </label>
                       <label style={{ flex:1 }}>
                         Volumen empaque (L)
-                        <input type="number" value={pkgVolume} onChange={e=>setPkgVolume(e.target.value)}
-                          min="0" step="0.01" placeholder="0.00"
+                        <input type="text" inputMode="decimal" value={pkgVolume} onChange={e=>setPkgVolume(e.target.value)}
+                          placeholder="0.00"
                           title="Litros que ocupa un empaque en la mochila (ej: 0.5 = medio litro)" />
                       </label>
                     </div>
@@ -651,14 +538,14 @@ export default function RestaurantMenu() {
               <div style={{ display:'flex', gap:'0.5rem' }}>
                 <label style={{ flex:1 }}>
                   Unidades por empaque
-                  <input type="number" value={pkgUnits} onChange={e => setPkgUnits(e.target.value)}
-                    min="1" step="1" placeholder="1"
+                  <input type="text" inputMode="numeric" value={pkgUnits} onChange={e => setPkgUnits(e.target.value)}
+                    placeholder="1"
                     title="Cuántas unidades incluye un empaque" />
                 </label>
                 <label style={{ flex:1 }}>
                   Volumen empaque (L)
-                  <input type="number" value={pkgVolume} onChange={e => setPkgVolume(e.target.value)}
-                    min="0" step="0.01" placeholder="0.00"
+                  <input type="text" inputMode="decimal" value={pkgVolume} onChange={e => setPkgVolume(e.target.value)}
+                    placeholder="0.00"
                     title="Litros que ocupa un empaque en la mochila" />
                 </label>
               </div>
