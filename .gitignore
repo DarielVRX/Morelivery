@@ -6,3 +6,4 @@ frontend/dist/
 !.env.example
 coverage/
 .DS_Store
+..env.kate-swp
