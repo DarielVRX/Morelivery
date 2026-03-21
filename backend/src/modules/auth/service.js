@@ -332,17 +332,20 @@ export async function googleLogin(credential, role = 'customer') {
   const realEmail = email.toLowerCase();
 
   // Buscar usuario existente por real_email o google_id
+  // Reemplaza el bloque de búsqueda de usuario existente en googleLogin
   let user;
   try {
     const r = await query(
-      'SELECT * FROM users WHERE real_email = $1 OR google_id = $2 LIMIT 1',
-      [realEmail, googleId]
+      'SELECT * FROM users WHERE (real_email = $1 OR google_id = $2) AND role = $3 LIMIT 1',
+                          [realEmail, googleId, role]
     );
     user = r.rows[0];
   } catch (e) {
     if (e?.code === '42703') {
-      // Columnas nuevas no existen — buscar solo por email
-      const r = await query('SELECT * FROM users WHERE email = $1 LIMIT 1', [realEmail]);
+      const r = await query(
+        'SELECT * FROM users WHERE email = $1 AND role = $2 LIMIT 1',
+        [realEmail, role]
+      );
       user = r.rows[0];
     } else throw e;
   }
@@ -379,7 +382,7 @@ export async function googleLogin(credential, role = 'customer') {
     // Vincular google_id si no lo tenía
     try {
       if (!user.google_id) {
-        await query('UPDATE users SET google_id=$1 WHERE id=$2', [googleId, user.id]);
+        await query('UPDATE users SET google_id=$1 WHERE id=$2 AND role=$3', [googleId, user.id, role]);
       }
     } catch (_) {}
   }
