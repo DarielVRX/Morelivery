@@ -131,13 +131,20 @@ export async function recordPickupWait(orderId, pickupWaitSec) {
 
 /**
  * Evalúa si el estimado de prep del restaurante debe ajustarse.
- * Se llama cuando el pedido pasa a 'delivered'.
+ * Se llama cuando el pedido pasa a 'on_the_way' (pickup confirmado).
+ *
+ * Trigger: ambas condiciones deben cumplirse simultáneamente:
+ *   1. El conductor esperó > kitchen_wait_threshold_s (default 120 s = 2 min)
+ *   2. El tiempo real de prep excedió el estimado en > kitchen_estimate_diff_threshold_s
+ *      (default 300 s = 5 min) — solo en dirección positiva (el estimado fue corto)
+ *
+ * Cuando se dispara: nuevo estimado = tiempo real exacto de esa orden.
  *
  * @param {string} orderId
  */
 export async function evaluatePrepEstimate(orderId) {
-  const waitThreshold  = getParam('kitchen_wait_threshold_s', 120);
-  const diffThreshold  = getParam('kitchen_estimate_diff_threshold_s', 90);
+  const waitThreshold = await getParam('kitchen_wait_threshold_s', 120);
+  const diffThreshold = await getParam('kitchen_estimate_diff_threshold_s', 300);
 
   try {
     const r = await query(
@@ -153,49 +160,100 @@ export async function evaluatePrepEstimate(orderId) {
     if (r.rowCount === 0) return;
     const row = r.rows[0];
 
-    // Solo actuar si el driver tuvo que esperar suficientemente
+    // Condición 1: conductor esperó más de N segundos
     const pickupWait = row.pickup_wait_s ?? 0;
-    if (pickupWait < waitThreshold) return;
+    if (pickupWait <= waitThreshold) return;
 
-    // Tiempo real de preparación
+    // Requisitos de datos para calcular tiempo real
     if (!row.prep_started_at || !row.ready_at) return;
     const realPrepSec = Math.round(
       (new Date(row.ready_at) - new Date(row.prep_started_at)) / 1000
     );
 
     const currentEstimate = row.prep_time_estimate_s ?? 600;
-    const diff = Math.abs(realPrepSec - currentEstimate);
 
-    if (diff < diffThreshold) return;  // Diferencia no significativa
+    // Condición 2: el tiempo real superó el estimado en más de M segundos
+    // Solo dirección positiva (estimado fue corto, no cuando fue excesivamente largo)
+    if ((realPrepSec - currentEstimate) <= diffThreshold) return;
 
-    // Actualizar automáticamente el estimado del restaurante
-    // (media ponderada: 70% estimado actual + 30% observación nueva)
-    const newEstimate = Math.round(currentEstimate * 0.7 + realPrepSec * 0.3);
+    // Nuevo estimado = tiempo real exacto de esta orden
+    const newEstimate = realPrepSec;
 
     await query(
       `UPDATE restaurants
-       SET prep_time_estimate_s  = $1,
-           last_prep_time_s      = $2,
+       SET prep_time_estimate_s     = $1,
+           last_prep_time_s         = $2,
            prep_estimate_updated_at = NOW()
        WHERE id = $3`,
       [newEstimate, realPrepSec, row.restaurant_id]
     );
 
-    console.log(`[kitchen] rest=${shortId(row.restaurant_id)} estimado ajustado: ${currentEstimate}s → ${newEstimate}s (real=${realPrepSec}s, espera driver=${pickupWait}s)`);
+    console.log(
+      `[kitchen] auto-adjust rest=${shortId(row.restaurant_id)} ` +
+      `${currentEstimate}s → ${newEstimate}s ` +
+      `(real=${realPrepSec}s, espera conductor=${pickupWait}s)`
+    );
 
-    // Notificar al restaurante para corrección manual si lo desea
+    // Notificar al restaurante vía SSE
     if (row.owner_user_id) {
       sseHub.sendToUser(row.owner_user_id, 'prep_estimate_updated', {
-        restaurantName:  row.restaurant_name,
+        restaurantName:   row.restaurant_name,
         previousEstimate: currentEstimate,
         newEstimate,
-        realPrepTime:    realPrepSec,
-        driverWaitSecs:  pickupWait,
-        message:         `El tiempo de preparación estimado se ajustó automáticamente a ${Math.round(newEstimate / 60)} min (antes: ${Math.round(currentEstimate / 60)} min). Puedes corregirlo en tu panel.`,
+        realPrepTime:     realPrepSec,
+        driverWaitSecs:   pickupWait,
+        triggeredBy:      'auto',
+        message:
+          `El tiempo de preparación se actualizó automáticamente a ` +
+          `${Math.round(newEstimate / 60)} min ` +
+          `(antes: ${Math.round(currentEstimate / 60)} min). ` +
+          `El conductor esperó ${Math.round(pickupWait / 60)} min. ` +
+          `Puedes corregirlo desde Pedidos si es incorrecto.`,
       });
     }
   } catch (e) {
     console.warn(`[kitchen] evaluatePrepEstimate error order=${shortId(orderId)}:`, e.message);
+  }
+}
+
+/**
+ * Registra una corrección manual del restaurante en restaurant_prep_corrections.
+ * Vigencia: 1 hora. Se usa para detección de abuso, no afecta el flujo de pedidos.
+ *
+ * @param {string} restaurantId
+ * @param {number} previousS
+ * @param {number} newS
+ */
+export async function recordManualCorrection(restaurantId, previousS, newS) {
+  try {
+    await query(
+      `INSERT INTO restaurant_prep_corrections (restaurant_id, previous_s, new_s)
+       VALUES ($1, $2, $3)`,
+      [restaurantId, previousS, newS]
+    );
+  } catch (e) {
+    console.warn(`[kitchen] recordManualCorrection error rest=${shortId(restaurantId)}:`, e.message);
+  }
+}
+
+/**
+ * Devuelve el número de correcciones manuales vigentes (última hora).
+ *
+ * @param {string} restaurantId
+ * @returns {Promise<number>}
+ */
+export async function getActiveCorrectionsCount(restaurantId) {
+  try {
+    const { rows } = await query(
+      `SELECT COUNT(*)::int AS cnt
+       FROM restaurant_prep_corrections
+       WHERE restaurant_id = $1 AND expires_at > NOW()`,
+      [restaurantId]
+    );
+    return rows[0]?.cnt ?? 0;
+  } catch (e) {
+    console.warn(`[kitchen] getActiveCorrectionsCount error:`, e.message);
+    return 0;
   }
 }
 

@@ -345,43 +345,6 @@ router.patch('/engine-params/:key', authenticate, authorize(['admin']), async (r
   }
 });
 
-// ── PATCH /admin/restaurants/:id/prep-estimate — corregir estimado de prep ────
-router.patch('/restaurants/:id/prep-estimate', authenticate, authorize(['admin']), async (req, res, next) => {
-  try {
-    const { prep_time_estimate_s } = req.body;
-    const val = Number(prep_time_estimate_s);
-    if (!Number.isFinite(val) || val < 30 || val > 7200) {
-      return next(new AppError(400, 'prep_time_estimate_s debe ser entre 30 y 7200 segundos'));
-    }
-    const r = await query(
-      `UPDATE restaurants
-       SET prep_time_estimate_s = $1, prep_estimate_updated_at = NOW()
-       WHERE id = $2 RETURNING id, name, prep_time_estimate_s`,
-      [val, req.params.id]
-    );
-    if (r.rowCount === 0) return next(new AppError(404, 'Restaurante no encontrado'));
-    return res.json({ restaurant: r.rows[0] });
-  } catch (error) { return next(error); }
-});
-
-// ── PATCH /admin/drivers/:id/penalties — ajustar penalizaciones de un driver ──
-router.patch('/drivers/:id/penalties', authenticate, authorize(['admin']), async (req, res, next) => {
-  try {
-    const { disconnect_penalties } = req.body;
-    const val = Number(disconnect_penalties);
-    if (!Number.isFinite(val) || val < 0 || val > 10) {
-      return next(new AppError(400, 'disconnect_penalties debe ser entre 0 y 10'));
-    }
-    const r = await query(
-      `UPDATE driver_profiles SET disconnect_penalties=$1 WHERE user_id=$2
-       RETURNING user_id, disconnect_penalties`,
-      [val, req.params.id]
-    );
-    if (r.rowCount === 0) return next(new AppError(404, 'Driver no encontrado'));
-    return res.json({ driver: r.rows[0] });
-  } catch (error) { return next(error); }
-});
-
 // ── GET /admin/reports — reportes pendientes de revisión ─────────────────────
 router.get('/reports', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
