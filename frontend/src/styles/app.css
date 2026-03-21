@@ -284,3 +284,7 @@ html,body{overscroll-behavior:none;}
   padding-bottom: 0.75rem !important;
   }
 }
+
+.header-icon-btn {
+  color: var(--text-primary);
+}
