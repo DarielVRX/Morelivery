@@ -28,8 +28,10 @@ const mailer = nodemailer.createTransport({
   port:   Number(process.env.SMTP_PORT) || 587,
   secure: false,
   auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-});
-
+  connectionTimeout: 5000,
+  greetingTimeout:   5000,
+  socketTimeout:     5000,
+  });
 // ── Utilidad: resolver username único ────────────────────────────────────────
 // El frontend manda un candidato (alias limpio). Si ya existe,
 // agrega sufijo de 3 chars hasta encontrar uno libre — sin avisar al usuario.
