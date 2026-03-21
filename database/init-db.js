@@ -1,39 +1,29 @@
-import pkg from "pg";
-import fs from "fs";
-const { Client } = pkg;
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import pg from 'pg';
+
+const { Client } = pg;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const schemaPath = path.join(__dirname, 'schema.sql');
+const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/morelivery';
 
 async function initDB() {
-    const client = new Client({
-        user: "darielv",        // tu usuario PostgreSQL
-        host: "localhost",
-        database: "postgres",   // conectamos a la DB por defecto
-        password: "TheGazettE0",
-        port: 5432,
-    });
+  const client = new Client({ connectionString, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
+  await client.connect();
 
-    await client.connect();
-
-    // Crear la base de datos Morelivery si no existe
-    await client.query(`CREATE DATABASE "Morelivery";`);
-
-    // Conectarse a la nueva base de datos
+  try {
+    const sql = fs.readFileSync(schemaPath, 'utf8');
+    await client.query(sql);
+    console.log(`Schema aplicado correctamente sobre ${connectionString}`);
+  } finally {
     await client.end();
-
-    const client2 = new Client({
-        user: "darielv",
-        host: "localhost",
-        database: "Morelivery",
-        password: "TheGazettE0",
-        port: 5432,
-    });
-    await client2.connect();
-
-    // Cargar schema.sql
-    const sql = fs.readFileSync("./database/schema.sql").toString();
-    await client2.query(sql);
-    await client2.end();
-
-    console.log("Database Morelivery creada e inicializada ✅");
+  }
 }
 
-initDB().catch(err => console.error(err));
+initDB().catch((error) => {
+  console.error('No fue posible aplicar database/schema.sql');
+  console.error(error);
+  process.exitCode = 1;
+});

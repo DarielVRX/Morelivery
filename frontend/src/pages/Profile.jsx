@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { apiFetch } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
-import { validatePassword, PasswordStrength } from '../utils/passwordUtils';
+import { validatePassword, PasswordStrength } from '../utils/passwordUtils.jsx';
 
 const STADIA_KEY  = import.meta.env?.VITE_STADIA_KEY || '';
 const STYLE_LIGHT = STADIA_KEY
