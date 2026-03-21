@@ -1,13 +1,13 @@
 // backend/modules/auth/service.js
-import bcrypt         from 'bcryptjs';
-import jwt            from 'jsonwebtoken';
-import nodemailer     from 'nodemailer';
+import bcrypt           from 'bcryptjs';
+import jwt              from 'jsonwebtoken';
+import { google }       from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
-import { query }      from '../../config/db.js';
-import { env }        from '../../config/env.js';
-import { AppError }   from '../../utils/errors.js';
-import { logEvent }   from '../../utils/logger.js';
-import { randomUUID } from 'crypto';
+import { query }        from '../../config/db.js';
+import { env }          from '../../config/env.js';
+import { AppError }     from '../../utils/errors.js';
+import { logEvent }     from '../../utils/logger.js';
+import { randomUUID }   from 'crypto';
 
 // ── Legado: mantener pseudoEmail para no romper usuarios existentes ───────────
 function normalizeUsername(username) { return username.trim().toLowerCase(); }
@@ -19,31 +19,41 @@ export function cleanRestaurantName(name) {
   return name.trim().replace(/\s+(kitchen|restaurant)$/i, '');
 }
 
-// ── Google OAuth client ───────────────────────────────────────────────────────
+// ── Google OAuth client (para verificar tokens de Google Login) ───────────────
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// ── Nodemailer (Gmail App Password) ──────────────────────────────────────────
-const mailer = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    type:         'OAuth2',
-    user:         process.env.GMAIL_USER,
-    clientId:     process.env.GMAIL_CLIENT_ID,
-    clientSecret: process.env.GMAIL_CLIENT_SECRET,
-    refreshToken: process.env.GMAIL_REFRESH_TOKEN,
-  },
-});
+// ── Gmail API (para envío de correos via HTTP — sin SMTP) ─────────────────────
+const gmailAuth = new google.auth.OAuth2(
+  process.env.GMAIL_CLIENT_ID,
+  process.env.GMAIL_CLIENT_SECRET,
+);
+gmailAuth.setCredentials({ refresh_token: process.env.GMAIL_REFRESH_TOKEN });
+
+async function sendGmail({ to, subject, html }) {
+  const gmail = google.gmail({ version: 'v1', auth: gmailAuth });
+  const message = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    html,
+  ].join('\n');
+  const encoded = Buffer.from(message).toString('base64url');
+  await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: { raw: encoded },
+  });
+}
+
 // ── Utilidad: resolver username único ────────────────────────────────────────
-// El frontend manda un candidato (alias limpio). Si ya existe,
-// agrega sufijo de 3 chars hasta encontrar uno libre — sin avisar al usuario.
 async function resolveUniqueUsername(candidate) {
   const base = candidate
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9._-]/g, '')
-    .slice(0, 27) || 'user';
+  .toLowerCase()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9._-]/g, '')
+  .slice(0, 27) || 'user';
 
-  // Verificar contra pseudoEmails legacy Y contra campo real_email
   const taken = await query('SELECT 1 FROM users WHERE email = $1', [pseudoEmailFromUsername(base)]);
   if (taken.rowCount === 0) return base;
 
@@ -57,18 +67,9 @@ async function resolveUniqueUsername(candidate) {
 }
 
 // ── REGISTER ─────────────────────────────────────────────────────────────────
-// Nuevo flujo: recibe email real, fullName, alias.
-// Internamente sigue usando pseudoEmail en el campo `email` para login legacy,
-// y guarda el email real en `real_email` (nuevo campo).
-//
-// Verificación de email:
-//   - Se genera un token y se guarda en `email_verify_token` + `email_verify_expires`
-//   - email_verified queda en FALSE pero NO bloquea el login
-//   - El envío del correo está comentado con TODO — descomenta cuando estés listo
 export async function registerUser(payload) {
   const realEmail = payload.email.trim().toLowerCase();
 
-  // Verificar email real único
   try {
     const existingReal = await query(
       'SELECT id FROM users WHERE real_email = $1 AND role = $2',
@@ -80,30 +81,24 @@ export async function registerUser(payload) {
     if (e?.code !== '42703') throw e;
   }
 
-  // Resolver username único desde candidato
   const usernameCandidate = payload.username || payload.alias;
   const username    = await resolveUniqueUsername(usernameCandidate);
   const pseudoEmail = pseudoEmailFromUsername(username);
 
-  // Verificar pseudoEmail único (doble check)
   const existingPseudo = await query('SELECT id FROM users WHERE email = $1', [pseudoEmail]);
   if (existingPseudo.rowCount > 0) throw new AppError(409, 'Nombre de usuario ya en uso');
 
   const passwordHash = await bcrypt.hash(payload.password, 12);
 
-  // Token de verificación de email (guardado, pero envío desactivado por ahora)
   const verifyToken   = jwt.sign({ email: realEmail, purpose: 'email-verify' }, env.jwtSecret, { expiresIn: '48h' });
   const verifyExpires = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
 
-  // Dirección
   const addressFull = payload.address ||
-    [payload.calle, payload.numero, payload.colonia, payload.ciudad, payload.estado, payload.postalCode]
-      .filter(Boolean).join(', ') || null;
+  [payload.calle, payload.numero, payload.colonia, payload.ciudad, payload.estado, payload.postalCode]
+  .filter(Boolean).join(', ') || null;
   const userAddress = ['customer','restaurant'].includes(payload.role) ? addressFull : null;
 
-  // Insertar usuario — intenta con todos los campos nuevos, fallback si columnas no existen
   let result;
-  // Reemplaza el bloque try/catch del INSERT (líneas 103-137)
   try {
     result = await query(
       `INSERT INTO users
@@ -139,62 +134,22 @@ export async function registerUser(payload) {
     } else throw e;
   }
 
-  // ── VERIFICACIÓN DE EMAIL — descomenta cuando estés listo ────────────────
-  // Paso 1: Agrega EMAIL_VERIFICATION_ENABLED=true en Render
-  // Paso 2: Descomenta el bloque de abajo
-  //
-  // if (process.env.EMAIL_VERIFICATION_ENABLED === 'true') {
-  //   const frontUrl  = process.env.FRONTEND_URL || 'http://localhost:5173';
-  //   const verifyUrl = `${frontUrl}/verify-email?token=${verifyToken}`;
-  //   try {
-  //     await mailer.sendMail({
-  //       from:    `"Morelivery" <${process.env.SMTP_USER}>`,
-  //       to:      realEmail,
-  //       subject: 'Confirma tu correo en Morelivery',
-  //       html: `
-  //         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
-  //           <h2 style="color:#1a202c">Confirma tu correo 📬</h2>
-  //           <p>Hola ${payload.alias}, haz clic para verificar tu cuenta:</p>
-  //           <p style="margin:24px 0">
-  //             <a href="${verifyUrl}"
-  //                style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700">
-  //               Verificar correo
-  //             </a>
-  //           </p>
-  //           <p style="color:#718096;font-size:13px">El enlace expira en 48 horas.</p>
-  //         </div>
-  //       `,
-  //     });
-  //   } catch (err) {
-  //     logEvent('auth.verify_email_send_error', { userId: result.rows[0]?.id, error: err.message });
-  //   }
-  // }
-
-  // ── BLOQUEAR LOGIN SIN VERIFICAR — descomenta en loginUser cuando actives lo de arriba ──
-  // Busca la función loginUser y agrega esto justo después del check de user.status:
-  //
-  // if (user.email_verified === false) {
-  //   throw new AppError(403, 'Verifica tu correo antes de ingresar');
-  // }
-
   const user = result.rows[0];
 
-  // Restaurant: crear registro en restaurants
   if (user.role === 'restaurant') {
     const restName = cleanRestaurantName(payload.displayName || payload.alias || payload.fullName);
     try {
       await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1,$2,$3)',
-        [user.id, restName, 'General']);
+                  [user.id, restName, 'General']);
     } catch (e) {
       if (e?.code !== '42703') throw e;
     }
   }
 
-  // Driver: crear driver_profile
   if (user.role === 'driver') {
     await query(
       'INSERT INTO driver_profiles(user_id, vehicle_type, is_verified, is_available) VALUES($1,$2,true,true)',
-      [user.id, 'bike']
+                [user.id, 'bike']
     );
   }
 
@@ -202,24 +157,19 @@ export async function registerUser(payload) {
 }
 
 // ── LOGIN ─────────────────────────────────────────────────────────────────────
-// Acepta { email, password } (nuevo) o { username, password } (legado).
 export async function loginUser(payload) {
   let result;
 
   if (payload.email) {
     const rawEmail = payload.email.trim().toLowerCase();
-
-    // Detectar si es un pseudoEmail legacy
     const isLegacy = rawEmail.endsWith('@local.test');
 
     if (isLegacy) {
-      // Flujo legacy — buscar por email directo
       result = await query(
         'SELECT id, full_name, alias, email, password_hash, role, status, address FROM users WHERE email = $1',
         [rawEmail]
       );
     } else {
-      // Flujo nuevo — buscar por real_email
       try {
         result = await query(
           'SELECT id, full_name, alias, email, real_email, password_hash, role, status, address FROM users WHERE real_email = $1',
@@ -253,11 +203,9 @@ export async function loginUser(payload) {
     throw new AppError(401, 'Credenciales inválidas');
   }
 
-  // username para el token: extraer del pseudoEmail
   const username = user.email.replace(/@local\.test$/, '');
   const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 
-  // Perfil extendido (idéntico al código original)
   let profile = {
     address: user.address || null,
     alias: user.alias || user.full_name || username,
@@ -334,8 +282,6 @@ export async function googleLogin(credential, role = 'customer') {
   const { email, name, given_name, sub: googleId } = payload;
   const realEmail = email.toLowerCase();
 
-  // Buscar usuario existente por real_email o google_id
-  // Reemplaza el bloque de búsqueda de usuario existente en googleLogin
   let user;
   try {
     const r = await query(
@@ -354,16 +300,13 @@ export async function googleLogin(credential, role = 'customer') {
   }
 
   if (!user) {
-    const alias    = given_name || name?.split(' ')[0] || 'user';
-    const fullName = name || realEmail.split('@')[0];
-    const username = await resolveUniqueUsername(alias);
+    const alias       = given_name || name?.split(' ')[0] || 'user';
+    const fullName    = name || realEmail.split('@')[0];
+    const username    = await resolveUniqueUsername(alias);
     const pseudoEmail = pseudoEmailFromUsername(username);
-
-    // Google users no tienen contraseña — placeholder irreversible
     const placeholderHash = await bcrypt.hash(randomUUID(), 12);
 
     try {
-      // INSERT nuevo usuario — usa el role recibido en vez de hardcodear 'customer':
       const r = await query(
         `INSERT INTO users(full_name, alias, email, real_email, google_id, role, status, password_hash)
         VALUES($1,$2,$3,$4,$5,$6,'active',$7) RETURNING *`,
@@ -372,7 +315,6 @@ export async function googleLogin(credential, role = 'customer') {
       user = r.rows[0];
     } catch (e) {
       if (e?.code === '42703') {
-        // Fallback sin columnas nuevas:
         const r = await query(
           `INSERT INTO users(full_name, alias, email, role, status, password_hash)
           VALUES($1,$2,$3,$4,'active',$5) RETURNING *`,
@@ -382,7 +324,6 @@ export async function googleLogin(credential, role = 'customer') {
       } else throw e;
     }
   } else {
-    // Vincular google_id si no lo tenía
     try {
       if (!user.google_id) {
         await query('UPDATE users SET google_id=$1 WHERE id=$2 AND role=$3', [googleId, user.id, role]);
@@ -406,11 +347,7 @@ export async function googleLogin(credential, role = 'customer') {
   };
 }
 
-// ── FORGOT PASSWORD ───────────────────────────────────────────────────────────
-// Genera token JWT de 15min y envía email. Siempre responde OK (no revela si existe).
 // ── VERIFY EMAIL ──────────────────────────────────────────────────────────────
-// Ruta: GET /auth/verify-email?token=xxx
-// Ya funciona — solo falta activar el envío del correo en registerUser (ver TODO arriba).
 export async function verifyEmail(token) {
   let payload;
   try {
@@ -422,32 +359,27 @@ export async function verifyEmail(token) {
   if (payload.purpose !== 'email-verify') throw new AppError(401, 'Token inválido');
 
   try {
-    const r = await query(
+    await query(
       `UPDATE users
-         SET email_verified = true, email_verify_token = NULL, email_verify_expires = NULL
-       WHERE real_email = $1 AND email_verified = false
-       RETURNING id`,
+      SET email_verified = true, email_verify_token = NULL, email_verify_expires = NULL
+      WHERE real_email = $1 AND email_verified = false
+      RETURNING id`,
       [payload.email]
     );
-    if (r.rowCount === 0) {
-      // Ya verificado o no existe — silencioso, no es error
-    }
   } catch (e) {
-    if (e?.code === '42703') return; // columnas no existen aún, ignorar
+    if (e?.code === '42703') return;
     throw e;
   }
 }
 
 // ── FORGOT PASSWORD ───────────────────────────────────────────────────────────
-// Reemplaza toda la función forgotPassword (líneas 434-485)
 export async function forgotPassword(email) {
   const realEmail = email.trim().toLowerCase();
-  logEvent('auth.forgot_password_attempt', { smtp_user: process.env.SMTP_USER, to: realEmail });
+
   let user;
   try {
     const r = await query('SELECT id, alias, full_name FROM users WHERE real_email = $1', [realEmail]);
     user = r.rows[0];
-    // Fallback: si no se encontró por real_email, buscar por pseudoEmail legacy
     if (!user) {
       const r2 = await query(
         'SELECT id, alias, full_name FROM users WHERE email = $1',
@@ -457,7 +389,6 @@ export async function forgotPassword(email) {
     }
   } catch (e) {
     if (e?.code === '42703') {
-      // Columna real_email no existe — buscar solo por pseudoEmail
       try {
         const r = await query(
           'SELECT id, alias, full_name FROM users WHERE email = $1',
@@ -466,11 +397,11 @@ export async function forgotPassword(email) {
         user = r.rows[0];
       } catch (_) { return; }
     } else {
-      return; // silencioso
+      return;
     }
   }
 
-  if (!user) return; // silencioso — no revelar si el email existe
+  if (!user) return;
 
   const resetToken = jwt.sign(
     { userId: user.id, purpose: 'password-reset' },
@@ -483,8 +414,7 @@ export async function forgotPassword(email) {
   const resetUrl = `${frontUrl}/reset-password?token=${resetToken}`;
 
   try {
-    await mailer.sendMail({
-      from:    `"Morelivery" <${process.env.SMTP_USER}>`,
+    await sendGmail({
       to:      realEmail,
       subject: 'Recupera tu contraseña en Morelivery',
       html: `
@@ -527,8 +457,7 @@ export async function resetPassword(token, newPassword) {
   if (r.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
 }
 
-// ── Funciones existentes — SIN CAMBIOS ───────────────────────────────────────
-
+// ── UPDATE PROFILE ADDRESS ────────────────────────────────────────────────────
 export async function updateProfileAddress(userId, role, address, displayName, lat, lng, homeLat, homeLng, postalCode, colonia, estado, ciudad) {
   const updates = [];
   const vals = [];
@@ -644,8 +573,8 @@ export async function deleteAccount(userId, role) {
   } else if (role === 'restaurant') {
     const r = await query(
       `SELECT 1 FROM orders o JOIN restaurants rest ON rest.id=o.restaurant_id
-       WHERE rest.owner_user_id=$1 AND o.status=ANY($2::text[]) LIMIT 1`,
-      [userId, PENDING_STATUSES]
+      WHERE rest.owner_user_id=$1 AND o.status=ANY($2::text[]) LIMIT 1`,
+                          [userId, PENDING_STATUSES]
     );
     hasPending = r.rowCount > 0;
   }
@@ -655,8 +584,8 @@ export async function deleteAccount(userId, role) {
 }
 
 export async function updateLoginUsername(userId, role, currentPassword, newUsername) {
-  const normalized  = normalizeUsername(newUsername);
-  const newEmail    = pseudoEmailFromUsername(normalized);
+  const normalized = normalizeUsername(newUsername);
+  const newEmail   = pseudoEmailFromUsername(normalized);
   const r = await query('SELECT password_hash FROM users WHERE id=$1', [userId]);
   if (r.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
   const matches = await bcrypt.compare(currentPassword, r.rows[0].password_hash);
