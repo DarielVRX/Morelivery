@@ -10,10 +10,8 @@ const STYLE_DARK  = STADIA_KEY
   ? `https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json?api_key=${STADIA_KEY}`
   : 'https://tiles.openfreemap.org/styles/bright';
 
-// ── CP AddressSearchBar ───────────────────────────────────────────────────────
-// Mismo patrón que RestaurantPage/Payments pero limitado a búsqueda por CP.
+// ── CP AddressSearchBar — siempre abierto, solo CP numérico ──────────────────
 function CPSearchBar({ onSelectPos }) {
-  const [open,      setOpen]      = useState(false);
   const [showMap,   setShowMap]   = useState(false);
   const [pinPlaced, setPinPlaced] = useState(false);
   const [inputVal,  setInputVal]  = useState('');
@@ -26,16 +24,6 @@ function CPSearchBar({ onSelectPos }) {
   const mapRef      = useRef(null);
   const markerRef   = useRef(null);
   const pendingPos  = useRef(null);
-
-  useEffect(() => {
-    function handler(e) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target) && !showMap) {
-        setOpen(false); setResults([]);
-      }
-    }
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showMap]);
 
   // Inicializar mapa MapLibre cuando showMap = true
   useEffect(() => {
@@ -89,7 +77,7 @@ function CPSearchBar({ onSelectPos }) {
     const pos = pendingPos.current;
     if (!pos) return;
     onSelectPos({ lat: pos.lat, lng: pos.lng });
-    setShowMap(false); setOpen(false); setResults([]); setInputVal('');
+    setShowMap(false); setResults([]); setInputVal('');
   }
 
   function doSearch(val) {
@@ -119,7 +107,7 @@ function CPSearchBar({ onSelectPos }) {
     navigator.geolocation?.getCurrentPosition(
       pos => {
         onSelectPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setOpen(false); setResults([]); setInputVal('');
+        setResults([]); setInputVal('');
         setGpsLoading(false);
       },
       () => setGpsLoading(false),
@@ -129,65 +117,47 @@ function CPSearchBar({ onSelectPos }) {
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
-      {!open && !showMap && (
-        <button type="button" onClick={() => setOpen(true)}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.4rem',
-            background: 'var(--brand-light)', border: '1px solid var(--brand)',
-            borderRadius: 8, padding: '0.3rem 0.65rem', cursor: 'pointer',
-            fontSize: '0.78rem', fontWeight: 600, color: 'var(--brand)', minHeight: 'unset' }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
-            <circle cx="12" cy="9" r="2.5"/>
+      {/* Barra siempre visible */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px',
+        background: 'var(--bg-sunken)', border: '1px solid var(--border)',
+        borderRadius: 10, padding: '4px 6px' }}>
+        <button type="button" onClick={selectGPS} disabled={gpsLoading}
+          title="Usar mi ubicación GPS"
+          style={{ background: 'none', border: 'none', cursor: gpsLoading ? 'default' : 'pointer',
+            padding: '4px', borderRadius: 6, display: 'flex', alignItems: 'center',
+            opacity: gpsLoading ? 0.5 : 1, minHeight: 'unset', flexShrink: 0 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="4.5"/>
+            <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+            <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
+            <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
+            <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
           </svg>
-          Buscar CP en mapa
         </button>
-      )}
+        <input value={inputVal} inputMode="numeric" maxLength={5}
+          onChange={e => doSearch(e.target.value)}
+          placeholder="Código postal…"
+          style={{ flex: 1, background: 'none', border: 'none', outline: 'none',
+            color: 'var(--text-primary)', fontSize: '13px', minWidth: 0 }} />
+        {searching && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', flexShrink: 0 }}>…</span>}
+        <button type="button" onClick={() => setShowMap(true)} title="Elegir en mapa"
+          style={{ background: 'var(--bg-raised)', border: 'none', cursor: 'pointer',
+            padding: '3px 5px', borderRadius: 5, minHeight: 'unset', flexShrink: 0,
+            color: 'var(--text-secondary)', display: 'flex', alignItems: 'center' }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
+            <line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>
+          </svg>
+        </button>
+      </div>
 
-      {open && !showMap && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px',
-          background: 'var(--bg-sunken)', border: '1px solid var(--border)',
-          borderRadius: 10, padding: '4px 6px', minWidth: 220 }}>
-          <button type="button" onClick={selectGPS} disabled={gpsLoading}
-            title="Usar mi ubicación GPS"
-            style={{ background: 'none', border: 'none', cursor: 'pointer',
-              padding: '4px', borderRadius: 6, display: 'flex', alignItems: 'center',
-              minHeight: 'unset', flexShrink: 0 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="4.5"/>
-              <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
-              <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
-              <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
-              <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
-            </svg>
-          </button>
-          <input autoFocus value={inputVal} inputMode="numeric" maxLength={5}
-            onChange={e => doSearch(e.target.value)}
-            placeholder="Código postal…"
-            style={{ flex: 1, background: 'none', border: 'none', outline: 'none',
-              color: 'var(--text-primary)', fontSize: '13px', minWidth: 0 }} />
-          {searching && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', flexShrink: 0 }}>…</span>}
-          <button type="button" onClick={() => { setShowMap(true); setOpen(false); }} title="Elegir en mapa"
-            style={{ background: 'var(--bg-raised)', border: 'none', cursor: 'pointer',
-              padding: '3px 5px', borderRadius: 5, minHeight: 'unset', flexShrink: 0,
-              color: 'var(--text-secondary)', display: 'flex', alignItems: 'center' }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
-              <line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>
-            </svg>
-          </button>
-          <button type="button" onClick={() => { setOpen(false); setResults([]); setInputVal(''); }}
-            style={{ background: 'none', border: 'none', cursor: 'pointer',
-              color: 'var(--text-tertiary)', fontSize: '13px', padding: '2px 4px',
-              minHeight: 'unset', flexShrink: 0 }}>✕</button>
-        </div>
-      )}
-
-      {open && !showMap && results.length > 0 && (
+      {/* Dropdown resultados */}
+      {results.length > 0 && (
         <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
           background: 'var(--bg-card)', border: '1px solid var(--border)',
           borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.18)', zIndex: 200, overflow: 'hidden' }}>
           {results.map((item, i) => (
-            <button type="button" key={i} onClick={() => { onSelectPos(item); setOpen(false); setResults([]); setInputVal(''); }}
+            <button type="button" key={i} onClick={() => { onSelectPos(item); setResults([]); setInputVal(''); }}
               style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none',
                 borderBottom: i < results.length - 1 ? '1px solid var(--border-light)' : 'none',
                 padding: '0.55rem 0.875rem', cursor: 'pointer', fontSize: '0.82rem',
@@ -204,6 +174,7 @@ function CPSearchBar({ onSelectPos }) {
         </div>
       )}
 
+      {/* Modal mapa MapLibre */}
       {showMap && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)',
           display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -288,30 +259,6 @@ function Flash({ text, isError }) {
 
 const ROLE_LABELS = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
 
-function ensureLeafletCSS() {
-  if (document.getElementById('leaflet-css')) return;
-  const lnk = document.createElement('link');
-  lnk.id = 'leaflet-css';
-  lnk.rel = 'stylesheet';
-  lnk.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-  document.head.appendChild(lnk);
-}
-
-// Consulta de CP vía backend (proxy anti-CORS)
-async function fetchColoniasByPostal(cp, token) {
-  try {
-    const result = await apiFetch(`/auth/postal/${cp}`, {}, token);
-    return {
-      estado: result?.estado || '',
-      ciudad: result?.ciudad || '',
-      colonias: Array.isArray(result?.colonias) ? result.colonias : [],
-    };
-  } catch {
-    return null;
-  }
-}
-
-const BUSY_FIELD_STYLE = { opacity: 0.7, pointerEvents: 'none' };
 
 export default function ProfilePage() {
   const { auth, patchUser, logout } = useAuth();
@@ -319,7 +266,6 @@ export default function ProfilePage() {
 
   // Datos personales
   const [alias, setAlias]             = useState(user?.alias || user?.display_name || user?.full_name || '');
-  const [address, setAddress]         = useState('');
   // Descomponer address guardado en calle + número al inicializar
   const _savedAddress = user?.address && user.address !== 'address-pending' ? user.address : '';
   const _calleInit    = _savedAddress.replace(/\s+\d+[a-zA-Z]?\s*$/, '').trim();
@@ -329,16 +275,12 @@ export default function ProfilePage() {
   const [profileMsg, setProfileMsg]   = useState('');
   const [profileErr, setProfileErr]   = useState(false);
 
-  // Código postal + dirección estructurada
-  const [postalCode,   setPostalCode]   = useState(user?.postal_code  || '');
-  const [estado,       setEstado]       = useState(user?.estado        || '');
-  const [ciudad,       setCiudad]       = useState(user?.ciudad        || '');
-  const [colonia,      setColonia]      = useState(user?.colonia       || '');
+  // Dirección estructurada
+  const [estado,       setEstado]       = useState(user?.estado   || '');
+  const [ciudad,       setCiudad]       = useState(user?.ciudad   || '');
+  const [colonia,      setColonia]      = useState(user?.colonia  || '');
   const [coloniasList, setColoniasList] = useState([]);
-  const [cpLoading,    setCpLoading]    = useState(false);
-  const [cpError,      setCpError]      = useState('');
-  const cpTimerRef = useRef(null);
-  const coloniaRef = useRef(colonia);
+  const coloniaRef = useRef(user?.colonia || '');
 
 
   const [notifStatus, setNotifStatus] = useState(
@@ -490,150 +432,35 @@ export default function ProfilePage() {
 
   // Seguridad
   const [loginUsername,    setLoginUsername]    = useState(user?.username || '');
+  const [usernameStatus,   setUsernameStatus]   = useState('idle'); // idle | checking | available | taken | error
   const [currentPassword,  setCurrentPassword]  = useState('');
   const [newPassword,      setNewPassword]       = useState('');
   const [confirmPassword,  setConfirmPassword]   = useState('');
   const [pwdMsg,  setPwdMsg]  = useState('');
   const [pwdErr,  setPwdErr]  = useState(false);
+  const usernameTimerRef = useRef(null);
 
   // Eliminar cuenta
   const [deleteMsg, setDeleteMsg] = useState('');
   const [deleteErr, setDeleteErr] = useState(false);
 
-  const lastSearchedCp = useRef(user?.postal_code || '');
-
-  // Buscar CP cuando cambia (debounce 600ms)
-  useEffect(() => {
-    const cp = postalCode.trim();
-    if (cp.length !== 5 || !/^\d{5}$/.test(cp)) {
-      setCpError('');
-      setColoniasList([]);
-      return;
-    }
-
-    if (cp === lastSearchedCp.current) return;
-
-    clearTimeout(cpTimerRef.current);
-    cpTimerRef.current = setTimeout(async () => {
-      setCpLoading(true);
-      setCpError('');
-      const result = await fetchColoniasByPostal(cp, auth.token);
-      setCpLoading(false);
-      if (!result) {
-        setCpError('CP no encontrado — ingresa estado, ciudad y colonia manualmente');
-        setColoniasList([]);
-      } else {
-        setEstado(result.estado || '');
-        setCiudad(result.ciudad || '');
-        setColoniasList(result.colonias || []);
-        // Si la colonia actual no está en la lista nueva, usar la primera disponible
-        if (result.colonias && result.colonias.length > 0 && !result.colonias.includes(coloniaRef.current)) {
-          setColonia(result.colonias[0]);
-        }
+  function handleUsernameChange(val) {
+    setLoginUsername(val);
+    setUsernameStatus('idle');
+    clearTimeout(usernameTimerRef.current);
+    const trimmed = val.trim();
+    if (!trimmed || trimmed === user?.username) return;
+    if (trimmed.length < 3) { setUsernameStatus('error'); return; }
+    setUsernameStatus('checking');
+    usernameTimerRef.current = setTimeout(async () => {
+      try {
+        await apiFetch(`/auth/check-username?username=${encodeURIComponent(trimmed)}`, {}, auth.token);
+        setUsernameStatus('available');
+      } catch (e) {
+        setUsernameStatus(e.message?.includes('disponible') || e.message?.includes('taken') ? 'taken' : 'error');
       }
-    }, 600);
-    return () => clearTimeout(cpTimerRef.current);
-  }, [postalCode, auth.token]);
-
-  // Estado para el modal del mapa de pin
-  const [showPinMap,   setShowPinMap]   = useState(false);
-  const [pinMapResult, setPinMapResult] = useState(null); // { lat, lng } encontrado
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError,   setSearchError]   = useState('');
-  const [pinSaving, setPinSaving] = useState(false);
-  const pinMapRef = useRef(null);
-  const pinMapInstance = useRef(null);
-  const pinMarkerRef = useRef(null);
-
-  // Buscar pin por dirección ingresada (Nominatim con countrycodes=mx)
-  async function searchPin() {
-    const streetAddress = [calle.trim(), numero.trim()].filter(Boolean).join(' ');
-    const parts = [streetAddress, colonia, ciudad, estado, postalCode].filter(Boolean);
-    if (parts.length === 0) { setSearchError('Ingresa al menos calle o colonia para buscar'); return; }
-    setSearchLoading(true);
-    setSearchError('');
-    try {
-      const q = encodeURIComponent(parts.join(', '));
-      const r = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${q}&countrycodes=mx&limit=5`,
-        { headers: { 'Accept-Language': 'es' } }
-      );
-      const data = await r.json();
-      if (data.length === 0) {
-        setSearchError('No se encontró la dirección. El pin se colocó en tu ubicación actual.');
-        // Intentar GPS como centro del mapa
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            pos => {
-              setPinMapResult({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-            },
-            () => setPinMapResult(null)
-          );
-        } else {
-          setPinMapResult(null);
-        }
-        setShowPinMap(true);
-      } else {
-        const best = data[0];
-        setPinMapResult({ lat: parseFloat(best.lat), lng: parseFloat(best.lon) });
-        setSearchError('');
-        setShowPinMap(true);
-      }
-    } catch {
-      setSearchError('Error al buscar. Verifica tu conexión.');
-    } finally {
-      setSearchLoading(false);
-    }
+    }, 500);
   }
-
-  // Inicializar mapa Leaflet cuando se abre el modal
-  useEffect(() => {
-    if (!showPinMap || !pinMapRef.current) return;
-    if (typeof window === 'undefined') return;
-
-    const loadLeaflet = async () => {
-      ensureLeafletCSS();
-      const L = await import('leaflet');
-      if (pinMapInstance.current) {
-        pinMapInstance.current.remove();
-        pinMapInstance.current = null;
-      }
-      // Centro: resultado de búsqueda, o home pin existente, o CDMX
-      const center = pinMapResult
-      ? [pinMapResult.lat, pinMapResult.lng]
-      : (homeLat && homeLng ? [homeLat, homeLng] : [19.70595, -101.19498]);
-
-      const map = L.map(pinMapRef.current, { center, zoom: pinMapResult ? 17 : 13 });
-      pinMapInstance.current = map;
-      setTimeout(() => map.invalidateSize(), 50);
-
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap'
-      }).addTo(map);
-
-      // Pin draggable
-      const icon = L.divIcon({
-        html: '<div style="width:24px;height:24px;border-radius:50%;background:#dc2626;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4)"></div>',
-                             iconSize: [24, 24], iconAnchor: [12, 12], className: ''
-      });
-      const initPos = pinMapResult ? [pinMapResult.lat, pinMapResult.lng] : center;
-      const marker = L.marker(initPos, { icon, draggable: true }).addTo(map);
-      pinMarkerRef.current = marker;
-
-      marker.on('dragend', () => {
-        const p = marker.getLatLng();
-        setPinMapResult({ lat: p.lat, lng: p.lng });
-      });
-      map.on('click', (e) => {
-        marker.setLatLng(e.latlng);
-        setPinMapResult({ lat: e.latlng.lat, lng: e.latlng.lng });
-      });
-    };
-    loadLeaflet();
-    return () => {
-      if (pinMapInstance.current) { pinMapInstance.current.remove(); pinMapInstance.current = null; }
-    };
-  }, [showPinMap]);
 
   async function saveProfile() {
     if (!alias.trim()) { setProfileMsg('El nombre no puede estar vacío'); setProfileErr(true); return; }
@@ -646,14 +473,13 @@ export default function ProfilePage() {
       // Construir dirección compuesta si tenemos los campos estructurados
       let finalAddress = streetAddress;
       if (colonia && ciudad && estado) {
-        const parts = [colonia, ciudad, estado, postalCode].filter(Boolean);
+        const parts = [colonia, ciudad, estado].filter(Boolean);
         finalAddress = finalAddress || parts.join(', ');
       }
 
       const body = {
         displayName:  alias.trim(),
         address:      finalAddress || undefined,
-        postalCode:   postalCode   || undefined,
         colonia:      colonia      || undefined,
         estado:       estado       || undefined,
         ciudad:       ciudad       || undefined,
@@ -663,65 +489,35 @@ export default function ProfilePage() {
 
       const data = await apiFetch('/auth/profile', { method:'PATCH', body: JSON.stringify(body) }, auth.token);
       patchUser({
-        alias:        data.profile.alias ?? data.profile.displayName,
-        full_name:    data.profile.alias ?? data.profile.displayName,
-        address:      data.profile.address,
-        postal_code:  data.profile.postal_code,
-        colonia:      data.profile.colonia,
-        estado:       data.profile.estado,
-        ciudad:       data.profile.ciudad,
-        home_lat:     data.profile.home_lat,
-        home_lng:     data.profile.home_lng,
+        alias:     data.profile.alias ?? data.profile.displayName,
+        full_name: data.profile.alias ?? data.profile.displayName,
+        address:   data.profile.address,
+        colonia:   data.profile.colonia,
+        estado:    data.profile.estado,
+        ciudad:    data.profile.ciudad,
+        home_lat:  data.profile.home_lat,
+        home_lng:  data.profile.home_lng,
       });
       const newAlias = data.profile.alias ?? data.profile.displayName;
-      if (newAlias)               setAlias(newAlias);
+      if (newAlias) setAlias(newAlias);
       if (data.profile.address) {
         const saved  = data.profile.address;
-        const calleR = saved.replace(/\s+\d+[a-zA-Z]?\s*$/, '').trim();
-        const numR   = saved.match(/\s+(\d+[a-zA-Z]?)\s*$/)?.[1] || '';
-        setCalle(calleR);
-        setNumero(numR);
-        setAddress(saved);
+        setCalle(saved.replace(/\s+\d+[a-zA-Z]?\s*$/, '').trim());
+        setNumero(saved.match(/\s+(\d+[a-zA-Z]?)\s*$/)?.[1] || '');
       }
-      if (data.profile.home_lat)  setHomeLat(data.profile.home_lat);
-      if (data.profile.home_lng)  setHomeLng(data.profile.home_lng);
+      if (data.profile.home_lat) setHomeLat(data.profile.home_lat);
+      if (data.profile.home_lng) setHomeLng(data.profile.home_lng);
       setProfileMsg('Perfil actualizado'); setProfileErr(false);
     } catch (e) { setProfileMsg(e.message); setProfileErr(true); }
   }
 
-  async function persistHomePin(lat, lng) {
-    setPinSaving(true);
-    setProfileMsg('');
-    setProfileErr(false);
-    try {
-      const data = await apiFetch('/auth/profile', {
-        method:'PATCH',
-        body: JSON.stringify({ homeLat: lat, homeLng: lng })
-      }, auth.token);
-
-      patchUser({
-        home_lat: data.profile?.home_lat ?? lat ?? null,
-        home_lng: data.profile?.home_lng ?? lng ?? null,
-      });
-      setHomeLat(data.profile?.home_lat ?? lat ?? null);
-      setHomeLng(data.profile?.home_lng ?? lng ?? null);
-      setProfileMsg('Ubicación de casa guardada');
-      setProfileErr(false);
-      return true;
-    } catch (e) {
-      setProfileMsg(e.message || 'No se pudo guardar el pin');
-      setProfileErr(true);
-      return false;
-    } finally {
-      setPinSaving(false);
-    }
-  }
-
   async function changePasswordAndLogin() {
-    if (!currentPassword) { setPwdMsg('Ingresa tu contraseña actual'); setPwdErr(true); return; }
+    if (!currentPassword) { setPwdMsg('Ingresa tu contraseña actual para confirmar cambios'); setPwdErr(true); return; }
     const changingPwd  = !!newPassword;
     const changingUser = loginUsername.trim() && loginUsername.trim() !== user?.username;
     if (!changingPwd && !changingUser) { setPwdMsg('No hay cambios que guardar'); setPwdErr(false); return; }
+    if (changingUser && usernameStatus === 'taken') { setPwdMsg('Ese nombre de usuario ya está en uso'); setPwdErr(true); return; }
+    if (changingUser && usernameStatus === 'checking') { setPwdMsg('Espera — verificando disponibilidad del usuario'); setPwdErr(true); return; }
     if (changingPwd) {
       if (newPassword !== confirmPassword) { setPwdMsg('Las contraseñas no coinciden'); setPwdErr(true); return; }
       if (newPassword.length < 6) { setPwdMsg('Mínimo 6 caracteres'); setPwdErr(true); return; }
@@ -734,9 +530,10 @@ export default function ProfilePage() {
         await apiFetch('/auth/login-username', { method:'PATCH', body: JSON.stringify({ currentPassword, newUsername: loginUsername.trim() }) }, auth.token);
         patchUser({ username: loginUsername.trim() });
       }
-      setPwdMsg(changingPwd && changingUser ? 'Contraseña y usuario actualizados' : changingPwd ? 'Contraseña actualizada' : 'Usuario de acceso actualizado');
+      setPwdMsg(changingPwd && changingUser ? 'Contraseña y nombre de usuario actualizados' : changingPwd ? 'Contraseña actualizada' : 'Nombre de usuario actualizado');
       setPwdErr(false);
       setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+      setUsernameStatus('idle');
     } catch (e) { setPwdMsg(e.message); setPwdErr(true); }
   }
 
@@ -817,123 +614,57 @@ export default function ProfilePage() {
     <input value={alias} onChange={e => setAlias(e.target.value)} placeholder="Ej: Juan García" />
     </label>
 
-    {/* Código postal con buscador en mapa */}
+    {/* Código postal */}
     <div>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.25rem' }}>
-        <span style={{ fontSize:'0.875rem', fontWeight:500 }}>Código postal</span>
-        <CPSearchBar onSelectPos={pos => {
-          // Solo guardamos lat/lng del centro de zona; el CP se sigue editando a mano en el input de abajo
-          setHomeLat(pos.lat); setHomeLng(pos.lng);
-        }} />
-      </div>
-      <div style={{ position:'relative', ...(cpLoading ? BUSY_FIELD_STYLE : {}) }}>
-        <input
-          value={postalCode}
-          onChange={e => setPostalCode(e.target.value.replace(/\D/g, '').slice(0, 5))}
-          placeholder="Ej: 58000"
-          maxLength={5}
-          inputMode="numeric"
-        />
-        {cpLoading && (
-          <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.75rem', color:'var(--gray-400)' }}>
-            Buscando…
-          </span>
-        )}
-      </div>
-      {cpError && <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>{cpError}</span>}
+      <span style={{ fontSize:'0.875rem', fontWeight:500, display:'block', marginBottom:'0.3rem' }}>Código postal</span>
+      <CPSearchBar onSelectPos={pos => { setHomeLat(pos.lat); setHomeLng(pos.lng); }} />
     </div>
 
     {/* Estado y Ciudad — auto-rellenados o manuales */}
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.55rem' }}>
     <label>
     Estado
-    <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Michoacán" disabled={cpLoading} />
+    <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Michoacán" />
     </label>
     <label>
     Municipio / Ciudad
-    <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Morelia" disabled={cpLoading} />
+    <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Morelia" />
     </label>
     </div>
 
-    {/* Colonia — dropdown si hay datos del CP, input manual si no */}
+    {/* Colonia */}
     <label>
     Colonia
     {coloniasList.length > 0 ? (
-      <select value={colonia} onChange={e => { setColonia(e.target.value); coloniaRef.current = e.target.value; }} disabled={cpLoading}>
+      <select value={colonia} onChange={e => { setColonia(e.target.value); coloniaRef.current = e.target.value; }}>
       <option value="">Seleccionar colonia…</option>
       {coloniasList.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
     ) : (
-      <input
-      value={colonia}
-      onChange={e => { setColonia(e.target.value); coloniaRef.current = e.target.value; }}
-      placeholder="Ej: Col. Centro"
-      disabled={cpLoading}
-      />
+      <input value={colonia} onChange={e => { setColonia(e.target.value); coloniaRef.current = e.target.value; }} placeholder="Ej: Col. Centro" />
     )}
     </label>
 
-    {/* Calle y número — dos campos separados */}
+    {/* Calle y número */}
     <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:'0.55rem', alignItems:'end' }}>
     <label>
     Calle
-    <input value={calle} onChange={e => setCalle(e.target.value)}
-    placeholder="Ej: Av. Revolución" disabled={searchLoading} />
+    <input value={calle} onChange={e => setCalle(e.target.value)} placeholder="Ej: Av. Revolución" />
     </label>
     <label style={{ width:90 }}>
     Número
-    <input value={numero} onChange={e => setNumero(e.target.value)}
-    placeholder="1234" disabled={searchLoading} />
+    <input value={numero} onChange={e => setNumero(e.target.value)} placeholder="1234" />
     </label>
     </div>
 
-    {/* Pin casa — botón buscar + estado + borrar */}
-    <div style={{ display:'flex', gap:'0.4rem', alignItems:'center', flexWrap:'wrap' }}>
-      <button
-        type="button"
-        className="btn-sm btn-primary"
-        onClick={searchPin}
-        disabled={searchLoading || cpLoading || pinSaving}
-        style={{ whiteSpace:'nowrap' }}
-      >
-        {searchLoading ? 'Buscando…' : '📍 Buscar en mapa'}
-      </button>
-      {hasHomePin && (
-        <span style={{ fontSize:'0.75rem', color:'var(--success)', fontWeight:600 }}>🏠 Pin guardado</span>
-      )}
-      {hasHomePin && (
-        <button type="button" disabled={pinSaving}
-          onClick={async () => { await persistHomePin(null, null); }}
-          style={{ background:'none', border:'none', color:'var(--error)', cursor:'pointer', fontSize:'0.75rem', fontWeight:600, marginLeft:'auto' }}>
-          {pinSaving ? 'Borrando…' : 'Borrar'}
+    {/* Pin casa — solo estado */}
+    {homeLat && homeLng && (
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'0.5rem' }}>
+        <span style={{ fontSize:'0.75rem', color:'var(--success)', fontWeight:600 }}>🏠 Ubicación guardada</span>
+        <button type="button" style={{ background:'none', border:'none', color:'var(--error)', cursor:'pointer', fontSize:'0.75rem', fontWeight:600 }}
+          onClick={() => { setHomeLat(null); setHomeLng(null); }}>
+          Borrar
         </button>
-      )}
-    </div>
-    {searchError && <span style={{ fontSize:'0.72rem', color:'var(--error)', display:'block' }}>{searchError}</span>}
-
-    {/* Modal mapa pin */}
-    {showPinMap && (
-      <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:9999, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'1rem' }}>
-      <div style={{ background:'var(--bg-card)', borderRadius:12, width:'100%', maxWidth:480, overflow:'hidden', boxShadow:'0 8px 32px rgba(0,0,0,0.25)' }}>
-      <div style={{ padding:'0.75rem 1rem', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid var(--gray-200)' }}>
-      <span style={{ fontWeight:700, fontSize:'0.9rem' }}>Confirmar ubicación</span>
-      <button onClick={() => setShowPinMap(false)} style={{ background:'none', border:'none', cursor:'pointer', fontSize:'1.2rem', color:'var(--gray-400)' }}>✕</button>
-      </div>
-      <p style={{ fontSize:'0.78rem', color:'var(--gray-500)', margin:'0.5rem 1rem 0' }}>
-      Arrastra el pin o toca el mapa para ajustar la ubicación exacta.
-      </p>
-      <div ref={pinMapRef} style={{ height:320, width:'100%' }} />
-      <div style={{ padding:'0.75rem 1rem', display:'flex', gap:'0.5rem', justifyContent:'flex-end', borderTop:'1px solid var(--gray-200)' }}>
-      <button className="btn-sm" onClick={() => setShowPinMap(false)}>Cancelar</button>
-      <button className="btn-sm btn-primary" disabled={pinSaving} onClick={async () => {
-        if (!pinMapResult) return;
-        const saved = await persistHomePin(pinMapResult.lat, pinMapResult.lng);
-        if (saved) setShowPinMap(false);
-      }}>
-      {pinSaving ? 'Guardando…' : 'Confirmar pin'}
-      </button>
-      </div>
-      </div>
       </div>
     )}
     </div>
@@ -1044,19 +775,39 @@ export default function ProfilePage() {
   {/* Seguridad */}
   <Collapsible title="Seguridad">
   <p style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.65rem' }}>
-  El usuario de acceso es el que usas para iniciar sesión. Es distinto al nombre que ven otros usuarios.
+  El nombre de usuario es público y visible en la plataforma. La contraseña protege el acceso a tu cuenta.
   </p>
   <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
-  <label>
-  Usuario de acceso
-  <input value={loginUsername} onChange={e => setLoginUsername(e.target.value)}
-  placeholder="Ej: juangarcia91" autoComplete="username" />
-  </label>
-  <label>Contraseña actual (requerida)
+  <div>
+    <label style={{ display:'block', marginBottom:'0.25rem' }}>
+      Nombre de usuario
+    </label>
+    <div style={{ position:'relative' }}>
+      <input value={loginUsername} onChange={e => handleUsernameChange(e.target.value)}
+        placeholder="Ej: juangarcia91" autoComplete="username"
+        style={{ paddingRight: '2.2rem' }} />
+      {usernameStatus === 'checking' && (
+        <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.72rem', color:'var(--text-tertiary)' }}>…</span>
+      )}
+      {usernameStatus === 'available' && (
+        <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.8rem', color:'var(--success)' }}>✓</span>
+      )}
+      {usernameStatus === 'taken' && (
+        <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.8rem', color:'var(--error)' }}>✗</span>
+      )}
+    </div>
+    {usernameStatus === 'taken' && (
+      <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>Ese nombre ya está en uso</span>
+    )}
+    {usernameStatus === 'error' && loginUsername.trim().length < 3 && (
+      <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>Mínimo 3 caracteres</span>
+    )}
+  </div>
+  <label>Contraseña actual <span style={{ fontWeight:400, color:'var(--text-tertiary)', fontSize:'0.78rem' }}>(requerida para guardar cambios)</span>
   <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
   autoComplete="current-password" />
   </label>
-  <label>Nueva contraseña (opcional)
+  <label>Nueva contraseña <span style={{ fontWeight:400, color:'var(--text-tertiary)', fontSize:'0.78rem' }}>(opcional)</span>
   <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
   autoComplete="new-password" placeholder="Dejar vacío para no cambiar" />
   </label>
@@ -1067,22 +818,12 @@ export default function ProfilePage() {
     </label>
   )}
   </div>
-  <button className="btn-primary btn-sm" onClick={changePasswordAndLogin}>Guardar cambios</button>
+  <button className="btn-primary btn-sm" onClick={changePasswordAndLogin}
+    disabled={usernameStatus === 'checking' || usernameStatus === 'taken'}>
+    Guardar cambios
+  </button>
   <Flash text={pwdMsg} isError={pwdErr} />
   </Collapsible>
-
-  {/* Cerrar sesión */}
-  <button
-  onClick={logout}
-  className="btn-sm"
-  style={{
-    width:'100%', padding:'0.7rem',
-    marginBottom:'0.75rem',
-    fontWeight:700, fontSize:'0.9rem',
-  }}
-  >
-  Cerrar sesión
-  </button>
 
   {/* Administración */}
   <Collapsible title="Administración de cuenta">
@@ -1092,6 +833,19 @@ export default function ProfilePage() {
   <button className="btn-danger btn-sm" onClick={deleteAccount}>Eliminar cuenta</button>
   <Flash text={deleteMsg} isError={deleteErr} />
   </Collapsible>
+
+  {/* Cerrar sesión — al fondo */}
+  <button
+  onClick={logout}
+  className="btn-sm"
+  style={{
+    width:'100%', padding:'0.7rem',
+    marginTop:'0.25rem', marginBottom:'0.75rem',
+    fontWeight:700, fontSize:'0.9rem',
+  }}
+  >
+  Cerrar sesión
+  </button>
   </div>
   );
 }
