@@ -22,7 +22,7 @@ function IconSun() {
 function IconMoon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
   strokeLinecap="round" strokeLinejoin="round" width="18" height="18"
-  style={{display:'block'}}>
+  style={{display:'block', overflow:'visible'}}>
   <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
   </svg>;
 }
@@ -94,7 +94,7 @@ export default function Layout({ children }) {
               className="header-icon-btn"
               onClick={toggle}
               title={isDark ? 'Tema claro' : 'Tema oscuro'}
-              aria-label="Tema"
+              aria-label="Tema">
               {isDark ? <IconSun /> : <IconMoon />}
             </button>
 
