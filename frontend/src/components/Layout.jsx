@@ -78,6 +78,7 @@ export default function Layout({ children }) {
 
         <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', flexShrink:0 }}>
           <button
+            style={{ color: 'var(--text-primary)' }}
             className="header-icon-btn"
             onClick={toggle}
             title={isDark ? 'Tema claro' : 'Tema oscuro'}
