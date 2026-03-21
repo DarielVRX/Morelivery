@@ -326,7 +326,10 @@ router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admi
         [updated.id]
       );
       const waitSec = waitResult.rows[0]?.wait_s ?? 0;
-      if (waitSec > 0) recordPickupWait(updated.id, waitSec).catch(() => {});
+      if (waitSec > 0) {
+        await recordPickupWait(updated.id, waitSec);
+        evaluatePrepEstimate(updated.id).catch(() => {});
+      }
 
       // Notificar al restaurante que el driver llegó y recogió
       try {
@@ -347,10 +350,6 @@ router.patch('/:id/status', authenticate, authorize(['restaurant','driver','admi
       } catch (_) {}
     }
 
-    // delivered: evaluar si hay que ajustar el estimado de prep del restaurante
-    if (nextStatus === 'delivered') {
-      evaluatePrepEstimate(updated.id).catch(() => {});
-    }
     // ─────────────────────────────────────────────────────────────────────
     const STATUS_ES_LOG = { created:'Recibido', pending_driver:'Sin conductor', assigned:'Asignado', accepted:'Aceptado', preparing:'En preparación', ready:'Listo para retiro', on_the_way:'En camino', delivered:'Entregado', cancelled:'Cancelado' };
     console.log(`🔄 [pedido.estado] id=${updated.id.slice(0,8)} → "${STATUS_ES_LOG[updated.status] || updated.status}" por rol=${req.user.role} actor=${req.user.userId.slice(0,8)}`);
