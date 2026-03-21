@@ -305,6 +305,8 @@ export default function CustomerPayments() {
   const [fromGps,         setFromGps]         = useState(false);
   const [gpsPos,          setGpsPos]          = useState(null);
 
+  const [tipCents, setTipCents] = useState(0);
+
   // Card fields
   const [cardNum,  setCardNum]  = useState('');
   const [expiry,   setExpiry]   = useState('');
@@ -330,13 +332,16 @@ export default function CustomerPayments() {
       setDeliveryLat(d.delivery_lat ?? null);
       setDeliveryLng(d.delivery_lng ?? null);
       setFromGps(!!d.delivery_from_gps);
+      setTipCents(d.tip_cents || 0);
     }
   }, []);
 
   useEffect(() => {
     apiFetch('/payments/methods', {}, auth.token)
     .then(d => {
-      const list = (d.methods || []).map(m => ({ ...m, available: true, coming_soon: false }));
+      const list = (d.methods || [])
+        .filter(m => m.id !== 'spei' && m.id !== 'bank')
+        .map(m => ({ ...m, available: true, coming_soon: false }));
       setMethods(list);
     })
     .catch(() => setMethods([
@@ -381,7 +386,7 @@ export default function CustomerPayments() {
         restaurantId:     draft.restaurantId,
         items:            draft.items || [],
         payment_method:   method,
-        tip_cents:        draft.tip_cents || 0,
+        tip_cents:        tipCents,
         delivery_address: deliveryAddress,
         delivery_lat:     deliveryLat,
         delivery_lng:     deliveryLng,
@@ -447,6 +452,80 @@ export default function CustomerPayments() {
             </div>
             </div>
     )}
+
+    {/* ── Resumen de productos ── */}
+    {draft?.items_detail?.length > 0 && (() => {
+      const subtotal    = draft.subtotal_cents || 0;
+      const serviceFee  = Math.round(subtotal * 0.05);
+      const deliveryFee = Math.round(subtotal * 0.10);
+      const total       = subtotal + serviceFee + deliveryFee + tipCents;
+      const fmt         = cents => `$${((cents ?? 0) / 100).toFixed(2)}`;
+      return (
+        <div style={{ background:'var(--bg-sunken)', border:'1px solid var(--border)',
+          borderRadius:10, padding:'0.75rem', marginBottom:'1.25rem' }}>
+
+          {/* Lista de productos */}
+          <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
+            textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.5rem' }}>
+            Productos
+          </p>
+          <ul style={{ listStyle:'none', padding:0, margin:'0 0 0.75rem' }}>
+            {draft.items_detail.map((it, i) => (
+              <li key={i} style={{ display:'flex', justifyContent:'space-between',
+                fontSize:'0.82rem', color:'var(--text-secondary)', marginBottom:'0.2rem' }}>
+                <span>{it.quantity > 1 ? `${it.quantity}× ` : ''}{it.name}</span>
+                <span style={{ flexShrink:0, marginLeft:'0.5rem' }}>{fmt(it.price_cents * it.quantity)}</span>
+              </li>
+            ))}
+          </ul>
+
+          {/* Selector de agradecimiento */}
+          <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
+            textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
+            Agradecimiento al conductor
+          </p>
+          <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', marginBottom:'0.75rem' }}>
+            {[{pct:0,label:'—'},{pct:5,label:'5%'},{pct:10,label:'10%'},{pct:20,label:'20%'}].map(({pct, label}) => {
+              const v = pct === 0 ? 0 : Math.round(subtotal * pct / 100);
+              const sel = tipCents === v;
+              return (
+                <button key={pct} onClick={() => {
+                  setTipCents(v);
+                  savePendingOrder({ ...draft, tip_cents: v });
+                }}
+                  style={{ padding:'0.25rem 0.55rem', cursor:'pointer', fontSize:'0.78rem',
+                    border:`1.5px solid ${sel ? 'var(--success)' : 'var(--border)'}`,
+                    borderRadius:6, background: sel ? 'var(--success-bg)' : 'var(--bg-card)',
+                    color: sel ? 'var(--success)' : 'var(--text-secondary)',
+                    fontWeight: sel ? 700 : 400, minHeight:'unset' }}>
+                  {label}{pct > 0 && subtotal > 0 ? ` (${fmt(v)})` : ''}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Desglose */}
+          <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)',
+            borderTop:'1px solid var(--border-light)', paddingTop:'0.6rem' }}>
+            {[['Subtotal', subtotal],['Servicio (5%)', serviceFee],['Envío (10%)', deliveryFee]].map(([label, val]) => (
+              <div key={label} style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.15rem' }}>
+                <span>{label}</span><span>{fmt(val)}</span>
+              </div>
+            ))}
+            {tipCents > 0 && (
+              <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)', marginBottom:'0.15rem' }}>
+                <span>Agradecimiento</span><span>+{fmt(tipCents)}</span>
+              </div>
+            )}
+            <div style={{ display:'flex', justifyContent:'space-between', fontWeight:800,
+              fontSize:'0.95rem', color:'var(--text-primary)', marginTop:'0.4rem',
+              paddingTop:'0.4rem', borderTop:'1px solid var(--border)' }}>
+              <span>Total</span><span>{fmt(total)}</span>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
 
     <h2 style={{ fontSize:'1.05rem', fontWeight:800, marginBottom:'0.25rem', display:'flex', alignItems:'center', gap:'0.5rem' }}><IconCard /> Método de pago</h2>
     <p style={{ fontSize:'0.82rem', color:'var(--gray-500)', marginBottom:'1.25rem' }}>

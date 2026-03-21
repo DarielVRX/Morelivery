@@ -717,52 +717,7 @@ export default function RestaurantPage() {
           </>
         )}
 
-        {/* Order summary */}
-        {isCustomer && total > 0 && !isClosed && (
-          <div style={{ marginTop:'1rem', background:'var(--bg-card)',
-            border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'1rem' }}>
 
-            <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
-              textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
-              Agradecimiento al conductor
-            </p>
-            <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', marginBottom:'1rem' }}>
-              {[{pct:0,label:'—'},{pct:5,label:'5%'},{pct:10,label:'10%'},{pct:20,label:'20%'}].map(({pct, label}) => {
-                const v = pct === 0 ? 0 : Math.round(subtotal * pct / 100);
-                const sel = tipCents === v;
-                return (
-                  <button key={pct} onClick={() => setTipCents(v)}
-                    style={{ padding:'0.25rem 0.55rem', cursor:'pointer', fontSize:'0.78rem',
-                      border:`1.5px solid ${sel ? 'var(--success)' : 'var(--border)'}`,
-                      borderRadius:6, background: sel ? 'var(--success-bg)' : 'var(--bg-card)',
-                      color: sel ? 'var(--success)' : 'var(--text-secondary)',
-                      fontWeight: sel ? 700 : 400, minHeight:'unset' }}>
-                    {label}{pct > 0 && subtotal > 0 ? ` (${fmt(v)})` : ''}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)',
-              borderTop:'1px solid var(--border-light)', paddingTop:'0.6rem' }}>
-              {[['Subtotal', subtotal],['Servicio (5%)', serviceFee],['Envío (10%)', deliveryFee]].map(([label, val]) => (
-                <div key={label} style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.15rem' }}>
-                  <span>{label}</span><span>{fmt(val)}</span>
-                </div>
-              ))}
-              {tipCents > 0 && (
-                <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)', marginBottom:'0.15rem' }}>
-                  <span>Agradecimiento</span><span>+{fmt(tipCents)}</span>
-                </div>
-              )}
-              <div style={{ display:'flex', justifyContent:'space-between', fontWeight:800,
-                fontSize:'0.95rem', color:'var(--text-primary)', marginTop:'0.4rem',
-                paddingTop:'0.4rem', borderTop:'1px solid var(--border)' }}>
-                <span>Total</span><span>{fmt(total)}</span>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Sticky bottom bar */}
@@ -800,11 +755,16 @@ export default function RestaurantPage() {
               savePendingOrder({
                 restaurantId:     id,
                 items:            Object.entries(selectedItems).filter(([,q])=>Number(q)>0).map(([menuItemId,quantity])=>({ menuItemId, quantity:Number(quantity) })),
-                               tip_cents:        tipCents,
-                               delivery_lat:     searchPos?.lat ?? gpsPos?.lat,
-                               delivery_lng:     searchPos?.lng ?? gpsPos?.lng,
-                               delivery_address: searchPos?.label || '',
-                               delivery_from_gps: !searchPos && !!gpsPos,
+                items_detail:     Object.entries(selectedItems).filter(([,q])=>Number(q)>0).map(([menuItemId,quantity]) => {
+                                    const item = menu.find(m => String(m.id) === String(menuItemId));
+                                    return { menuItemId, quantity: Number(quantity), name: item?.name || '', price_cents: item?.price_cents || 0 };
+                                  }),
+                subtotal_cents:   subtotal,
+                tip_cents:        tipCents,
+                delivery_lat:     searchPos?.lat ?? gpsPos?.lat,
+                delivery_lng:     searchPos?.lng ?? gpsPos?.lng,
+                delivery_address: searchPos?.label || '',
+                delivery_from_gps: !searchPos && !!gpsPos,
               });
               navigate('/customer/pagos');
             }}>
