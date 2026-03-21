@@ -4,6 +4,17 @@ import { useNavigate } from 'react-router-dom';
 import { readPendingOrder, clearPendingOrder, savePendingOrder } from '../../utils/pendingOrder';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+// ── Iconos SVG ────────────────────────────────────────────────────────────────
+function IconPin()      { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>; }
+function IconMap()      { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>; }
+function IconPackage()  { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>; }
+function IconWarning()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>; }
+function IconCash()     { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></svg>; }
+function IconCard()     { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>; }
+function IconBank()     { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="22" x2="21" y2="22"/><line x1="6" y1="18" x2="6" y2="11"/><line x1="10" y1="18" x2="10" y2="11"/><line x1="14" y1="18" x2="14" y2="11"/><line x1="18" y1="18" x2="18" y2="11"/><polygon points="12 2 20 7 4 7"/></svg>; }
+function IconLock()     { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>; }
+
+
 
 const STADIA_KEY  = import.meta.env?.VITE_STADIA_KEY || '';
 const STYLE_LIGHT = STADIA_KEY
@@ -182,7 +193,7 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
                               <button onClick={() => { setShowMap(true); setOpen(false); }} title="Elegir en mapa"
                               style={{ background:'var(--bg-raised)', border:'none', cursor:'pointer',
                                 padding:'3px 5px', borderRadius:5, minHeight:'unset', flexShrink:0,
-                                color:'var(--text-secondary)', fontSize:'0.8rem' }}>🗺</button>
+                                color:'var(--text-secondary)' }}><IconMap /></button>
                                 {hasHome && (
                                   <button onClick={selectHome} title="Casa"
                                   style={{ background:'none', border:'none', cursor:'pointer', padding:'4px',
@@ -210,7 +221,7 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
                                                                    borderBottom: i < results.length-1 ? '1px solid var(--border-light)' : 'none',
                                                                                           padding:'0.55rem 0.875rem', cursor:'pointer', fontSize:'0.82rem',
                                                                                           color:'var(--text-primary)', display:'block', minHeight:'unset' }}>
-                                                                                          📍 {item.label}
+                                                                                          <span style={{display:'flex',alignItems:'center',gap:'0.35rem'}}><IconPin />{item.label}</span>
                                                                                           </button>
                                                                ))}
                                                                </div>
@@ -223,7 +234,7 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
         <div className="addr-map-modal">
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
           padding:'0.75rem 1rem', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-          <span style={{ fontWeight:700, fontSize:'0.95rem' }}>📍 Elige tu ubicación</span>
+          <span style={{ fontWeight:700, fontSize:'0.95rem', display:'flex', alignItems:'center', gap:'0.4rem' }}><IconPin />Elige tu ubicación</span>
           <button onClick={() => setShowMap(false)}
           style={{ background:'none', border:'none', cursor:'pointer', fontSize:'1.1rem',
             color:'var(--text-tertiary)', minHeight:'unset', padding:'2px 6px' }}>✕</button>
@@ -232,7 +243,7 @@ function AddressSearchBar({ userPos, homeAddress, onSelectPos }) {
             <div style={{ display:'flex', gap:'0.5rem', padding:'0.75rem 1rem',
               borderTop:'1px solid var(--border)', background:'var(--bg-card)', flexShrink:0 }}>
               <span style={{ flex:1, fontSize:'0.78rem', color:'var(--text-tertiary)', alignSelf:'center' }}>
-              {pinPlaced ? '📍 Pin colocado — confirma o muévelo' : 'Toca el mapa para colocar un pin'}
+              {pinPlaced ? <span style={{display:'flex',alignItems:'center',gap:'0.3rem'}}><IconPin />Pin colocado — confirma o muévelo</span> : 'Toca el mapa para colocar un pin'}
               </span>
               <button onClick={confirmMapPin} disabled={!pinPlaced}
               className="btn-primary btn-sm" style={{ opacity: pinPlaced ? 1 : 0.45 }}>
@@ -400,7 +411,7 @@ export default function CustomerPayments() {
         borderRadius:10, padding:'0.75rem', marginBottom:'1.25rem',
         fontSize:'0.82rem', color:'var(--text-secondary)' }}>
         <div style={{ fontWeight:700, color:'var(--text-primary)', marginBottom:'0.4rem' }}>
-        📦 Pedido pendiente
+        <span style={{display:'flex',alignItems:'center',gap:'0.4rem'}}><IconPackage /> Pedido pendiente</span>
         </div>
         {draft.items?.length > 0 && (
           <div style={{ marginBottom:'0.4rem' }}>
@@ -413,7 +424,7 @@ export default function CustomerPayments() {
           <div style={{ background:'#fffbeb', border:'1px solid #fde68a',
             borderRadius:8, padding:'0.5rem 0.65rem', marginBottom:'0.5rem',
             fontSize:'0.78rem', color:'#92400e', display:'flex', alignItems:'flex-start', gap:'0.4rem' }}>
-            <span style={{ flexShrink:0 }}>⚠️</span>
+            <span style={{ flexShrink:0, display:'flex' }}><IconWarning /></span>
             <span>La dirección de entrega se detectó desde tu GPS. Confirma que es correcta o cámbiala.</span>
             </div>
         )}
@@ -424,8 +435,8 @@ export default function CustomerPayments() {
           <div style={{ fontSize:'0.8rem', color: deliveryAddress ? 'var(--text-primary)' : 'var(--warn)',
             fontWeight: deliveryAddress ? 400 : 600, flex:1, minWidth:0 }}>
             {deliveryAddress
-              ? <span>📍 {deliveryAddress}</span>
-              : <span>⚠️ Sin dirección de entrega</span>
+              ? <span style={{display:'flex',alignItems:'center',gap:'0.3rem'}}><IconPin />{deliveryAddress}</span>
+              : <span style={{display:'flex',alignItems:'center',gap:'0.3rem'}}><IconWarning />Sin dirección de entrega</span>
             }
             </div>
             <AddressSearchBar
@@ -437,7 +448,7 @@ export default function CustomerPayments() {
             </div>
     )}
 
-    <h2 style={{ fontSize:'1.05rem', fontWeight:800, marginBottom:'0.25rem' }}>💳 Método de pago</h2>
+    <h2 style={{ fontSize:'1.05rem', fontWeight:800, marginBottom:'0.25rem', display:'flex', alignItems:'center', gap:'0.5rem' }}><IconCard /> Método de pago</h2>
     <p style={{ fontSize:'0.82rem', color:'var(--gray-500)', marginBottom:'1.25rem' }}>
     Elige cómo quieres pagar tus pedidos.
     </p>
@@ -456,7 +467,7 @@ export default function CustomerPayments() {
       onChange={() => setMethod(m.id)}
       style={{ accentColor:'var(--brand)', flexShrink:0, width:16, height:16 }} />
       <span style={{ fontSize:'1.1rem', flexShrink:0 }}>
-      {m.id==='cash' ? '💵' : m.id==='card' ? '💳' : '🏦'}
+      {m.id==='cash' ? <IconCash /> : m.id==='card' ? <IconCard /> : <IconBank />}
       </span>
       <span style={{ fontWeight:700, fontSize:'0.875rem', whiteSpace:'nowrap' }}>{m.label}</span>
       </label>
@@ -502,7 +513,7 @@ export default function CustomerPayments() {
           </div>
           <div style={{ padding:'0.5rem 0.75rem', background:'#fffbeb',
             border:'1px solid #fde68a', borderRadius:8, fontSize:'0.78rem', color:'#92400e' }}>
-            🔒 Procesador pendiente de integración. Los datos no se envían a ningún servidor.
+            <span style={{display:'inline-flex',alignItems:'center',gap:'0.35rem'}}><IconLock />Procesador pendiente de integración. Los datos no se envían a ningún servidor.</span>
             </div>
             </div>
     )}

@@ -100,37 +100,37 @@ export async function registerUser(payload) {
 
   // Insertar usuario — intenta con todos los campos nuevos, fallback si columnas no existen
   let result;
+  // Reemplaza el bloque try/catch del INSERT (líneas 103-137)
   try {
     result = await query(
       `INSERT INTO users
-         (full_name, alias, email, real_email, password_hash, role, address,
-          postal_code, colonia, estado, ciudad,
-          email_verified, email_verify_token, email_verify_expires)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, false,$12,$13)
-       RETURNING id, full_name, alias, email, real_email, role, address`,
+      (full_name, alias, email, real_email, password_hash, role, status, address,
+       postal_code, colonia, estado, ciudad,
+       email_verified, email_verify_token, email_verify_expires)
+      VALUES($1,$2,$3,$4,$5,$6,'active',$7,$8,$9,$10,$11, false,$12,$13)
+      RETURNING id, full_name, alias, email, real_email, role, address`,
       [
         payload.fullName.trim(),
-        payload.alias.trim(),
-        pseudoEmail,
-        realEmail,
-        passwordHash,
-        payload.role,
-        userAddress,
-        payload.postalCode || null,
-        payload.colonia    || null,
-        payload.estado     || null,
-        payload.ciudad     || null,
-        verifyToken,
-        verifyExpires,
+                         payload.alias.trim(),
+                         pseudoEmail,
+                         realEmail,
+                         passwordHash,
+                         payload.role,
+                         userAddress,
+                         payload.postalCode || null,
+                         payload.colonia    || null,
+                         payload.estado     || null,
+                         payload.ciudad     || null,
+                         verifyToken,
+                         verifyExpires,
       ]
     );
   } catch (e) {
     if (e?.code === '42703') {
-      // Fallback: columnas nuevas no existen aún — insertar sin ellas
       result = await query(
-        `INSERT INTO users(full_name, alias, email, password_hash, role, address)
-         VALUES($1,$2,$3,$4,$5,$6)
-         RETURNING id, full_name, alias, email, role, address`,
+        `INSERT INTO users(full_name, alias, email, password_hash, role, status, address)
+        VALUES($1,$2,$3,$4,$5,'active',$6)
+        RETURNING id, full_name, alias, email, role, address`,
         [payload.fullName.trim(), payload.alias.trim(), pseudoEmail, passwordHash, payload.role, userAddress]
       );
     } else throw e;
@@ -314,7 +314,7 @@ export async function loginUser(payload) {
 }
 
 // ── GOOGLE LOGIN / REGISTRO ───────────────────────────────────────────────────
-export async function googleLogin(credential) {
+export async function googleLogin(credential, role = 'customer') {
   if (!process.env.GOOGLE_CLIENT_ID) throw new AppError(501, 'Google login no configurado');
 
   let payload;
@@ -357,18 +357,20 @@ export async function googleLogin(credential) {
     const placeholderHash = await bcrypt.hash(randomUUID(), 12);
 
     try {
+      // INSERT nuevo usuario — usa el role recibido en vez de hardcodear 'customer':
       const r = await query(
         `INSERT INTO users(full_name, alias, email, real_email, google_id, role, status, password_hash)
-        VALUES($1,$2,$3,$4,$5,'customer','active',$6) RETURNING *`,
-                            [fullName, alias, pseudoEmail, realEmail, googleId, placeholderHash]
+        VALUES($1,$2,$3,$4,$5,$6,'active',$7) RETURNING *`,
+                            [fullName, alias, pseudoEmail, realEmail, googleId, role, placeholderHash]
       );
       user = r.rows[0];
     } catch (e) {
       if (e?.code === '42703') {
+        // Fallback sin columnas nuevas:
         const r = await query(
           `INSERT INTO users(full_name, alias, email, role, status, password_hash)
-          VALUES($1,$2,$3,'customer','active',$4) RETURNING *`,
-                              [fullName, alias, pseudoEmail, placeholderHash]
+          VALUES($1,$2,$3,$4,'active',$5) RETURNING *`,
+                              [fullName, alias, pseudoEmail, role, placeholderHash]
         );
         user = r.rows[0];
       } else throw e;
@@ -431,6 +433,7 @@ export async function verifyEmail(token) {
 }
 
 // ── FORGOT PASSWORD ───────────────────────────────────────────────────────────
+// Reemplaza toda la función forgotPassword (líneas 434-485)
 export async function forgotPassword(email) {
   const realEmail = email.trim().toLowerCase();
 
@@ -438,9 +441,27 @@ export async function forgotPassword(email) {
   try {
     const r = await query('SELECT id, alias, full_name FROM users WHERE real_email = $1', [realEmail]);
     user = r.rows[0];
-  } catch (_) {
-    // Si columna no existe, silencioso
-    return;
+    // Fallback: si no se encontró por real_email, buscar por pseudoEmail legacy
+    if (!user) {
+      const r2 = await query(
+        'SELECT id, alias, full_name FROM users WHERE email = $1',
+        [pseudoEmailFromUsername(realEmail.split('@')[0])]
+      );
+      user = r2.rows[0];
+    }
+  } catch (e) {
+    if (e?.code === '42703') {
+      // Columna real_email no existe — buscar solo por pseudoEmail
+      try {
+        const r = await query(
+          'SELECT id, alias, full_name FROM users WHERE email = $1',
+          [pseudoEmailFromUsername(realEmail.split('@')[0])]
+        );
+        user = r.rows[0];
+      } catch (_) { return; }
+    } else {
+      return; // silencioso
+    }
   }
 
   if (!user) return; // silencioso — no revelar si el email existe
@@ -461,22 +482,22 @@ export async function forgotPassword(email) {
       to:      realEmail,
       subject: 'Recupera tu contraseña en Morelivery',
       html: `
-        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
-          <h2 style="color:#1a202c;margin-bottom:8px">Hola, ${name} 👋</h2>
-          <p style="color:#4a5568">Recibimos una solicitud para restablecer la contraseña de tu cuenta.</p>
-          <p style="margin:24px 0">
-            <a href="${resetUrl}"
-               style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">
-              Restablecer contraseña
-            </a>
-          </p>
-          <p style="color:#718096;font-size:13px">
-            Este enlace expira en <strong>15 minutos</strong>.<br>
-            Si no solicitaste esto, ignora este correo — tu contraseña no cambiará.
-          </p>
-          <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
-          <p style="color:#a0aec0;font-size:12px">Morelivery · No responder este correo</p>
-        </div>
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+      <h2 style="color:#1a202c;margin-bottom:8px">Hola, ${name} 👋</h2>
+      <p style="color:#4a5568">Recibimos una solicitud para restablecer la contraseña de tu cuenta.</p>
+      <p style="margin:24px 0">
+      <a href="${resetUrl}"
+      style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">
+      Restablecer contraseña
+      </a>
+      </p>
+      <p style="color:#718096;font-size:13px">
+      Este enlace expira en <strong>15 minutos</strong>.<br>
+      Si no solicitaste esto, ignora este correo — tu contraseña no cambiará.
+      </p>
+      <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
+      <p style="color:#a0aec0;font-size:12px">Morelivery · No responder este correo</p>
+      </div>
       `,
     });
   } catch (err) {

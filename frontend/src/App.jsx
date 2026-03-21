@@ -27,17 +27,57 @@ const Spinner = () => (
 );
 
 // ─── Config de apps ───────────────────────────────────────────────────────────
-const ADMIN_APP = { key:'admin', label:'Administrador', home:'/admin', icon:null, description:'' };
+const ADMIN_APP = { key:'admin', label:'Administrador', home:'/admin', description:'' };
 const APPS = [
-  { key:'customer',   label:'Cliente',   description:'Pide donde quieras',  icon:'🛍️', home:'/customer'   },
-  { key:'restaurant', label:'Tienda',    description:'Gestiona tu negocio', icon:'🏪', home:'/restaurant' },
-  { key:'driver',     label:'Conductor', description:'Reparte y gana',      icon:'🛵', home:'/driver'     },
+  { key:'customer',   label:'Cliente',   description:'Pide donde quieras',  home:'/customer'   },
+  { key:'restaurant', label:'Tienda',    description:'Gestiona tu negocio', home:'/restaurant' },
+  { key:'driver',     label:'Conductor', description:'Reparte y gana',      home:'/driver'     },
 ];
 
 function findApp(key) {
   return APPS.find(a => a.key === key) ?? (key === 'admin' ? ADMIN_APP : null);
 }
 
+// ─── Iconos por rol (Lucide, trazo fino) ──────────────────────────────────────
+function IconCustomer() {
+  return (
+    <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="#a85c5c"
+      strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+      <line x1="3" y1="6" x2="21" y2="6"/>
+      <path d="M16 10a4 4 0 01-8 0"/>
+    </svg>
+  );
+}
+function IconRestaurant() {
+  return (
+    <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="#a85c5c"
+      strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z"/>
+      <path d="M9 21V12h6v9"/>
+      <path d="M3 9h18"/>
+    </svg>
+  );
+}
+function IconDriver() {
+  return (
+    <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="#a85c5c"
+      strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="18.5" cy="17.5" r="2.5"/>
+      <circle cx="5.5"  cy="17.5" r="2.5"/>
+      <path d="M15 6H9l-4 6h14l-1.5-4.5"/>
+      <path d="M9 6V4"/>
+      <path d="M5 12v5.5"/>
+      <path d="M19 12v5.5"/>
+    </svg>
+  );
+}
+
+const ROLE_ICONS = {
+  customer:   <IconCustomer />,
+  restaurant: <IconRestaurant />,
+  driver:     <IconDriver />,
+};
 // ─── Logo bicolor — fuente única de verdad ────────────────────────────────────
 function BrandName({ size = '2rem' }) {
   return (
@@ -47,6 +87,10 @@ function BrandName({ size = '2rem' }) {
     </span>
   );
 }
+
+// ─── Iconos utilitarios ───────────────────────────────────────────────────────
+function IconSun()  { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>; }
+function IconMoon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>; }
 
 // ─── Guards ───────────────────────────────────────────────────────────────────
 function ProtectedRole({ role, children }) {
@@ -91,7 +135,7 @@ function LandingScreen() {
             flexShrink: 0,
           }}
         >
-          {isDark ? '☀️' : '🌙'}
+          {isDark ? <IconSun /> : <IconMoon />}
         </button>
       </div>
 
@@ -124,7 +168,7 @@ function LandingScreen() {
               width: '100%',
               boxSizing: 'border-box',
             }} className="landing-btn">
-              <span style={{ fontSize: '5rem', lineHeight: 1, marginTop: '2rem' }}>{app.icon}</span>
+              <div style={{ marginTop: '1.5rem' }}>{ROLE_ICONS[app.key]}</div>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontWeight: 700, fontSize: '1rem', color: '#1a1a1a' }}>{app.label}</div>
                 <div style={{ fontSize: '0.9rem', color: '#555' }}>{app.description}</div>
@@ -183,14 +227,14 @@ function AuthScreen({ mode = 'login' }) {
             flexShrink: 0,
           }}
         >
-          {isDark ? '☀️' : '🌙'}
+          {isDark ? <IconSun /> : <IconMoon />}
         </button>
       </header>
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem 1.25rem' }}>
         <div style={{ width: '100%', maxWidth: '420px' }}>
           <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
-            <span style={{ fontSize: '5rem' }}>{app.icon || '🔐'}</span>
+            <div style={{ marginBottom: '0.5rem' }}>{ROLE_ICONS[appKey] ?? '🔐'}</div>
             <p style={{ margin: '0.3rem 0 0', fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
               {app.label}
             </p>

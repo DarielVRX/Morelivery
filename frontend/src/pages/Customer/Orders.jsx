@@ -2,6 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
+// ── Iconos SVG ────────────────────────────────────────────────────────────────
+function IconChat()        { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>; }
+function IconSend()        { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>; }
+function IconChevronUp()   { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15"/></svg>; }
+function IconChevronDown() { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>; }
+function IconStarFilled()  { return <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>; }
+function IconStarEmpty()   { return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>; }
+
+
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
@@ -204,7 +213,7 @@ function OrderChat({ orderId, token }) {
     disabled={!text.trim() || sending}
     style={{ background:'var(--brand)', color:'#fff', border:'none', padding:'0 0.75rem', cursor:'pointer', fontSize:'0.8rem', fontWeight:700, opacity: text.trim() ? 1 : 0.45 }}
     >
-    {sending ? '…' : '➤'}
+    {sending ? '…' : <IconSend />}
     </button>
     </div>
     </div>
@@ -272,7 +281,7 @@ export default function CustomerOrders() {
         style={{ fontSize:'1.5rem', background:'none', border:'none', cursor:'pointer',
           padding:'0 0.1rem', opacity: s <= value ? 1 : 0.25,
           filter: s <= value ? 'none' : 'grayscale(1)' }}>
-          ⭐
+          {s <= value ? <IconStarFilled /> : <IconStarEmpty />}
           </button>
       ))}
       </div>
@@ -455,7 +464,7 @@ export default function CustomerOrders() {
           }}>
           <div style={{ background:'var(--bg-card)', borderRadius:'18px 18px 0 0', padding:'1.5rem 1.25rem 1.75rem',
             width:'100%', maxWidth:480, boxShadow:'0 -4px 32px rgba(0,0,0,0.18)' }}>
-            <div style={{ fontWeight:800, fontSize:'1rem', marginBottom:'0.25rem' }}>⭐ Calificar pedido</div>
+            <div style={{ fontWeight:800, fontSize:'1rem', marginBottom:'0.25rem', display:'flex', alignItems:'center', gap:'0.4rem' }}><IconStarFilled /> Calificar pedido</div>
             <div style={{ fontSize:'0.82rem', color:'var(--text-tertiary)', marginBottom:'1rem' }}>
             {ratingOrder.restaurant_name}
             </div>
@@ -538,7 +547,7 @@ export default function CustomerOrders() {
                 </div>
                 <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
                 <span style={{ fontWeight:700 }}>{fmt((order.total_cents||0)+(order.service_fee_cents||0)+(order.delivery_fee_cents||0)+(order.tip_cents||0))}</span>
-                <span style={{ color:'var(--text-tertiary)', fontSize:'0.8rem' }}>{isExp?'▲':'▼'}</span>
+                <span style={{ color:'var(--text-tertiary)', display:'flex' }}>{isExp ? <IconChevronUp /> : <IconChevronDown />}</span>
                 </div>
                 </div>
                 {isExp && (
@@ -621,7 +630,7 @@ export default function CustomerOrders() {
                     background:'none', border:'1px solid var(--border)', borderRadius:6,
                            padding:'0.25rem 0.65rem', fontSize:'0.78rem', cursor:'pointer',
                            color:'var(--text-secondary)', fontWeight:600 }}>
-                           💬 {isChatOpen ? 'Cerrar chat' : 'Chat del pedido'}
+                           <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Chat del pedido'}
                            </button>
                            {isChatOpen && <OrderChat orderId={order.id} token={auth.token} />}
 
@@ -663,7 +672,7 @@ export default function CustomerOrders() {
                 </div>
                 <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
                 <span style={{ fontWeight:700 }}>{fmt(grandTotal)}</span>
-                <span style={{ color:'var(--text-tertiary)', fontSize:'0.8rem' }}>{isHExp?'▲':'▼'}</span>
+                <span style={{ color:'var(--text-tertiary)', display:'flex' }}>{isHExp ? <IconChevronUp /> : <IconChevronDown />}</span>
                 </div>
                 </div>
                 {isHExp && (
@@ -734,7 +743,7 @@ export default function CustomerOrders() {
                     background:'none', border:'1px solid var(--border)', borderRadius:6,
                             padding:'0.25rem 0.65rem', fontSize:'0.78rem', cursor:'pointer',
                             color:'var(--text-secondary)', fontWeight:600 }}>
-                            💬 {isChatOpen ? 'Cerrar chat' : 'Ver chat'}
+                            <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Ver chat'}
                             </button>
                             {isChatOpen && <OrderChat orderId={o.id} token={auth.token} />}
 
@@ -768,7 +777,7 @@ export default function CustomerOrders() {
                                 <button className="btn-sm"
                                 style={{ background:'var(--brand-light)', color:'var(--brand)', borderColor:'var(--brand)', fontSize:'0.78rem', fontWeight:700 }}
                                 onClick={() => { setRatingOrder(o); setRatingRestStar(0); setRatingDrvStar(0); setRatingComment(''); }}>
-                                ⭐ Calificar
+                                <IconStarFilled /> Calificar
                                 </button>
                               )}
                               {ratedOrders.has(o.id) && (
