@@ -153,7 +153,7 @@ function AuthForm({ mode, appKey }) {
   try {
     const data = await apiFetch('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, role: appKey || undefined }),
     });
     if (appKey && data.user.role !== appKey) {
       const labels = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
