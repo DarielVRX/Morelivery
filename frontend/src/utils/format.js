@@ -4,6 +4,15 @@ export function fmt(cents) {
   return `$${((cents ?? 0) / 100).toFixed(2)}`;
 }
 
+export function formatShortDateTime(iso, locale = 'es') {
+  return iso ? new Date(iso).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' }) : '—';
+}
+
+export function formatShortDate(iso, locale = 'es-MX') {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 export function getNotifPriorityMode() {
   try {
     return localStorage.getItem('morelivery_notif_priority') === 'high' ? 'high' : 'normal';
