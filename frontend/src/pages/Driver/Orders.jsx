@@ -463,7 +463,7 @@ export default function DriverOrders() {
                               <IconChat /> {chatOpen === o.id ? 'Cerrar chat' : 'Chat del pedido'}
                             </button>
                             {chatOpen === o.id && <OrderChat
-                              orderId={order.id}
+                              orderId={o.id}
                               token={auth.token}
                               refreshTick={chatTick}  // nuevo prop
                               />}
@@ -514,7 +514,7 @@ export default function DriverOrders() {
 
                         {/* Chat historial */}
                         <button
-                        onClick={() => setChatOpen(isChatOpen ? null : o.id)}
+                        onClick={() => setChatOpen(isChatOpen ? null :'h_' + o.id)}
                         style={{ marginTop:'0.4rem', display:'flex', alignItems:'center', gap:'0.35rem',
                           background:'none', border:'1px solid var(--border)', borderRadius:6,
                                 padding:'0.25rem 0.65rem', fontSize:'0.78rem', cursor:'pointer',
