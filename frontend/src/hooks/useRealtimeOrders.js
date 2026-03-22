@@ -436,6 +436,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
 
   useEffect(() => {
     mountedRef.current = true;
+    console.log('🔌 [SSE] mount — token:', token?.slice(0, 8), new Error().stack?.split('\n')[2]?.trim());
     connect();
 
     // Reconectar si iOS/Android pausó el JS y el SSE quedó muerto al volver al foco
@@ -454,6 +455,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
     document.addEventListener('visibilitychange', onVisible);
 
     return () => {
+      console.log('🔌 [SSE] unmount — token:', token?.slice(0, 8));
       mountedRef.current = false;
       clearTimeout(reconnectTimer.current);
       esRef.current?.close();
