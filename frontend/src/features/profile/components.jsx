@@ -85,9 +85,10 @@ export function CPSearchBar({ token, onSelectAddress }) {
   async function confirmMapPin() {
     const pos = pendingPos.current;
     if (!pos) return;
-    const geo = await nominatimReverse(lat, lng, { apiFetch, token });
+    const geo = await nominatimReverse(pos.lat, pos.lng, { apiFetch, token });
     onSelectAddress({
-      lat, lng,
+      lat:        pos.lat,
+      lng:        pos.lng,
       address:    geo?.label      || '',
       colonia:    geo?.colonia    || '',
       ciudad:     geo?.ciudad     || '',
