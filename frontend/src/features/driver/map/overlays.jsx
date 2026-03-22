@@ -27,17 +27,12 @@ export function DriverMapOverlays({ hasGPS, showAttrib, onToggleAttrib, bottomOf
       <button onClick={onToggleAttrib} title="Atribuciones del mapa"
         style={{
           position: 'absolute', bottom: bottomOffset, left: 8, zIndex: 10,
-          background: 'rgba(255,255,255,0.82)', border: '1px solid rgba(0,0,0,0.15)',
-          borderRadius: 4, width: 20, height: 20, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#666', padding: 0, transition: 'bottom 0.25s ease',
+          background: 'rgba(255,255,255,0.75)', border: 'none',
+          borderRadius: 3, padding: '1px 5px', cursor: 'pointer',
+          fontSize: '0.6rem', color: '#555', lineHeight: 1,
+          transition: 'bottom 0.25s ease',
         }}>
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-          <circle cx="12" cy="12" r="10"/>
-          <line x1="12" y1="8" x2="12" y2="8"/>
-          <line x1="12" y1="12" x2="12" y2="16"/>
-        </svg>
+        ©
       </button>
 
       {/* Sin GPS */}

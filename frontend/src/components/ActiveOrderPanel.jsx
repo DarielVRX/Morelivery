@@ -247,19 +247,24 @@ export default function ActiveOrderPanel({
                   </svg>
                   Más opciones
                 </summary>
-                <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
                   {canRelevo && (
-                    <button className="btn-sm"
-                      style={{ display: 'flex', alignItems: 'center', gap: 4,
-                        color: '#854d0e', borderColor: '#fde047', background: '#fef9c3' }}
-                      onClick={onRebalance}>
+                    <button style={{
+                      flex: 1, padding: '0.45rem 0', borderRadius: 8, fontWeight: 700,
+                      fontSize: '0.78rem', border: '1.5px solid #fde047', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                      color: '#854d0e', background: '#fef9c3',
+                    }} onClick={onRebalance}>
                       <IconRelevo /> Buscar relevo
                     </button>
                   )}
                   {canRelease && (
-                    <button className="btn-sm btn-danger"
-                      style={{ display: 'flex', alignItems: 'center', gap: 4 }}
-                      onClick={onToggleRelease}>
+                    <button style={{
+                      flex: 1, padding: '0.45rem 0', borderRadius: 8, fontWeight: 700,
+                      fontSize: '0.78rem', border: '1.5px solid #dc2626', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                      background: '#fef2f2', color: '#dc2626',
+                    }} onClick={onToggleRelease}>
                       <IconRelease /> Liberar
                     </button>
                   )}

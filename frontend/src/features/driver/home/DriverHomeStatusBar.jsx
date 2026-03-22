@@ -29,46 +29,32 @@ export default function DriverHomeStatusBar({
         gap: 8,
         zIndex: 10,
       }}>
-        {/* Estado */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
-          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>
-            {availability ? '● Disponible' : '○ No disponible'}
+        {/* Stats del día — siempre visibles */}
+        <div style={{
+          display: 'flex', gap: '0.75rem', alignItems: 'center',
+          fontSize: '0.74rem', color: 'rgba(255,255,255,0.9)', minWidth: 0,
+        }}>
+          <span style={{ fontWeight: 600 }}>
+            <span style={{ opacity: 0.7, fontSize: '0.68rem' }}>Hoy </span>
+            {earnings ?? '$0'}
           </span>
-
-          {/* Stats del día — solo si hay datos */}
-          {(earnings || deliveries > 0 || bagPct !== null) && (
-            <div style={{
-              display: 'flex', gap: '0.6rem', alignItems: 'center',
-              fontSize: '0.72rem', color: 'rgba(255,255,255,0.85)',
-              borderLeft: '1px solid rgba(255,255,255,0.3)',
-              paddingLeft: '0.6rem', flexWrap: 'wrap',
-            }}>
-              {earnings && (
-                <span style={{ fontWeight: 600 }}>
-                  <span style={{ opacity: 0.75 }}>Hoy </span>{earnings}
-                </span>
-              )}
-              {deliveries > 0 && (
-                <span>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)"
-                    strokeWidth="2.5" strokeLinecap="round" style={{ verticalAlign: 'middle', marginRight: 2 }}>
-                    <polyline points="20 6 9 17 4 12"/>
-                  </svg>
-                  {deliveries}
-                </span>
-              )}
-              {bagPct !== null && (
-                <span>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)"
-                    strokeWidth="2" strokeLinecap="round" style={{ verticalAlign: 'middle', marginRight: 2 }}>
-                    <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
-                    <line x1="3" y1="6" x2="21" y2="6"/>
-                    <path d="M16 10a4 4 0 01-8 0"/>
-                  </svg>
-                  {bagPct}%
-                </span>
-              )}
-            </div>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.85)"
+              strokeWidth="2.5" strokeLinecap="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            {deliveries}
+          </span>
+          {bagPct !== null && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.85)"
+                strokeWidth="2" strokeLinecap="round">
+                <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <path d="M16 10a4 4 0 01-8 0"/>
+              </svg>
+              {bagPct}%
+            </span>
           )}
         </div>
 

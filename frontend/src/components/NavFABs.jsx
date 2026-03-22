@@ -77,7 +77,13 @@ export default function NavFABs({
 
   const centerBottom    = `calc(${BASE_BOTTOM}px + ${safeBot})`;
   const secondaryBottom = `calc(${BASE_BOTTOM + SZ_PRIMARY + GAP}px + ${safeBot})`;
-  const menuBottom      = `calc(${BASE_BOTTOM + SZ_PRIMARY + GAP + SZ_SECONDARY + GAP}px + ${safeBot})`;
+  // Cuando hay ruta, el botón Más ocupa secondaryBottom y Reportar sube un nivel más
+  const reportBottom    = withRoute
+    ? `calc(${BASE_BOTTOM + SZ_PRIMARY + GAP + SZ_SECONDARY + GAP}px + ${safeBot})`
+    : secondaryBottom;
+  const menuBottom      = withRoute
+    ? `calc(${BASE_BOTTOM + SZ_PRIMARY + GAP + SZ_SECONDARY + GAP + SZ_SECONDARY + GAP}px + ${safeBot})`
+    : `calc(${BASE_BOTTOM + SZ_PRIMARY + GAP + SZ_SECONDARY + GAP}px + ${safeBot})`;
 
   const centerBg =
     centerMode === 'follow'   ? 'var(--brand)' :
@@ -200,7 +206,7 @@ export default function NavFABs({
       )}
 
       {/* ── Sin pedido: botón Reportar ──────────────────────────────────────── */}
-      {!hasActiveOrder && !navMode && (
+      {!navMode && navMode !== 'more' && (
         <button
           aria-label="Reportar incidencia"
           title="Reportar zona, calle no viable o preferencia"
@@ -208,7 +214,7 @@ export default function NavFABs({
           onClick={() => onNavMode('menu')}
           style={{
             ...fabBase,
-            bottom: secondaryBottom,
+            bottom: reportBottom,
             width: SZ_SECONDARY,
             height: SZ_SECONDARY,
             background: '#fff',
@@ -222,7 +228,7 @@ export default function NavFABs({
       )}
 
       {/* ── Menú Reportar expandido ─────────────────────────────────────────── */}
-      {navMode === 'menu' && !hasActiveOrder && (
+      {navMode === 'menu' && (
         <div style={{
           position: 'absolute',
           bottom: menuBottom,
