@@ -15,10 +15,12 @@ async function nominatimReverse(lat, lng) {
     const data = await r.json();
     const a = data.address || {};
     return {
-      address: [a.road, a.house_number, a.suburb || a.neighbourhood, a.city || 'Morelia'].filter(Boolean).join(', ') || data.display_name?.split(',').slice(0,3).join(',') || '',
-      colonia:    a.suburb || a.neighbourhood || a.quarter || '',
-      ciudad:     a.city || a.town || a.municipality || 'Morelia',
+      address:    [a.road, a.house_number, a.suburb || a.neighbourhood || a.village, a.city || a.county || 'Morelia'].filter(Boolean).join(', ')
+      || data.display_name?.split(',').slice(0,3).join(',') || '',
+      colonia:    a.suburb || a.neighbourhood || a.quarter || a.city_district || a.village || '',
+      ciudad:     a.city || a.county || 'Morelia',
       estado:     a.state || 'Michoacán',
+      postalCode: a.postcode || '',
     };
   } catch { return null; }
 }
@@ -146,12 +148,26 @@ export function CPSearchBar({ token, onSelectAddress }) {
     setColonias([]);
   }
 
-  function selectGPS() {
+  async function selectGPS() {
     setGpsLoading(true);
-    navigator.geolocation?.getCurrentPosition(pos => {
-      onSelectAddress({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-      setGpsLoading(false);
-    }, () => setGpsLoading(false), { timeout: 6000, maximumAge: 30000 });
+    navigator.geolocation?.getCurrentPosition(
+      async pos => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        const geo = await nominatimReverse(lat, lng);
+        onSelectAddress({
+          lat,
+          lng,
+          address:    geo?.address    || '',
+          colonia:    geo?.colonia    || '',
+          ciudad:     geo?.ciudad     || '',
+          estado:     geo?.estado     || '',
+          postalCode: geo?.postalCode || '',
+        });
+        setGpsLoading(false);
+      },
+      () => setGpsLoading(false),
+                                              { timeout: 6000, maximumAge: 30000 }
+    );
   }
 
   return (
