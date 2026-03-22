@@ -7,7 +7,6 @@ import { useEffect, useState } from 'react';
 
 import ActiveOrderPanel from '../../components/ActiveOrderPanel';
 import OfferPanel from '../../components/OfferPanel';
-import PullToRefresh from '../../components/PullToRefresh';
 import { useAuth } from '../../contexts/AuthContext';
 import { ensureDriverHomeAnimations } from '../../features/driver/home/animations';
 import DriverHomeMapSection from '../../features/driver/home/DriverHomeMapSection.jsx';
@@ -70,8 +69,7 @@ export default function DriverHome({ registerRef }) {
   });
 
   return (
-    <PullToRefresh onRefresh={order.loadData}>
-      <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden', position:'relative' }}>
+    <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden', position:'relative' }}>
         <DriverHomeStatusBar
           availability={order.availability}
           position={myPosition}
@@ -146,7 +144,6 @@ export default function DriverHome({ registerRef }) {
           onRebalance={() => order.doRebalance(setMsg)}
           onRoute={home.openRoadRouteApi}
         />
-      </div>
-    </PullToRefresh>
+    </div>
   );
 }

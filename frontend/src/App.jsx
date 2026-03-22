@@ -5,7 +5,6 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import {IconSun, IconMoon} from './components/Layout';
 import Layout from './components/Layout';
-import PullToRefresh from './components/PullToRefresh';
 import SplitLayout from './components/SplitLayout';
 import AuthPage from './pages/AuthPage';
 import CustomerOrders   from './pages/Customer/Orders';
@@ -249,9 +248,9 @@ function AuthScreen({ mode = 'login' }) {
 // ─── Layout wrappers por rol ──────────────────────────────────────────────────
 function CustomerLayout() {
   return (
-    <PullToRefresh>
     <ProtectedRole role="customer">
       <SplitLayout
+        onRefresh={() => window.location.reload()}
         ordersContent={<CustomerOrders />}
         homeContent={
           <Suspense fallback={<Spinner />}>
@@ -264,15 +263,14 @@ function CustomerLayout() {
         }
       />
     </ProtectedRole>
-    </PullToRefresh>
   );
 }
 
 function RestaurantLayout() {
   return (
-    <PullToRefresh>
     <ProtectedRole role="restaurant">
       <SplitLayout
+        onRefresh={() => window.location.reload()}
         ordersContent={<RestaurantOrders />}
         homeContent={
           <Suspense fallback={<Spinner />}>
@@ -284,7 +282,6 @@ function RestaurantLayout() {
         }
       />
     </ProtectedRole>
-    </PullToRefresh>
   );
 }
 
@@ -306,6 +303,7 @@ function DriverLayout() {
   return (
     <ProtectedRole role="driver">
       <SplitLayout
+        onRefresh={() => registerRef.current.loadData?.()}
         ordersContent={<DriverOrders registerRef={registerRef} />}
         homeContent={
           <Suspense fallback={<Spinner />}>
