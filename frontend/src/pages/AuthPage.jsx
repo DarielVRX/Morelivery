@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../api/client';
 import { validatePassword, PasswordStrength } from '../utils/passwordUtils.jsx';
+import PullToRefresh from '../components/PullToRefresh';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
@@ -292,6 +293,7 @@ function AuthForm({ mode, appKey }) {
   function goTo(v) { setMessage({ text: '', ok: false }); setView(v); }
 
   return (
+    <PullToRefresh>
     <section className="auth-card">
 
     <div style={{ marginBottom:'0.25rem' }}>
@@ -513,6 +515,7 @@ function AuthForm({ mode, appKey }) {
       </p>
     )}
     </section>
+    </PullToRefresh>
   );
 }
 

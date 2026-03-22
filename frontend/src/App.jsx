@@ -11,6 +11,7 @@ import CustomerOrders   from './pages/Customer/Orders';
 import DriverOrders     from './pages/Driver/Orders';
 import RestaurantOrders from './pages/Restaurant/Orders';
 import { usePermissions } from './hooks/usePermissions';
+import PullToRefresh from '../components/PullToRefresh';
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const CustomerHome      = lazy(() => import('./pages/Customer/Home'));
@@ -110,6 +111,7 @@ function LandingScreen() {
   }
 
   return (
+    <PullToRefresh>
     <div style={{
       minHeight: '100dvh', background: 'var(--bg-card)',
       display: 'flex', flexDirection: 'column',
@@ -176,6 +178,7 @@ function LandingScreen() {
         .landing-btn:hover { transform:translateY(-2px); box-shadow:0 4px 16px rgba(227,170,170,0.35); }
       `}</style>
     </div>
+    </PullToRefresh>
   );
 }
 
