@@ -144,7 +144,11 @@ function MessageBubble({ m, isOwn }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: isOwn ? 'flex-end' : 'flex-start' }}>
     {!isOwn && (
-      ...
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem',
+        marginBottom: '0.15rem', color: cfg.color, fontSize: '0.68rem', fontWeight: 700 }}>
+        <Icon width={13} height={13} />
+        {m.sender_name}
+        </div>
     )}
     <div style={{
       background: cfg.color,
@@ -156,7 +160,6 @@ function MessageBubble({ m, isOwn }) {
     }}>
     {m.text}
     </div>
-
     <span style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)', marginTop: '2px' }}>
     {new Date(m.created_at).toLocaleTimeString('es-MX', {
       timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit'
