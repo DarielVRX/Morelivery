@@ -1,6 +1,6 @@
 // hooks/useOrderManager.js — lógica de pedidos extraída de DriverHome
 // Agrupa: loadData, accept/reject offer, changeStatus, doRelease,
-//         announceListener, SSE via useRealtimeOrders, alertas de oferta
+//         SSE via useRealtimeOrders, alertas de oferta
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api/client';
@@ -27,21 +27,12 @@ export function useOrderManager(token, patchUser, userDriver) {
 
   const loadDataRef            = useRef(null);
   const loadDebounceRef        = useRef(null);
-  const tokenRef               = useRef(token);
-  const availabilityRef        = useRef(availability);
-  const pendingOfferRef        = useRef(pendingOffer);
   const consecutiveTimeouts    = useRef(0);
   const lastOfferAlertRef      = useRef(null);
-
-  useEffect(() => { tokenRef.current = token; }, [token]);
-  useEffect(() => { availabilityRef.current = availability; }, [availability]);
-  useEffect(() => { pendingOfferRef.current = pendingOffer; }, [pendingOffer]);
 
   const hasActiveOrder = Boolean(
     activeOrder && !['delivered', 'cancelled'].includes(activeOrder.status)
   );
-  const hasActiveOrderRef = useRef(hasActiveOrder);
-  useEffect(() => { hasActiveOrderRef.current = hasActiveOrder; }, [hasActiveOrder]);
 
   // Notificaciones
   useEffect(() => {
@@ -110,25 +101,6 @@ export function useOrderManager(token, patchUser, userDriver) {
         patchUser({ driver: { ...(userDriver || {}), is_available: fresh } });
       }).catch(() => {});
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Listener periódico
-  const announceListener = useCallback(async () => {
-    if (!tokenRef.current) return;
-    try { await apiFetch('/drivers/listener', { method: 'POST' }, tokenRef.current); loadDataRef.current?.(); }
-    catch (_) {}
-  }, []);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (!availabilityRef.current || pendingOfferRef.current || hasActiveOrderRef.current) return;
-      announceListener();
-    }, 4000);
-    setTimeout(() => {
-      if (availabilityRef.current && !pendingOfferRef.current && !hasActiveOrderRef.current)
-        announceListener();
-    }, 500);
-    return () => clearInterval(id);
-  }, [announceListener]);
 
   const [transferBanner, setTransferBanner] = useState(null); // { type, message, orderId }
 
