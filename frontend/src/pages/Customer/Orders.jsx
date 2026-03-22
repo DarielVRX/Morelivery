@@ -151,8 +151,8 @@ export default function CustomerOrders() {
           if (data?.action === 'suggestion_received') loadDataRef.current?.();
         },
         ({ orderId, lat, lng }) => setDriverPos(p => ({ ...p, [orderId]: { lat, lng } })),
-                        undefined,                                     // onNewOffer
-                        (data) => {                                    // onChatMessage
+                        undefined,
+                        (data) => {
                           if (data.orderId === chatOpen) setChatTick(t => t + 1);
                         },
       );
