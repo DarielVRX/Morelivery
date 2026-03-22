@@ -14,7 +14,7 @@ export default function RestaurantCard({ restaurant, isHero, distKm, onClick }) 
           {restaurant.profile_photo
             ? <img src={restaurant.profile_photo} alt={restaurant.name} style={{ width:'100%', height:180, objectFit:'cover', display:'block' }} />
             : <div style={{ width:'100%', height:180, background:'linear-gradient(135deg,#c97b7b,#9e4f4f)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                <span style={{ color: 'rgba(255,255,255,0.7)' }}><IconRestaurant width={52} height={52} /></span>
+                <span style={{ color: 'rgba(255,255,255,0.5)' }}><IconRestaurant width={144} height={144  } /></span>
               </div>}
           <div style={{ position:'absolute', inset:0, background:'linear-gradient(to top, rgba(120,30,30,0.82) 0%, rgba(80,20,20,0.2) 60%, transparent 100%)' }} />
         </div>
@@ -41,7 +41,7 @@ export default function RestaurantCard({ restaurant, isHero, distKm, onClick }) 
         {restaurant.profile_photo
           ? <img src={restaurant.profile_photo} alt={restaurant.name} style={{ width:'100%', height:100, objectFit:'cover', display:'block', opacity: restaurant.is_open ? 1 : 0.55 }} />
           : <div style={{ width:'100%', height:100, background:'linear-gradient(135deg,#e3aaaa33,#c97b7b22)', display:'flex', alignItems:'center', justifyContent:'center', opacity: restaurant.is_open ? 1 : 0.55 }}>
-              <span style={{ color: 'rgba(255,255,255,0.7)' }}><IconRestaurant width={28} height={28} /></span>
+              <span style={{ color: 'rgba(255,255,255,0.7)' }}><IconRestaurant width={72} height={72} /></span>
             </div>}
         <div style={{ position:'absolute', inset:0, background:'linear-gradient(to top, rgba(0,0,0,0.35) 0%, transparent 60%)' }} />
       </div>
