@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { apiFetch } from '../api/client';
+import { splitOrdersByTerminalStatus } from '../features/orders/status';
 import { useRealtimeOrders } from './useRealtimeOrders';
 import { haversineMeters } from '../utils/geo';
 
-const ACTIVE_ORDER_STATUSES = ['delivered', 'cancelled'];
 const STATUS_WITH_GPS = ['on_the_way', 'delivered'];
 const MAX_RADIUS_M = 100;
 const GRACE_MS = 3 * 60 * 1000;
@@ -18,17 +18,11 @@ export function useDriverOrders(token) {
   const [chatTick, setChatTick] = useState(0);
 
   const loadDataRef = useRef(null);
+  const loadOrdersRef = useRef(null);
   const chatOpenRef = useRef(null);
   const graceRef = useRef({});
 
-  const active = useMemo(
-    () => orders.filter((order) => !ACTIVE_ORDER_STATUSES.includes(order.status)),
-    [orders]
-  );
-  const past = useMemo(
-    () => orders.filter((order) => ACTIVE_ORDER_STATUSES.includes(order.status)),
-    [orders]
-  );
+  const { active, past } = useMemo(() => splitOrdersByTerminalStatus(orders), [orders]);
   const activeIds = useMemo(() => new Set(active.map((order) => order.id)), [active]);
   const unoffered = useMemo(
     () => waitingOrders.filter((order) => !activeIds.has(order.id)),
@@ -41,21 +35,31 @@ export function useDriverOrders(token) {
     )[0]?.id ?? null;
   }, [active]);
 
-  const loadData = useCallback(async () => {
+  const loadOrders = useCallback(async () => {
     if (!token) return;
     try {
-      const [myOrders, pending] = await Promise.all([
-        apiFetch('/orders/my', {}, token),
-        apiFetch('/orders/pending-assignment', {}, token).catch(() => ({ orders: [] })),
-      ]);
+      const myOrders = await apiFetch('/orders/my', {}, token);
       setOrders(myOrders.orders || []);
+    } catch (_) {}
+  }, [token]);
+
+  const loadWaitingOrders = useCallback(async () => {
+    if (!token) return;
+    try {
+      const pending = await apiFetch('/orders/pending-assignment', {}, token).catch(() => ({ orders: [] }));
       setWaitingOrders(pending.orders || []);
     } catch (_) {}
   }, [token]);
 
+  const loadData = useCallback(async ({ includeWaiting = true } = {}) => {
+    await loadOrders();
+    if (includeWaiting) await loadWaitingOrders();
+  }, [loadOrders, loadWaitingOrders]);
+
   useEffect(() => {
     loadDataRef.current = loadData;
-  }, [loadData]);
+    loadOrdersRef.current = loadOrders;
+  }, [loadData, loadOrders]);
 
   useEffect(() => {
     loadData();
@@ -63,7 +67,7 @@ export function useDriverOrders(token) {
 
   useRealtimeOrders(
     token,
-    () => loadDataRef.current?.(),
+    () => loadOrdersRef.current?.(),
     () => {},
     undefined,
     (data) => {
@@ -133,7 +137,7 @@ export function useDriverOrders(token) {
         method: 'PATCH',
         body: JSON.stringify({ status, ...gps }),
       }, token);
-      loadDataRef.current?.();
+      loadOrdersRef.current?.();
     } catch (error) {
       setActionMsg(error.message);
     } finally {
@@ -146,7 +150,7 @@ export function useDriverOrders(token) {
     try {
       await apiFetch(`/drivers/orders/${orderId}/rebalance`, { method: 'POST' }, token);
       setActionMsg('Pedido en disputa — si alguien lo toma se te notifica.');
-      loadDataRef.current?.();
+      loadOrdersRef.current?.();
       setTimeout(() => setActionMsg(''), 5000);
     } catch (error) {
       setActionMsg(error.message || 'Error al solicitar rebalanceo');
@@ -203,6 +207,8 @@ export function useDriverOrders(token) {
     rebalancingId,
     chatTick,
     loadData,
+    loadOrders,
+    loadWaitingOrders,
     setActionMsg,
     sendReport,
     changeStatusWithGps,
