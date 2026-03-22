@@ -113,7 +113,7 @@ export default function CustomerOrders() {
 
   useEffect(() => {
     // Evitar recarga si ya hay datos — SplitLayout puede montar este panel
-    // al navegar a RestaurantPage sin desmontarlo; la recarga la maneja el polling
+    // al navegar a RestaurantPage sin desmontarlo; la recarga posterior la maneja SSE
     if (activeOrders.length === 0) loadActive();
   }, [auth.token]);
 
@@ -134,13 +134,6 @@ export default function CustomerOrders() {
         obs.observe(el);
         return () => obs.disconnect();
       }, [tab, pastHasMore, pastLoading, pastOffset]);
-
-      // Polling 5s para activos
-      useEffect(() => {
-        if (!auth.token) return;
-        const id = setInterval(() => loadActive(), 5000);
-        return () => clearInterval(id);
-      }, [auth.token]);
 
       const [chatTick, setChatTick] = useState(0);
 
