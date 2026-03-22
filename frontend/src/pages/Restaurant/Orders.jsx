@@ -3,6 +3,7 @@ import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 import { useAppBadge } from '../../hooks/useAppBadge';
+import { buildSuggestionDraft, buildSuggestionItems } from '../../features/orders/drafts';
 import { IconChat, OrderChat } from '../../features/customer/orders/components';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
@@ -50,10 +51,6 @@ var STATUS_COLOR = {
   preparing:'#f97316', ready:'#16a34a', on_the_way:'#0891b2',
   delivered:'#16a34a', cancelled:'#dc2626', pending_driver:'#ef4444',
 };
-
-function buildInitial(items = []) {
-  const m = {}; items.forEach(i => { m[i.menuItemId] = i.quantity; }); return m;
-}
 
 // ── Control de tiempo de preparación ─────────────────────────────────────────
 function PrepTimeControl({ value, onChange, onSave, saving }) {
@@ -244,7 +241,7 @@ export default function RestaurantOrders() {
   useEffect(() => {
     setSuggDrafts(prev => {
       const next = {};
-      orders.forEach(o => { next[o.id] = prev[o.id] || buildInitial(o.items); });
+      orders.forEach(o => { next[o.id] = prev[o.id] || buildSuggestionDraft(o.items); });
       return next;
     });
   }, [orders.length]);
@@ -266,8 +263,7 @@ export default function RestaurantOrders() {
   const READY_COOLDOWN_SECS = 5 * 60;
 
   async function sendSuggestion(order) {
-    const draft = suggDrafts[order.id] || {};
-    const items = Object.entries(draft).filter(([,q]) => q > 0).map(([menuItemId, quantity]) => ({ menuItemId, quantity }));
+    const items = buildSuggestionItems(suggDrafts[order.id] || {});
     if (items.length === 0) return setMsg('La sugerencia debe tener al menos 1 producto');
     try {
       await apiFetch(`/orders/${order.id}/suggest`, { method:'PATCH', body: JSON.stringify({ items }) }, auth.token);
