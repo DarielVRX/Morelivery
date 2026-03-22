@@ -7,39 +7,14 @@
 // OPT-12: livePos y liveHeading son refs, NO estado — sin re-render en cada tick GPS
 
 import { useEffect, useRef, useState } from 'react';
-import { getBearing }                  from '../utils/geo';
-import { ensureMapLibreCSS, ensureMapLibreJS } from '../utils/mapLibre';
+import { DriverMapOverlays } from '../features/driver/map/overlays';
+import { DEFAULT_POS, MORELIA_BOUNDS, STADIA_KEY, STYLE_DARK, STYLE_LIGHT } from '../features/driver/map/config';
 import { useTheme } from '../contexts/ThemeContext';
-
-// Stadia Maps styles — professional tiles with CDN SLA
-// API key read from VITE_STADIA_KEY env var; falls back to OpenFreeMap if not set.
-// Stadia has native dark/light pairs — no CSS filter hack needed.
-var STADIA_KEY = import.meta.env?.VITE_STADIA_KEY || '';
-
-function stadiaStyle(name) {
-  const base = `https://tiles.stadiamaps.com/styles/${name}.json`;
-  return STADIA_KEY ? `${base}?api_key=${STADIA_KEY}` : base;
-}
-
-// Light: alidade_smooth — cleaner than bright, less visual noise, routes stand out more
-// Dark:  alidade_smooth_dark — native dark, no color inversion needed
-// Fallback: OpenFreeMap (no key required)
-var STYLE_LIGHT = STADIA_KEY
-  ? stadiaStyle('alidade_smooth')
-  : 'https://tiles.openfreemap.org/styles/bright';
-var STYLE_DARK = STADIA_KEY
-  ? stadiaStyle('alidade_smooth_dark')
-  : 'https://tiles.openfreemap.org/styles/bright'; // fallback still uses filter
+import { getBearing } from '../utils/geo';
+import { ensureMapLibreCSS, ensureMapLibreJS } from '../utils/mapLibre';
 
 // OPT-4: singleton — se asigna una vez cuando la lib carga y se reutiliza
 var _ml = null;
-
-// ── Constantes de Morelia ─────────────────────────────────────────────────────
-var DEFAULT_POS    = { lat: 19.70595, lng: -101.19498 };
-// Bounding box del Área Metropolitana de Morelia.
-// Cubre Morelia + Tarímbaro, Charo, Jesús del Monte, Cuto del Porvenir.
-// MapLibre no carga tiles fuera de este rectángulo → ~40% menos memoria GPU.
-var MORELIA_BOUNDS = [[-101.42, 19.57], [-100.98, 19.84]];
 
 export default function DriverMap({
   driverPos, customPin, onCustomPin, hasActiveOrder,
@@ -477,37 +452,7 @@ export default function DriverMap({
     <div style={{ height: '100%', width: '100%', position: 'relative' }}>
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
 
-      {showAttrib && (
-        <div style={{ position: 'absolute', bottom: 52, left: 8, zIndex: 10,
-          background: 'rgba(255,255,255,0.92)', borderRadius: 6,
-          padding: '0.3rem 0.6rem', fontSize: '0.65rem', color: '#444',
-          boxShadow: '0 1px 6px #0002', maxWidth: 260, pointerEvents: 'none' }}>
-          © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer"
-            style={{ color: '#2563eb' }}>OpenStreetMap</a> contributors ·{' '}
-          {STADIA_KEY
-            ? <><a href="https://stadiamaps.com" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>Stadia Maps</a> · </>
-            : <><a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>OpenFreeMap</a> · </>
-          }
-          <a href="https://maplibre.org" target="_blank" rel="noopener noreferrer"
-            style={{ color: '#2563eb' }}>MapLibre</a>
-        </div>
-      )}
-
-      <button onClick={() => setShowAttrib(v => !v)} title="Atribuciones"
-        style={{ position: 'absolute', bottom: 8, left: 8, zIndex: 10,
-          background: 'rgba(255,255,255,0.82)', border: '1px solid #ccc',
-          borderRadius: 4, width: 22, height: 22, cursor: 'pointer',
-          fontSize: '0.65rem', display: 'flex', alignItems: 'center',
-          justifyContent: 'center', color: '#555', padding: 0 }}>ℹ</button>
-
-      {!hasGPS && (
-        <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(0,0,0,0.5)', color: '#fff', borderRadius: 20,
-          padding: '0.2rem 0.75rem', fontSize: '0.72rem', zIndex: 5,
-          pointerEvents: 'none', whiteSpace: 'nowrap' }}>
-          📍 Sin GPS — toca el mapa para marcar posición
-        </div>
-      )}
+      <DriverMapOverlays hasGPS={hasGPS} showAttrib={showAttrib} onToggleAttrib={() => setShowAttrib(v => !v)} />
     </div>
   );
 }

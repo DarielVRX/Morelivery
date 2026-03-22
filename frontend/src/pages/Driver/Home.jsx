@@ -10,6 +10,7 @@ import ActiveOrderPanel from '../../components/ActiveOrderPanel';
 import OfferPanel from '../../components/OfferPanel';
 import PullToRefresh from '../../components/PullToRefresh';
 import { useAuth } from '../../contexts/AuthContext';
+import { ensureDriverHomeAnimations } from '../../features/driver/home/animations';
 import DriverHomeMapSection from '../../features/driver/home/DriverHomeMapSection.jsx';
 import DriverHomeStatusBar from '../../features/driver/home/DriverHomeStatusBar.jsx';
 import { useAppBadge } from '../../hooks/useAppBadge';
@@ -20,26 +21,7 @@ import { reverseGeocode } from '../../utils/geo';
 import { ZONE_LABELS } from '../../utils/format';
 import { getErrorMessage } from '../../utils/errorMessage';
 
-if (typeof document !== 'undefined' && !document.getElementById('dh-animations')) {
-  const style = document.createElement('style');
-  style.id = 'dh-animations';
-  style.textContent = `
-  @keyframes dh-spin { to { transform: rotate(360deg); } }
-  .dh-spinner { animation: dh-spin 0.75s linear infinite; transform-origin: 50% 50%; }
-  .dh-ptr-indicator {
-    position: absolute; top: 0; left: 50%;
-    transform: translateX(-50%) translateY(-50px);
-    will-change: transform; pointer-events: none;
-  }
-  .dh-ptr-indicator.pulling   { transition: none; }
-  .dh-ptr-indicator.releasing { transition: transform 0.18s ease; }
-  .dh-ptr-content             { will-change: transform; }
-  .dh-ptr-content.releasing   { transition: transform 0.22s ease; }
-  .dh-offer-panel { will-change: transform; transform: translateZ(0); }
-  .dh-fab         { will-change: transform; }
-  `;
-  document.head.appendChild(style);
-}
+ensureDriverHomeAnimations();
 
 export default function DriverHome() {
   const { auth, patchUser } = useAuth();
