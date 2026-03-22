@@ -288,6 +288,7 @@ export function OrderChat({ orderId, token, refreshTick }) {
     <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', padding: '0.4rem 0' }}>
       Cargando mensajes…
     </div>
+  );
   console.log('messages debug:', messages.map(m => ({
     sender_role: m.sender_role,
     sender_id: m.sender_id,
