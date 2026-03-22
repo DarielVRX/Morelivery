@@ -5,7 +5,7 @@ import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
 import { fmt, haversineKm, IconMap, IconPin, IconSearch, IconWarning, ProductImage, StarPicker } from '../../features/customer/restaurant-page/components';
-import {IconRestaurant } from '../../../App';
+import {IconRestaurant } from '../../App';
 
 export default function RestaurantPage() {
   const { id }   = useParams();
