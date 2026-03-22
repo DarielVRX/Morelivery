@@ -230,14 +230,14 @@ export default function NavFABs({
           {/* Etiqueta modo rápido */}
           {isReportQuick && (
             <div style={{
-              padding: '0.2rem 0.65rem', borderRadius: 20,
+              padding: '0.18rem 0.6rem', borderRadius: 20,
               fontSize: '0.68rem', fontWeight: 700,
-              background: isDark ? 'rgba(250,204,21,0.15)' : 'rgba(124,58,237,0.12)',
-              color: isDark ? '#fbbf24' : '#7c3aed',
-              border: `1px solid ${isDark ? 'rgba(250,204,21,0.3)' : 'rgba(124,58,237,0.25)'}`,
+              background: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.92)',
+              color: isDark ? '#fff' : '#111',
+              border: `1.5px solid ${isDark ? 'rgba(251,191,36,0.5)' : 'rgba(124,58,237,0.35)'}`,
               boxShadow: isDark
-                ? '0 0 8px rgba(250,204,21,0.2)'
-                : '0 0 8px rgba(124,58,237,0.15)',
+                ? '0 0 8px rgba(251,191,36,0.25)'
+                : '0 0 8px rgba(124,58,237,0.18)',
               whiteSpace: 'nowrap',
             }}>
               ⚡ Modo rápido
@@ -252,15 +252,15 @@ export default function NavFABs({
                 padding: '0.55rem 1rem', borderRadius: 20,
                 fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
                 whiteSpace: 'nowrap',
-                background: isReportQuick
-                  ? (isDark ? 'rgba(250,204,21,0.08)' : 'rgba(124,58,237,0.07)')
-                  : pill.color,
-                color: isReportQuick ? (isDark ? '#fbbf24' : '#7c3aed') : '#fff',
+                background: pill.color,
+                color: '#fff',
                 border: isReportQuick
-                  ? `1.5px solid ${isDark ? 'rgba(250,204,21,0.35)' : 'rgba(124,58,237,0.3)'}`
+                  ? `2px solid ${isDark ? '#fbbf24' : '#7c3aed'}`
                   : 'none',
                 boxShadow: isReportQuick
-                  ? (isDark ? '0 0 6px rgba(250,204,21,0.15)' : '0 0 6px rgba(124,58,237,0.12)')
+                  ? (isDark
+                      ? `0 0 0 3px rgba(251,191,36,0.25), 0 2px 8px rgba(0,0,0,0.22)`
+                      : `0 0 0 3px rgba(124,58,237,0.2), 0 2px 8px rgba(0,0,0,0.22)`)
                   : '0 2px 8px rgba(0,0,0,0.22)',
                 minHeight: 'unset',
               }}>
