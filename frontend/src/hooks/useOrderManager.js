@@ -1,11 +1,12 @@
 // hooks/useOrderManager.js — lógica de pedidos extraída de DriverHome
 // Agrupa: loadData, accept/reject offer, changeStatus, doRelease,
-//         announceListener, SSE via useRealtimeOrders, alertas de oferta
+//         SSE via useRealtimeOrders, alertas de oferta
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api/client';
 import { useRealtimeOrders } from './useRealtimeOrders';
 import { playOfferAlertSound } from '../utils/audio';
+import { haversineMeters } from '../utils/geo';
 import { getNotifPriorityMode } from '../utils/format';
 
 export function useOrderManager(token, patchUser, userDriver) {
@@ -26,21 +27,12 @@ export function useOrderManager(token, patchUser, userDriver) {
 
   const loadDataRef            = useRef(null);
   const loadDebounceRef        = useRef(null);
-  const tokenRef               = useRef(token);
-  const availabilityRef        = useRef(availability);
-  const pendingOfferRef        = useRef(pendingOffer);
   const consecutiveTimeouts    = useRef(0);
   const lastOfferAlertRef      = useRef(null);
-
-  useEffect(() => { tokenRef.current = token; }, [token]);
-  useEffect(() => { availabilityRef.current = availability; }, [availability]);
-  useEffect(() => { pendingOfferRef.current = pendingOffer; }, [pendingOffer]);
 
   const hasActiveOrder = Boolean(
     activeOrder && !['delivered', 'cancelled'].includes(activeOrder.status)
   );
-  const hasActiveOrderRef = useRef(hasActiveOrder);
-  useEffect(() => { hasActiveOrderRef.current = hasActiveOrder; }, [hasActiveOrder]);
 
   // Notificaciones
   useEffect(() => {
@@ -110,25 +102,6 @@ export function useOrderManager(token, patchUser, userDriver) {
       }).catch(() => {});
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Listener periódico
-  const announceListener = useCallback(async () => {
-    if (!tokenRef.current) return;
-    try { await apiFetch('/drivers/listener', { method: 'POST' }, tokenRef.current); loadDataRef.current?.(); }
-    catch (_) {}
-  }, []);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (!availabilityRef.current || pendingOfferRef.current || hasActiveOrderRef.current) return;
-      announceListener();
-    }, 4000);
-    setTimeout(() => {
-      if (availabilityRef.current && !pendingOfferRef.current && !hasActiveOrderRef.current)
-        announceListener();
-    }, 500);
-    return () => clearInterval(id);
-  }, [announceListener]);
-
   const [transferBanner, setTransferBanner] = useState(null); // { type, message, orderId }
 
   const handleNewOffer = useCallback((data) => {
@@ -144,7 +117,16 @@ export function useOrderManager(token, patchUser, userDriver) {
     setTimeout(() => loadDataRef.current?.(), 800);
   }, []);
 
-  useRealtimeOrders(token, () => scheduleLoad(), () => {}, handleNewOffer, undefined, undefined, undefined, handleTransferEvent);
+  useRealtimeOrders(
+    token,
+    () => scheduleLoad(),
+    () => {},
+    handleNewOffer,
+    undefined,
+    () => loadDataRef.current?.(),
+    undefined,
+    handleTransferEvent
+  );
 
   // Acciones
   async function toggleAvailability(onError) {
@@ -184,13 +166,6 @@ export function useOrderManager(token, patchUser, userDriver) {
   const GRACE_MS = 3 * 60 * 1000; // 3 min
   const MAX_RADIUS_M = 100;
 
-  function haversineM(lat1, lng1, lat2, lng2) {
-    const toRad = x => x * Math.PI / 180;
-    const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
-    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
-    return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
-
   async function changeStatus(orderId, status, onError) {
     setLoadingStatus(status);
     try {
@@ -211,7 +186,7 @@ export function useOrderManager(token, patchUser, userDriver) {
               const refLng = status === 'on_the_way' ? order?.restaurant_lng : order?.delivery_lng;
 
               if (refLat && refLng) {
-                const distM = haversineM(body.lat, body.lng, Number(refLat), Number(refLng));
+                const distM = haversineMeters(body.lat, body.lng, Number(refLat), Number(refLng));
                 if (distM <= MAX_RADIUS_M) {
                   // Within radius now — update grace timestamp
                   graceTimestampRef.current[status] = Date.now();

@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api/client';
 
-const SEND_INTERVAL_MS    = 12000;
+const MIN_SEND_INTERVAL_MS = 4000;
 const MIN_DISTANCE_METERS = 15;
 const MIN_RENDER_METERS   = 5;   // no actualizar estado UI si movimiento < 5m
 
@@ -25,8 +25,8 @@ function haversineMeters(lat1, lng1, lat2, lng2) {
 export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
   const [position, setPosition] = useState(null);
   const [error, setError]       = useState(null);
-  const lastSent    = useRef(null);
-  const intervalRef = useRef(null);
+  const lastSentRef = useRef(null);
+  const lastSentAtRef = useRef(0);
   const watchRef    = useRef(null);
   const posRef      = useRef(null);
 
@@ -36,8 +36,9 @@ export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
     if (!shouldTrack) {
       navigator.geolocation?.clearWatch(watchRef.current);
       watchRef.current = null;
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+      posRef.current = null;
+      lastSentRef.current = null;
+      lastSentAtRef.current = 0;
       setPosition(null);
       setError(null);
       return;
@@ -46,6 +47,19 @@ export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
     if (!('geolocation' in navigator)) {
       setError('GPS no disponible en este dispositivo');
       return;
+    }
+
+    async function sendLocation(current, force = false) {
+      if (!token || !current) return;
+      const prevSent = lastSentRef.current;
+      const movedEnough = !prevSent || haversineMeters(prevSent.lat, prevSent.lng, current.lat, current.lng) >= MIN_DISTANCE_METERS;
+      const longEnough = Date.now() - lastSentAtRef.current >= MIN_SEND_INTERVAL_MS;
+
+      if (!force && (!movedEnough || !longEnough)) return;
+
+      lastSentRef.current = current;
+      lastSentAtRef.current = Date.now();
+      apiFetch('/drivers/location', { method:'PATCH', body: JSON.stringify(current) }, token).catch(() => {});
     }
 
     watchRef.current = navigator.geolocation.watchPosition(
@@ -64,28 +78,26 @@ export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
         posRef.current = p;
         setPosition(p);
         setError(null);
+
+        // La experiencia visual del conductor vive en frontend; el backend
+        // solo se sincroniza cuando realmente cambia la posición de forma útil.
+        sendLocation(p, !lastSentRef.current);
       },
       (err) => setError(err.message),
       { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 }
     );
 
-    async function maybeSend() {
+    function maybeSend(force = false) {
       const current = posRef.current;
       if (!current) return;
-      const prev = lastSent.current;
-      if (prev && haversineMeters(prev.lat, prev.lng, current.lat, current.lng) < MIN_DISTANCE_METERS) return;
-      lastSent.current = current;
-      apiFetch('/drivers/location', { method:'PATCH', body: JSON.stringify(current) }, token).catch(() => {});
+      sendLocation(current, force);
     }
 
-    intervalRef.current = setInterval(maybeSend, SEND_INTERVAL_MS);
-
-    function onVisible() { if (!document.hidden) maybeSend(); }
+    function onVisible() { if (!document.hidden) maybeSend(true); }
     document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       navigator.geolocation.clearWatch(watchRef.current);
-      clearInterval(intervalRef.current);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [shouldTrack, token]);
