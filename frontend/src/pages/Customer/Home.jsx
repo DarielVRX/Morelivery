@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
-import { cancelPendingOrderExpiry, savePendingOrder, schedulePendingOrderExpiry } from '../../utils/pendingOrder';
+import { cancelPendingOrderExpiry, savePendingOrder, schedulePendingOrderExpiry, readPendingOrder } from '../../utils/pendingOrder';
 import { getErrorMessage } from '../../utils/errorMessage';
 import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
 import { IconPin, IconSearch } from '../../features/customer/home/icons.jsx';
