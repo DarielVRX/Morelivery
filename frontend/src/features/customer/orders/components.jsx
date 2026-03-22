@@ -289,6 +289,11 @@ export function OrderChat({ orderId, token, refreshTick }) {
       Cargando mensajes…
     </div>
   );
+  console.log('messages debug:', messages.map(m => ({
+    sender_role: m.sender_role,
+    sender_id: m.sender_id,
+    isOwn: m._own === true || m.sender_id === auth.user?.id
+  })));
 
   return (
     <div style={{ marginTop: '0.5rem', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
