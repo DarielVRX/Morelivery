@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { apiFetch } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
-import { validatePassword, PasswordStrength } from '../utils/passwordUtils.jsx';
-import { Collapsible, CPSearchBar, Flash, ROLE_LABELS } from '../features/profile/components';
+import { validatePassword } from '../utils/passwordUtils.jsx';
+import { AccountManagementSection, PersonalInfoSection, ProfileHeaderCard, ProfileSecuritySection, ProfileSettingsSection } from '../features/profile/sections';
 import { usePermissions } from '../hooks/usePermissions';
 
 
@@ -28,7 +28,6 @@ export default function ProfilePage() {
   const [ciudad,       setCiudad]       = useState(user?.ciudad   || '');
   const [colonia,      setColonia]      = useState(user?.colonia  || '');
   const [coloniasList, setColoniasList] = useState([]);
-  const coloniaRef = useRef(user?.colonia || '');
 
 
   const {
@@ -262,8 +261,8 @@ export default function ProfilePage() {
     if (changingUser && usernameStatus === 'checking') { setPwdMsg('Espera — verificando disponibilidad del usuario'); setPwdErr(true); return; }
     if (changingPwd) {
       if (newPassword !== confirmPassword) { setPwdMsg('Las contraseñas no coinciden'); setPwdErr(true); return; }
-      const pwdValidation = validatePassword(newPassword);  // ← agregar
-      if (pwdValidation) { setPwdMsg(pwdValidation); setPwdErr(true); return; }  // ← agregar
+      const pwdValidation = validatePassword(newPassword);
+      if (pwdValidation) { setPwdMsg(pwdValidation); setPwdErr(true); return; }
     }
     try {
       if (changingPwd) {
@@ -281,7 +280,6 @@ export default function ProfilePage() {
   }
 
   const avatarLetter = (alias[0] || '?').toUpperCase();
-  const hasHomePin = homeLat && homeLng;
 
   // ── Perf monitor — solo en dev, sin efecto en producción ──
   useEffect(() => {
@@ -324,374 +322,103 @@ export default function ProfilePage() {
 
   return (
     <div>
-    <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem' }}>Mi perfil</h2>
+      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem' }}>Mi perfil</h2>
 
-    {/* Tarjeta de cuenta */}
-    <div className="card" style={{ marginBottom:'0.75rem', display:'flex', gap:'0.75rem', alignItems:'center' }}>
-    <div style={{ width:44, height:44, borderRadius:'50%', background:'var(--brand-light)', border:'2px solid var(--brand)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-    <span style={{ fontWeight:800, fontSize:'1.1rem', color:'var(--brand)' }}>{avatarLetter}</span>
-    </div>
-    <div>
-    <div style={{ fontWeight:700 }}>{alias}</div>
-    <div style={{ fontSize:'0.8rem', color:'var(--gray-600)' }}>{ROLE_LABELS[user?.role] || user?.role}</div>
-    </div>
-    </div>
+      <ProfileHeaderCard alias={alias} avatarLetter={avatarLetter} role={user?.role} />
 
-    {/* Datos personales */}
-    <Collapsible title="Datos personales" defaultOpen={false}>
-    <p style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.65rem' }}>
-    Este nombre se muestra a otros usuarios en la plataforma.
-    </p>
-    <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
-
-    <label>
-    Nombre para mostrar
-    <input value={alias} onChange={e => setAlias(e.target.value)} placeholder="Ej: Juan García" />
-    </label>
-
-    {/* Código postal */}
-    <div>
-      <span style={{ fontSize:'0.875rem', fontWeight:500, display:'block', marginBottom:'0.3rem' }}>Código postal</span>
-      <CPSearchBar
-      token={auth.token}
-      homeLat={homeLat}
-      homeLng={homeLng}
-      onSelectAddress={({ lat, lng, estado: e, ciudad: c, colonia: col, postalCode: cp, colonias }) => {
+      <PersonalInfoSection
+        authToken={auth.token}
+        alias={alias}
+        setAlias={setAlias}
+        homeLat={homeLat}
+        homeLng={homeLng}
+        onSelectAddress={({ lat, lng, estado: nextEstado, ciudad: nextCiudad, colonia: nextColonia, postalCode: cp, colonias }) => {
           if (lat != null) setHomeLat(lat);
           if (lng != null) setHomeLng(lng);
-          if (e   != null) setEstado(e);
-          if (c   != null) setCiudad(c);
-          if (col != null && col !== '') { setColonia(col); coloniaRef.current = col; }
-          if (cp  != null) setPostalCode(cp);
+          if (nextEstado != null) setEstado(nextEstado);
+          if (nextCiudad != null) setCiudad(nextCiudad);
+          if (nextColonia != null && nextColonia !== '') setColonia(nextColonia);
+          if (cp != null) setPostalCode(cp);
           if (colonias?.length) setColoniasList(colonias);
         }}
+        estado={estado}
+        setEstado={setEstado}
+        ciudad={ciudad}
+        setCiudad={setCiudad}
+        colonia={colonia}
+        setColonia={setColonia}
+        coloniasList={coloniasList}
+        calle={calle}
+        setCalle={setCalle}
+        numero={numero}
+        setNumero={setNumero}
+        onClearHomePin={() => { setHomeLat(null); setHomeLng(null); }}
+        onSave={saveProfile}
+        message={profileMsg}
+        isError={profileErr}
       />
+
+      <ProfileSettingsSection
+        userRole={user?.role}
+        permStatus={permStatus}
+        permLoading={permLoading}
+        permMsg={permMsg}
+        notifStatus={notifStatus}
+        notifEnabled={notifEnabled}
+        highPriorityNotifs={highPriorityNotifs}
+        notifMsg={notifMsg}
+        onToggleNotifEnabled={toggleNotifEnabled}
+        onToggleHighPriority={toggleHighPriorityNotifs}
+        onRequestWakeLock={requestWakeLock}
+        onRequestAllPermissions={requestAllPermissions}
+        theme={theme}
+        onApplyTheme={applyTheme}
+        reducedMotion={reducedMotion}
+        onToggleReducedMotion={toggleReducedMotion}
+        isInstalled={isInstalled}
+        deferredInstall={deferredInstall}
+        onTriggerInstallPrompt={triggerInstallPrompt}
+        onRefreshOfflineCache={refreshOfflineCache}
+        offlineCacheMsg={offlineCacheMsg}
+      />
+
+      <ProfileSecuritySection
+        loginUsername={loginUsername}
+        onChangeUsername={handleUsernameChange}
+        usernameStatus={usernameStatus}
+        currentPassword={currentPassword}
+        setCurrentPassword={setCurrentPassword}
+        newPassword={newPassword}
+        setNewPassword={setNewPassword}
+        confirmPassword={confirmPassword}
+        setConfirmPassword={setConfirmPassword}
+        onSave={changePasswordAndLogin}
+        message={pwdMsg}
+        isError={pwdErr}
+      />
+
+      <AccountManagementSection
+        deleteConfirm={deleteConfirm}
+        onDeleteAccount={deleteAccount}
+        deletePwd={deletePwd}
+        setDeletePwd={setDeletePwd}
+        deleteLoading={deleteLoading}
+        onCancelDelete={() => { setDeleteConfirm(false); setDeletePwd(''); setDeleteMsg(''); }}
+        message={deleteMsg}
+        isError={deleteErr}
+      />
+
+      <button
+        onClick={logout}
+        className="btn-sm"
+        style={{
+          width:'100%', padding:'0.7rem',
+          marginTop:'0.25rem', marginBottom:'0.75rem',
+          fontWeight:700, fontSize:'0.9rem',
+        }}
+      >
+        Cerrar sesión
+      </button>
     </div>
-
-    {/* Estado y Ciudad — auto-rellenados o manuales */}
-    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.55rem' }}>
-    <label>
-    Estado
-    <input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Michoacán" />
-    </label>
-    <label>
-    Municipio / Ciudad
-    <input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Morelia" />
-    </label>
-    </div>
-
-    {/* Colonia */}
-    <label>
-    Colonia
-    {coloniasList.length > 0 ? (
-      <select value={colonia} onChange={e => { setColonia(e.target.value); coloniaRef.current = e.target.value; }}>
-      <option value="">Seleccionar colonia…</option>
-      {coloniasList.map(c => <option key={c} value={c}>{c}</option>)}
-      </select>
-    ) : (
-      <input value={colonia} onChange={e => { setColonia(e.target.value); coloniaRef.current = e.target.value; }} placeholder="Ej: Col. Centro" />
-    )}
-    </label>
-
-    {/* Calle y número */}
-    <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:'0.55rem', alignItems:'end' }}>
-    <label>
-    Calle
-    <input value={calle} onChange={e => setCalle(e.target.value)} placeholder="Ej: Av. Revolución" />
-    </label>
-    <label style={{ width:90 }}>
-    Número
-    <input value={numero} onChange={e => setNumero(e.target.value)} placeholder="1234" />
-    </label>
-    </div>
-
-    {/* Pin casa — solo estado */}
-    {homeLat && homeLng && (
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'0.5rem' }}>
-        <span style={{ fontSize:'0.75rem', color:'var(--success)', fontWeight:600 }}>🏠 Ubicación guardada</span>
-        <button type="button" style={{ background:'none', border:'none', color:'var(--error)', cursor:'pointer', fontSize:'0.75rem', fontWeight:600 }}
-          onClick={() => { setHomeLat(null); setHomeLng(null); }}>
-          Borrar
-        </button>
-      </div>
-    )}
-    </div>
-  <button className="btn-primary btn-sm" onClick={saveProfile}>Guardar cambios</button>
-  <Flash text={profileMsg} isError={profileErr} />
-  </Collapsible>
-
-  {/* ── Configuración ── */}
-  <Collapsible title="Configuración">
-  <div style={{ display:'flex', flexDirection:'column', gap:'0.75rem' }}>
-
-    {/* Permisos */}
-    <div>
-      <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
-        textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
-        Permisos del sistema
-      </p>
-      <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
-
-        {/* Notificaciones */}
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-          <div>
-            <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Notificaciones push</span>
-            <span style={{ display:'block', fontSize:'0.72rem', color:
-              notifStatus === 'granted' ? 'var(--success)'
-              : notifStatus === 'denied' ? 'var(--danger)'
-              : 'var(--text-tertiary)' }}>
-              {notifStatus === 'granted' ? (notifEnabled ? '● Activo' : '● Pausado')
-                : notifStatus === 'denied' ? '● Bloqueado — activa en ajustes del navegador'
-                : notifStatus === 'default' ? '● Pendiente'
-                : '● No soportado'}
-            </span>
-          </div>
-          <button type="button" className="btn-sm" onClick={toggleNotifEnabled}
-            disabled={notifStatus === 'denied' || notifStatus === 'unsupported'}>
-            {notifStatus === 'granted' && notifEnabled ? 'Pausar' : 'Activar'}
-          </button>
-        </div>
-
-        {/* Alta prioridad */}
-        {notifStatus === 'granted' && (
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-            <div>
-              <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Alta prioridad</span>
-              <span style={{ display:'block', fontSize:'0.72rem', color:'var(--text-tertiary)' }}>
-                Vibración y sonido más intensos
-              </span>
-            </div>
-            <button type="button" className="btn-sm" onClick={toggleHighPriorityNotifs}>
-              {highPriorityNotifs ? 'Activada' : 'Desactivada'}
-            </button>
-          </div>
-        )}
-
-        {/* Geolocalización */}
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-          <div>
-            <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Ubicación</span>
-            <span style={{ display:'block', fontSize:'0.72rem', color:
-              permStatus.geolocation === 'granted' ? 'var(--success)'
-              : permStatus.geolocation === 'denied' ? 'var(--danger)'
-              : 'var(--text-tertiary)' }}>
-              {permStatus.geolocation === 'granted' ? '● Activa'
-                : permStatus.geolocation === 'denied' ? '● Bloqueada — activa en ajustes'
-                : permStatus.geolocation === 'unsupported' ? '● No soportada'
-                : '● Pendiente'}
-            </span>
-          </div>
-        </div>
-
-        {/* Storage persistente */}
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-          <div>
-            <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Caché persistente</span>
-            <span style={{ display:'block', fontSize:'0.72rem', color:
-              permStatus.persistentStorage === 'granted' ? 'var(--success)' : 'var(--text-tertiary)' }}>
-              {permStatus.persistentStorage === 'granted'
-                ? '● Activo — los datos offline no se borrarán'
-                : '● Inactivo — el OS puede limpiar el caché'}
-            </span>
-          </div>
-        </div>
-
-        {/* Wake lock — solo drivers */}
-        {user?.role === 'driver' && permStatus.wakeLock !== 'unsupported' && (
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-            <div>
-              <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Pantalla activa en ruta</span>
-              <span style={{ display:'block', fontSize:'0.72rem', color:
-                permStatus.wakeLock === 'active' ? 'var(--success)' : 'var(--text-tertiary)' }}>
-                {permStatus.wakeLock === 'active' ? '● Activa — la pantalla no se apagará' : '● Inactiva'}
-              </span>
-            </div>
-            <button type="button" className="btn-sm" onClick={requestWakeLock}>
-              {permStatus.wakeLock === 'active' ? 'Desactivar' : 'Activar'}
-            </button>
-          </div>
-        )}
-
-        {/* Botón solicitar todos */}
-        <button type="button" className="btn-sm btn-primary"
-          onClick={requestAllPermissions}
-          disabled={permLoading}
-          style={{ marginTop:'0.25rem', alignSelf:'flex-start' }}>
-          {permLoading ? 'Configurando…' : '↺ Solicitar todos los permisos'}
-        </button>
-
-        {(permMsg || notifMsg) && (
-          <div style={{ fontSize:'0.74rem', color:'var(--gray-500)' }}>
-            {permMsg || notifMsg}
-          </div>
-        )}
-      </div>
-    </div>
-
-    {/* Apariencia */}
-    <div>
-      <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
-        textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
-        Apariencia
-      </p>
-      <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-          <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Tema</span>
-          <div style={{ display:'flex', gap:'0.25rem' }}>
-            {[['system','Auto'],['light','Claro'],['dark','Oscuro']].map(([val, label]) => (
-              <button key={val} type="button" onClick={() => applyTheme(val)}
-                style={{ padding:'0.2rem 0.55rem', fontSize:'0.75rem', cursor:'pointer',
-                  border:`1.5px solid ${theme === val ? 'var(--brand)' : 'var(--border)'}`,
-                  borderRadius:6,
-                  background: theme === val ? 'var(--brand-light)' : 'var(--bg-card)',
-                  color: theme === val ? 'var(--brand)' : 'var(--text-secondary)',
-                  fontWeight: theme === val ? 700 : 400, minHeight:'unset' }}>
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-          <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Reducir animaciones</span>
-          <button type="button" className="btn-sm" onClick={toggleReducedMotion}>
-            {reducedMotion ? 'Activado' : 'Desactivado'}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    {/* Aplicación (PWA) */}
-    <div>
-      <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
-        textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
-        Aplicación
-      </p>
-      <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
-        {!isInstalled && deferredInstall && (
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-            <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Instalar en pantalla de inicio</span>
-            <button type="button" className="btn-sm btn-primary" onClick={triggerInstallPrompt}>
-              Instalar
-            </button>
-          </div>
-        )}
-        {isInstalled && (
-          <div style={{ fontSize:'0.82rem', color:'var(--success)', fontWeight:600 }}>
-            ✓ App instalada
-          </div>
-        )}
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-          <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Verificar actualización</span>
-          <button type="button" className="btn-sm" onClick={refreshOfflineCache}>
-            Actualizar
-          </button>
-        </div>
-        {offlineCacheMsg && <div style={{ fontSize:'0.74rem', color:'var(--gray-500)' }}>{offlineCacheMsg}</div>}
-      </div>
-    </div>
-
-  </div>
-  </Collapsible>
-
-  {/* Seguridad */}
-  <Collapsible title="Seguridad">
-  <p style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginBottom:'0.65rem' }}>
-  El nombre de usuario es público y visible en la plataforma. La contraseña protege el acceso a tu cuenta.
-  </p>
-  <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
-  <div>
-    <label style={{ display:'block', marginBottom:'0.25rem' }}>
-      Nombre de usuario
-    </label>
-    <div style={{ position:'relative' }}>
-      <input value={loginUsername} onChange={e => handleUsernameChange(e.target.value)}
-        placeholder="Ej: juangarcia91" autoComplete="username"
-        style={{ paddingRight: '2.2rem' }} />
-      {usernameStatus === 'checking' && (
-        <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.72rem', color:'var(--text-tertiary)' }}>…</span>
-      )}
-      {usernameStatus === 'available' && (
-        <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.8rem', color:'var(--success)' }}>✓</span>
-      )}
-      {usernameStatus === 'taken' && (
-        <span style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', fontSize:'0.8rem', color:'var(--error)' }}>✗</span>
-      )}
-    </div>
-    {usernameStatus === 'taken' && (
-      <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>Ese nombre ya está en uso</span>
-    )}
-    {usernameStatus === 'error' && loginUsername.trim().length < 3 && (
-      <span style={{ fontSize:'0.72rem', color:'var(--error)', marginTop:'0.2rem', display:'block' }}>Mínimo 3 caracteres</span>
-    )}
-  </div>
-  <label>Contraseña actual <span style={{ fontWeight:400, color:'var(--text-tertiary)', fontSize:'0.78rem' }}>(requerida para guardar cambios)</span>
-  <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
-  autoComplete="current-password" />
-  </label>
-  <label>Nueva contraseña <span style={{ fontWeight:400, color:'var(--text-tertiary)', fontSize:'0.78rem' }}>(opcional)</span>
-  <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
-  autoComplete="new-password" placeholder="Dejar vacío para no cambiar" />
-  </label>
-  {newPassword && (
-    <>
-    <PasswordStrength pwd={newPassword} />
-    <label>Confirmar nueva contraseña
-    <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
-    autoComplete="new-password" />
-    </label>
-    </>
-  )}
-  </div>
-  <button className="btn-primary btn-sm" onClick={changePasswordAndLogin}
-    disabled={usernameStatus === 'checking' || usernameStatus === 'taken'}>
-    Guardar cambios
-  </button>
-  <Flash text={pwdMsg} isError={pwdErr} />
-  </Collapsible>
-
-  {/* Administración */}
-  <Collapsible title="Administración de cuenta">
-  <p style={{ fontSize:'0.85rem', color:'var(--gray-600)', marginBottom:'0.75rem' }}>
-  Eliminar tu cuenta es permanente e irreversible.
-  </p>
-  {!deleteConfirm ? (
-    <button className="btn-danger btn-sm" onClick={deleteAccount}>Eliminar cuenta</button>
-  ) : (
-    <div style={{ display:'flex', flexDirection:'column', gap:'0.5rem' }}>
-      <p style={{ fontSize:'0.82rem', color:'var(--error)', fontWeight:600, margin:0 }}>
-        ¿Seguro? Esta acción no se puede deshacer.
-      </p>
-      <label style={{ fontSize:'0.82rem' }}>
-        Ingresa tu contraseña para confirmar
-        <input type="password" value={deletePwd} onChange={e => setDeletePwd(e.target.value)}
-          autoComplete="current-password" placeholder="Tu contraseña"
-          style={{ marginTop:'0.25rem' }} />
-      </label>
-      <div style={{ display:'flex', gap:'0.5rem' }}>
-        <button className="btn-danger btn-sm" onClick={deleteAccount} disabled={deleteLoading}>
-          {deleteLoading ? 'Eliminando…' : 'Confirmar eliminación'}
-        </button>
-        <button className="btn-sm" onClick={() => { setDeleteConfirm(false); setDeletePwd(''); setDeleteMsg(''); }}>
-          Cancelar
-        </button>
-      </div>
-    </div>
-  )}
-  <Flash text={deleteMsg} isError={deleteErr} />
-  </Collapsible>
-
-  {/* Cerrar sesión — al fondo */}
-  <button
-  onClick={logout}
-  className="btn-sm"
-  style={{
-    width:'100%', padding:'0.7rem',
-    marginTop:'0.25rem', marginBottom:'0.75rem',
-    fontWeight:700, fontSize:'0.9rem',
-  }}
-  >
-  Cerrar sesión
-  </button>
-  </div>
   );
 }

@@ -1,23 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
-import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
-import PullToRefresh from '../../components/PullToRefresh';
 import { IconChat, OrderChat } from '../../features/customer/orders/components';
-
-function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
+import { getDriverEarningCents, getOrderGrandTotalCents, isCashPayment } from '../../features/driver/shared/orderUtils';
+import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
+import { haversineMeters } from '../../utils/geo';
+import { fmt, formatShortDateTime } from '../../utils/format';
 
 // Desglose de tarifas para conductor
 // Desglose para Conductor
 function FeeBreakdown({ order }) {
-  const sub           = order.total_cents          || 0;
-  const svc           = order.service_fee_cents    || 0;
-  const del_fee       = order.delivery_fee_cents   || 0;
-  const tip           = order.tip_cents            || 0;
-  const isCash        = (order.payment_method || 'cash') === 'cash';
-  const driverEarning = del_fee + Math.round(svc * 0.5) + tip;
-  const grandTotal    = sub + svc + del_fee + tip;
-  if (!svc && !del_fee) return null;
+  const sub = order.total_cents || 0;
+  const svc = order.service_fee_cents || 0;
+  const delFee = order.delivery_fee_cents || 0;
+  const tip = order.tip_cents || 0;
+  const isCash = isCashPayment(order);
+  const driverEarning = getDriverEarningCents(order);
+  const grandTotal = getOrderGrandTotalCents(order);
+  if (!svc && !delFee) return null;
   return (
     <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)', borderTop:'1px solid var(--border-light)', paddingTop:'0.35rem', marginTop:'0.35rem' }}>
       {isCash && (
@@ -39,8 +39,6 @@ function FeeBreakdown({ order }) {
     </div>
   );
 }
-
-function fmtDate(iso) { return iso ? new Date(iso).toLocaleString('es', { dateStyle:'short', timeStyle:'short' }) : '—'; }
 
 var STATUS_LABELS = {
   created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
@@ -137,13 +135,6 @@ export default function DriverOrders() {
   const MAX_RADIUS_M = 100;
   const GRACE_MS = 3 * 60 * 1000;
 
-  function haversineM(lat1, lng1, lat2, lng2) {
-    const toRad = x => x * Math.PI / 180;
-    const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
-    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
-    return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
-
   async function getGpsBody(status, order) {
     return new Promise(resolve => {
       if (!navigator.geolocation) { resolve({}); return; }
@@ -153,7 +144,7 @@ export default function DriverOrders() {
           const refLat = status === 'on_the_way' ? order?.restaurant_lat : order?.delivery_lat;
           const refLng = status === 'on_the_way' ? order?.restaurant_lng : order?.delivery_lng;
           if (refLat && refLng) {
-            const distM = haversineM(body.lat, body.lng, Number(refLat), Number(refLng));
+            const distM = haversineMeters(body.lat, body.lng, Number(refLat), Number(refLng));
             if (distM <= MAX_RADIUS_M) {
               graceRef.current[status] = Date.now();
             } else {
@@ -267,10 +258,7 @@ export default function DriverOrders() {
           </p>
           <ul style={{ listStyle:'none', padding:0 }}>
             {unoffered.map(o => {
-              const isChatOpen = chatOpen === ('h_' + o.id);
-              const color  = STATUS_COLOR[o.status] || '#9ca3af';
-              const grandTotal = (o.total_cents||0)+(o.service_fee_cents||0)+(o.delivery_fee_cents||0);
-              const isUExp = expanded === ('u_'+o.id);
+              const color = STATUS_COLOR[o.status] || '#9ca3af';
               return (
                 <li key={o.id} className="card" style={{ borderLeft:`3px solid var(--brand)`,
                   marginBottom:'0.5rem', padding:'0.6rem 0.75rem 0.75rem', overflow:'hidden' }}>
@@ -306,7 +294,7 @@ export default function DriverOrders() {
                     )}
                   </div>
                   {(() => {
-                    const earn = (o.delivery_fee_cents||0)+Math.round((o.service_fee_cents||0)*0.5)+(o.tip_cents||0);
+                    const earn = getDriverEarningCents(o);
                     return earn > 0 ? (
                       <div style={{ fontSize:'0.85rem', fontWeight:800, color:'var(--success)', marginBottom:'0.3rem' }}>
                         Tu ganancia: {fmt(earn)}
@@ -340,8 +328,8 @@ export default function DriverOrders() {
                 const color      = STATUS_COLOR[o.status] || '#9ca3af';
                 const isActive   = o.id === activeOrderId;
                 const isOnTheWay = o.status === 'on_the_way';
-                const isCash     = (o.payment_method||'cash') === 'cash';
-                const grandTotal = (o.total_cents||0)+(o.service_fee_cents||0)+(o.delivery_fee_cents||0)+(o.tip_cents||0);
+                const isCash = isCashPayment(o);
+                const grandTotal = getOrderGrandTotalCents(o);
                 const DRIVER_ST  = { assigned:'Asignado', on_the_way:'En camino', preparing:'En tienda', ready:'Listo retiro' };
                 return (
                   <li key={o.id} className="card" style={{ borderLeft:`3px solid ${isActive ? 'var(--success)' : color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden', opacity: isActive ? 1 : 0.6 }}>
@@ -486,7 +474,8 @@ export default function DriverOrders() {
               {past.slice(0, 50).map(o => {
                 const color    = STATUS_COLOR[o.status] || '#9ca3af';
                 const isHExp   = expanded === ('h_'+o.id);
-                const grandTotal = (o.total_cents||0)+(o.service_fee_cents||0)+(o.delivery_fee_cents||0)+(o.tip_cents||0);
+                const isChatOpen = chatOpen === ('h_' + o.id);
+                const grandTotal = getOrderGrandTotalCents(o);
                 return (
                   <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden' }}>
                     <div onClick={() => setExpanded(isHExp ? null : 'h_'+o.id)}
@@ -504,7 +493,7 @@ export default function DriverOrders() {
                     </div>
                     {isHExp && (
                       <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
-                        <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)', marginBottom:'0.3rem' }}>{fmtDate(o.created_at)}</div>
+                        <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)', marginBottom:'0.3rem' }}>{formatShortDateTime(o.created_at)}</div>
                         {(o.items || []).length > 0 && (
                           <ul style={{ fontSize:'0.82rem', margin:'0.2rem 0 0.35rem 1rem' }}>
                             {o.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
