@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
+import { IconCustomer, IconDriver, IconRestaurant } from '../../../app';
 
 export function IconChat() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>; }
 function IconSend() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>; }
@@ -83,6 +84,71 @@ export function TipInput({ onValidAmount }) {
   return <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}><input type="text" inputMode="numeric" pattern="[0-9]*" placeholder="$ otro" value={val} onChange={e => { const raw = e.target.value.replace(/[^0-9]/g, ''); setVal(raw); const cents = Math.round(Number(raw) * 100); if (cents > 0) onValidAmount(cents); else if (raw === '') onValidAmount(0); }} style={{ width: 62, fontSize: '0.75rem', padding: '0.2rem 0.4rem', border: '1px solid var(--border)', borderRadius: 6 }} /></div>;
 }
 
+// ── Config por rol ─────────────────────────────────────────
+const ROLE_CONFIG = {
+  customer: {
+    icon: IconCustomer,
+    color: 'var(--brand)',
+    textColor: '#fff',
+    align: 'flex-end',
+    borderRadius: '10px 10px 2px 10px',
+    label: 'Tú',
+  },
+  driver: {
+    icon: IconDriver,
+    color: '#f59e0b',
+    textColor: '#fff',
+    align: 'flex-start',
+    borderRadius: '10px 10px 10px 2px',
+    label: 'Repartidor',
+  },
+  restaurant: {
+    icon: IconRestaurant,
+    color: '#10b981',
+    textColor: '#fff',
+    align: 'flex-start',
+    borderRadius: '10px 10px 10px 2px',
+    label: 'Restaurante',
+  },
+};
+
+// ── Burbuja de mensaje ─────────────────────────────────────
+function MessageBubble({ m, isOwn }) {
+  const cfg = ROLE_CONFIG[m.sender_role] || ROLE_CONFIG.customer;
+  const Icon = cfg.icon;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: cfg.align }}>
+    {/* Nombre + icono (solo mensajes ajenos) */}
+    {!isOwn && (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem',
+        marginBottom: '0.15rem', color: cfg.color, fontSize: '0.68rem', fontWeight: 700 }}>
+        <Icon />
+        {m.sender_name}
+        </div>
+    )}
+
+    <div style={{
+      background: cfg.color,
+      color: cfg.textColor,
+      borderRadius: cfg.borderRadius,
+      padding: '0.3rem 0.6rem',
+      fontSize: '0.8rem',
+      maxWidth: '80%',
+    }}>
+    {m.text}
+    </div>
+
+    <span style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)', marginTop: '2px' }}>
+    {new Date(m.created_at).toLocaleTimeString('es-MX', {
+      timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit'
+    })}
+    </span>
+    </div>
+  );
+}
+
+// ── OrderChat ──────────────────────────────────────────────
 export function OrderChat({ orderId, token }) {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
@@ -111,7 +177,14 @@ export function OrderChat({ orderId, token }) {
   async function send() {
     if (!text.trim() || sending) return;
     setSending(true);
-    const optimistic = { id: Date.now(), sender_id: auth.user?.id, sender_name: 'Tú', sender_role: 'customer', text: text.trim(), created_at: new Date().toISOString() };
+    const optimistic = {
+      id: Date.now(),
+      sender_id: auth.user?.id,
+      sender_name: 'Tú',
+      sender_role: 'customer',
+      text: text.trim(),
+      created_at: new Date().toISOString(),
+    };
     setMessages(m => [...m, optimistic]);
     const sent = text.trim();
     setText('');
@@ -125,22 +198,52 @@ export function OrderChat({ orderId, token }) {
     } finally { setSending(false); }
   }
 
-  if (loading) return <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', padding: '0.4rem 0' }}>Cargando mensajes…</div>;
+  if (loading) return (
+    <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', padding: '0.4rem 0' }}>
+    Cargando mensajes…
+    </div>
+  );
 
   return (
     <div style={{ marginTop: '0.5rem', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-      <div style={{ maxHeight: 160, overflowY: 'auto', padding: '0.5rem 0.65rem', display: 'flex', flexDirection: 'column', gap: '0.3rem', background: 'var(--bg-sunken)' }}>
-        {messages.length === 0 && <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', textAlign: 'center' }}>Sin mensajes aún</span>}
-        {messages.map(m => {
-          const isMe = m.sender_role === 'customer';
-          return <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}><div style={{ background: isMe ? 'var(--brand)' : 'var(--bg-card)', color: isMe ? '#fff' : 'var(--text-primary)', border: isMe ? 'none' : '1px solid var(--border)', borderRadius: isMe ? '10px 10px 2px 10px' : '10px 10px 10px 2px', padding: '0.3rem 0.6rem', fontSize: '0.8rem', maxWidth: '80%' }}>{m.text}</div><span style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)', marginTop: '1px' }}>{!isMe && `${m.sender_name} · `}{new Date(m.created_at).toLocaleTimeString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' })}</span></div>;
-        })}
-        <div ref={bottomRef} />
+    {/* Lista de mensajes */}
+    <div style={{ maxHeight: 180, overflowY: 'auto', padding: '0.6rem 0.65rem',
+      display: 'flex', flexDirection: 'column', gap: '0.5rem',
+      background: 'var(--bg-sunken)' }}>
+      {messages.length === 0 && (
+        <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', textAlign: 'center' }}>
+        Sin mensajes aún
+        </span>
+      )}
+      {messages.map(m => (
+        <MessageBubble
+        key={m.id}
+        m={m}
+        isOwn={m.sender_role === 'customer'}
+        />
+      ))}
+      <div ref={bottomRef} />
       </div>
+
+      {/* Input */}
       <div style={{ display: 'flex', borderTop: '1px solid var(--border)', background: 'var(--bg-card)' }}>
-        <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()} placeholder="Escribe un mensaje…" style={{ flex: 1, border: 'none', outline: 'none', padding: '0.45rem 0.65rem', fontSize: '0.8rem', background: 'none' }} />
-        <button onClick={send} disabled={!text.trim() || sending} style={{ background: 'var(--brand)', color: '#fff', border: 'none', padding: '0 0.75rem', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, opacity: text.trim() ? 1 : 0.45 }}>{sending ? '…' : <IconSend />}</button>
-      </div>
-    </div>
+      <input
+      value={text}
+      onChange={e => setText(e.target.value)}
+      onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
+      placeholder="Escribe un mensaje…"
+      style={{ flex: 1, border: 'none', outline: 'none',
+        padding: '0.45rem 0.65rem', fontSize: '0.8rem', background: 'none' }}
+        />
+        <button
+        onClick={send}
+        disabled={!text.trim() || sending}
+        style={{ background: 'var(--brand)', color: '#fff', border: 'none',
+          padding: '0 0.75rem', cursor: 'pointer', fontSize: '0.8rem',
+          fontWeight: 700, opacity: text.trim() ? 1 : 0.45 }}>
+          {sending ? '…' : <IconSend />}
+          </button>
+          </div>
+          </div>
   );
 }
