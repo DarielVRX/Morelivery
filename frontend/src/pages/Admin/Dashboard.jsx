@@ -6,6 +6,7 @@ import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 
 import { DashboardTabsBar, AssignmentTab } from '../../features/admin/dashboard/sections';
 import { useTick, fmt, fmtDate, Th, Td, Badge } from '../../features/admin/dashboard/shared';
+import PullToRefresh from '../components/PullToRefresh';
 
 // ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 export default function AdminDashboard() {
@@ -201,6 +202,7 @@ export default function AdminDashboard() {
 
 
   return (
+    <PullToRefresh>
     <div style={{ padding:'1rem', maxWidth:1200, margin:'0 auto' }}>
       {/* Encabezado */}
       <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'var(--promo-gradient)', color:'#fff' }}>
@@ -721,5 +723,6 @@ export default function AdminDashboard() {
         </div>
       )}
     </div>
+    </PullToRefresh>
   );
 }

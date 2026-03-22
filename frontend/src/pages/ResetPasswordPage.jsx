@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../api/client';
+import PullToRefresh from '../components/PullToRefresh';
 
 function validatePassword(pwd) {
   if (pwd.length < 8)   return 'Mínimo 8 caracteres';
@@ -53,6 +54,7 @@ export default function ResetPasswordPage() {
   }, [pwd, pwdConf, token, navigate]);
 
   return (
+     <PullToRefresh>
     <section className="auth-card">
       <h2 style={{ marginBottom:'0.5rem' }}>Nueva contraseña</h2>
       <p style={{ fontSize:'0.875rem', color:'var(--text-secondary)', marginBottom:'1rem' }}>
@@ -109,6 +111,7 @@ export default function ResetPasswordPage() {
         </p>
       )}
     </section>
+    </PullToRefresh>
   );
 }
 
