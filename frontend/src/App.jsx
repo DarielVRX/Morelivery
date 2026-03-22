@@ -10,6 +10,7 @@ import AuthPage from './pages/AuthPage';
 import CustomerOrders   from './pages/Customer/Orders';
 import DriverOrders     from './pages/Driver/Orders';
 import RestaurantOrders from './pages/Restaurant/Orders';
+import { usePermissions } from './hooks/usePermissions';
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const CustomerHome      = lazy(() => import('./pages/Customer/Home'));
@@ -87,6 +88,7 @@ function BrandName({ size = '2rem' }) {
 // ─── Guards ───────────────────────────────────────────────────────────────────
 function ProtectedRole({ role, children }) {
   const { auth } = useAuth();
+  usePermissions(auth.token, auth.user?.role);
   if (!auth.user) return <Navigate to="/" replace />;
   if (auth.user.role !== role) return <Navigate to={findApp(auth.user.role)?.home || '/'} replace />;
   return children;

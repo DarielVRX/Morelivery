@@ -3,6 +3,7 @@ import { apiFetch } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { validatePassword, PasswordStrength } from '../utils/passwordUtils.jsx';
 import { Collapsible, CPSearchBar, Flash, ROLE_LABELS } from '../features/profile/components';
+import { usePermissions } from '../hooks/usePermissions';
 
 
 export default function ProfilePage() {
@@ -30,11 +31,15 @@ export default function ProfilePage() {
   const coloniaRef = useRef(user?.colonia || '');
 
 
-  const [notifStatus, setNotifStatus] = useState(
-    (typeof window !== 'undefined' && 'Notification' in window)
-    ? Notification.permission
-    : 'unsupported'
-  );
+  const {
+    status:          permStatus,
+    loading:         permLoading,
+    msg:             permMsg,
+    requestAll:      requestAllPermissions,
+    requestWakeLock,
+  } = usePermissions(auth.token, user?.role);
+
+  const notifStatus = permStatus.notifications;
   const [notifMsg, setNotifMsg] = useState('');
   const [highPriorityNotifs, setHighPriorityNotifs] = useState(() => {
     try { return localStorage.getItem('morelivery_notif_priority') === 'high'; } catch { return false; }
@@ -122,33 +127,7 @@ export default function ProfilePage() {
   }
 
   async function enablePushNotifications() {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      setNotifMsg('Este dispositivo no soporta notificaciones web.');
-      return;
-    }
-    try {
-      if ('serviceWorker' in navigator) {
-        await navigator.serviceWorker.register('/sw.js');
-      }
-      let permission = Notification.permission;
-      if (permission === 'default') {
-        permission = await Notification.requestPermission();
-      }
-      setNotifStatus(permission);
-      if (permission === 'granted') {
-        try { localStorage.setItem('morelivery_notif_enabled', '1'); } catch (_) {}
-        setNotifEnabled(true);
-        setNotifMsg('Notificaciones activadas correctamente.');
-      } else if (permission === 'denied') {
-        try { localStorage.setItem('morelivery_notif_enabled', '0'); } catch (_) {}
-        setNotifEnabled(false);
-        setNotifMsg('Permiso bloqueado. Actívalo en ajustes del navegador/sitio.');
-      } else {
-        setNotifMsg('Solicitud cerrada sin cambios.');
-      }
-    } catch {
-      setNotifMsg('No se pudo solicitar permiso de notificaciones.');
-    }
+    await requestAllPermissions();
   }
 
 
@@ -445,34 +424,107 @@ export default function ProfilePage() {
   <Collapsible title="Configuración">
   <div style={{ display:'flex', flexDirection:'column', gap:'0.75rem' }}>
 
-    {/* Notificaciones */}
+    {/* Permisos */}
     <div>
       <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
         textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
-        Notificaciones
+        Permisos del sistema
       </p>
       <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+
+        {/* Notificaciones */}
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-          <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>
-            Push:{' '}
-            <strong>
-              {notifStatus === 'granted' ? (notifEnabled ? 'Activo' : 'Pausado')
-                : notifStatus === 'denied' ? 'Bloqueado'
-                : notifStatus === 'default' ? 'Pendiente'
-                : 'No soportado'}
-            </strong>
-          </span>
-          <button type="button" className="btn-sm" onClick={toggleNotifEnabled}>
+          <div>
+            <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Notificaciones push</span>
+            <span style={{ display:'block', fontSize:'0.72rem', color:
+              notifStatus === 'granted' ? 'var(--success)'
+              : notifStatus === 'denied' ? 'var(--danger)'
+              : 'var(--text-tertiary)' }}>
+              {notifStatus === 'granted' ? (notifEnabled ? '● Activo' : '● Pausado')
+                : notifStatus === 'denied' ? '● Bloqueado — activa en ajustes del navegador'
+                : notifStatus === 'default' ? '● Pendiente'
+                : '● No soportado'}
+            </span>
+          </div>
+          <button type="button" className="btn-sm" onClick={toggleNotifEnabled}
+            disabled={notifStatus === 'denied' || notifStatus === 'unsupported'}>
             {notifStatus === 'granted' && notifEnabled ? 'Pausar' : 'Activar'}
           </button>
         </div>
+
+        {/* Alta prioridad */}
+        {notifStatus === 'granted' && (
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+            <div>
+              <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Alta prioridad</span>
+              <span style={{ display:'block', fontSize:'0.72rem', color:'var(--text-tertiary)' }}>
+                Vibración y sonido más intensos
+              </span>
+            </div>
+            <button type="button" className="btn-sm" onClick={toggleHighPriorityNotifs}>
+              {highPriorityNotifs ? 'Activada' : 'Desactivada'}
+            </button>
+          </div>
+        )}
+
+        {/* Geolocalización */}
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
-          <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Alta prioridad</span>
-          <button type="button" className="btn-sm" onClick={toggleHighPriorityNotifs}>
-            {highPriorityNotifs ? 'Activadas' : 'Desactivadas'}
-          </button>
+          <div>
+            <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Ubicación</span>
+            <span style={{ display:'block', fontSize:'0.72rem', color:
+              permStatus.geolocation === 'granted' ? 'var(--success)'
+              : permStatus.geolocation === 'denied' ? 'var(--danger)'
+              : 'var(--text-tertiary)' }}>
+              {permStatus.geolocation === 'granted' ? '● Activa'
+                : permStatus.geolocation === 'denied' ? '● Bloqueada — activa en ajustes'
+                : permStatus.geolocation === 'unsupported' ? '● No soportada'
+                : '● Pendiente'}
+            </span>
+          </div>
         </div>
-        {notifMsg && <div style={{ fontSize:'0.74rem', color:'var(--gray-500)' }}>{notifMsg}</div>}
+
+        {/* Storage persistente */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+          <div>
+            <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Caché persistente</span>
+            <span style={{ display:'block', fontSize:'0.72rem', color:
+              permStatus.persistentStorage === 'granted' ? 'var(--success)' : 'var(--text-tertiary)' }}>
+              {permStatus.persistentStorage === 'granted'
+                ? '● Activo — los datos offline no se borrarán'
+                : '● Inactivo — el OS puede limpiar el caché'}
+            </span>
+          </div>
+        </div>
+
+        {/* Wake lock — solo drivers */}
+        {user?.role === 'driver' && permStatus.wakeLock !== 'unsupported' && (
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+            <div>
+              <span style={{ fontSize:'0.82rem', color:'var(--gray-600)' }}>Pantalla activa en ruta</span>
+              <span style={{ display:'block', fontSize:'0.72rem', color:
+                permStatus.wakeLock === 'active' ? 'var(--success)' : 'var(--text-tertiary)' }}>
+                {permStatus.wakeLock === 'active' ? '● Activa — la pantalla no se apagará' : '● Inactiva'}
+              </span>
+            </div>
+            <button type="button" className="btn-sm" onClick={requestWakeLock}>
+              {permStatus.wakeLock === 'active' ? 'Desactivar' : 'Activar'}
+            </button>
+          </div>
+        )}
+
+        {/* Botón solicitar todos */}
+        <button type="button" className="btn-sm btn-primary"
+          onClick={requestAllPermissions}
+          disabled={permLoading}
+          style={{ marginTop:'0.25rem', alignSelf:'flex-start' }}>
+          {permLoading ? 'Configurando…' : '↺ Solicitar todos los permisos'}
+        </button>
+
+        {(permMsg || notifMsg) && (
+          <div style={{ fontSize:'0.74rem', color:'var(--gray-500)' }}>
+            {permMsg || notifMsg}
+          </div>
+        )}
       </div>
     </div>
 
