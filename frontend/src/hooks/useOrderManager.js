@@ -89,6 +89,7 @@ export function useOrderManager(token, patchUser, userDriver) {
         .filter(o => !['delivered', 'cancelled'].includes(o.status))
         .sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at))[0] || null;
       setActiveOrder(active);
+      if (!active) setRouteBagPct(null);
       const newOffer = (off.offers || []).length > 0 ? off.offers[0] : null;
       setPendingOffer(prev => {
         if (newOffer?.id !== prev?.id) setOfferMinimized(false);
@@ -113,11 +114,20 @@ export function useOrderManager(token, patchUser, userDriver) {
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [transferBanner, setTransferBanner] = useState(null); // { type, message, orderId }
+  const [routeBagPct,    setRouteBagPct]    = useState(null); // pico de capacidad de mochila en ruta actual
 
   const handleNewOffer = useCallback((data) => {
     setPendingOffer(prev => prev ? prev : { id: data.orderId, ...data, seconds_left: data.secondsLeft ?? 60 });
     setTimeout(() => loadDataRef.current?.(), 600);
   }, []);
+
+  // Guardar pico de mochila al aceptar oferta — se muestra en el header durante la ruta
+  const handleAcceptOffer = useCallback(async (setMsg) => {
+    if (!pendingOffer) return;
+    const bagPct = pendingOffer.bagOverflowPct ?? null;
+    await acceptOffer(setMsg);
+    if (bagPct !== null) setRouteBagPct(bagPct);
+  }, [pendingOffer]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleTransferEvent = useCallback((data) => {
     setTransferBanner(data);
@@ -258,7 +268,7 @@ export function useOrderManager(token, patchUser, userDriver) {
   }
 
   function handleOfferExpired() {
-    setPendingOffer(null); loadData();
+    setPendingOffer(null); setRouteBagPct(null); loadData();
     consecutiveTimeouts.current += 1;
     if (consecutiveTimeouts.current >= 3) {
       consecutiveTimeouts.current = 0;
@@ -276,8 +286,10 @@ export function useOrderManager(token, patchUser, userDriver) {
     // Setters de UI
     setOfferMinimized, setOrderExpanded, setShowRelease, setReleaseNote,
     setTransferBanner,
+    // Estado de ruta
+    routeBagPct,
     // Acciones
-    loadData, toggleAvailability, acceptOffer, rejectOffer,
+    loadData, toggleAvailability, acceptOffer: handleAcceptOffer, rejectOffer,
     changeStatus, doRelease, doRebalance, handleOfferExpired,
     // Registradores SSE para DriverOrders (evita segunda conexión)
     registerOrdersUpdate, registerOrdersReconnect, registerOrdersChat,

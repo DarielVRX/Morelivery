@@ -60,6 +60,7 @@ export default function NavFABs({
   hasActiveOrder,
   routeGeometry,
   centerMode,
+  bottomOffset = 16,
   voiceEnabled,
   navMode,
   onCenterCycle,
@@ -69,10 +70,10 @@ export default function NavFABs({
 }) {
   const withRoute      = hasActiveOrder && (routeGeometry?.length > 0);
   const safeBot        = 'env(safe-area-inset-bottom, 0px)';
-  const BASE_BOTTOM    = 164; // sobre las cards de pedido/oferta
+  const BASE_BOTTOM    = bottomOffset; // sube dinámicamente con los paneles
   const GAP            = 12;
-  const SZ_PRIMARY     = 60;  // pulgar en ruta — WCAG 60px mínimo
-  const SZ_SECONDARY   = 52;  // secundario cómodo con una mano
+  const SZ_PRIMARY     = 60;
+  const SZ_SECONDARY   = 52;
 
   const centerBottom    = `calc(${BASE_BOTTOM}px + ${safeBot})`;
   const secondaryBottom = `calc(${BASE_BOTTOM + SZ_PRIMARY + GAP}px + ${safeBot})`;

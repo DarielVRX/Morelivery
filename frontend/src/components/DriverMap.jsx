@@ -24,6 +24,10 @@ export default function DriverMap({
   navFollowEnabled, navHeadingDeg, onHeadingChange,
   centerSignal, onCenterDone,
   onMapReady,
+  bottomOffset = 8,
+  pinAddress,
+  loadingPin,
+  onClearPin,
 }) {
   const { isDark }        = useTheme();
   const containerRef      = useRef(null);
@@ -305,18 +309,80 @@ export default function DriverMap({
       ? `rotate(${navHeadingDeg}deg)` : 'rotate(0deg)';
   }, [navHeadingDeg, navFollowEnabled]);
 
-  // Pin personalizado
+  // Pin personalizado — SVG pin + popup con dirección auto-ocultar 5s
+  const pinPopupRef   = useRef(null);
+  const pinHideTimer  = useRef(null);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !_ml) return;
+
+    // Limpiar marcador y popup previos
     if (markersRef.current.custom) { markersRef.current.custom.remove(); markersRef.current.custom = null; }
+    if (pinPopupRef.current)       { pinPopupRef.current.remove();       pinPopupRef.current = null; }
+    clearTimeout(pinHideTimer.current);
+
     if (customPin && !hasActiveOrder) {
+      // SVG pin
       const el = document.createElement('div');
-      el.style.cssText = 'width:16px;height:16px;border-radius:999px;background:var(--brand);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35)';
-      markersRef.current.custom = new _ml.Marker({ element: el })
+      el.style.cssText = 'cursor:pointer;width:32px;height:40px;';
+      el.innerHTML = `<svg width="32" height="40" viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M16 2C9.37 2 4 7.37 4 14c0 9 12 24 12 24s12-15 12-24c0-6.63-5.37-12-12-12z" fill="var(--brand)" stroke="#fff" stroke-width="1.5"/>
+        <circle cx="16" cy="14" r="5" fill="#fff" fill-opacity="0.9"/>
+      </svg>`;
+      markersRef.current.custom = new _ml.Marker({ element: el, anchor: 'bottom' })
         .setLngLat([customPin.lng, customPin.lat]).addTo(map);
     }
   }, [customPin?.lat, customPin?.lng, hasActiveOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Popup sobre el pin — aparece al colocar/tocar, auto-oculta tras 5s
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !_ml || !customPin || hasActiveOrder) return;
+    if (pinPopupRef.current) { pinPopupRef.current.remove(); pinPopupRef.current = null; }
+    clearTimeout(pinHideTimer.current);
+    if (loadingPin || !pinAddress) return;
+
+    const html = `<div style="font-size:0.78rem;font-family:inherit;max-width:200px;">
+      <div style="font-weight:600;margin-bottom:2px;">${pinAddress}</div>
+      <button onclick="this.dispatchEvent(new CustomEvent('clearpin',{bubbles:true}))"
+        style="font-size:0.72rem;color:#9e4f4f;background:none;border:none;cursor:pointer;padding:0;">
+        Quitar pin
+      </button>
+    </div>`;
+
+    const popup = new _ml.Popup({ closeButton: false, offset: [0, -38], maxWidth: '220px' })
+      .setLngLat([customPin.lng, customPin.lat])
+      .setHTML(html)
+      .addTo(map);
+
+    pinPopupRef.current = popup;
+
+    // Escuchar el evento del botón "Quitar pin"
+    const el = popup.getElement();
+    el?.addEventListener('clearpin', () => { onClearPin?.(); });
+
+    // Auto-ocultar tras 5s
+    pinHideTimer.current = setTimeout(() => {
+      popup.remove();
+      pinPopupRef.current = null;
+    }, 5000);
+
+    return () => clearTimeout(pinHideTimer.current);
+  }, [pinAddress, loadingPin, customPin?.lat, customPin?.lng, hasActiveOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ocultar popup al hacer click en otro punto del mapa
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const hide = () => {
+      if (pinPopupRef.current) { pinPopupRef.current.remove(); pinPopupRef.current = null; }
+      clearTimeout(pinHideTimer.current);
+    };
+    map.on('click', hide);
+    return () => map.off('click', hide);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   // Marcadores tienda / cliente
   useEffect(() => {
@@ -411,7 +477,7 @@ export default function DriverMap({
     <div style={{ height: '100%', width: '100%', position: 'relative' }}>
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
 
-      <DriverMapOverlays hasGPS={hasGPS} showAttrib={showAttrib} onToggleAttrib={() => setShowAttrib(v => !v)} />
+      <DriverMapOverlays hasGPS={hasGPS} showAttrib={showAttrib} onToggleAttrib={() => setShowAttrib(v => !v)} bottomOffset={bottomOffset} />
     </div>
   );
 }
