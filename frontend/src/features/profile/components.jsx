@@ -1,29 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../api/client';
+import { nominatimReverse } from '../../utils/geocode';
 
 const STADIA_KEY = import.meta.env?.VITE_STADIA_KEY || '';
 const STYLE_LIGHT = STADIA_KEY ? `https://tiles.stadiamaps.com/styles/alidade_smooth.json?api_key=${STADIA_KEY}` : 'https://tiles.openfreemap.org/styles/bright';
 const STYLE_DARK = STADIA_KEY ? `https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json?api_key=${STADIA_KEY}` : 'https://tiles.openfreemap.org/styles/bright';
-
-
-async function nominatimReverse(lat, lng) {
-  try {
-    const r = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&countrycodes=mx&accept-language=es`,
-      { headers: { 'Accept-Language': 'es', 'User-Agent': 'Morelivery/1.0' } }
-    );
-    const data = await r.json();
-    const a = data.address || {};
-    return {
-      address:    [a.road, a.house_number, a.suburb || a.neighbourhood || a.village, a.city || a.county || 'Morelia'].filter(Boolean).join(', ')
-      || data.display_name?.split(',').slice(0,3).join(',') || '',
-      colonia:    a.suburb || a.neighbourhood || a.quarter || a.city_district || a.village || '',
-      ciudad:     a.city || a.county || 'Morelia',
-      estado:     a.state || 'Michoacán',
-      postalCode: a.postcode || '',
-    };
-  } catch { return null; }
-}
 
 export function CPSearchBar({ token, onSelectAddress }) {
   const [showMap, setShowMap] = useState(false);
@@ -108,10 +89,11 @@ export function CPSearchBar({ token, onSelectAddress }) {
     onSelectAddress({
       lat:        pos.lat,
       lng:        pos.lng,
-      address:    geo?.address || '',
-      colonia:    geo?.colonia || '',
-      ciudad:     geo?.ciudad || '',
-      estado:     geo?.estado || '',
+      address:    geo?.label      || '',
+      colonia:    geo?.colonia    || '',
+      ciudad:     geo?.ciudad     || '',
+      estado:     geo?.estado     || '',
+      postalCode: geo?.postalCode || '',
     });
     setShowMap(false);
   }
@@ -157,7 +139,7 @@ export function CPSearchBar({ token, onSelectAddress }) {
         onSelectAddress({
           lat,
           lng,
-          address:    geo?.address    || '',
+          address:    geo?.label      || '',
           colonia:    geo?.colonia    || '',
           ciudad:     geo?.ciudad     || '',
           estado:     geo?.estado     || '',
@@ -166,7 +148,7 @@ export function CPSearchBar({ token, onSelectAddress }) {
         setGpsLoading(false);
       },
       () => setGpsLoading(false),
-                                              { timeout: 6000, maximumAge: 30000 }
+      { timeout: 6000, maximumAge: 30000 }
     );
   }
 

@@ -5,7 +5,7 @@ import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { cancelPendingOrderExpiry, savePendingOrder, schedulePendingOrderExpiry } from '../../utils/pendingOrder';
 import { getErrorMessage } from '../../utils/errorMessage';
-import AddressSearchBar from '../../features/customer/home/AddressSearchBar.jsx';
+import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
 import { IconPin, IconSearch } from '../../features/customer/home/icons.jsx';
 import RestaurantCard from '../../features/customer/home/RestaurantCard.jsx';
 import SuggestionBanner from '../../features/customer/home/SuggestionBanner.jsx';
