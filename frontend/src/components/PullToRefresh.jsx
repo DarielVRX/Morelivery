@@ -35,7 +35,7 @@ export default function PullToRefresh({ children, onRefresh }) {
     pullRef.current = px;
     const ind = indicatorRef.current, con = contentRef.current, arc = arcRef.current;
     if (!ind || !con) return;
-    const indY = px > 4 ? Math.max(-36, px - 36) : -50;
+    const indY = px > 4 ? Math.max(-44, px - 44) : -56;
     ind.style.transform = `translateX(-50%) translateY(${indY}px)`;
     con.style.transform = `translateY(${px}px)`;
     if (arc) {
@@ -47,13 +47,11 @@ export default function PullToRefresh({ children, onRefresh }) {
 
   function _release(keepVisible = false) {
     const con = contentRef.current, ind = indicatorRef.current;
-    ind?.classList.remove('pulling');
-    ind?.classList.add('releasing');
     con?.classList.add('releasing');
     if (keepVisible) {
       // Mantener indicador visible y centrado mientras dura el refresh
-      if (ind) ind.style.transform = 'translateX(-50%) translateY(0px)';
-      if (con) con.style.transform = 'translateY(44px)';
+      if (ind) { ind.style.transition = 'transform 0.18s ease'; ind.style.transform = 'translateX(-50%) translateY(8px)'; }
+      if (con) con.style.transform = 'translateY(52px)';
     } else {
       _applyPull(0);
       setTimeout(() => {
@@ -67,10 +65,9 @@ export default function PullToRefresh({ children, onRefresh }) {
 
   function _hideIndicator() {
     const con = contentRef.current, ind = indicatorRef.current;
-    ind?.classList.add('releasing');
     con?.classList.add('releasing');
-    if (ind) ind.style.transform = 'translateX(-50%) translateY(-50px)';
-    if (con) con.style.transform = 'translateY(0px)';
+    if (ind) { ind.style.transition = 'transform 0.28s ease'; ind.style.transform = 'translateX(-50%) translateY(-56px)'; }
+    if (con) { con.style.transition = 'transform 0.22s ease'; con.style.transform = 'translateY(0px)'; }
     setTimeout(() => {
       ind?.classList.remove('releasing');
       con?.classList.remove('releasing');
@@ -134,8 +131,17 @@ export default function PullToRefresh({ children, onRefresh }) {
 
   return (
     <div ref={wrapRef} style={{ height:'100%', overflow:'hidden', position:'relative' }}>
+      <style>{`@keyframes ptr-spin { to { transform: rotate(360deg); } }`}</style>
 
-      <div ref={indicatorRef} className="dh-ptr-indicator releasing">
+      <div ref={indicatorRef} style={{
+          position: 'absolute',
+          top: 0,
+          left: '50%',
+          transform: 'translateX(-50%) translateY(-56px)',
+          transition: 'transform 0.18s ease',
+          pointerEvents: 'none',
+          zIndex: 999,
+        }}>
         <div style={{ width:44, height:44, borderRadius:'50%', background:'#fff',
           boxShadow:'0 2px 14px rgba(0,0,0,0.2)', display:'flex',
           alignItems:'center', justifyContent:'center' }}>
@@ -146,7 +152,7 @@ export default function PullToRefresh({ children, onRefresh }) {
               strokeDasharray="0 56.5" strokeLinecap="round"
               style={{
                 transformOrigin: '50% 50%',
-                ...(loading ? { animation:'dh-spin 0.75s linear infinite' } : {}),
+                ...(loading ? { animation:'ptr-spin 0.75s linear infinite' } : {}),
               }}
             />
           </svg>
