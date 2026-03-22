@@ -15,12 +15,12 @@ export function secsSince(iso) {
   if (!iso) return null;
   return Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000));
 }
-function secsLeft(iso, total = 60) {
+export function secsLeft(iso, total = 60) {
   if (!iso) return null;
   const elapsed = secsSince(iso);
   return Math.max(0, total - elapsed);
 }
-function fmtSecs(s) {
+export function fmtSecs(s) {
   if (s == null) return '—';
   if (s >= 60) return `${Math.floor(s / 60)}m ${s % 60}s`;
   return `${s}s`;
@@ -37,7 +37,7 @@ const STATUS_COLOR = {
   delivered: '#16a34a', cancelled: '#dc2626', pending_driver: '#ef4444',
 };
 
-function Badge({ status, label }) {
+export function Badge({ status, label }) {
   const c = STATUS_COLOR[status] || '#9ca3af';
   return (
     <span style={{ background: `${c}22`, color: c, border: `1px solid ${c}55`, borderRadius: 10, padding: '0.1rem 0.5rem', fontSize: '0.72rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -46,14 +46,14 @@ function Badge({ status, label }) {
   );
 }
 
-function Th({ children }) {
+export function Th({ children }) {
   return <th style={{ padding: '0.4rem 0.65rem', textAlign: 'left', whiteSpace: 'nowrap', fontWeight: 700, borderBottom: '2px solid var(--border)', background: 'var(--bg-sunken)', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{children}</th>;
 }
-function Td({ children, style = {} }) {
+export function Td({ children, style = {} }) {
   return <td style={{ padding: '0.4rem 0.65rem', borderBottom: '1px solid var(--border-light)', fontSize: '0.8rem', verticalAlign: 'middle', color: 'var(--text-primary)', ...style }}>{children}</td>;
 }
 
-function useTick(interval = 1000) {
+export function useTick(interval = 1000) {
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), interval);
@@ -62,7 +62,7 @@ function useTick(interval = 1000) {
   return tick;
 }
 
-function CooldownBadge({ waitUntil }) {
+export function CooldownBadge({ waitUntil }) {
   useTick();
   const secsR = Math.max(0, Math.round((new Date(waitUntil) - Date.now()) / 1000));
   const color = secsR > 60 ? '#dc2626' : secsR > 20 ? '#f59e0b' : '#9ca3af';
@@ -73,7 +73,7 @@ function CooldownBadge({ waitUntil }) {
   );
 }
 
-function DriversPanel({ drivers, orderId }) {
+export function DriversPanel({ drivers, orderId }) {
   const [open, setOpen] = useState(false);
   useTick();
   const MAX_ACTIVE = 4;
@@ -135,7 +135,7 @@ function DriversPanel({ drivers, orderId }) {
   );
 }
 
-function Detail({ label, value, color }) {
+export function Detail({ label, value, color }) {
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 7, padding: '0.4rem 0.6rem' }}>
       <div style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{label}</div>
