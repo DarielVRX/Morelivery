@@ -150,7 +150,6 @@ export default function SplitLayout({ homeContent, ordersContent, onRefresh }) {
       }
       `}</style>
       </div>
-    </div>
     </PullToRefresh>
   );
 }
