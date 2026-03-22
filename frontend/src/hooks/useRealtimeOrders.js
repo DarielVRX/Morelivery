@@ -170,7 +170,7 @@ async function notifyRealtime({ title, body, tag, group, url = '/' }) {
 /**
  * SSE listener central — una sola conexión estable por token.
  */
-export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewOffer, onChatMessage, onReconnect, onKitchenEvent, onTransferEvent) {
+export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewOffer, onChatMessage, onReconnect, onKitchenEvent, onTransferEvent, onSupportMessage) {
   const esRef          = useRef(null);
   const reconnectTimer = useRef(null);
   const mountedRef     = useRef(true);
@@ -184,6 +184,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
   const cbReconnect = useRef(onReconnect);
   const cbKitchen   = useRef(onKitchenEvent);
   const cbTransfer  = useRef(onTransferEvent);
+  const cbSupport   = useRef(onSupportMessage);
 
   useEffect(() => { cbUpdate.current    = onOrderUpdate;    }, [onOrderUpdate]);
   useEffect(() => { cbLocation.current  = onDriverLocation; }, [onDriverLocation]);
@@ -192,6 +193,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
   useEffect(() => { cbReconnect.current = onReconnect;      }, [onReconnect]);
   useEffect(() => { cbKitchen.current   = onKitchenEvent;   }, [onKitchenEvent]);
   useEffect(() => { cbTransfer.current  = onTransferEvent;  }, [onTransferEvent]);
+  useEffect(() => { cbSupport.current   = onSupportMessage; }, [onSupportMessage]);
 
   // Pedir permiso una vez cuando hay sesión activa
   useEffect(() => {
@@ -221,6 +223,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
 
     const url = `${API_BASE}/api/events?token=${encodeURIComponent(token)}`;
+    console.log(`📡 [SSE] conectando (intento ${retryCount.current + 1})`);
     const es = new EventSource(url);
     esRef.current = es;
 
@@ -248,6 +251,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
     es.addEventListener('new_offer', (e) => {
       try {
         const data = JSON.parse(e.data);
+        console.log(`[SSE] new_offer received orderId=${data.orderId} secondsLeft=${data.secondsLeft}`);
         cbOffer.current?.(data);
 
         // Alerta local inmediata por evento SSE (no depende de render en Home)
@@ -355,6 +359,23 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
       } catch (_) {}
     });
 
+    // Mensajes del chat de soporte (independiente de pedidos)
+    es.addEventListener('support_message', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbSupport.current?.(data);
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: '🛟 Soporte',
+            body:  data.text || 'Tienes un nuevo mensaje de soporte.',
+            tag:   'support',
+            group: 'support',
+            url:   '/profile',
+          });
+        }
+      } catch (_) {}
+    });
+
     // ── Eventos específicos de restaurante ───────────────────────────────────
     // driver_arrival: el driver recogió el pedido (= marcó on_the_way)
     es.addEventListener('driver_arrival', (e) => {
@@ -396,6 +417,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
 
     es.addEventListener('connected', () => {
       retryCount.current = 0;
+      console.log('📡 [SSE] conexión establecida');
       clearTimeout(reconnectTimer.current);
       cbReconnect.current?.();
     });
