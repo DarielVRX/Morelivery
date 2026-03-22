@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../api/client';
-import PullToRefresh from '../components/PullToRefresh';
+import PullToRefresh from '../../components/PullToRefresh';
 
 function validatePassword(pwd) {
   if (pwd.length < 8)   return 'Mínimo 8 caracteres';

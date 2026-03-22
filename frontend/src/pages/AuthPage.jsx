@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../api/client';
 import { validatePassword, PasswordStrength } from '../utils/passwordUtils.jsx';
-import PullToRefresh from '../components/PullToRefresh';
+import PullToRefresh from '../../components/PullToRefresh';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 

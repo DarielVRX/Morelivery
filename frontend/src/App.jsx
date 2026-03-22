@@ -11,7 +11,7 @@ import CustomerOrders   from './pages/Customer/Orders';
 import DriverOrders     from './pages/Driver/Orders';
 import RestaurantOrders from './pages/Restaurant/Orders';
 import { usePermissions } from './hooks/usePermissions';
-import PullToRefresh from '../components/PullToRefresh';
+import PullToRefresh from './components/PullToRefresh';
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const CustomerHome      = lazy(() => import('./pages/Customer/Home'));
