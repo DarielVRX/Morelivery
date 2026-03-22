@@ -33,11 +33,12 @@ export async function cleanStaleEntities(onOffer) {
   let requeued   = 0;
   let cancelled  = 0;
   let reassigned = 0;
+  let staleOnWay = null;
 
   try {
     // ── 1. Pedidos on_the_way: driver inactivo o desconectado ──────────────
     // "Desconectado" = is_available=false y el pedido lleva más de reconnect_window_s sin moverse
-    const staleOnWay = await query(
+    staleOnWay = await query(
       `SELECT o.id, o.last_driver_id, o.reconnect_deadline,
               o.updated_at, dp.is_available, dp.disconnect_penalties
        FROM orders o
