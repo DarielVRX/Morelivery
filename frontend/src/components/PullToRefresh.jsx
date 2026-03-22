@@ -9,7 +9,7 @@ const PTR_THRESHOLD  = 72;
 const PTR_RESISTANCE = 0.45;
 const HEADER_ZONE    = 64; // px desde el top — solo iniciar el gesto aquí
 
-export default function PullToRefresh({ children }) {
+export default function PullToRefresh({ children, onRefresh }) {
   const wrapRef      = useRef(null);
   const contentRef   = useRef(null);
   const indicatorRef = useRef(null);
@@ -86,7 +86,15 @@ export default function PullToRefresh({ children }) {
       loadingRef.current = true;
       setLoading(true);
       _release();
-      window.location.reload();
+      if (onRefresh) {
+        Promise.resolve(onRefresh())
+          .finally(() => {
+            loadingRef.current = false;
+            setLoading(false);
+          });
+      } else {
+        window.location.reload();
+      }
     }
 
     // Escuchar en window para capturar touches que empiecen en el header

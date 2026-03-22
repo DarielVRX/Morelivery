@@ -36,6 +36,7 @@ export default function DriverHome({ registerRef }) {
       if (registerRef.current.onUpdate)    order.registerOrdersUpdate(registerRef.current.onUpdate);
       if (registerRef.current.onReconnect) order.registerOrdersReconnect(registerRef.current.onReconnect);
       if (registerRef.current.onChat)      order.registerOrdersChat(registerRef.current.onChat);
+      registerRef.current.loadData = order.loadData;
     };
     wire();
     // Re-intentar en el siguiente tick por si DriverOrders monta después
