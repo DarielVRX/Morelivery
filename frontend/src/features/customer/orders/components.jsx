@@ -142,20 +142,14 @@ function MessageBubble({ m, isOwn }) {
   const { Icon } = cfg;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: cfg.align }}>
-    {/* Nombre + icono (solo mensajes ajenos) */}
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: isOwn ? 'flex-end' : 'flex-start' }}>
     {!isOwn && (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem',
-        marginBottom: '0.15rem', color: cfg.color, fontSize: '0.68rem', fontWeight: 700 }}>
-        <Icon width={13} height={13} />
-        {m.sender_name}
-        </div>
+      ...
     )}
-
     <div style={{
       background: cfg.color,
       color: cfg.textColor,
-      borderRadius: cfg.borderRadius,
+      borderRadius: isOwn ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
       padding: '0.3rem 0.6rem',
       fontSize: '0.8rem',
       maxWidth: '80%',
