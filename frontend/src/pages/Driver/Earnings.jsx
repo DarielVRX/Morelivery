@@ -102,7 +102,7 @@ export default function DriverEarnings() {
         </div>
       )}
       <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem',
-        background:'var(--promo-gradient)', color:'#fff' }}>
+        background:'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)', color:'#fff' }}>
         <div style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>💰 Ganancias</div>
         <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Historial de entregas y comisiones</div>
       </div>
