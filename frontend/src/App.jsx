@@ -197,6 +197,7 @@ function AuthScreen({ mode = 'login' }) {
   const wrongRole = auth.user && auth.user.role !== appKey;
 
   return (
+    <PullToRefresh>
     <div style={{ minHeight: '100dvh', background: 'var(--bg-card)', display: 'flex', flexDirection: 'column' }}>
       <header style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -245,6 +246,7 @@ function AuthScreen({ mode = 'login' }) {
         </div>
       </div>
     </div>
+    </PullToRefresh>
   );
 }
 
