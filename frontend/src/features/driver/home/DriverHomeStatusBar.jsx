@@ -16,7 +16,7 @@ export default function DriverHomeStatusBar({
     <>
       <div style={{
         flexShrink:0,
-        background:'var(--promo-gradient)',
+        background:'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)',
         padding:'0.65rem 1rem',
         display:'flex',
         justifyContent:'space-between',
