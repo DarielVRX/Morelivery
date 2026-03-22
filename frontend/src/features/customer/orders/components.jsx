@@ -87,7 +87,7 @@ export function TipInput({ onValidAmount }) {
 // ── Config por rol ─────────────────────────────────────────
 const ROLE_CONFIG = {
   customer: {
-    icon: <IconCustomer width={13} height={13} />,
+    Icon: IconCustomer,
     color: 'var(--brand)',
     textColor: '#fff',
     align: 'flex-end',
@@ -95,7 +95,7 @@ const ROLE_CONFIG = {
     label: 'Tú',
   },
   driver: {
-    icon: <IconDriver width={13} height={13} />,
+    Icon: IconDriver,
     color: '#f59e0b',
     textColor: '#fff',
     align: 'flex-start',
@@ -103,7 +103,7 @@ const ROLE_CONFIG = {
     label: 'Repartidor',
   },
   restaurant: {
-    icon: <IconRestaurant width={13} height={13} />,
+    Icon: IconRestaurant,
     color: '#10b981',
     textColor: '#fff',
     align: 'flex-start',
@@ -115,7 +115,7 @@ const ROLE_CONFIG = {
 // ── Burbuja de mensaje ─────────────────────────────────────
 function MessageBubble({ m, isOwn }) {
   const cfg = ROLE_CONFIG[m.sender_role] || ROLE_CONFIG.customer;
-  const Icon = cfg.icon;
+  const { Icon } = cfg;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: cfg.align }}>
@@ -123,7 +123,7 @@ function MessageBubble({ m, isOwn }) {
     {!isOwn && (
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem',
         marginBottom: '0.15rem', color: cfg.color, fontSize: '0.68rem', fontWeight: 700 }}>
-        <Icon />
+        <Icon width={13} height={13} />
         {m.sender_name}
         </div>
     )}
