@@ -4,7 +4,8 @@ import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 
-import { OrderRow, fmt, fmtDate, fmtTs, secsSince, Th, Td, Badge, OfferBar, CooldownBadge } from '../../features/admin/dashboard/shared';
+import { DashboardTabsBar, AssignmentTab } from '../../features/admin/dashboard/sections';
+import { useTick, fmt, fmtDate, Th, Td, Badge } from '../../features/admin/dashboard/shared';
 
 // ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 export default function AdminDashboard() {
@@ -14,7 +15,6 @@ export default function AdminDashboard() {
   const [metrics, setMetrics]   = useState(null);
   const [users, setUsers]       = useState([]);
   const [liveData, setLiveData] = useState({ orders:[], drivers:[] });
-  const [offerStats, setOfferStats] = useState([]);
   const [statusFilter, setStatusFilter] = useState('');
   const [metricDays, setMetricDays]     = useState(7);
   const [loading, setLoading]   = useState(false);
@@ -22,6 +22,7 @@ export default function AdminDashboard() {
   const [liveOffers, setLiveOffers] = useState([]);
   const [orderLog, setOrderLog]     = useState([]);
   const [actionLoading, setActionLoading] = useState(''); // id de la entidad en operación
+  const dashboardTick = useTick(1000);
 
   // ── Engine params ─────────────────────────────────────────────────────────
   const [engineParams, setEngineParams]   = useState([]);
@@ -154,12 +155,17 @@ export default function AdminDashboard() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Auto-refresh del panel de asignación cada 5s
-  useEffect(() => {
-    if (tab !== 'assignment') return;
-    const id = setInterval(() => load(), 5000);
-    return () => clearInterval(id);
-  }, [tab, load]);
+  const reloadTimerRef = useRef(null);
+  const scheduleReload = useCallback(() => {
+    clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = setTimeout(() => {
+      load();
+      reloadTimerRef.current = null;
+    }, 250);
+  }, [load]);
+
+  useEffect(() => () => clearTimeout(reloadTimerRef.current), []);
+
 
   // SSE: recibir eventos de ofertas y pedidos en tiempo real
   useRealtimeOrders(
@@ -167,13 +173,16 @@ export default function AdminDashboard() {
     (data) => {
       const entry = { ts: Date.now(), type:'order', orderId: data.orderId?.slice(0,8), extra: data.status || data.action || '' };
       setOrderLog(prev => [entry, ...prev].slice(0, 50));
-      if (tab === 'assignment') load();
+      if (['assignment', 'orders'].includes(tab)) scheduleReload();
     },
     () => {},
     (data) => {
       const entry = { ts: Date.now(), type:'offer', orderId: data.orderId?.slice(0,8), extra: `driver:${(data.driverId||'').slice(0,8)}` };
       setLiveOffers(prev => [entry, ...prev].slice(0, 50));
+      if (tab === 'assignment') scheduleReload();
     },
+    undefined,
+    () => { if (['assignment', 'orders'].includes(tab)) load(); },
   );
 
   // ── Admin user registration ──────────────────────────────────────────────
@@ -189,20 +198,7 @@ export default function AdminDashboard() {
     } catch (e) { setMsg(e.message); }
   }
 
-  // ── Tabs UI ──────────────────────────────────────────────────────────────
-  const tabBtn = (key, label) => (
-    <button
-      key={key}
-      onClick={() => setTab(key)}
-      style={{
-        padding:'0.4rem 0.875rem', border:'none', cursor:'pointer', borderRadius:8,
-        fontWeight: tab===key ? 700 : 400, fontSize:'0.85rem',
-        background: tab===key ? 'var(--brand)' : 'transparent',
-        color: tab===key ? '#fff' : 'var(--text-secondary)',
-      }}>
-      {label}
-    </button>
-  );
+
 
   return (
     <div style={{ padding:'1rem', maxWidth:1200, margin:'0 auto' }}>
@@ -212,169 +208,19 @@ export default function AdminDashboard() {
         <div style={{ fontSize:'0.75rem', opacity:0.8, marginTop:'0.1rem' }}>Vista completa del sistema</div>
       </div>
 
-      {/* Tabs */}
-      <div style={{ display:'flex', gap:'0.25rem', marginBottom:'1.25rem', borderBottom:'1px solid var(--border)', paddingBottom:'0.5rem', flexWrap:'wrap' }}>
-        {tabBtn('assignment', `🛵 Asignaciones${liveData.orders.filter(o=>!o.driver_id).length ? ` (${liveData.orders.filter(o=>!o.driver_id).length})` : ''}`)}
-        {tabBtn('orders', '📦 Pedidos')}
-        {tabBtn('metrics', '📊 Métricas')}
-        {tabBtn('users', '👥 Usuarios')}
-        {tabBtn('engine', '⚙️ Motor')}
-        {tabBtn('reports', `🚨 Reportes${reports.length > 0 ? ` (${reports.length})` : ''}`)}
-        {tabBtn('notes', '📝 Notas')}
-        {tabBtn('ratings', '⭐ Ratings')}
-        {tabBtn('feed', `📡 Feed${liveOffers.length + orderLog.length > 0 ? ` (${liveOffers.length + orderLog.length})` : ''}`)}
-        <button onClick={load} style={{ marginLeft:'auto', padding:'0.4rem 0.75rem', border:'1px solid var(--border)', borderRadius:8, cursor:'pointer', fontSize:'0.8rem', background:'var(--bg-card)' }}>
-          ↻ Actualizar
-        </button>
-      </div>
+      <DashboardTabsBar
+        tab={tab}
+        onTabChange={setTab}
+        onReload={load}
+        unassignedCount={liveData.orders.filter((order) => !order.driver_id).length}
+        reportsCount={reports.length}
+        feedCount={liveOffers.length + orderLog.length}
+      />
 
       {msg && <p className="flash flash-error" style={{ marginBottom:'0.75rem' }}>{msg}</p>}
       {loading && <div style={{ color:'var(--text-tertiary)', fontSize:'0.85rem', marginBottom:'0.5rem' }}>Cargando…</div>}
 
-      {/* ── TAB: ASIGNACIONES ─────────────────────────────────────────── */}
-      {tab === 'assignment' && (
-        <div>
-          {/* Resumen rápido */}
-          <div style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap', marginBottom:'1.25rem' }}>
-            {[
-              { label:'Pedidos activos', value:liveData.orders.length, color:'#60a5fa' },
-              { label:'Sin driver', value:liveData.orders.filter(o=>!o.driver_id).length, color:'#ef4444' },
-              { label:'Con oferta', value:liveData.orders.filter(o=>o.pending_driver_id&&!o.driver_id).length, color:'#f59e0b' },
-              { label:'Drivers disponibles', value:liveData.drivers.filter(d=>d.is_available).length, color:'#16a34a' },
-              { label:'Drivers en entrega', value:liveData.drivers.filter(d=>d.active_orders>0).length, color:'#8b5cf6' },
-            ].map(({ label, value, color }) => (
-              <div key={label} style={{ border:'1px solid var(--border)', borderRadius:8, padding:'0.6rem 1rem', flex:'1 1 130px', minWidth:130 }}>
-                <div style={{ fontSize:'0.72rem', color:'var(--text-secondary)' }}>{label}</div>
-                <div style={{ fontSize:'1.5rem', fontWeight:800, color, lineHeight:1.2 }}>{value}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Tabla de pedidos activos */}
-          {liveData.orders.length === 0 ? (
-            <div style={{ textAlign:'center', padding:'3rem', color:'var(--text-tertiary)' }}>No hay pedidos activos.</div>
-          ) : (
-            <div style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:10 }}>
-              <table style={{ width:'100%', borderCollapse:'collapse', minWidth:800 }}>
-                <thead>
-                  <tr>
-                    <Th>ID</Th>
-                    <Th>Estado</Th>
-                    <Th>Tienda</Th>
-                    <Th>Abierta</Th>
-                    <Th>Hora</Th>
-                    <Th>Total</Th>
-                    <Th></Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {liveData.orders.filter(o => !o.driver_id).map(order => (
-                    <OrderRow key={order.id} order={order} drivers={liveData.drivers} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Estado global de todos los drivers */}
-          <div style={{ marginTop:'1.5rem', border:'1px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
-            <div style={{ padding:'0.65rem 1rem', background:'var(--bg-sunken)', fontWeight:700, fontSize:'0.875rem', borderBottom:'1px solid var(--border)' }}>
-              👥 Estado de todos los drivers
-            </div>
-            {liveData.drivers.length === 0 ? (
-              <div style={{ padding:'1rem', color:'var(--text-tertiary)', fontSize:'0.85rem' }}>Sin drivers registrados.</div>
-            ) : (
-              <div style={{ overflowX:'auto' }}>
-                <table style={{ width:'100%', borderCollapse:'collapse' }}>
-                  <thead>
-                    <tr>
-                      <Th>#</Th>
-                      <Th>Driver</Th>
-                      <Th>Disponible</Th>
-                      <Th>Pedidos activos</Th>
-                      <Th>Oferta activa</Th>
-                      <Th>GPS</Th>
-                      <Th>Cooldowns</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...liveData.drivers].sort((a, b) => {
-                      // Orden: activos primero, luego disponibles, luego pending sin cooldown, luego con cooldown
-                      const score = d => {
-                        if (d.active_orders > 0) return 0;
-                        if (d.is_available && !d.pending_offer_order_id && !(d.cooldowns||[]).length) return 1;
-                        if (d.is_available && d.pending_offer_order_id) return 2;
-                        if ((d.cooldowns||[]).length > 0) return 3;
-                        return 4;
-                      };
-                      return score(a) - score(b);
-                    }).map(d => {
-                      const tick = 0; // fuerza re-render desde useTick en padre
-                      const cooldowns = d.cooldowns || [];
-                      return (
-                        <tr key={d.id}>
-                          <Td>{d.driver_number || '—'}</Td>
-                          <Td><span style={{ fontWeight:600 }}>{d.full_name?.split('_')[0] || '—'}</span></Td>
-                          <Td>
-                            {d.is_available
-                              ? <span style={{ color:'var(--success)', fontWeight:700, fontSize:'0.75rem' }}>● Sí</span>
-                              : <span style={{ color:'var(--text-tertiary)', fontSize:'0.75rem' }}>○ No</span>
-                            }
-                          </Td>
-                          <Td>
-                            {d.active_orders > 0
-                              ? <Badge status="on_the_way" label={`${d.active_orders} en entrega`} />
-                              : <span style={{ color:'var(--text-tertiary)', fontSize:'0.75rem' }}>0</span>
-                            }
-                          </Td>
-                          <Td>
-                            {d.pending_offer_order_id
-                              ? (
-                                <div>
-                                  <span style={{ fontSize:'0.75rem', color:'#60a5fa', fontWeight:600 }}>
-                                    {d.pending_offer_order_id.slice(0,8)}
-                                  </span>
-                                  {d.pending_offer_started_at && (
-                                    <div style={{ marginTop:2 }}>
-                                      <OfferBar startedAt={d.pending_offer_started_at} total={60} />
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                              : <span style={{ color:'var(--text-tertiary)', fontSize:'0.75rem' }}>—</span>
-                            }
-                          </Td>
-                          <Td>
-                            {(d.last_lat && d.last_lng)
-                              ? <span style={{ color:'var(--success)', fontSize:'0.75rem', fontWeight:600 }}>✓ {Number(d.last_lat).toFixed(3)},{Number(d.last_lng).toFixed(3)}</span>
-                              : <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>Sin GPS</span>
-                            }
-                          </Td>
-                          <Td>
-                            {cooldowns.length === 0
-                              ? <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>—</span>
-                              : (
-                                <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
-                                  {cooldowns.map((cd, i) => (
-                                    <div key={i} style={{ display:'flex', alignItems:'center', gap:4 }}>
-                                      <span style={{ fontSize:'0.68rem', color:'var(--text-secondary)' }}>{cd.order_id.slice(0,6)}</span>
-                                      <CooldownBadge waitUntil={cd.wait_until} />
-                                    </div>
-                                  ))}
-                                </div>
-                              )
-                            }
-                          </Td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {tab === 'assignment' && <AssignmentTab liveData={liveData} tick={dashboardTick} />}
 
       {/* ── TAB: PEDIDOS ─────────────────────────────────────────────── */}
       {tab === 'orders' && (
