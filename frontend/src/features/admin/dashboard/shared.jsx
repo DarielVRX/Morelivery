@@ -144,6 +144,28 @@ export function Detail({ label, value, color }) {
   );
 }
 
+export const OfferBar = ({ startedAt, total = 60 }) => {
+  const [pct, setPct] = useState(0);
+
+  useEffect(() => {
+    const tick = () => {
+      const elapsed = (Date.now() - new Date(startedAt).getTime()) / 1000;
+      setPct(Math.min(100, (elapsed / total) * 100));
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [startedAt, total]);
+
+  const color = pct > 80 ? '#dc2626' : pct > 50 ? '#f59e0b' : '#16a34a';
+
+  return (
+    <div style={{ width: 80, height: 5, background: '#e5e7eb', borderRadius: 99, overflow: 'hidden' }}>
+    <div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width 1s linear' }} />
+    </div>
+  );
+};
+
 export function OrderRow({ order, drivers }) {
   useTick();
   const [expanded, setExpanded] = useState(false);
