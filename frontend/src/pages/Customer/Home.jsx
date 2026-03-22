@@ -178,6 +178,10 @@ export default function CustomerHome() {
   const distanceActive = sortBy === 'distance_asc' || sortBy === 'distance_desc';
   const ratingIcon = sortBy === 'rating_asc' ? '↑' : '↓';
   const distanceIcon = sortBy === 'distance_desc' ? '↑' : '↓';
+  const draft = readPendingOrder();
+  const initialPos = draft?.delivery_lat
+  ? { lat: draft.delivery_lat, lng: draft.delivery_lng }
+  : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
 
   if (loading) {
     return <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)' }}>Cargando…</div>;
@@ -257,10 +261,6 @@ export default function CustomerHome() {
               ¿Qué se te antoja?
             </div>
           </div>
-          const draft = readPendingOrder();
-          const initialPos = draft?.delivery_lat
-          ? { lat: draft.delivery_lat, lng: draft.delivery_lng }
-          : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
           <AddressSearchBar
           userPos={userPos}
           homeAddress={homeAddress}
