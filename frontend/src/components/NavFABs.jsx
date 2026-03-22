@@ -63,10 +63,12 @@ export default function NavFABs({
   bottomOffset = 16,
   voiceEnabled,
   navMode,
+  myPosition,
   onCenterCycle,
   onVoiceToggle,
   onGoogleNav,
   onNavMode,
+  onQuickZone,
 }) {
   const withRoute      = hasActiveOrder && (routeGeometry?.length > 0);
   const safeBot        = 'env(safe-area-inset-bottom, 0px)';
@@ -131,7 +133,7 @@ export default function NavFABs({
       </button>
 
       {/* ── Con ruta: botón "Más" (voz + Google Maps) ──────────────────────── */}
-      {withRoute && navMode !== 'menu' && (
+      {withRoute && navMode !== 'menu' && navMode !== 'zone' && navMode !== 'impassable' && navMode !== 'preference' && (
         <button
           onClick={() => onNavMode(navMode === 'more' ? null : 'more')}
           title="Más opciones"
@@ -155,7 +157,7 @@ export default function NavFABs({
       {withRoute && navMode === 'more' && (
         <div style={{
           position: 'absolute',
-          bottom: secondaryBottom,
+          bottom: `calc(${BASE_BOTTOM + SZ_PRIMARY + GAP + SZ_SECONDARY + GAP}px + ${safeBot})`,
           right: 14,
           zIndex: 403,
           display: 'flex',
@@ -193,34 +195,25 @@ export default function NavFABs({
             Abrir en Maps
           </button>
 
-          <button onClick={() => onNavMode(null)}
-            style={{
-              padding: '0.3rem 0.75rem', borderRadius: 20, fontSize: '0.73rem',
-              background: 'var(--bg-card)', color: 'var(--text-secondary)',
-              border: '1px solid var(--border)', cursor: 'pointer',
-              fontWeight: 600, minHeight: 'unset',
-            }}>
-            Cerrar
-          </button>
         </div>
       )}
 
       {/* ── Sin pedido: botón Reportar ──────────────────────────────────────── */}
-      {!navMode && navMode !== 'more' && (
+      {navMode !== 'more' && navMode !== 'zone' && navMode !== 'impassable' && navMode !== 'preference' && (
         <button
           aria-label="Reportar incidencia"
           title="Reportar zona, calle no viable o preferencia"
           className="dh-fab"
-          onClick={() => onNavMode('menu')}
+          onClick={() => onNavMode(navMode === 'menu' ? null : 'menu')}
           style={{
             ...fabBase,
             bottom: reportBottom,
             width: SZ_SECONDARY,
             height: SZ_SECONDARY,
-            background: '#fff',
-            border: '1.5px solid var(--border)',
+            background: navMode === 'menu' ? 'var(--brand)' : '#fff',
+            border: navMode === 'menu' ? 'none' : '1.5px solid var(--border)',
             boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-            color: 'var(--text-secondary)',
+            color: navMode === 'menu' ? '#fff' : 'var(--text-secondary)',
             fontSize: '1rem',
           }}>
           ⚑
@@ -239,6 +232,27 @@ export default function NavFABs({
           alignItems: 'flex-end',
           gap: 6,
         }}>
+          {/* Reporte rápido — zona en posición GPS actual, radio 500m */}
+          {myPosition && (
+            <button
+              onClick={() => {
+                onQuickZone?.(myPosition);
+                onNavMode(null);
+              }}
+              style={{
+                padding: '0.55rem 1rem', borderRadius: 20,
+                fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer',
+                whiteSpace: 'nowrap', background: '#7c3aed',
+                color: '#fff', border: 'none',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.22)', minHeight: 'unset',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+              </svg>
+              Zona aquí (rápido)
+            </button>
+          )}
           {NAV_MENU_OPTIONS.map(opt => (
             <button key={opt.mode}
               onClick={() => onNavMode(opt.mode)}
@@ -252,15 +266,6 @@ export default function NavFABs({
               {opt.label}
             </button>
           ))}
-          <button onClick={() => onNavMode(null)}
-            style={{
-              padding: '0.3rem 0.75rem', borderRadius: 20, fontSize: '0.75rem',
-              background: 'var(--bg-card)', color: 'var(--text-secondary)',
-              border: '1px solid var(--border)', cursor: 'pointer',
-              fontWeight: 600, minHeight: 'unset',
-            }}>
-            Cancelar
-          </button>
         </div>
       )}
     </>

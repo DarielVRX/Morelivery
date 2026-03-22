@@ -37,6 +37,7 @@ export default function DriverHomeMapSection({
   onSubmitImpassable,
   onSubmitPreference,
   bottomOffset,
+  onQuickZone,
 }) {
   return (
     <div style={{ flex:1, minHeight:0, position:'relative', overflow:'hidden', zIndex:0 }}>
@@ -92,6 +93,8 @@ export default function DriverHomeMapSection({
         onGoogleNav={onGoogleNav}
         onNavMode={onNavMode}
         bottomOffset={bottomOffset + 16}
+        myPosition={myPosition}
+        onQuickZone={onQuickZone}
       />
 
       {navMode === 'zone' && mapInstance && (

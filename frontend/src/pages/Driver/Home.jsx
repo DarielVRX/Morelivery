@@ -124,6 +124,7 @@ export default function DriverHome({ registerRef }) {
           onSubmitImpassable={home.handleImpassableConfirm}
           onSubmitPreference={home.handlePreferenceConfirm}
           bottomOffset={panelHeight + 8}
+          onQuickZone={(pos) => home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'traffic', radius: 500 })}
         />
 
         <OfferPanel
