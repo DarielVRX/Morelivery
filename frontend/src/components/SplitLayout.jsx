@@ -147,5 +147,6 @@ export default function SplitLayout({ homeContent, ordersContent }) {
         }
       }
       `}</style>
+      </div>   {/* ← este falta */}
   );
 }
