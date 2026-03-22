@@ -85,15 +85,15 @@ export function CPSearchBar({ token, onSelectAddress }) {
   async function confirmMapPin() {
     const pos = pendingPos.current;
     if (!pos) return;
-    const geo = await nominatimReverse(pos.lat, pos.lng);
+    const geo = await nominatimReverse(lat, lng, { apiFetch, token });
     onSelectAddress({
-      lat:        pos.lat,
-      lng:        pos.lng,
+      lat, lng,
       address:    geo?.label      || '',
       colonia:    geo?.colonia    || '',
       ciudad:     geo?.ciudad     || '',
       estado:     geo?.estado     || '',
       postalCode: geo?.postalCode || '',
+      colonias:   geo?.colonias   || [],
     });
     setShowMap(false);
   }
@@ -137,13 +137,13 @@ export function CPSearchBar({ token, onSelectAddress }) {
         const { latitude: lat, longitude: lng } = pos.coords;
         const geo = await nominatimReverse(lat, lng);
         onSelectAddress({
-          lat,
-          lng,
+          lat, lng,
           address:    geo?.label      || '',
           colonia:    geo?.colonia    || '',
           ciudad:     geo?.ciudad     || '',
           estado:     geo?.estado     || '',
           postalCode: geo?.postalCode || '',
+          colonias:   geo?.colonias   || [],
         });
         setGpsLoading(false);
       },

@@ -190,7 +190,7 @@ export default function AddressSearchBar({
   async function confirmMapPin() {
     const pos = pendingPos.current;
     if (!pos) return;
-    const geo   = await nominatimReverse(pos.lat, pos.lng);
+    const geo = await nominatimReverse(pos.lat, pos.lng);
     const label = geo?.label || `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`;
     onSelectPos({ ...pos, label });
     setShowMap(false);
