@@ -5,6 +5,7 @@ import ZoneLayer from '../../../components/ZoneLayer';
 import ZonePlacer from '../../../components/ZonePlacer';
 import { ZONE_LABELS } from '../../../utils/format';
 
+import { useEffect, useRef } from 'react';
 export default function DriverHomeMapSection({
   availability,
   hasActiveOrder,
@@ -35,6 +36,7 @@ export default function DriverHomeMapSection({
   onSubmitZone,
   onSubmitImpassable,
   onSubmitPreference,
+  bottomOffset,
 }) {
   return (
     <div style={{ flex:1, minHeight:0, position:'relative', overflow:'hidden', zIndex:0 }}>
@@ -61,6 +63,10 @@ export default function DriverHomeMapSection({
         centerSignal={centerSignal}
         onCenterDone={onCenterDone}
         onMapReady={setMapInstance}
+        bottomOffset={bottomOffset}
+        pinAddress={pinAddress}
+        loadingPin={loadingPin}
+        onClearPin={() => setCustomPin(null)}
       />
 
       {mapInstance && (
@@ -72,18 +78,8 @@ export default function DriverHomeMapSection({
         />
       )}
 
-      {!hasActiveOrder && customPin && (
-        <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', background:'var(--bg-card)', borderRadius:10, padding:'0.5rem 0.875rem', boxShadow:'var(--panel-shadow)', maxWidth:'calc(100% - 2rem)', zIndex:10, display:'flex', alignItems:'center', gap:'0.5rem', minWidth:180 }}>
-          <span style={{ fontSize:'1rem', flexShrink:0 }}>📍</span>
-          <div style={{ flex:1, minWidth:0 }}>
-            {loadingPin
-              ? <span style={{ fontSize:'0.78rem', color:'var(--text-tertiary)' }}>Buscando dirección…</span>
-              : <span style={{ fontSize:'0.78rem', color:'var(--text-primary)', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block' }}>{pinAddress}</span>}
-            <span style={{ fontSize:'0.7rem', color:'var(--text-tertiary)' }}>Toca el mapa para mover</span>
-          </div>
-          <button onClick={() => { setCustomPin(null); }} style={{ border:'none', background:'none', cursor:'pointer', color:'var(--text-tertiary)', fontSize:'1rem', lineHeight:1, padding:'0.15rem', flexShrink:0, minHeight:'unset' }}>✕</button>
-        </div>
-      )}
+      {/* Popup de dirección ahora se muestra sobre el pin via MapLibre Popup — ver DriverMap */}
+      {/* El pin SVG se oculta automáticamente tras 5s o al tocar otro punto */}
 
       <NavFABs
         hasActiveOrder={hasActiveOrder}
@@ -95,6 +91,7 @@ export default function DriverHomeMapSection({
         onVoiceToggle={onVoiceToggle}
         onGoogleNav={onGoogleNav}
         onNavMode={onNavMode}
+        bottomOffset={bottomOffset + 16}
       />
 
       {navMode === 'zone' && mapInstance && (

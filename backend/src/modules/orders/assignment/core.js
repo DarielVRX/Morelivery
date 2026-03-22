@@ -149,18 +149,17 @@ export async function offerNextDrivers(orderId, onOffer) {
           // Para rondas con batch > 1 correr simulación completa para obtener
           // bagOverflowPct y score definitivo. Para ronda 1-5 (batch=1) usar
           // scoreCandidate() sobre el envelope — más rápido, suficientemente preciso.
-          const useFullSim = batchSize > 1;
+          // Siempre simular para obtener bagOverflowPct correcto (pico de carga en ruta).
+          // Para batch=1 la simulación es igualmente necesaria — sin ella el conductor
+          // no recibe aviso de capacidad aunque la oferta lo lleve a colapsar su mochila.
           const nowSec = Date.now() / 1000;
 
           const scored = await Promise.all(
             topDrivers.map(async (env) => {
               try {
-                let candidate = env;
-                if (useFullSim) {
-                  candidate = await simulateDriverWithOrder(
-                    env, orderForSim, restaurantPos, customerPos, nowSec
-                  );
-                }
+                const candidate = await simulateDriverWithOrder(
+                  env, orderForSim, restaurantPos, customerPos, nowSec
+                );
                 const { totalCost } = scoreCandidate(
                   candidate,
                   { max_delivery_time_s: null },

@@ -3,7 +3,7 @@
 // Toda la lógica de mapa está en DriverMap
 // Los componentes de UI son independientes y reciben solo props
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import ActiveOrderPanel from '../../components/ActiveOrderPanel';
 import OfferPanel from '../../components/OfferPanel';
@@ -46,6 +46,17 @@ export default function DriverHome({ registerRef }) {
   useAppBadge(badgeCount);
 
   const [msg, setMsg] = useState('');
+  const [panelHeight, setPanelHeight] = useState(0);
+  const activePanelRef = useRef(null);
+
+  // Medir altura del panel activo para subir FABs y atribución
+  useEffect(() => {
+    const el = activePanelRef.current;
+    if (!el) { setPanelHeight(0); return; }
+    const ro = new ResizeObserver(([entry]) => setPanelHeight(entry.contentRect.height));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [order.hasActiveOrder, order.pendingOffer]);
 
   const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, order.availability, order.hasActiveOrder);
   const home = useDriverHomeRuntime({
@@ -72,12 +83,9 @@ export default function DriverHome({ registerRef }) {
     <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden', position:'relative' }}>
         <DriverHomeStatusBar
           availability={order.availability}
-          position={myPosition}
-          notifPermission={order.notifPermission}
-          notifPriorityMode={order.notifPriorityMode}
-          wakeLockActive={wakeLockActive}
-          gpsError={gpsError}
           counters={home.counters}
+          activeOrder={order.activeOrder}
+          bagPct={order.routeBagPct}
           onToggleAvailability={() => order.toggleAvailability(setMsg)}
           msg={msg}
           onDismissMsg={() => setMsg('')}
@@ -115,6 +123,7 @@ export default function DriverHome({ registerRef }) {
           onSubmitZone={home.handleZoneConfirm}
           onSubmitImpassable={home.handleImpassableConfirm}
           onSubmitPreference={home.handlePreferenceConfirm}
+          bottomOffset={panelHeight + 8}
         />
 
         <OfferPanel
@@ -128,6 +137,7 @@ export default function DriverHome({ registerRef }) {
             const warning = order.handleOfferExpired();
             if (warning) setMsg(warning);
           }}
+          panelRef={!order.hasActiveOrder ? activePanelRef : undefined}
         />
 
         <ActiveOrderPanel
@@ -143,6 +153,7 @@ export default function DriverHome({ registerRef }) {
           onConfirmRelease={() => order.doRelease(setMsg)}
           onRebalance={() => order.doRebalance(setMsg)}
           onRoute={home.openRoadRouteApi}
+          panelRef={activePanelRef}
         />
     </div>
   );

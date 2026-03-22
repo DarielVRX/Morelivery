@@ -12,6 +12,7 @@ export default function OfferPanel({
   onReject,
   onToggleMinimize,
   onExpired,
+  panelRef,
 }) {
   if (!offer) return null;
 
@@ -43,7 +44,7 @@ export default function OfferPanel({
           Oferta
         </button>
 
-        <div style={{ background:'var(--bg-card)', borderTop:'1px solid var(--border)',
+        <div ref={panelRef} style={{ background:'var(--bg-card)', borderTop:'1px solid var(--border)',
           boxShadow:'0 -4px 20px rgba(0,0,0,0.14)', overflow:'hidden', pointerEvents:'auto' }}>
           <div style={{ padding:'0.6rem 1rem 0.75rem', overflowY:'auto' }}>
 
