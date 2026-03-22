@@ -11,6 +11,7 @@ import PullToRefresh from '../../components/PullToRefresh';
 import { useAuth } from '../../contexts/AuthContext';
 import { ensureDriverHomeAnimations } from '../../features/driver/home/animations';
 import DriverHomeMapSection from '../../features/driver/home/DriverHomeMapSection.jsx';
+import { buildGoogleMapsAppUrl, buildGoogleMapsWebUrl, buildGoogleNavigationUrl, formatRouteSummary, getDriverRouteStops, getGoogleNavigationTarget } from '../../features/driver/home/navigation';
 import DriverHomeStatusBar from '../../features/driver/home/DriverHomeStatusBar.jsx';
 import { useDriverHomeRuntime } from '../../features/driver/home/useDriverHomeRuntime';
 import { useAppBadge } from '../../hooks/useAppBadge';
