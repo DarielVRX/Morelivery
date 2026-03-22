@@ -3,7 +3,8 @@ import { readPendingOrder, savePendingOrder, schedulePendingOrderExpiry, cancelP
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
-import { AddressSearchBar, fmt, haversineKm, IconMap, IconPin, IconSearch, IconStore, IconStoreXL, IconWarning, ProductImage, StarPicker } from '../../features/customer/restaurant-page/components';
+import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
+import { fmt, haversineKm, IconMap, IconPin, IconSearch, IconStore, IconStoreXL, IconWarning, ProductImage, StarPicker } from '../../features/customer/restaurant-page/components';
 
 export default function RestaurantPage() {
   const { id }   = useParams();
@@ -452,8 +453,6 @@ export default function RestaurantPage() {
             </ul>
           </>
         )}
-
-
       </div>
 
       {/* Sticky bottom bar */}
