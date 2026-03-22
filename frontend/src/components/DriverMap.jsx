@@ -343,10 +343,14 @@ export default function DriverMap({
     clearTimeout(pinHideTimer.current);
     if (loadingPin || !pinAddress) return;
 
-    const html = `<div style="font-size:0.78rem;font-family:inherit;max-width:200px;">
-      <div style="font-weight:600;margin-bottom:2px;">${pinAddress}</div>
+    const isDarkMode = document.documentElement.getAttribute('data-theme') === 'dark';
+    const bg  = isDarkMode ? '#1f2937' : '#fff';
+    const txt = isDarkMode ? '#f3f4f6' : '#111827';
+    const sub = isDarkMode ? '#9ca3af' : '#9e4f4f';
+    const html = `<div style="font-size:0.78rem;font-family:inherit;max-width:200px;background:${bg};color:${txt};border-radius:6px;padding:6px 8px;">
+      <div style="font-weight:600;margin-bottom:3px;line-height:1.3;">${pinAddress}</div>
       <button onclick="this.dispatchEvent(new CustomEvent('clearpin',{bubbles:true}))"
-        style="font-size:0.72rem;color:#9e4f4f;background:none;border:none;cursor:pointer;padding:0;">
+        style="font-size:0.7rem;color:${sub};background:none;border:none;cursor:pointer;padding:0;">
         Quitar pin
       </button>
     </div>`;
