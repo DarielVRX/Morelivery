@@ -4,7 +4,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
-import { fmt, haversineKm, IconMap, IconPin, IconSearch, IconStore, IconStoreXL, IconWarning, ProductImage, StarPicker } from '../../features/customer/restaurant-page/components';
+import { fmt, haversineKm, IconMap, IconPin, IconSearch, IconWarning, ProductImage, StarPicker } from '../../features/customer/restaurant-page/components';
+import {IconRestaurant } from '../../../App';
 
 export default function RestaurantPage() {
   const { id }   = useParams();
@@ -223,7 +224,7 @@ export default function RestaurantPage() {
           <div style={{ width:48, height:48, borderRadius:'50%', background:'rgba(255,255,255,0.2)',
             border:'2px solid rgba(255,255,255,0.4)', display:'flex', alignItems:'center',
             justifyContent:'center', flexShrink:0, color:'rgba(255,255,255,0.8)' }}>
-            <IconStore />
+            <IconRestaurant />
           </div>
           <h2 style={{ fontSize:'1.1rem', fontWeight:900, color:'#fff', margin:0, letterSpacing:'-0.02em' }}>
             {restaurant.name}
@@ -340,7 +341,7 @@ export default function RestaurantPage() {
               : <div style={{ width:56, height:56, borderRadius:'50%',
                   background:'rgba(255,255,255,0.2)', border:'2px solid rgba(255,255,255,0.4)',
                   display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                  <span style={{color:'rgba(255,255,255,0.7)'}}><IconStore /></span>
+                  <span style={{color:'rgba(255,255,255,0.7)'}}><IconRestaurant /></span>
                 </div>
             }
             <div style={{ flex:1 }}>
