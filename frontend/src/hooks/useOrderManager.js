@@ -119,13 +119,14 @@ export function useOrderManager(token, patchUser, userDriver) {
 
   useRealtimeOrders(
     token,
-    () => scheduleLoad(),
-    () => {},
-    handleNewOffer,
-    undefined,
-    () => loadDataRef.current?.(),
-    undefined,
-    handleTransferEvent
+    () => scheduleLoad(),          // onOrderUpdate
+    () => {},                      // onDriverLocation
+    handleNewOffer,                // onNewOffer
+    undefined,                     // onChatMessage
+    () => loadDataRef.current?.(), // onReconnect
+    undefined,                     // onKitchenEvent
+    handleTransferEvent,           // onTransferEvent
+    undefined,                     // onSupportMessage
   );
 
   // Acciones
