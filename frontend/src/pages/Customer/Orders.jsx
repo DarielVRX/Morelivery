@@ -142,13 +142,19 @@ export default function CustomerOrders() {
         return () => clearInterval(id);
       }, [auth.token]);
 
+      const [chatTick, setChatTick] = useState(0);
+
       useRealtimeOrders(
         auth.token,
         (data) => {
           loadDataRef.current?.();
           if (data?.action === 'suggestion_received') loadDataRef.current?.();
         },
-        ({ orderId, lat, lng }) => setDriverPos(p => ({ ...p, [orderId]:{ lat, lng } }))
+        ({ orderId, lat, lng }) => setDriverPos(p => ({ ...p, [orderId]: { lat, lng } })),
+                        undefined,                                     // onNewOffer
+                        (data) => {                                    // onChatMessage
+                          if (data.orderId === chatOpen) setChatTick(t => t + 1);
+                        },
       );
 
       const pendingSuggestions = useMemo(
@@ -420,7 +426,11 @@ export default function CustomerOrders() {
                            color:'var(--text-secondary)', fontWeight:600 }}>
                            <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Chat del pedido'}
                            </button>
-                           {isChatOpen && <OrderChat orderId={order.id} token={auth.token} />}
+                           {isChatOpen && <OrderChat
+                             orderId={order.id}
+                             token={auth.token}
+                             refreshTick={chatTick}  // nuevo prop
+                             />}
 
                            {['created','pending_driver','assigned','accepted'].includes(order.status) && (
                              <button className="btn-sm btn-danger" onClick={()=>cancelOrder(order.id)} style={{ marginTop:'0.5rem' }}>
@@ -533,7 +543,11 @@ export default function CustomerOrders() {
                             color:'var(--text-secondary)', fontWeight:600 }}>
                             <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Ver chat'}
                             </button>
-                            {isChatOpen && <OrderChat orderId={o.id} token={auth.token} />}
+                            {isChatOpen && <OrderChat
+                              orderId={order.id}
+                              token={auth.token}
+                              refreshTick={chatTick}  // nuevo prop
+                              />}
 
                             {/* Reporte / queja */}
                             {reportingId===o.id ? (

@@ -95,7 +95,18 @@ export default function DriverOrders() {
     const id = setInterval(() => loadDataRef.current?.(), 5000);
     return () => clearInterval(id);
   }, [auth.token]);
-  useRealtimeOrders(auth.token, () => loadDataRef.current?.(), () => {});
+  // Estado para forzar recarga del chat
+  const [chatTick, setChatTick] = useState(0);
+
+  useRealtimeOrders(
+    auth.token,
+    (data) => { loadDataRef.current?.(); ... }, // onOrderUpdate
+                    ({ orderId, lat, lng }) => setDriverPos(...), // onDriverLocation
+                    undefined,                                    // onNewOffer
+                    (data) => {                                   // onChatMessage
+                      if (data.orderId === chatOpen) setChatTick(t => t + 1);
+                    },
+  );
 
   const active = useMemo(() => orders.filter(o => !['delivered','cancelled'].includes(o.status)), [orders]);
   const past   = useMemo(() => orders.filter(o =>  ['delivered','cancelled'].includes(o.status)), [orders]);
@@ -450,7 +461,11 @@ export default function DriverOrders() {
                                 color:'var(--text-secondary)', fontWeight:600 }}>
                               <IconChat /> {chatOpen === o.id ? 'Cerrar chat' : 'Chat del pedido'}
                             </button>
-                            {chatOpen === o.id && <OrderChat orderId={o.id} token={auth.token} />}
+                            {chatOpen === o.id && <OrderChat
+                              orderId={order.id}
+                              token={auth.token}
+                              refreshTick={chatTick}  // nuevo prop
+                              />}
                           </div>
                         )}
                       </div>

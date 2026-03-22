@@ -173,7 +173,7 @@ function MessageBubble({ m, isOwn }) {
 }
 
 // ── OrderChat ──────────────────────────────────────────────
-export function OrderChat({ orderId, token, onNewMessage }) {
+export function OrderChat({ orderId, token, refreshTick }) {
   const [messages,     setMessages]     = useState([]);
   const [writeBlocked, setWriteBlocked] = useState(null); // null = puede escribir
   const [isAdminChat,  setIsAdminChat]  = useState(false);
@@ -186,9 +186,6 @@ export function OrderChat({ orderId, token, onNewMessage }) {
 
   const myRole = auth.user?.role || 'customer';
   const myName = auth.user?.displayName || auth.user?.username || 'Tú';
-
-  // Notificar al padre cuando llegan mensajes nuevos (para recargar desde SSE)
-  useEffect(() => { onNewMessage?.(); }, [messages.length]);
 
   async function loadMessages() {
     try {
@@ -213,7 +210,7 @@ export function OrderChat({ orderId, token, onNewMessage }) {
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [orderId, token]);
+  }, [orderId, token, refreshTick]);
 
   // Sonido al recibir mensaje ajeno
   const prevMsgCount = useRef(0);

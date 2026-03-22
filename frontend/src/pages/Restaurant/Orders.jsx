@@ -111,17 +111,7 @@ function PrepTimeControl({ value, onChange, onSave, saving }) {
   );
 }
 
-// ── OrderChat adaptado para rol restaurante ───────────────────────────────────
-function RestaurantOrderChat({ orderId, token }) {
-  const { auth } = useAuth();
-
-  // Reutilizamos OrderChat pero necesitamos que el mensaje optimista lleve role=restaurant.
-  // La forma más limpia es un wrapper fino que sobreescribe sender_role en el optimista.
-  // Como OrderChat está definido en customer/components y usa auth.user internamente,
-  // simplemente lo renderizamos — los mensajes propios se identifican por sender_role
-  // en MessageBubble. Si el backend guarda correctamente el rol del emisor no hay
-  // ningún cambio necesario; el chat funciona igual para cualquier rol.
-  return <OrderChat orderId={orderId} token={token} senderRole="restaurant" />;
+  <OrderChat orderId={order.id} token={auth.token} refreshTick={chatTick} />
 }
 
 export default function RestaurantOrders() {
@@ -218,7 +208,19 @@ export default function RestaurantOrders() {
   // ── Polling eliminado: el SSE dispara loadData en cada evento de orden ────
   // (antes: setInterval cada 5s sobre /orders/my y /restaurants/my/menu)
 
-  useRealtimeOrders(auth.token, () => loadDataRef.current?.(), () => {}, undefined, undefined, undefined, handleKitchenEvent);
+  const [chatTick, setChatTick] = useState(0);
+
+  useRealtimeOrders(
+    auth.token,
+    () => loadDataRef.current?.(),  // onOrderUpdate
+                    () => {},                        // onDriverLocation
+                    undefined,                       // onNewOffer
+                    (data) => {                      // onChatMessage
+                      if (data.orderId === chatOpen) setChatTick(t => t + 1);
+                    },
+                    undefined,                       // onReconnect
+                    handleKitchenEvent,              // onKitchenEvent
+  );
 
   async function savePrepTime() {
     setPrepSaving(true);
@@ -554,7 +556,11 @@ export default function RestaurantOrders() {
                         color:'var(--text-secondary)', fontWeight:600 }}>
                       <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Chat del pedido'}
                     </button>
-                    {isChatOpen && <RestaurantOrderChat orderId={order.id} token={auth.token} />}
+                    {isChatOpen && <OrderChat
+                      orderId={order.id}
+                      token={auth.token}
+                      refreshTick={chatTick}  // nuevo prop
+                      />}
 
                     {/* Panel sugerencia */}
                     {suggestionFor === order.id && (
@@ -673,7 +679,11 @@ export default function RestaurantOrders() {
                             color:'var(--text-secondary)', fontWeight:600 }}>
                           <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Ver chat'}
                         </button>
-                        {isChatOpen && <RestaurantOrderChat orderId={o.id} token={auth.token} />}
+                        {isChatOpen && <OrderChat
+                          orderId={order.id}
+                          token={auth.token}
+                          refreshTick={chatTick}  // nuevo prop
+                          />}
 
                         {reportingId === o.id ? (
                           <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginTop:'0.4rem' }}>
