@@ -145,7 +145,16 @@ export function useOrderManager(token, patchUser, userDriver) {
     setTimeout(() => loadDataRef.current?.(), 800);
   }, []);
 
-  useRealtimeOrders(token, () => scheduleLoad(), () => {}, handleNewOffer, undefined, undefined, undefined, handleTransferEvent);
+  useRealtimeOrders(
+    token,
+    () => scheduleLoad(),
+    () => {},
+    handleNewOffer,
+    undefined,
+    () => loadDataRef.current?.(),
+    undefined,
+    handleTransferEvent
+  );
 
   // Acciones
   async function toggleAvailability(onError) {

@@ -1,7 +1,6 @@
-import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { DriverActiveOrderCard, DriverAvailableOrderCard, DriverPastOrderCard } from '../../features/driver/orders/components';
-import { useDriverOrders } from '../../hooks/useDriverOrders';
+import { useDriverOrdersPageState } from '../../features/driver/orders/useDriverOrdersPageState';
 
 var STATUS_LABELS = {
   created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
@@ -17,38 +16,10 @@ var STATUS_COLOR = {
 
 export default function DriverOrders() {
   const { auth } = useAuth();
-  const orderState = useDriverOrders(auth.token);
-  const [tab, setTab] = useState('active');
-  const [reportingId, setReportingId] = useState(null);
-  const [reportText, setReportText] = useState('');
-  const [reportMsg, setReportMsg] = useState('');
-  const [releaseNote, setReleaseNote] = useState('');
-  const [releasingId, setReleasingId] = useState(null);
-  const [expanded, setExpanded] = useState(null);
-  const [chatOpen, setChatOpenState] = useState(null);
-
-  function setChatOpen(valueOrUpdater) {
-    setChatOpenState((current) => {
-      const nextValue = typeof valueOrUpdater === 'function' ? valueOrUpdater(current) : valueOrUpdater;
-      orderState.setChatOpen(nextValue);
-      return nextValue;
-    });
-  }
-
-  async function sendReport(orderId) {
-    if (!reportText.trim()) return;
-    await orderState.sendReport(orderId, reportText, () => {
-      setReportingId(null);
-      setReportText('');
-      setReportMsg('Reporte enviado');
-      setTimeout(() => setReportMsg(''), 3000);
-    });
-  }
-
+  const view = useDriverOrdersPageState(auth.token);
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
-      {/* ── Encabezado fijo ─────────────────────────────────────────── */}
       <div style={{
         flexShrink:0, background:'var(--bg-card)', borderBottom:'2px solid var(--border)',
         padding:'0.65rem 1rem 0', zIndex:30,
@@ -60,15 +31,15 @@ export default function DriverOrders() {
         <div style={{ display:'flex', gap:0, borderTop:'1px solid var(--border-light)' }}>
           {[
             ['active', 'Activos'],
-            ['waiting', orderState.unoffered.length > 0 ? `En espera (${orderState.unoffered.length})` : 'En espera'],
-            ['past',   'Historial'],
+            ['waiting', view.waitingTabLabel],
+            ['past', 'Historial'],
           ].map(([val, label]) => (
-            <button key={val} onClick={() => setTab(val)}
+            <button key={val} onClick={() => view.setTab(val)}
               style={{
                 flex:1, background:'none', border:'none', cursor:'pointer',
-                padding:'0.4rem 0.3rem', fontSize:'0.72rem', fontWeight: tab===val ? 800 : 500,
-                color: tab===val ? 'var(--brand)' : 'var(--gray-500)',
-                borderBottom: tab===val ? '2px solid var(--brand)' : '2px solid transparent',
+                padding:'0.4rem 0.3rem', fontSize:'0.72rem', fontWeight: view.tab===val ? 800 : 500,
+                color: view.tab===val ? 'var(--brand)' : 'var(--gray-500)',
+                borderBottom: view.tab===val ? '2px solid var(--brand)' : '2px solid transparent',
                 marginBottom:'-1px', transition:'color 0.15s'
               }}>
               {label}
@@ -77,105 +48,101 @@ export default function DriverOrders() {
         </div>
       </div>
 
-      {/* ── Contenido scrolleable ─────────────────────────────────── */}
       <div style={{ flex:1, overflowY:'auto', padding:'0.75rem 1rem', paddingBottom:'calc(var(--nav-h-mobile) + 2.5rem)' }}>
+        {view.reportMsg && <p className="flash flash-ok" style={{ marginBottom:'0.5rem' }}>{view.reportMsg}</p>}
+        {view.actionMsg && <p className="flash flash-ok" style={{ marginBottom:'0.5rem' }}>{view.actionMsg}</p>}
 
-      {reportMsg  && <p className="flash flash-ok"    style={{ marginBottom:'0.5rem' }}>{reportMsg}</p>}
-      {orderState.actionMsg  && <p className="flash flash-ok"    style={{ marginBottom:'0.5rem' }}>{orderState.actionMsg}</p>}
-      {/* ── En espera (sin oferta activa) ─────────────────────────────── */}
-      {tab === 'waiting' && (
-        <div style={{ marginBottom:'1.25rem' }}>
-          <p style={{ fontSize:'0.8rem', fontWeight:700, color:'var(--text-tertiary)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.5rem' }}>
-            Buscando conductor ({orderState.unoffered.length})
-          </p>
-          <ul style={{ listStyle:'none', padding:0 }}>
-            {orderState.unoffered.map(order => (
-              <DriverAvailableOrderCard
-                key={order.id}
-                order={order}
-                actionLoading={orderState.actionLoading}
-                onAccept={() => orderState.acceptDirectly(order.id)}
-              />
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div style={{ display:'flex', gap:'0.4rem', marginBottom:'1rem' }}>
-      </div>
-
-      {tab === 'active' && (
-        orderState.active.length === 0
-          ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos activos.</p>
-          : (
-            <ul className="orders-tab-panel" style={{ listStyle:'none', padding:0 }}>
-              {orderState.active.map(order => {
-                const color = STATUS_COLOR[order.status] || '#9ca3af';
-                const isActive = order.id === orderState.activeOrderId;
-                const DRIVER_ST = { assigned:'Asignado', on_the_way:'En camino', preparing:'En tienda', ready:'Listo retiro' };
-                return (
-                  <DriverActiveOrderCard
-                    key={order.id}
-                    order={order}
-                    color={color}
-                    isActive={isActive}
-                    isExpanded={expanded === order.id}
-                    statusLabel={DRIVER_ST[order.status] || STATUS_LABELS[order.status]}
-                    actionLoading={orderState.actionLoading}
-                    rebalancingId={orderState.rebalancingId}
-                    releasingId={releasingId}
-                    releaseNote={releaseNote}
-                    onToggleExpand={() => setExpanded(expanded === order.id ? null : order.id)}
-                    onChangeStatus={(status) => orderState.changeStatusWithGps(order.id, status, order)}
-                    onRebalance={() => orderState.doRebalance(order.id)}
-                    onStartRelease={() => setReleasingId(order.id)}
-                    onReleaseNoteChange={setReleaseNote}
-                    onConfirmRelease={() => orderState.releaseOrder(order.id, releaseNote, () => { setReleasingId(null); setReleaseNote(''); })}
-                    onCancelRelease={() => { setReleasingId(null); setReleaseNote(''); }}
-                    chatOpen={chatOpen}
-                    onToggleChat={() => setChatOpen(chatOpen === order.id ? null : order.id)}
-                    authToken={auth.token}
-                    chatTick={orderState.chatTick}
-                  />
-                );
-              })}
+        {view.tab === 'waiting' && (
+          <div style={{ marginBottom:'1.25rem' }}>
+            <p style={{ fontSize:'0.8rem', fontWeight:700, color:'var(--text-tertiary)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.5rem' }}>
+              Buscando conductor ({view.unoffered.length})
+            </p>
+            <ul style={{ listStyle:'none', padding:0 }}>
+              {view.unoffered.map((order) => (
+                <DriverAvailableOrderCard
+                  key={order.id}
+                  order={order}
+                  actionLoading={view.actionLoading}
+                  onAccept={() => view.acceptDirectly(order.id)}
+                />
+              ))}
             </ul>
-          )
-      )}
+          </div>
+        )}
 
-      {tab === 'past' && (
-        orderState.past.length === 0
-          ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
-          : (
-            <ul className="orders-tab-panel reverse" style={{ listStyle:'none', padding:0 }}>
-              {orderState.past.slice(0, 50).map(order => {
-                const color = STATUS_COLOR[order.status] || '#9ca3af';
-                const historyKey = 'h_' + order.id;
-                return (
-                  <DriverPastOrderCard
-                    key={order.id}
-                    order={order}
-                    color={color}
-                    isExpanded={expanded === historyKey}
-                    isChatOpen={chatOpen === historyKey}
-                    statusLabel={STATUS_LABELS[order.status]}
-                    reportingId={reportingId}
-                    reportText={reportText}
-                    onToggleExpand={() => setExpanded(expanded === historyKey ? null : historyKey)}
-                    onToggleChat={() => setChatOpen(chatOpen === historyKey ? null : historyKey)}
-                    authToken={auth.token}
-                    chatTick={orderState.chatTick}
-                    onStartReport={() => setReportingId(order.id)}
-                    onReportTextChange={setReportText}
-                    onSendReport={() => sendReport(order.id)}
-                    onCancelReport={() => { setReportingId(null); setReportText(''); }}
-                  />
-                );
-              })}
-            </ul>
-          )
-      )}
+        <div style={{ display:'flex', gap:'0.4rem', marginBottom:'1rem' }} />
 
+        {view.tab === 'active' && (
+          view.active.length === 0
+            ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos activos.</p>
+            : (
+              <ul className="orders-tab-panel" style={{ listStyle:'none', padding:0 }}>
+                {view.active.map((order) => {
+                  const color = STATUS_COLOR[order.status] || '#9ca3af';
+                  const isActive = order.id === view.activeOrderId;
+                  const DRIVER_ST = { assigned:'Asignado', on_the_way:'En camino', preparing:'En tienda', ready:'Listo retiro' };
+                  return (
+                    <DriverActiveOrderCard
+                      key={order.id}
+                      order={order}
+                      color={color}
+                      isActive={isActive}
+                      isExpanded={view.expanded === order.id}
+                      statusLabel={DRIVER_ST[order.status] || STATUS_LABELS[order.status]}
+                      actionLoading={view.actionLoading}
+                      rebalancingId={view.rebalancingId}
+                      releasingId={view.releasingId}
+                      releaseNote={view.releaseNote}
+                      onToggleExpand={() => view.setExpanded(view.expanded === order.id ? null : order.id)}
+                      onChangeStatus={(status) => view.changeStatusWithGps(order.id, status, order)}
+                      onRebalance={() => view.doRebalance(order.id)}
+                      onStartRelease={() => view.setReleasingId(order.id)}
+                      onReleaseNoteChange={view.setReleaseNote}
+                      onConfirmRelease={() => view.confirmRelease(order.id)}
+                      onCancelRelease={view.closeReleaseEditor}
+                      chatOpen={view.chatOpen}
+                      onToggleChat={() => view.toggleChat(order.id)}
+                      authToken={auth.token}
+                      chatTick={view.chatTick}
+                    />
+                  );
+                })}
+              </ul>
+            )
+        )}
+
+        {view.tab === 'past' && (
+          view.past.length === 0
+            ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
+            : (
+              <ul className="orders-tab-panel reverse" style={{ listStyle:'none', padding:0 }}>
+                {view.past.slice(0, 50).map((order) => {
+                  const color = STATUS_COLOR[order.status] || '#9ca3af';
+                  const historyKey = `h_${order.id}`;
+                  return (
+                    <DriverPastOrderCard
+                      key={order.id}
+                      order={order}
+                      color={color}
+                      isExpanded={view.expanded === historyKey}
+                      isChatOpen={view.chatOpen === historyKey}
+                      statusLabel={STATUS_LABELS[order.status]}
+                      reportingId={view.reportingId}
+                      reportText={view.reportText}
+                      onToggleExpand={() => view.setExpanded(view.expanded === historyKey ? null : historyKey)}
+                      onToggleChat={() => view.toggleChat(historyKey)}
+                      authToken={auth.token}
+                      chatTick={view.chatTick}
+                      onStartReport={() => view.setReportingId(order.id)}
+                      onReportTextChange={view.setReportText}
+                      onSendReport={() => view.sendReport(order.id)}
+                      onCancelReport={() => { view.setReportingId(null); view.setReportText(''); }}
+                    />
+                  );
+                })}
+              </ul>
+            )
+        )}
       </div>
     </div>
   );

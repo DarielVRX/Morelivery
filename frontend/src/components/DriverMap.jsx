@@ -80,7 +80,7 @@ export default function DriverMap({
       // applyDarkFilter is also called in map.once('load') below
       applyDarkFilter(isDark);
     }
-  }, [isDark]); // eslint-disable-line react-hooks/exhaustive-deps  }, [isDark]);
+  }, [isDark]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Sincronizar refs sin recrear listeners ───────────────────────────────────
   useEffect(() => { hasActiveOrderRef.current = hasActiveOrder;  }, [hasActiveOrder]);
