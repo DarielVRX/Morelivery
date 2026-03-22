@@ -87,7 +87,7 @@ export function TipInput({ onValidAmount }) {
 // ── Config por rol ─────────────────────────────────────────
 const ROLE_CONFIG = {
   customer: {
-    icon: IconCustomer,
+    icon: <IconCustomer width={13} height={13} />,
     color: 'var(--brand)',
     textColor: '#fff',
     align: 'flex-end',
@@ -95,7 +95,7 @@ const ROLE_CONFIG = {
     label: 'Tú',
   },
   driver: {
-    icon: IconDriver,
+    icon: <IconDriver width={13} height={13} />,
     color: '#f59e0b',
     textColor: '#fff',
     align: 'flex-start',
@@ -103,7 +103,7 @@ const ROLE_CONFIG = {
     label: 'Repartidor',
   },
   restaurant: {
-    icon: IconRestaurant,
+    icon: <IconRestaurant width={13} height={13} />,
     color: '#10b981',
     textColor: '#fff',
     align: 'flex-start',
