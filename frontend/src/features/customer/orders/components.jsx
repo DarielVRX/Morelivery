@@ -237,6 +237,7 @@ export function OrderChat({ orderId, token, onNewMessage }) {
       sender_role: myRole,
       text:        text.trim(),
       created_at:  new Date().toISOString(),
+      _own:        true, // siempre derecha, independiente del rol
     };
     setMessages(m => [...m, optimistic]);
     const sent = text.trim();
@@ -322,7 +323,7 @@ export function OrderChat({ orderId, token, onNewMessage }) {
               <MessageBubble
                 key={m.id}
                 m={m}
-                isOwn={m.sender_id === auth.user?.id || m.sender_role === myRole}
+                isOwn={m._own === true || m.sender_id === auth.user?.id}
               />
             )
         ))}
