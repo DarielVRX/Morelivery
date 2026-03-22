@@ -7,39 +7,15 @@
 // OPT-12: livePos y liveHeading son refs, NO estado — sin re-render en cada tick GPS
 
 import { useEffect, useRef, useState } from 'react';
-import { getBearing }                  from '../utils/geo';
-import { ensureMapLibreCSS, ensureMapLibreJS } from '../utils/mapLibre';
+import { DriverMapOverlays } from '../features/driver/map/overlays';
+import { DEFAULT_POS, MORELIA_BOUNDS, STADIA_KEY, STYLE_DARK, STYLE_LIGHT } from '../features/driver/map/config';
+import { createDriverPoiMarker, DRIVER_ROUTE_BORDER_ID, DRIVER_ROUTE_LAYER_ID, DRIVER_ROUTE_SOURCE_ID, getDriverRouteFeature, syncDriverRouteLayers } from '../features/driver/map/helpers';
 import { useTheme } from '../contexts/ThemeContext';
-
-// Stadia Maps styles — professional tiles with CDN SLA
-// API key read from VITE_STADIA_KEY env var; falls back to OpenFreeMap if not set.
-// Stadia has native dark/light pairs — no CSS filter hack needed.
-var STADIA_KEY = import.meta.env?.VITE_STADIA_KEY || '';
-
-function stadiaStyle(name) {
-  const base = `https://tiles.stadiamaps.com/styles/${name}.json`;
-  return STADIA_KEY ? `${base}?api_key=${STADIA_KEY}` : base;
-}
-
-// Light: alidade_smooth — cleaner than bright, less visual noise, routes stand out more
-// Dark:  alidade_smooth_dark — native dark, no color inversion needed
-// Fallback: OpenFreeMap (no key required)
-var STYLE_LIGHT = STADIA_KEY
-  ? stadiaStyle('alidade_smooth')
-  : 'https://tiles.openfreemap.org/styles/bright';
-var STYLE_DARK = STADIA_KEY
-  ? stadiaStyle('alidade_smooth_dark')
-  : 'https://tiles.openfreemap.org/styles/bright'; // fallback still uses filter
+import { getBearing } from '../utils/geo';
+import { ensureMapLibreCSS, ensureMapLibreJS } from '../utils/mapLibre';
 
 // OPT-4: singleton — se asigna una vez cuando la lib carga y se reutiliza
 var _ml = null;
-
-// ── Constantes de Morelia ─────────────────────────────────────────────────────
-var DEFAULT_POS    = { lat: 19.70595, lng: -101.19498 };
-// Bounding box del Área Metropolitana de Morelia.
-// Cubre Morelia + Tarímbaro, Charo, Jesús del Monte, Cuto del Porvenir.
-// MapLibre no carga tiles fuera de este rectángulo → ~40% menos memoria GPU.
-var MORELIA_BOUNDS = [[-101.42, 19.57], [-100.98, 19.84]];
 
 export default function DriverMap({
   driverPos, customPin, onCustomPin, hasActiveOrder,
@@ -87,16 +63,14 @@ export default function DriverMap({
       const newStyle = isDark ? STYLE_DARK : STYLE_LIGHT;
       map.setStyle(newStyle);
       map.once('styledata', () => {
-        const SRC = 'driver-route-source', LYR = 'driver-route-layer', BDR = 'driver-route-border';
-        const coords = (routeGeometry || []).map(p => [p.lng, p.lat]);
-        if (!coords.length) return;
+        const routeFeature = getDriverRouteFeature(routeGeometry);
+        if (!routeFeature) return;
         try {
-          const geo = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } };
-          if (!map.getSource(SRC)) map.addSource(SRC, { type: 'geojson', data: geo });
-          if (!map.getLayer(BDR)) map.addLayer({ id: BDR, type: 'line', source: SRC,
+          if (!map.getSource(DRIVER_ROUTE_SOURCE_ID)) map.addSource(DRIVER_ROUTE_SOURCE_ID, { type: 'geojson', data: routeFeature });
+          if (!map.getLayer(DRIVER_ROUTE_BORDER_ID)) map.addLayer({ id: DRIVER_ROUTE_BORDER_ID, type: 'line', source: DRIVER_ROUTE_SOURCE_ID,
             paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.4 },
             layout: { 'line-cap': 'round', 'line-join': 'round' } });
-          if (!map.getLayer(LYR)) map.addLayer({ id: LYR, type: 'line', source: SRC,
+          if (!map.getLayer(DRIVER_ROUTE_LAYER_ID)) map.addLayer({ id: DRIVER_ROUTE_LAYER_ID, type: 'line', source: DRIVER_ROUTE_SOURCE_ID,
             paint: { 'line-color': '#6366f1', 'line-width': 5, 'line-opacity': 0.95 },
             layout: { 'line-cap': 'round', 'line-join': 'round' } });
         } catch (_) {}
@@ -350,61 +324,21 @@ export default function DriverMap({
     if (!map || !_ml) return;
     if (markersRef.current.pickup)   { markersRef.current.pickup.remove();   markersRef.current.pickup   = null; }
     if (markersRef.current.delivery) { markersRef.current.delivery.remove(); markersRef.current.delivery = null; }
-    const mkr = (pos, emoji, color, label) => {
-      const el = document.createElement('div');
-      el.style.cssText = `width:28px;height:28px;border-radius:50%;background:${color};display:grid;place-items:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);font-size:15px`;
-      el.textContent = emoji;
-      return new _ml.Marker({ element: el }).setLngLat([pos.lng, pos.lat])
-        .setPopup(new _ml.Popup({ closeButton: false }).setText(label));
-    };
-    if (pickupPos)   markersRef.current.pickup   = mkr(pickupPos,   '🏪', '#16a34a', pickupLabel   || 'Tienda').addTo(map);
-    if (deliveryPos) markersRef.current.delivery = mkr(deliveryPos, '📦', '#f97316', deliveryLabel || 'Cliente').addTo(map);
+    if (pickupPos) {
+      markersRef.current.pickup = createDriverPoiMarker(_ml, pickupPos, { emoji: '🏪', color: '#16a34a', label: pickupLabel || 'Tienda' }).addTo(map);
+    }
+    if (deliveryPos) {
+      markersRef.current.delivery = createDriverPoiMarker(_ml, deliveryPos, { emoji: '📦', color: '#f97316', label: deliveryLabel || 'Cliente' }).addTo(map);
+    }
   }, [pickupPos?.lat, pickupPos?.lng, deliveryPos?.lat, deliveryPos?.lng, pickupLabel, deliveryLabel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ruta GeoJSON
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    const SRC = 'driver-route-source', LYR = 'driver-route-layer', BDR = 'driver-route-border';
-
     function draw() {
       try {
-        const coords = (routeGeometry || []).map(p => [p.lng, p.lat]);
-        const geo = {
-          type: 'Feature', properties: {},
-          geometry: { type: 'LineString', coordinates: coords },
-        };
-
-        // Remove old route if clearing
-        if (!coords.length) {
-          try { if (map.getLayer(BDR)) map.removeLayer(BDR); } catch (_) {}
-          try { if (map.getLayer(LYR)) map.removeLayer(LYR); } catch (_) {}
-          try { if (map.getSource(SRC)) map.removeSource(SRC); } catch (_) {}
-          return;
-        }
-
-        if (map.getSource(SRC)) {
-          map.getSource(SRC).setData(geo);
-        } else {
-          map.addSource(SRC, { type: 'geojson', data: geo });
-        }
-
-        // Border layer (drawn first = behind)
-        if (!map.getLayer(BDR)) {
-          map.addLayer({
-            id: BDR, type: 'line', source: SRC,
-            paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.4 },
-            layout: { 'line-cap': 'round', 'line-join': 'round' },
-          });
-        }
-        // Main line layer
-        if (!map.getLayer(LYR)) {
-          map.addLayer({
-            id: LYR, type: 'line', source: SRC,
-            paint: { 'line-color': '#6366f1', 'line-width': 5, 'line-opacity': 0.95 },
-            layout: { 'line-cap': 'round', 'line-join': 'round' },
-          });
-        }
+        syncDriverRouteLayers(map, routeGeometry);
       } catch (e) {
         console.warn('[DriverMap] route draw error:', e.message);
       }
@@ -477,37 +411,7 @@ export default function DriverMap({
     <div style={{ height: '100%', width: '100%', position: 'relative' }}>
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
 
-      {showAttrib && (
-        <div style={{ position: 'absolute', bottom: 52, left: 8, zIndex: 10,
-          background: 'rgba(255,255,255,0.92)', borderRadius: 6,
-          padding: '0.3rem 0.6rem', fontSize: '0.65rem', color: '#444',
-          boxShadow: '0 1px 6px #0002', maxWidth: 260, pointerEvents: 'none' }}>
-          © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer"
-            style={{ color: '#2563eb' }}>OpenStreetMap</a> contributors ·{' '}
-          {STADIA_KEY
-            ? <><a href="https://stadiamaps.com" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>Stadia Maps</a> · </>
-            : <><a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>OpenFreeMap</a> · </>
-          }
-          <a href="https://maplibre.org" target="_blank" rel="noopener noreferrer"
-            style={{ color: '#2563eb' }}>MapLibre</a>
-        </div>
-      )}
-
-      <button onClick={() => setShowAttrib(v => !v)} title="Atribuciones"
-        style={{ position: 'absolute', bottom: 8, left: 8, zIndex: 10,
-          background: 'rgba(255,255,255,0.82)', border: '1px solid #ccc',
-          borderRadius: 4, width: 22, height: 22, cursor: 'pointer',
-          fontSize: '0.65rem', display: 'flex', alignItems: 'center',
-          justifyContent: 'center', color: '#555', padding: 0 }}>ℹ</button>
-
-      {!hasGPS && (
-        <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(0,0,0,0.5)', color: '#fff', borderRadius: 20,
-          padding: '0.2rem 0.75rem', fontSize: '0.72rem', zIndex: 5,
-          pointerEvents: 'none', whiteSpace: 'nowrap' }}>
-          📍 Sin GPS — toca el mapa para marcar posición
-        </div>
-      )}
+      <DriverMapOverlays hasGPS={hasGPS} showAttrib={showAttrib} onToggleAttrib={() => setShowAttrib(v => !v)} />
     </div>
   );
 }

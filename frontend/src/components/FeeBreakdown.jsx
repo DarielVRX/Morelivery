@@ -1,14 +1,15 @@
 // components/FeeBreakdown.jsx
+import { getDriverEarningCents, getOrderGrandTotalCents, getDriverTipCents, isCashPayment } from '../features/driver/shared/orderUtils';
 import { fmt } from '../utils/format';
 
 export default function FeeBreakdown({ order }) {
-  const sub    = order.total_cents        || 0;
-  const svc    = order.service_fee_cents  || 0;
+  const sub = order.total_cents || 0;
+  const svc = order.service_fee_cents || 0;
   const delFee = order.delivery_fee_cents || 0;
-  const tip    = order.tip_cents          || 0;
-  const isCash = (order.payment_method || 'cash') === 'cash';
-  const earn   = delFee + Math.round(svc * 0.5) + tip;
-  const total  = sub + svc + delFee + tip;
+  const tip = getDriverTipCents(order);
+  const isCash = isCashPayment(order);
+  const earn = getDriverEarningCents(order);
+  const total = getOrderGrandTotalCents(order);
 
   if (!svc && !delFee) return null;
 
