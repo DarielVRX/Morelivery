@@ -508,15 +508,19 @@ export default function RestaurantMenu() {
                     )}
                     <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
                       <button className="btn-sm" onClick={() => startEdit(product)}>Editar</button>
-                      <button className="btn-sm" onClick={() => toggleAvailable(product)}>
-                        {product.is_available ? 'Desactivar' : 'Activar'}
-                      </button>
                       <button className="btn-sm" onClick={() => {
                         setEditingImg(product.id);
                         setImgUrl(product.image_url && !product.image_url.startsWith('data:') ? product.image_url : '');
                         clear();
                       }}>
                         {product.image_url ? 'Cambiar imagen' : 'Agregar imagen'}
+                      </button>
+                      <button className="btn-sm" onClick={() => toggleAvailable(product)}
+                        style={product.is_available
+                          ? { borderColor:'#86a87a', color:'#4a7a40' }
+                          : { borderColor:'#c0877a', color:'#8a4a40' }
+                        }>
+                        {product.is_available ? 'Desactivar' : 'Activar'}
                       </button>
                       {confirmDelete === product.id ? (
                         <div style={{ display:'flex', gap:'0.3rem', alignItems:'center' }}>

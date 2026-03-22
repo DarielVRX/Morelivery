@@ -3,6 +3,7 @@ import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 import { useAppBadge } from '../../hooks/useAppBadge';
+import { IconChat, OrderChat } from '../../features/customer/orders/components';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
@@ -13,14 +14,6 @@ function IconOrders() {
       <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
       <rect x="9" y="3" width="6" height="4" rx="1"/>
       <path d="M9 12h6M9 16h4"/>
-    </svg>
-  );
-}
-function IconClock() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display:'block' }}>
-      <circle cx="12" cy="12" r="10"/>
-      <polyline points="12 6 12 12 16 14"/>
     </svg>
   );
 }
@@ -118,6 +111,19 @@ function PrepTimeControl({ value, onChange, onSave, saving }) {
   );
 }
 
+// ── OrderChat adaptado para rol restaurante ───────────────────────────────────
+function RestaurantOrderChat({ orderId, token }) {
+  const { auth } = useAuth();
+
+  // Reutilizamos OrderChat pero necesitamos que el mensaje optimista lleve role=restaurant.
+  // La forma más limpia es un wrapper fino que sobreescribe sender_role en el optimista.
+  // Como OrderChat está definido en customer/components y usa auth.user internamente,
+  // simplemente lo renderizamos — los mensajes propios se identifican por sender_role
+  // en MessageBubble. Si el backend guarda correctamente el rol del emisor no hay
+  // ningún cambio necesario; el chat funciona igual para cualquier rol.
+  return <OrderChat orderId={orderId} token={token} senderRole="restaurant" />;
+}
+
 export default function RestaurantOrders() {
   const { auth } = useAuth();
   const [orders, setOrders]     = useState([]);
@@ -133,17 +139,27 @@ export default function RestaurantOrders() {
   const [ratedOrders,   setRatedOrders]   = useState(new Set());
   const [reportMsg, setReportMsg]     = useState('');
   const [expanded, setExpanded]       = useState(null);
+  const [chatOpen, setChatOpen]       = useState(null); // orderId | null
   const [suggestionFor, setSuggestionFor]   = useState('');
   const [readyCooldown, setReadyCooldown]   = useState({});
   const [suggDrafts, setSuggDrafts]         = useState({});
   // ── Banners del motor de cocina ───────────────────────────────────────────
   const [kitchenBanners, setKitchenBanners] = useState([]);
-  // ── Tiempo de preparación temporal (sesión) ───────────────────────────────
-  const [prepMins, setPrepMins]   = useState(15);
+  // ── Tiempo de preparación (sesión) ───────────────────────────────────────
+  // prepMins es el valor "hoy" que se muestra en PrepTimeControl.
+  // Se inicializa desde el servidor al cargar y se actualiza cuando:
+  //   1. El restaurante lo guarda desde Schedule (valor default) → se recibe via SSE prep_estimate_updated
+  //   2. El motor lo ajusta automáticamente → también llega como prep_estimate_updated
+  const [prepMins, setPrepMins]     = useState(15);
   const [prepSaving, setPrepSaving] = useState(false);
   const loadDataRef = useRef(null);
 
   const handleKitchenEvent = useCallback((data) => {
+    // ── Sincronizar prepMins cuando el motor o Schedule cambian el estimado ──
+    if (data.type === 'prep_estimate_updated' && data.newEstimate) {
+      setPrepMins(Math.round(data.newEstimate / 60));
+    }
+
     const bannerId = `${data.type}-${Date.now()}`;
     const duration = data.type === 'order_cancelled_preparing' ? 30_000 : 12_000;
     setKitchenBanners(prev => [...prev, { ...data, bannerId }]);
@@ -175,16 +191,33 @@ export default function RestaurantOrders() {
       ]);
       setOrders(od.orders || []);
       setProducts(md.menu || []);
+      // Sincronizar prepMins con el valor del servidor en la carga inicial
+      if (od.prepEstimateS) {
+        setPrepMins(Math.round(od.prepEstimateS / 60));
+      }
     } catch (e) { setMsg(e.message); }
   }
 
-  useEffect(() => { loadDataRef.current = loadData; });
-  useEffect(() => { loadData(); }, [auth.token]);
+  // Carga inicial del estimado desde /restaurants/my
   useEffect(() => {
     if (!auth.token) return;
-    const id = setInterval(() => loadDataRef.current?.(), 5000);
-    return () => clearInterval(id);
+    apiFetch('/restaurants/my', {}, auth.token)
+      .then(d => {
+        if (d.restaurant?.prep_time_estimate_s) {
+          setPrepMins(Math.round(d.restaurant.prep_time_estimate_s / 60));
+        }
+      })
+      .catch(() => {});
   }, [auth.token]);
+
+  useEffect(() => { loadDataRef.current = loadData; });
+
+  // Solo carga inicial — el SSE se encarga de las actualizaciones
+  useEffect(() => { loadData(); }, [auth.token]);
+
+  // ── Polling eliminado: el SSE dispara loadData en cada evento de orden ────
+  // (antes: setInterval cada 5s sobre /orders/my y /restaurants/my/menu)
+
   useRealtimeOrders(auth.token, () => loadDataRef.current?.(), () => {}, undefined, undefined, undefined, handleKitchenEvent);
 
   async function savePrepTime() {
@@ -204,6 +237,7 @@ export default function RestaurantOrders() {
       await apiFetch('/restaurants/my/prep-estimate',
         { method: 'PATCH', body: JSON.stringify({ prep_time_estimate_s: secs }) },
         auth.token);
+      setPrepMins(minutes);
       loadData();
     } catch (e) { setMsg(e.message); }
   }
@@ -355,7 +389,7 @@ export default function RestaurantOrders() {
           )}
         </div>
 
-        {/* Control de tiempo de preparación (temporal — solo hoy) */}
+        {/* Control de tiempo de preparación (hoy) */}
         <PrepTimeControl
           value={prepMins}
           onChange={setPrepMins}
@@ -448,6 +482,7 @@ export default function RestaurantOrders() {
               {active.map(order => {
                 const color = STATUS_COLOR[order.status] || '#9ca3af';
                 const isExp = expanded === order.id;
+                const isChatOpen = chatOpen === order.id;
                 return (
                   <li key={order.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden' }}>
                     <div onClick={() => setExpanded(isExp ? null : order.id)}
@@ -509,6 +544,17 @@ export default function RestaurantOrders() {
                         </button>
                       )}
                     </div>
+
+                    {/* ── Chat ── */}
+                    <button
+                      onClick={() => setChatOpen(isChatOpen ? null : order.id)}
+                      style={{ marginTop:'0.5rem', display:'flex', alignItems:'center', gap:'0.35rem',
+                        background:'none', border:'1px solid var(--border)', borderRadius:6,
+                        padding:'0.25rem 0.65rem', fontSize:'0.78rem', cursor:'pointer',
+                        color:'var(--text-secondary)', fontWeight:600 }}>
+                      <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Chat del pedido'}
+                    </button>
+                    {isChatOpen && <RestaurantOrderChat orderId={order.id} token={auth.token} />}
 
                     {/* Panel sugerencia */}
                     {suggestionFor === order.id && (
@@ -585,6 +631,7 @@ export default function RestaurantOrders() {
               {past.slice(0, 50).map(o => {
                 const color    = STATUS_COLOR[o.status] || '#9ca3af';
                 const isPastExp = expanded === ('h_'+o.id);
+                const isChatOpen = chatOpen === o.id;
                 return (
                   <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden' }}>
                     <div onClick={() => setExpanded(isPastExp ? null : 'h_'+o.id)}
@@ -616,6 +663,18 @@ export default function RestaurantOrders() {
                           </div>
                         )}
                         <FeeBreakdown order={o} />
+
+                        {/* Chat historial */}
+                        <button
+                          onClick={() => setChatOpen(isChatOpen ? null : o.id)}
+                          style={{ marginTop:'0.4rem', display:'flex', alignItems:'center', gap:'0.35rem',
+                            background:'none', border:'1px solid var(--border)', borderRadius:6,
+                            padding:'0.25rem 0.65rem', fontSize:'0.78rem', cursor:'pointer',
+                            color:'var(--text-secondary)', fontWeight:600 }}>
+                          <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Ver chat'}
+                        </button>
+                        {isChatOpen && <RestaurantOrderChat orderId={o.id} token={auth.token} />}
+
                         {reportingId === o.id ? (
                           <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginTop:'0.4rem' }}>
                             <textarea value={reportText} onChange={e=>setReportText(e.target.value)}
