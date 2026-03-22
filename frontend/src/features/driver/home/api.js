@@ -42,3 +42,16 @@ export function submitRoadPreferences({ ways, token }) {
     }),
   }, token);
 }
+
+
+export function fetchRouteModel({ origin, pickup, delivery, token }) {
+  return apiFetch('/routes/model', {
+    method: 'POST',
+    body: JSON.stringify({
+      origin,
+      destination: delivery,
+      waypoints: origin !== pickup ? [pickup] : [],
+      includeSteps: true,
+    }),
+  }, token);
+}

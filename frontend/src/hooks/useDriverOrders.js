@@ -61,12 +61,6 @@ export function useDriverOrders(token) {
     loadData();
   }, [loadData]);
 
-  useEffect(() => {
-    if (!token) return;
-    const id = setInterval(() => loadDataRef.current?.(), 5000);
-    return () => clearInterval(id);
-  }, [token]);
-
   useRealtimeOrders(
     token,
     () => loadDataRef.current?.(),
@@ -77,6 +71,7 @@ export function useDriverOrders(token) {
         setChatTick((value) => value + 1);
       }
     },
+    () => loadDataRef.current?.(),
   );
 
   const setChatOpen = useCallback((valueOrUpdater) => {
