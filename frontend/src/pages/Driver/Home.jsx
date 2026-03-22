@@ -10,7 +10,9 @@ import ActiveOrderPanel from '../../components/ActiveOrderPanel';
 import OfferPanel from '../../components/OfferPanel';
 import PullToRefresh from '../../components/PullToRefresh';
 import { useAuth } from '../../contexts/AuthContext';
+import { ensureDriverHomeAnimations } from '../../features/driver/home/animations';
 import DriverHomeMapSection from '../../features/driver/home/DriverHomeMapSection.jsx';
+import { buildGoogleMapsAppUrl, buildGoogleMapsWebUrl, buildGoogleNavigationUrl, formatRouteSummary, getDriverRouteStops, getGoogleNavigationTarget } from '../../features/driver/home/navigation';
 import DriverHomeStatusBar from '../../features/driver/home/DriverHomeStatusBar.jsx';
 import { useAppBadge } from '../../hooks/useAppBadge';
 import { useDriverLocation } from '../../hooks/useDriverLocation';
@@ -20,26 +22,7 @@ import { reverseGeocode } from '../../utils/geo';
 import { ZONE_LABELS } from '../../utils/format';
 import { getErrorMessage } from '../../utils/errorMessage';
 
-if (typeof document !== 'undefined' && !document.getElementById('dh-animations')) {
-  const style = document.createElement('style');
-  style.id = 'dh-animations';
-  style.textContent = `
-  @keyframes dh-spin { to { transform: rotate(360deg); } }
-  .dh-spinner { animation: dh-spin 0.75s linear infinite; transform-origin: 50% 50%; }
-  .dh-ptr-indicator {
-    position: absolute; top: 0; left: 50%;
-    transform: translateX(-50%) translateY(-50px);
-    will-change: transform; pointer-events: none;
-  }
-  .dh-ptr-indicator.pulling   { transition: none; }
-  .dh-ptr-indicator.releasing { transition: transform 0.18s ease; }
-  .dh-ptr-content             { will-change: transform; }
-  .dh-ptr-content.releasing   { transition: transform 0.22s ease; }
-  .dh-offer-panel { will-change: transform; transform: translateZ(0); }
-  .dh-fab         { will-change: transform; }
-  `;
-  document.head.appendChild(style);
-}
+ensureDriverHomeAnimations();
 
 export default function DriverHome() {
   const { auth, patchUser } = useAuth();
@@ -162,15 +145,7 @@ export default function DriverHome() {
   function openRoadRouteApi() {
     if (!order.activeOrder) return;
 
-    const pickup = order.activeOrder.restaurant_lat
-      ? { lat: Number(order.activeOrder.restaurant_lat), lng: Number(order.activeOrder.restaurant_lng) }
-      : null;
-    const delivery = order.activeOrder.delivery_lat
-      ? { lat: Number(order.activeOrder.delivery_lat), lng: Number(order.activeOrder.delivery_lng) }
-      : order.activeOrder.customer_lat
-        ? { lat: Number(order.activeOrder.customer_lat), lng: Number(order.activeOrder.customer_lng) }
-        : null;
-
+    const { pickup, delivery } = getDriverRouteStops(order.activeOrder);
     if (!pickup || !delivery) {
       setMsg('Faltan coordenadas del pedido para trazar la ruta');
       return;
@@ -185,7 +160,7 @@ export default function DriverHome() {
           if (!data?.geometry?.length) throw new Error('Ruta vacía');
           setRouteGeometry(data.geometry);
           setRouteSteps(Array.isArray(data?.steps) ? data.steps : []);
-          setMsg(`Ruta: ${Math.round(data.distance_m / 1000 * 10) / 10} km · ~${Math.round(data.duration_s / 60)} min`);
+          setMsg(formatRouteSummary(data));
         })
         .catch((error) => {
           setRouteGeometry(null);
@@ -212,11 +187,8 @@ export default function DriverHome() {
   }
 
   function openGoogleNavigation() {
-    if (!order.activeOrder) return;
-    const onTheWay = order.activeOrder.status === 'on_the_way';
-    const dLat = onTheWay ? Number(order.activeOrder.customer_lat) : Number(order.activeOrder.restaurant_lat);
-    const dLng = onTheWay ? Number(order.activeOrder.customer_lng) : Number(order.activeOrder.restaurant_lng);
-    if (!dLat || !dLng) {
+    const target = getGoogleNavigationTarget(order.activeOrder);
+    if (!target) {
       setMsg('Faltan coordenadas para navegar');
       return;
     }
@@ -224,13 +196,13 @@ export default function DriverHome() {
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     if (isIOS) {
       const anchor = document.createElement('a');
-      anchor.href = `comgooglemaps://?daddr=${dLat},${dLng}&directionsmode=driving`;
+      anchor.href = buildGoogleMapsAppUrl(target);
       anchor.click();
-      setTimeout(() => window.open(`https://maps.google.com/maps?daddr=${dLat},${dLng}&directionsmode=driving`, '_blank', 'noopener'), 500);
+      setTimeout(() => window.open(buildGoogleMapsWebUrl(target), '_blank', 'noopener'), 500);
       return;
     }
 
-    window.location.href = `google.navigation:q=${dLat},${dLng}&mode=d`;
+    window.location.href = buildGoogleNavigationUrl(target);
   }
 
   function refreshZones() {
