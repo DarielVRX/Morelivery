@@ -679,7 +679,7 @@ export default function RestaurantOrders() {
                           <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Ver chat'}
                         </button>
                         {isChatOpen && <OrderChat
-                          orderId={order.id}
+                          orderId={o.id}
                           token={auth.token}
                           refreshTick={chatTick}  // nuevo prop
                           />}
