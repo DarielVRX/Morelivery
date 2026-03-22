@@ -267,6 +267,7 @@ export default function DriverOrders() {
           </p>
           <ul style={{ listStyle:'none', padding:0 }}>
             {unoffered.map(o => {
+              const isChatOpen = chatOpen === ('h_' + o.id);
               const color  = STATUS_COLOR[o.status] || '#9ca3af';
               const grandTotal = (o.total_cents||0)+(o.service_fee_cents||0)+(o.delivery_fee_cents||0);
               const isUExp = expanded === ('u_'+o.id);
@@ -510,6 +511,22 @@ export default function DriverOrders() {
                           </ul>
                         )}
                         <FeeBreakdown order={o} />
+
+                        {/* Chat historial */}
+                        <button
+                        onClick={() => setChatOpen(isChatOpen ? null : o.id)}
+                        style={{ marginTop:'0.4rem', display:'flex', alignItems:'center', gap:'0.35rem',
+                          background:'none', border:'1px solid var(--border)', borderRadius:6,
+                                padding:'0.25rem 0.65rem', fontSize:'0.78rem', cursor:'pointer',
+                                color:'var(--text-secondary)', fontWeight:600 }}>
+                                <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Ver chat'}
+                                </button>
+                                {isChatOpen && <OrderChat
+                                  orderId={o.id}
+                                  token={auth.token}
+                                  refreshTick={chatTick}
+                                  />}
+
                         {reportingId === o.id ? (
                           <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginTop:'0.3rem' }}>
                             <textarea value={reportText} onChange={e=>setReportText(e.target.value)}
