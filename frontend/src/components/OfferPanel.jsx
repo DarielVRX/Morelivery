@@ -1,4 +1,5 @@
 // components/OfferPanel.jsx — panel de oferta entrante (minimizable)
+import { getDriverEarningCents } from '../features/driver/shared/orderUtils';
 import OfferCountdown from './OfferCountdown';
 import { fmt } from '../utils/format';
 
@@ -14,10 +15,7 @@ export default function OfferPanel({
 }) {
   if (!offer) return null;
 
-  const earn = (offer.delivery_fee_cents || 0)
-    + Math.round((offer.service_fee_cents || 0) * 0.5)
-    + (offer.tip_cents || 0)
-    || offer.driverEarning || 0;
+  const earn = getDriverEarningCents(offer) || offer.driverEarning || 0;
 
   const bagOverflow = offer.bagOverflowPct ?? 0;
   const showBagWarning = bagOverflow > 100;

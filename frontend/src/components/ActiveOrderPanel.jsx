@@ -1,4 +1,5 @@
 // components/ActiveOrderPanel.jsx — panel inferior del pedido activo
+import { getDriverEarningCents, getOrderGrandTotalCents, isCashPayment } from '../features/driver/shared/orderUtils';
 import { fmt } from '../utils/format';
 import FeeBreakdown from './FeeBreakdown';
 
@@ -27,13 +28,10 @@ export default function ActiveOrderPanel({
 }) {
   if (!order) return null;
 
-  const isOTW  = order.status === 'on_the_way';
-  const isCash = (order.payment_method || 'cash') === 'cash';
-  const total  = (order.total_cents || 0) + (order.service_fee_cents || 0)
-               + (order.delivery_fee_cents || 0) + (order.tip_cents || 0);
-  const earn   = (order.delivery_fee_cents || 0)
-               + Math.round((order.service_fee_cents || 0) * 0.5)
-               + (order.tip_cents || 0);
+  const isOTW = order.status === 'on_the_way';
+  const isCash = isCashPayment(order);
+  const total = getOrderGrandTotalCents(order);
+  const earn = getDriverEarningCents(order);
 
   const expandStyle = {
     display:           'grid',
