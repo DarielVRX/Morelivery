@@ -2,9 +2,8 @@
 // ordersContent se monta UNA sola vez — en desktop es columna fija,
 // en móvil la misma columna se transforma en drawer via CSS (sin re-mount).
 import { useEffect, useState } from 'react';
-import PullToRefresh from './PullToRefresh';
 
-export default function SplitLayout({ homeContent, ordersContent, onRefresh }) {
+export default function SplitLayout({ homeContent, ordersContent }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
@@ -13,7 +12,6 @@ export default function SplitLayout({ homeContent, ordersContent, onRefresh }) {
   }, [mobileOpen]);
 
   return (
-    <PullToRefresh onRefresh={onRefresh}>
     <div className="split-root">
 
     {/* ── Orders: una sola instancia — desktop col + mobile drawer ── */}
@@ -149,7 +147,5 @@ export default function SplitLayout({ homeContent, ordersContent, onRefresh }) {
         }
       }
       `}</style>
-    </div>
-    </PullToRefresh>
   );
 }
