@@ -12,8 +12,8 @@ export async function nominatimReverse(lat, lng) {
     const a = data.address || {};
 
     // En Morelia: centros de ciudad → a.city, periféria → a.village para colonia
-    const coloniaRaw = a.suburb || a.neighbourhood || a.quarter || a.city_district || a.village || '';
-    const ciudadRaw  = a.city || a.county || 'Morelia';
+    const coloniaRaw = a.suburb || a.neighbourhood || a.quarter || a.city || a.village || '';
+    const ciudadRaw  = a.county || '';
 
     const label =
       [a.road, a.house_number, coloniaRaw, ciudadRaw].filter(Boolean).join(', ') ||
@@ -24,7 +24,7 @@ export async function nominatimReverse(lat, lng) {
       label,
       colonia:    coloniaRaw,
       ciudad:     ciudadRaw,
-      estado:     a.state || 'Michoacán',
+      estado:     a.state || '',
       postalCode: a.postcode || '',
     };
   } catch {
