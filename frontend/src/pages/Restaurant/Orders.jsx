@@ -112,7 +112,6 @@ function PrepTimeControl({ value, onChange, onSave, saving }) {
 }
 
   <OrderChat orderId={order.id} token={auth.token} refreshTick={chatTick} />
-}
 
 export default function RestaurantOrders() {
   const { auth } = useAuth();
