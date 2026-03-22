@@ -229,8 +229,11 @@ export default function AddressSearchBar({
     }, 400);
   }
 
-  function selectGPS() {
-    if (userPos) onSelectPos({ lat: userPos.lat, lng: userPos.lng, label: 'Ubicación actual' });
+  async function selectGPS() {
+    if (!userPos) return;
+    const geo = await nominatimReverse(userPos.lat, userPos.lng);
+    const label = geo?.label || 'Ubicación actual';
+    onSelectPos({ lat: userPos.lat, lng: userPos.lng, label });
     setOpen(false);
     setResults([]);
     setInputVal('');
