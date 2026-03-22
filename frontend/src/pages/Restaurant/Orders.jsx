@@ -212,14 +212,14 @@ export default function RestaurantOrders() {
 
   useRealtimeOrders(
     auth.token,
-    () => loadDataRef.current?.(),  // onOrderUpdate
-                    () => {},                        // onDriverLocation
-                    undefined,                       // onNewOffer
-                    (data) => {                      // onChatMessage
+    () => loadDataRef.current?.(),
+                    () => {},
+                    undefined,
+                    (data) => {
                       if (data.orderId === chatOpen) setChatTick(t => t + 1);
                     },
-                    undefined,                       // onReconnect
-                    handleKitchenEvent,              // onKitchenEvent
+                    undefined,
+                    handleKitchenEvent,
   );
 
   async function savePrepTime() {

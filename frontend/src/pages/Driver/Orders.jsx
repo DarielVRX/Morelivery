@@ -100,10 +100,10 @@ export default function DriverOrders() {
 
   useRealtimeOrders(
     auth.token,
-    (data) => { loadDataRef.current?.(); ... }, // onOrderUpdate
-                    ({ orderId, lat, lng }) => setDriverPos(...), // onDriverLocation
-                    undefined,                                    // onNewOffer
-                    (data) => {                                   // onChatMessage
+    () => loadDataRef.current?.(),
+                    () => {},
+                    undefined,
+                    (data) => {
                       if (data.orderId === chatOpen) setChatTick(t => t + 1);
                     },
   );
