@@ -1,13 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
-import PullToRefresh    from '../../components/PullToRefresh';
-
-function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
-function fmtDate(ts) {
-  if (!ts) return '—';
-  return new Date(ts).toLocaleDateString('es-MX', { day:'2-digit', month:'short', year:'numeric' });
-}
+import { getDriverEarningCents, getOrderGrandTotalCents, getDriverTipCents, isCashPayment } from '../../features/driver/shared/orderUtils';
+import { fmt, formatShortDate } from '../../utils/format';
 
 var PERIODS = [
   { label: '7 días',  days: 7 },
@@ -153,12 +148,10 @@ export default function DriverEarnings() {
           </h3>
           <ul style={{ listStyle:'none', padding:0 }}>
             {orders.map(o => {
-              const del_fee = o.delivery_fee_cents || 0;
-              const svc     = o.service_fee_cents  || 0;
-              const tip     = (o.tip_cents || 0) + (o.delivered_tip_cents || 0);
-              const earning = del_fee + Math.round(svc * 0.5) + tip;
-              const isCash  = (o.payment_method || 'cash') === 'cash';
-              const grandTotal = (o.total_cents || 0) + svc + del_fee + tip;
+              const tip = getDriverTipCents(o, { includeDeliveredTip: true });
+              const earning = getDriverEarningCents(o, { includeDeliveredTip: true });
+              const isCash = isCashPayment(o);
+              const grandTotal = getOrderGrandTotalCents(o, { includeDeliveredTip: true });
               return (
                 <li key={o.id} className="card" style={{ marginBottom:'0.5rem', padding:'0.7rem 0.875rem' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.2rem' }}>
@@ -166,7 +159,7 @@ export default function DriverEarnings() {
                     <span style={{ fontWeight:800, color:'var(--success)' }}>{fmt(earning)}</span>
                   </div>
                   <div style={{ fontSize:'0.77rem', color:'var(--text-tertiary)' }}>
-                    {fmtDate(o.delivered_at || o.created_at)}
+                    {formatShortDate(o.delivered_at || o.created_at)}
                     {' · '}{{ cash:'Efectivo', card:'Tarjeta', spei:'SPEI' }[o.payment_method] || 'Efectivo'}
                     {tip > 0 && <span style={{ color:'#f59e0b' }}> · Propina +{fmt(tip)}</span>}
                   </div>

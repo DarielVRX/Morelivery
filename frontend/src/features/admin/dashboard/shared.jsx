@@ -62,8 +62,8 @@ export function useTick(interval = 1000) {
   return tick;
 }
 
-export function CooldownBadge({ waitUntil }) {
-  useTick();
+export function CooldownBadge({ waitUntil, tick = 0 }) {
+  void tick;
   const secsR = Math.max(0, Math.round((new Date(waitUntil) - Date.now()) / 1000));
   const color = secsR > 60 ? '#dc2626' : secsR > 20 ? '#f59e0b' : '#9ca3af';
   return (
@@ -73,9 +73,9 @@ export function CooldownBadge({ waitUntil }) {
   );
 }
 
-export function DriversPanel({ drivers, orderId }) {
+export function DriversPanel({ drivers, orderId, tick = 0 }) {
   const [open, setOpen] = useState(false);
-  useTick();
+  void tick;
   const MAX_ACTIVE = 4;
   const classified = drivers.map(d => {
     const isActive = d.active_orders > 0;
@@ -123,7 +123,7 @@ export function DriversPanel({ drivers, orderId }) {
                     <Td>{d.is_available ? <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '0.72rem' }}>● Disp.</span> : <span style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem' }}>○ No</span>}</Td>
                     <Td style={{ textAlign: 'center' }}>{d.active_orders}</Td>
                     <Td>{(d.last_lat && d.last_lng) ? <span style={{ color: 'var(--success)', fontSize: '0.7rem' }}>✓</span> : <span style={{ color: '#9ca3af', fontSize: '0.7rem' }}>—</span>}</Td>
-                    <Td style={{ color: sitColor, fontWeight: d.priority <= 1 ? 700 : 400 }}>{sitLabel}{d.cooldownHere && <CooldownBadge waitUntil={d.cooldownHere.wait_until} />}</Td>
+                    <Td style={{ color: sitColor, fontWeight: d.priority <= 1 ? 700 : 400 }}>{sitLabel}{d.cooldownHere && <CooldownBadge waitUntil={d.cooldownHere.wait_until} tick={tick} />}</Td>
                   </tr>
                 );
               })}
@@ -144,30 +144,21 @@ export function Detail({ label, value, color }) {
   );
 }
 
-export const OfferBar = ({ startedAt, total = 60 }) => {
-  const [pct, setPct] = useState(0);
-
-  useEffect(() => {
-    const tick = () => {
-      const elapsed = (Date.now() - new Date(startedAt).getTime()) / 1000;
-      setPct(Math.min(100, (elapsed / total) * 100));
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [startedAt, total]);
-
+export const OfferBar = ({ startedAt, total = 60, tick = 0 }) => {
+  void tick;
+  const elapsed = (Date.now() - new Date(startedAt).getTime()) / 1000;
+  const pct = Math.min(100, (elapsed / total) * 100);
   const color = pct > 80 ? '#dc2626' : pct > 50 ? '#f59e0b' : '#16a34a';
 
   return (
     <div style={{ width: 80, height: 5, background: '#e5e7eb', borderRadius: 99, overflow: 'hidden' }}>
-    <div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width 1s linear' }} />
+      <div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width 1s linear' }} />
     </div>
   );
 };
 
-export function OrderRow({ order, drivers }) {
-  useTick();
+export function OrderRow({ order, drivers, tick = 0 }) {
+  void tick;
   const [expanded, setExpanded] = useState(false);
   const ageMin = Math.floor(secsSince(order.created_at) / 60);
 
@@ -206,7 +197,7 @@ export function OrderRow({ order, drivers }) {
               <Detail label="Envío" value={fmt(order.delivery_fee_cents)} />
               <Detail label="Propina" value={fmt(order.tip_cents)} />
             </div>
-            <DriversPanel drivers={drivers} orderId={order.id} />
+            <DriversPanel drivers={drivers} orderId={order.id} tick={tick} />
           </td>
         </tr>
       )}

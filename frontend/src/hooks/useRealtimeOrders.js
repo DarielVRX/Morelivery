@@ -221,7 +221,6 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
 
     const url = `${API_BASE}/api/events?token=${encodeURIComponent(token)}`;
-    console.log(`📡 [SSE] conectando (intento ${retryCount.current + 1})`);
     const es = new EventSource(url);
     esRef.current = es;
 
@@ -249,7 +248,6 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
     es.addEventListener('new_offer', (e) => {
       try {
         const data = JSON.parse(e.data);
-        console.log(`[SSE] new_offer received orderId=${data.orderId} secondsLeft=${data.secondsLeft}`);
         cbOffer.current?.(data);
 
         // Alerta local inmediata por evento SSE (no depende de render en Home)
@@ -398,7 +396,6 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
 
     es.addEventListener('connected', () => {
       retryCount.current = 0;
-      console.log('📡 [SSE] conexión establecida');
       clearTimeout(reconnectTimer.current);
       cbReconnect.current?.();
     });
