@@ -10,6 +10,7 @@ import ActiveOrderPanel from '../../components/ActiveOrderPanel';
 import OfferPanel from '../../components/OfferPanel';
 import PullToRefresh from '../../components/PullToRefresh';
 import { useAuth } from '../../contexts/AuthContext';
+import { createZoneReport, fetchActiveZones, fetchDriverCounters, submitImpassableRoads, submitRoadPreferences } from '../../features/driver/home/api';
 import { ensureDriverHomeAnimations } from '../../features/driver/home/animations';
 import DriverHomeMapSection from '../../features/driver/home/DriverHomeMapSection.jsx';
 import { buildGoogleMapsAppUrl, buildGoogleMapsWebUrl, buildGoogleNavigationUrl, formatRouteSummary, getDriverRouteStops, getGoogleNavigationTarget } from '../../features/driver/home/navigation';
@@ -50,7 +51,7 @@ export default function DriverHome() {
 
   useEffect(() => {
     if (!auth.token || !order.availability) return;
-    apiFetch('/drivers/me/counters', {}, auth.token)
+    fetchDriverCounters(auth.token)
       .then((data) => setCounters(data.counters))
       .catch(() => {});
   }, [auth.token, order.availability]);
@@ -130,7 +131,7 @@ export default function DriverHome() {
 
   useEffect(() => {
     function fetchZones() {
-      apiFetch('/nav/zones/active', {}, null)
+      fetchActiveZones()
         .then((data) => {
           if (Array.isArray(data?.zones)) setActiveZones(data.zones);
         })
@@ -206,7 +207,7 @@ export default function DriverHome() {
   }
 
   function refreshZones() {
-    apiFetch('/nav/zones/active', {}, null)
+    fetchActiveZones()
       .then((data) => {
         if (Array.isArray(data?.zones)) setActiveZones(data.zones);
       })
@@ -214,7 +215,7 @@ export default function DriverHome() {
   }
 
   function handleZoneConfirm(params) {
-    apiFetch('/nav/zones', { method: 'POST', body: JSON.stringify(params) }, auth.token)
+    createZoneReport(params, auth.token)
       .then(() => {
         setNavMode(null);
         refreshZones();
@@ -225,14 +226,7 @@ export default function DriverHome() {
 
   function handleImpassableConfirm(ways) {
     const pos = myPosition || { lat: 0, lng: 0 };
-    apiFetch('/nav/road-prefs/impassable', {
-      method: 'POST',
-      body: JSON.stringify({
-        lat: pos.lat,
-        lng: pos.lng,
-        ways: ways.map((way) => ({ way_id: way.way_id, estimated_duration: way.estimated_duration, description: way.description })),
-      }),
-    }, auth.token)
+    submitImpassableRoads({ position: pos, ways, token: auth.token })
       .then(() => {
         setNavMode(null);
         setMsg(`${ways.length} calle(s) reportada(s) ✓`);
@@ -241,10 +235,7 @@ export default function DriverHome() {
   }
 
   function handlePreferenceConfirm(ways) {
-    apiFetch('/nav/road-prefs/preference', {
-      method: 'POST',
-      body: JSON.stringify({ ways: ways.map((way) => ({ way_id: way.way_id, preference: way.preference, description: way.description })) }),
-    }, auth.token)
+    submitRoadPreferences({ ways, token: auth.token })
       .then(() => {
         setNavMode(null);
         setMsg(`${ways.length} preferencia(s) guardada(s) ✓`);
