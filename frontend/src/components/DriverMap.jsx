@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { DriverMapOverlays } from '../features/driver/map/overlays';
 import { DEFAULT_POS, MORELIA_BOUNDS, STADIA_KEY, STYLE_DARK, STYLE_LIGHT } from '../features/driver/map/config';
+import { createDriverPoiMarker, DRIVER_ROUTE_BORDER_ID, DRIVER_ROUTE_LAYER_ID, DRIVER_ROUTE_SOURCE_ID, getDriverRouteFeature, syncDriverRouteLayers } from '../features/driver/map/helpers';
 import { useTheme } from '../contexts/ThemeContext';
 import { getBearing } from '../utils/geo';
 import { ensureMapLibreCSS, ensureMapLibreJS } from '../utils/mapLibre';
@@ -62,16 +63,14 @@ export default function DriverMap({
       const newStyle = isDark ? STYLE_DARK : STYLE_LIGHT;
       map.setStyle(newStyle);
       map.once('styledata', () => {
-        const SRC = 'driver-route-source', LYR = 'driver-route-layer', BDR = 'driver-route-border';
-        const coords = (routeGeometry || []).map(p => [p.lng, p.lat]);
-        if (!coords.length) return;
+        const routeFeature = getDriverRouteFeature(routeGeometry);
+        if (!routeFeature) return;
         try {
-          const geo = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } };
-          if (!map.getSource(SRC)) map.addSource(SRC, { type: 'geojson', data: geo });
-          if (!map.getLayer(BDR)) map.addLayer({ id: BDR, type: 'line', source: SRC,
+          if (!map.getSource(DRIVER_ROUTE_SOURCE_ID)) map.addSource(DRIVER_ROUTE_SOURCE_ID, { type: 'geojson', data: routeFeature });
+          if (!map.getLayer(DRIVER_ROUTE_BORDER_ID)) map.addLayer({ id: DRIVER_ROUTE_BORDER_ID, type: 'line', source: DRIVER_ROUTE_SOURCE_ID,
             paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.4 },
             layout: { 'line-cap': 'round', 'line-join': 'round' } });
-          if (!map.getLayer(LYR)) map.addLayer({ id: LYR, type: 'line', source: SRC,
+          if (!map.getLayer(DRIVER_ROUTE_LAYER_ID)) map.addLayer({ id: DRIVER_ROUTE_LAYER_ID, type: 'line', source: DRIVER_ROUTE_SOURCE_ID,
             paint: { 'line-color': '#6366f1', 'line-width': 5, 'line-opacity': 0.95 },
             layout: { 'line-cap': 'round', 'line-join': 'round' } });
         } catch (_) {}
@@ -325,61 +324,21 @@ export default function DriverMap({
     if (!map || !_ml) return;
     if (markersRef.current.pickup)   { markersRef.current.pickup.remove();   markersRef.current.pickup   = null; }
     if (markersRef.current.delivery) { markersRef.current.delivery.remove(); markersRef.current.delivery = null; }
-    const mkr = (pos, emoji, color, label) => {
-      const el = document.createElement('div');
-      el.style.cssText = `width:28px;height:28px;border-radius:50%;background:${color};display:grid;place-items:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);font-size:15px`;
-      el.textContent = emoji;
-      return new _ml.Marker({ element: el }).setLngLat([pos.lng, pos.lat])
-        .setPopup(new _ml.Popup({ closeButton: false }).setText(label));
-    };
-    if (pickupPos)   markersRef.current.pickup   = mkr(pickupPos,   '🏪', '#16a34a', pickupLabel   || 'Tienda').addTo(map);
-    if (deliveryPos) markersRef.current.delivery = mkr(deliveryPos, '📦', '#f97316', deliveryLabel || 'Cliente').addTo(map);
+    if (pickupPos) {
+      markersRef.current.pickup = createDriverPoiMarker(_ml, pickupPos, { emoji: '🏪', color: '#16a34a', label: pickupLabel || 'Tienda' }).addTo(map);
+    }
+    if (deliveryPos) {
+      markersRef.current.delivery = createDriverPoiMarker(_ml, deliveryPos, { emoji: '📦', color: '#f97316', label: deliveryLabel || 'Cliente' }).addTo(map);
+    }
   }, [pickupPos?.lat, pickupPos?.lng, deliveryPos?.lat, deliveryPos?.lng, pickupLabel, deliveryLabel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ruta GeoJSON
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    const SRC = 'driver-route-source', LYR = 'driver-route-layer', BDR = 'driver-route-border';
-
     function draw() {
       try {
-        const coords = (routeGeometry || []).map(p => [p.lng, p.lat]);
-        const geo = {
-          type: 'Feature', properties: {},
-          geometry: { type: 'LineString', coordinates: coords },
-        };
-
-        // Remove old route if clearing
-        if (!coords.length) {
-          try { if (map.getLayer(BDR)) map.removeLayer(BDR); } catch (_) {}
-          try { if (map.getLayer(LYR)) map.removeLayer(LYR); } catch (_) {}
-          try { if (map.getSource(SRC)) map.removeSource(SRC); } catch (_) {}
-          return;
-        }
-
-        if (map.getSource(SRC)) {
-          map.getSource(SRC).setData(geo);
-        } else {
-          map.addSource(SRC, { type: 'geojson', data: geo });
-        }
-
-        // Border layer (drawn first = behind)
-        if (!map.getLayer(BDR)) {
-          map.addLayer({
-            id: BDR, type: 'line', source: SRC,
-            paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.4 },
-            layout: { 'line-cap': 'round', 'line-join': 'round' },
-          });
-        }
-        // Main line layer
-        if (!map.getLayer(LYR)) {
-          map.addLayer({
-            id: LYR, type: 'line', source: SRC,
-            paint: { 'line-color': '#6366f1', 'line-width': 5, 'line-opacity': 0.95 },
-            layout: { 'line-cap': 'round', 'line-join': 'round' },
-          });
-        }
+        syncDriverRouteLayers(map, routeGeometry);
       } catch (e) {
         console.warn('[DriverMap] route draw error:', e.message);
       }

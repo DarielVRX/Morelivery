@@ -10,8 +10,10 @@ import ActiveOrderPanel from '../../components/ActiveOrderPanel';
 import OfferPanel from '../../components/OfferPanel';
 import PullToRefresh from '../../components/PullToRefresh';
 import { useAuth } from '../../contexts/AuthContext';
+import { createZoneReport, fetchActiveZones, fetchDriverCounters, submitImpassableRoads, submitRoadPreferences } from '../../features/driver/home/api';
 import { ensureDriverHomeAnimations } from '../../features/driver/home/animations';
 import DriverHomeMapSection from '../../features/driver/home/DriverHomeMapSection.jsx';
+import { buildGoogleMapsAppUrl, buildGoogleMapsWebUrl, buildGoogleNavigationUrl, formatRouteSummary, getDriverRouteStops, getGoogleNavigationTarget } from '../../features/driver/home/navigation';
 import DriverHomeStatusBar from '../../features/driver/home/DriverHomeStatusBar.jsx';
 import { useAppBadge } from '../../hooks/useAppBadge';
 import { useDriverLocation } from '../../hooks/useDriverLocation';
@@ -49,7 +51,7 @@ export default function DriverHome() {
 
   useEffect(() => {
     if (!auth.token || !order.availability) return;
-    apiFetch('/drivers/me/counters', {}, auth.token)
+    fetchDriverCounters(auth.token)
       .then((data) => setCounters(data.counters))
       .catch(() => {});
   }, [auth.token, order.availability]);
@@ -129,7 +131,7 @@ export default function DriverHome() {
 
   useEffect(() => {
     function fetchZones() {
-      apiFetch('/nav/zones/active', {}, null)
+      fetchActiveZones()
         .then((data) => {
           if (Array.isArray(data?.zones)) setActiveZones(data.zones);
         })
@@ -144,15 +146,7 @@ export default function DriverHome() {
   function openRoadRouteApi() {
     if (!order.activeOrder) return;
 
-    const pickup = order.activeOrder.restaurant_lat
-      ? { lat: Number(order.activeOrder.restaurant_lat), lng: Number(order.activeOrder.restaurant_lng) }
-      : null;
-    const delivery = order.activeOrder.delivery_lat
-      ? { lat: Number(order.activeOrder.delivery_lat), lng: Number(order.activeOrder.delivery_lng) }
-      : order.activeOrder.customer_lat
-        ? { lat: Number(order.activeOrder.customer_lat), lng: Number(order.activeOrder.customer_lng) }
-        : null;
-
+    const { pickup, delivery } = getDriverRouteStops(order.activeOrder);
     if (!pickup || !delivery) {
       setMsg('Faltan coordenadas del pedido para trazar la ruta');
       return;
@@ -167,7 +161,7 @@ export default function DriverHome() {
           if (!data?.geometry?.length) throw new Error('Ruta vacía');
           setRouteGeometry(data.geometry);
           setRouteSteps(Array.isArray(data?.steps) ? data.steps : []);
-          setMsg(`Ruta: ${Math.round(data.distance_m / 1000 * 10) / 10} km · ~${Math.round(data.duration_s / 60)} min`);
+          setMsg(formatRouteSummary(data));
         })
         .catch((error) => {
           setRouteGeometry(null);
@@ -194,11 +188,8 @@ export default function DriverHome() {
   }
 
   function openGoogleNavigation() {
-    if (!order.activeOrder) return;
-    const onTheWay = order.activeOrder.status === 'on_the_way';
-    const dLat = onTheWay ? Number(order.activeOrder.customer_lat) : Number(order.activeOrder.restaurant_lat);
-    const dLng = onTheWay ? Number(order.activeOrder.customer_lng) : Number(order.activeOrder.restaurant_lng);
-    if (!dLat || !dLng) {
+    const target = getGoogleNavigationTarget(order.activeOrder);
+    if (!target) {
       setMsg('Faltan coordenadas para navegar');
       return;
     }
@@ -206,17 +197,17 @@ export default function DriverHome() {
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     if (isIOS) {
       const anchor = document.createElement('a');
-      anchor.href = `comgooglemaps://?daddr=${dLat},${dLng}&directionsmode=driving`;
+      anchor.href = buildGoogleMapsAppUrl(target);
       anchor.click();
-      setTimeout(() => window.open(`https://maps.google.com/maps?daddr=${dLat},${dLng}&directionsmode=driving`, '_blank', 'noopener'), 500);
+      setTimeout(() => window.open(buildGoogleMapsWebUrl(target), '_blank', 'noopener'), 500);
       return;
     }
 
-    window.location.href = `google.navigation:q=${dLat},${dLng}&mode=d`;
+    window.location.href = buildGoogleNavigationUrl(target);
   }
 
   function refreshZones() {
-    apiFetch('/nav/zones/active', {}, null)
+    fetchActiveZones()
       .then((data) => {
         if (Array.isArray(data?.zones)) setActiveZones(data.zones);
       })
@@ -224,7 +215,7 @@ export default function DriverHome() {
   }
 
   function handleZoneConfirm(params) {
-    apiFetch('/nav/zones', { method: 'POST', body: JSON.stringify(params) }, auth.token)
+    createZoneReport(params, auth.token)
       .then(() => {
         setNavMode(null);
         refreshZones();
@@ -235,14 +226,7 @@ export default function DriverHome() {
 
   function handleImpassableConfirm(ways) {
     const pos = myPosition || { lat: 0, lng: 0 };
-    apiFetch('/nav/road-prefs/impassable', {
-      method: 'POST',
-      body: JSON.stringify({
-        lat: pos.lat,
-        lng: pos.lng,
-        ways: ways.map((way) => ({ way_id: way.way_id, estimated_duration: way.estimated_duration, description: way.description })),
-      }),
-    }, auth.token)
+    submitImpassableRoads({ position: pos, ways, token: auth.token })
       .then(() => {
         setNavMode(null);
         setMsg(`${ways.length} calle(s) reportada(s) ✓`);
@@ -251,10 +235,7 @@ export default function DriverHome() {
   }
 
   function handlePreferenceConfirm(ways) {
-    apiFetch('/nav/road-prefs/preference', {
-      method: 'POST',
-      body: JSON.stringify({ ways: ways.map((way) => ({ way_id: way.way_id, preference: way.preference, description: way.description })) }),
-    }, auth.token)
+    submitRoadPreferences({ ways, token: auth.token })
       .then(() => {
         setNavMode(null);
         setMsg(`${ways.length} preferencia(s) guardada(s) ✓`);
