@@ -25,19 +25,11 @@ const ZONE_TYPES = [
   { value: 'other',        emoji: '⚠️', label: 'Otro problema',        color: '#6b7280' },
 ];
 
-const HOURS_OPTS = [
-  { value: 1,  label: '~1 hora'  },
-  { value: 2,  label: '~2 horas' },
-  { value: 4,  label: '~4 horas' },
-  { value: 8,  label: 'Medio día' },
-  { value: 12, label: '12 horas' },
-  { value: 24, label: '1 día'    },
-  { value: 48, label: '2 días'   },
-  { value: 72, label: '3 días'   },
-];
+// Duración predeterminada: 1 hora
+const DEFAULT_HOURS = 1;
 
-export default function ZonePlacer({ map, onConfirm, onCancel }) {
-  const [step,     setStep]     = useState('place'); // 'place' | 'type' | 'hours'
+export default function ZonePlacer({ map, onConfirm, onCancel, bottomOffset = 0 }) {
+  const [step,     setStep]     = useState('place'); // 'place' | 'type'
   const [radiusM,  setRadiusM]  = useState(100);
   const [zoneType, setZoneType] = useState(null);
   const [captured, setCaptured] = useState(null);    // {lat,lng,radius_m} fijado en step 1
@@ -68,14 +60,9 @@ export default function ZonePlacer({ map, onConfirm, onCancel }) {
   }
 
   function handleTypeSelect(val) {
-    setZoneType(val);
-    setStep('hours');
-  }
-
-  function handleHoursSelect(h) {
     if (!captured || saving) return;
     setSaving(true);
-    onConfirm({ ...captured, type: zoneType, estimated_hours: h });
+    onConfirm({ ...captured, type: val, estimated_hours: DEFAULT_HOURS });
   }
 
   const displayR = radiusM >= 1000
@@ -84,7 +71,7 @@ export default function ZonePlacer({ map, onConfirm, onCancel }) {
 
   // Panel inferior compartido — altura depende del step
   const panelBase = {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
+    position: 'absolute', bottom: bottomOffset, left: 0, right: 0,
     pointerEvents: 'auto',
     background: '#fff',
     borderTop: `3px solid ${circleColor}`,
@@ -186,40 +173,7 @@ export default function ZonePlacer({ map, onConfirm, onCancel }) {
         </div>
       )}
 
-      {/* ══ STEP 3 — Vigencia ════════════════════════════════════════════ */}
-      {step === 'hours' && sel && (
-        <div style={panelBase}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '0.6rem' }}>
-            <span style={{ fontSize: '1.4rem' }}>{sel.emoji}</span>
-            <span style={{ fontWeight: 700, fontSize: '0.88rem', color: sel.color }}>{sel.label}</span>
-            <span style={{ fontSize: '0.72rem', color: '#9ca3af', marginLeft: 'auto' }}>¿Cuánto durará?</span>
-          </div>
-          <div style={{
-            display: 'grid', gridTemplateColumns: '1fr 1fr',
-            gap: '0.4rem', marginBottom: '0.6rem',
-          }}>
-            {HOURS_OPTS.map(o => (
-              <button key={o.value}
-                onClick={() => handleHoursSelect(o.value)}
-                disabled={saving}
-                style={{
-                  padding: '0.6rem 0.2rem', borderRadius: 9,
-                  cursor: saving ? 'wait' : 'pointer',
-                  background: sel.color + '12', border: `1.5px solid ${sel.color}55`,
-                  fontSize: '0.82rem', fontWeight: 600, color: sel.color,
-                  opacity: saving ? 0.6 : 1,
-                }}>
-                {saving ? '…' : o.label}
-              </button>
-            ))}
-          </div>
-          <button onClick={() => setStep('type')} style={{
-            width: '100%', padding: '0.5rem 0', borderRadius: 8, fontSize: '0.8rem',
-            fontWeight: 600, cursor: 'pointer',
-            background: '#f3f4f6', color: '#6b7280', border: '1px solid #e5e7eb',
-          }}>← Cambiar tipo</button>
-        </div>
-      )}
+
 
     </div>
   );

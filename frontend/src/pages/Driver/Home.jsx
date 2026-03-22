@@ -8,8 +8,10 @@ import { useEffect, useRef, useState } from 'react';
 import ActiveOrderPanel from '../../components/ActiveOrderPanel';
 import OfferPanel from '../../components/OfferPanel';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { ensureDriverHomeAnimations } from '../../features/driver/home/animations';
 import DriverHomeMapSection from '../../features/driver/home/DriverHomeMapSection.jsx';
+import { quickSelectWays } from '../../components/WayPicker';
 import { buildGoogleMapsAppUrl, buildGoogleMapsWebUrl, buildGoogleNavigationUrl, formatRouteSummary, getDriverRouteStops, getGoogleNavigationTarget } from '../../features/driver/home/navigation';
 import DriverHomeStatusBar from '../../features/driver/home/DriverHomeStatusBar.jsx';
 import { useDriverHomeRuntime } from '../../features/driver/home/useDriverHomeRuntime';
@@ -23,6 +25,7 @@ ensureDriverHomeAnimations();
 
 export default function DriverHome({ registerRef }) {
   const { auth, patchUser } = useAuth();
+  const { isDark } = useTheme();
   const order = useOrderManager(auth.token, patchUser, auth.user?.driver);
 
   // Conectar useDriverOrders (panel lateral) al SSE de useOrderManager.
@@ -124,7 +127,26 @@ export default function DriverHome({ registerRef }) {
           onSubmitImpassable={home.handleImpassableConfirm}
           onSubmitPreference={home.handlePreferenceConfirm}
           bottomOffset={panelHeight + 8}
-          onQuickZone={(pos) => home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'traffic', radius: 500 })}
+          isDark={isDark}
+          onQuickReport={async (type, pos) => {
+            if (type === 'zone') {
+              home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'other', radius: 500, estimated_hours: 1 });
+            } else if (type === 'impassable') {
+              try {
+                const ways = await quickSelectWays(pos, 'impassable');
+                home.handleImpassableConfirm(ways);
+              } catch (_) {
+                setMsg('No se pudo detectar la calle. Intenta el modo normal.');
+              }
+            } else if (type === 'preference') {
+              try {
+                const ways = await quickSelectWays(pos, 'preference');
+                home.handlePreferenceConfirm(ways);
+              } catch (_) {
+                setMsg('No se pudo detectar la calle. Intenta el modo normal.');
+              }
+            }
+          }}
         />
 
         <OfferPanel

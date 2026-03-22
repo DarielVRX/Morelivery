@@ -1,22 +1,10 @@
-// components/NavFABs.jsx — FABs del mapa del conductor
-//
-// Jerarquía visual:
-//
-// SIN pedido activo:
-//   [⚑ Reportar]  ← expandible, arriba
-//   [⊕ Centrar]   ← principal, abajo derecha
-//
-// CON pedido activo (ruta cargada):
-//   [⋯ Más]       ← secundario: voz + google maps, arriba
-//   [⊕ Centrar]   ← principal, prominente, abajo derecha
-//
-// BASE_BOTTOM = 164px sobre safe area — por encima de las cards de oferta/pedido
+// components/NavFABs.jsx
 
-var NAV_MENU_OPTIONS = [
-  { mode: 'zone',       label: '🚦 Zona de alerta',      bg: '#f97316' },
-  { mode: 'impassable', label: '⛔ Calle no viable',      bg: '#ef4444' },
-  { mode: 'preference', label: '⭐ Preferencia de calle', bg: '#16a34a' },
-];
+var NAV_REPORT_MODES = ['zone', 'impassable', 'preference'];
+
+// Ciclo del FAB de reporte: null → normal → rapido → null
+// En modo normal abre ZonePlacer / WayPicker según submodo
+// En modo rápido envía directo sin pasos intermedios
 
 function IconCenter({ mode }) {
   const color = mode === 'off' ? 'var(--text-secondary)' : '#fff';
@@ -31,21 +19,14 @@ function IconCenter({ mode }) {
     </svg>
   );
 }
-
 function IconVolume({ on }) {
   return on
     ? <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
     : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>;
 }
-
 function IconNavigate() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/>
-    </svg>
-  );
+  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/></svg>;
 }
-
 function IconMore() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
@@ -55,6 +36,24 @@ function IconMore() {
     </svg>
   );
 }
+function IconReport({ reportMode }) {
+  if (reportMode === 'quick') {
+    return <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>;
+  }
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+      <line x1="4" y1="22" x2="4" y2="15"/>
+    </svg>
+  );
+}
+
+// Pills de reporte — igual en normal y rápido
+const REPORT_PILLS = [
+  { mode: 'zone',       label: 'Zona de alerta',   icon: '🚦', color: '#f97316' },
+  { mode: 'impassable', label: 'Calle no viable',   icon: '⛔', color: '#ef4444' },
+  { mode: 'preference', label: 'Nota personal',     icon: '⭐', color: '#16a34a' },
+];
 
 export default function NavFABs({
   hasActiveOrder,
@@ -68,82 +67,98 @@ export default function NavFABs({
   onVoiceToggle,
   onGoogleNav,
   onNavMode,
-  onQuickZone,
+  onQuickReport,  // (type, position) → envío directo sin pasos
+  isDark = false,
 }) {
-  const withRoute      = hasActiveOrder && (routeGeometry?.length > 0);
-  const safeBot        = 'env(safe-area-inset-bottom, 0px)';
-  const BASE_BOTTOM    = bottomOffset; // sube dinámicamente con los paneles
-  const GAP            = 12;
-  const SZ_PRIMARY     = 60;
-  const SZ_SECONDARY   = 52;
+  const withRoute   = hasActiveOrder && (routeGeometry?.length > 0);
+  const safeBot     = 'env(safe-area-inset-bottom, 0px)';
+  const BASE        = bottomOffset;
+  const GAP         = 12;
+  const SZ_P        = 60;  // primary
+  const SZ_S        = 52;  // secondary
 
-  const centerBottom    = `calc(${BASE_BOTTOM}px + ${safeBot})`;
-  const secondaryBottom = `calc(${BASE_BOTTOM + SZ_PRIMARY + GAP}px + ${safeBot})`;
-  // Cuando hay ruta, el botón Más ocupa secondaryBottom y Reportar sube un nivel más
+  // reportMode: null | 'normal' | 'quick'
+  const isReportNormal = navMode === 'menu';
+  const isReportQuick  = navMode === 'menu-quick';
+  const isReportOpen   = isReportNormal || isReportQuick;
+
+  const centerBottom    = `calc(${BASE}px + ${safeBot})`;
+  const secondaryBottom = `calc(${BASE + SZ_P + GAP}px + ${safeBot})`;
   const reportBottom    = withRoute
-    ? `calc(${BASE_BOTTOM + SZ_PRIMARY + GAP + SZ_SECONDARY + GAP}px + ${safeBot})`
+    ? `calc(${BASE + SZ_P + GAP + SZ_S + GAP}px + ${safeBot})`
     : secondaryBottom;
   const menuBottom      = withRoute
-    ? `calc(${BASE_BOTTOM + SZ_PRIMARY + GAP + SZ_SECONDARY + GAP + SZ_SECONDARY + GAP}px + ${safeBot})`
-    : `calc(${BASE_BOTTOM + SZ_PRIMARY + GAP + SZ_SECONDARY + GAP}px + ${safeBot})`;
+    ? `calc(${BASE + SZ_P + GAP + SZ_S + GAP + SZ_S + GAP}px + ${safeBot})`
+    : `calc(${BASE + SZ_P + GAP + SZ_S + GAP}px + ${safeBot})`;
 
   const centerBg =
     centerMode === 'follow'   ? 'var(--brand)' :
     centerMode === 'overview' ? '#4f46e5'      : '#fff';
 
-  const centerTitle =
-    centerMode === 'follow'   ? 'Seguimiento activo — toca para vista de ruta' :
-    centerMode === 'overview' ? 'Vista de ruta — toca para desactivar'         :
-                                'Centrar en mi posición';
+  // Colores del FAB de reporte según estado
+  const reportFabBg    = isReportQuick
+    ? (isDark ? '#4c1d95' : '#7c3aed')
+    : isReportNormal ? 'var(--brand)' : '#fff';
+  const reportFabColor = isReportOpen ? '#fff' : 'var(--text-secondary)';
+  const reportFabBorder = isReportOpen ? 'none' : '1.5px solid var(--border)';
+
+  // Resplandor modo rápido
+  const quickGlow = isDark
+    ? '0 0 0 3px rgba(250,204,21,0.35), 0 2px 8px rgba(0,0,0,0.3)'
+    : '0 0 0 3px rgba(124,58,237,0.25), 0 2px 8px rgba(0,0,0,0.15)';
 
   const fabBase = {
-    position: 'absolute',
-    right: 14,
-    zIndex: 402,
-    borderRadius: '50%',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    border: 'none',
-    transition: 'background 0.15s, box-shadow 0.15s',
+    position: 'absolute', right: 14, zIndex: 402,
+    borderRadius: '50%', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    border: 'none', transition: 'background 0.15s, box-shadow 0.15s',
   };
+
+  function cycleReport() {
+    if (!isReportOpen)      return onNavMode('menu');
+    if (isReportNormal)     return onNavMode('menu-quick');
+    return onNavMode(null);
+  }
+
+  function handlePill(type) {
+    if (isReportQuick) {
+      // Modo rápido: envío directo
+      if (!myPosition) return;
+      onQuickReport?.(type, myPosition);
+      onNavMode(null);
+    } else {
+      // Modo normal: abre el placer/picker
+      onNavMode(type);
+    }
+  }
+
+  const showReport = navMode !== 'zone' && navMode !== 'impassable' && navMode !== 'preference';
+  const showMore   = withRoute && navMode !== 'zone' && navMode !== 'impassable' && navMode !== 'preference' && !isReportOpen;
 
   return (
     <>
-      {/* ── Principal: Centrar ──────────────────────────────────────────────── */}
-      <button
-        onClick={onCenterCycle}
-        title={centerTitle}
-        aria-label="Centrar mapa"
-        className="dh-fab"
+      {/* ── Centrar ─────────────────────────────────────────────────── */}
+      <button onClick={onCenterCycle} title={
+        centerMode === 'follow' ? 'Seguimiento activo' :
+        centerMode === 'overview' ? 'Vista de ruta' : 'Centrar en mi posición'}
+        aria-label="Centrar mapa" className="dh-fab"
         style={{
-          ...fabBase,
-          bottom: centerBottom,
-          width: SZ_PRIMARY,
-          height: SZ_PRIMARY,
-          background: centerBg,
+          ...fabBase, bottom: centerBottom,
+          width: SZ_P, height: SZ_P, background: centerBg,
           border: centerMode === 'off' ? '1.5px solid var(--border)' : 'none',
-          boxShadow: centerMode !== 'off'
-            ? '0 4px 16px rgba(0,0,0,0.28)'
-            : '0 2px 10px rgba(0,0,0,0.16)',
+          boxShadow: centerMode !== 'off' ? '0 4px 16px rgba(0,0,0,0.28)' : '0 2px 10px rgba(0,0,0,0.16)',
           color: centerMode !== 'off' ? '#fff' : 'var(--text-secondary)',
         }}>
         <IconCenter mode={centerMode} />
       </button>
 
-      {/* ── Con ruta: botón "Más" (voz + Google Maps) ──────────────────────── */}
-      {withRoute && navMode !== 'menu' && navMode !== 'zone' && navMode !== 'impassable' && navMode !== 'preference' && (
-        <button
-          onClick={() => onNavMode(navMode === 'more' ? null : 'more')}
-          title="Más opciones"
-          aria-label="Más opciones de navegación"
-          className="dh-fab"
+      {/* ── Más (con ruta) ──────────────────────────────────────────── */}
+      {showMore && (
+        <button onClick={() => onNavMode(navMode === 'more' ? null : 'more')}
+          title="Más opciones" aria-label="Más" className="dh-fab"
           style={{
-            ...fabBase,
-            bottom: secondaryBottom,
-            width: SZ_SECONDARY,
-            height: SZ_SECONDARY,
+            ...fabBase, bottom: secondaryBottom,
+            width: SZ_S, height: SZ_S,
             background: navMode === 'more' ? 'var(--brand)' : '#fff',
             border: '1.5px solid var(--border)',
             boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
@@ -153,117 +168,104 @@ export default function NavFABs({
         </button>
       )}
 
-      {/* ── Menú "Más" expandido ────────────────────────────────────────────── */}
+      {/* ── Menú Más expandido ──────────────────────────────────────── */}
       {withRoute && navMode === 'more' && (
         <div style={{
           position: 'absolute',
-          bottom: `calc(${BASE_BOTTOM + SZ_PRIMARY + GAP + SZ_SECONDARY + GAP}px + ${safeBot})`,
-          right: 14,
-          zIndex: 403,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-end',
-          gap: 8,
+          bottom: `calc(${BASE + SZ_P + GAP + SZ_S + GAP}px + ${safeBot})`,
+          right: 14, zIndex: 403,
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
         }}>
-          <button
-            onClick={() => { onVoiceToggle(); onNavMode(null); }}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '0.55rem 1rem', borderRadius: 20,
-              fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              background: voiceEnabled ? '#f0fdf4' : '#f9fafb',
-              color: voiceEnabled ? '#15803d' : '#6b7280',
-              border: `1.5px solid ${voiceEnabled ? '#86efac' : 'var(--border)'}`,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.12)', minHeight: 'unset',
-            }}>
+          <button onClick={() => { onVoiceToggle(); onNavMode(null); }} style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '0.55rem 1rem', borderRadius: 20,
+            fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+            background: voiceEnabled ? '#f0fdf4' : '#f9fafb',
+            color: voiceEnabled ? '#15803d' : '#6b7280',
+            border: `1.5px solid ${voiceEnabled ? '#86efac' : 'var(--border)'}`,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.12)', minHeight: 'unset',
+          }}>
             <IconVolume on={voiceEnabled} />
             {voiceEnabled ? 'Voz activa' : 'Voz inactiva'}
           </button>
-
-          <button
-            onClick={() => { onGoogleNav(); onNavMode(null); }}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '0.55rem 1rem', borderRadius: 20,
-              fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
-              whiteSpace: 'nowrap', background: 'var(--brand)',
-              color: '#fff', border: 'none',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.2)', minHeight: 'unset',
-            }}>
-            <IconNavigate />
-            Abrir en Maps
+          <button onClick={() => { onGoogleNav(); onNavMode(null); }} style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '0.55rem 1rem', borderRadius: 20,
+            fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+            background: 'var(--brand)', color: '#fff', border: 'none',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)', minHeight: 'unset',
+          }}>
+            <IconNavigate /> Abrir en Maps
           </button>
-
         </div>
       )}
 
-      {/* ── Sin pedido: botón Reportar ──────────────────────────────────────── */}
-      {navMode !== 'more' && navMode !== 'zone' && navMode !== 'impassable' && navMode !== 'preference' && (
-        <button
-          aria-label="Reportar incidencia"
-          title="Reportar zona, calle no viable o preferencia"
+      {/* ── FAB Reportar ────────────────────────────────────────────── */}
+      {showReport && (
+        <button onClick={cycleReport}
+          aria-label={isReportQuick ? 'Reporte rápido' : isReportNormal ? 'Cerrar reporte' : 'Reportar'}
+          title={isReportQuick ? 'Modo rápido — toca para cerrar' : 'Reportar incidencia'}
           className="dh-fab"
-          onClick={() => onNavMode(navMode === 'menu' ? null : 'menu')}
           style={{
             ...fabBase,
             bottom: reportBottom,
-            width: SZ_SECONDARY,
-            height: SZ_SECONDARY,
-            background: navMode === 'menu' ? 'var(--brand)' : '#fff',
-            border: navMode === 'menu' ? 'none' : '1.5px solid var(--border)',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-            color: navMode === 'menu' ? '#fff' : 'var(--text-secondary)',
-            fontSize: '1rem',
+            width: SZ_S, height: SZ_S,
+            background: reportFabBg,
+            border: reportFabBorder,
+            boxShadow: isReportQuick ? quickGlow : '0 2px 8px rgba(0,0,0,0.15)',
+            color: reportFabColor,
           }}>
-          ⚑
+          <IconReport reportMode={isReportQuick ? 'quick' : 'normal'} />
         </button>
       )}
 
-      {/* ── Menú Reportar expandido ─────────────────────────────────────────── */}
-      {navMode === 'menu' && (
+      {/* ── Menú de reporte (normal o rápido) ──────────────────────── */}
+      {isReportOpen && (
         <div style={{
           position: 'absolute',
           bottom: menuBottom,
-          right: 14,
-          zIndex: 403,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-end',
-          gap: 6,
+          right: 14, zIndex: 403,
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6,
         }}>
-          {/* Reporte rápido — zona en posición GPS actual, radio 500m */}
-          {myPosition && (
-            <button
-              onClick={() => {
-                onQuickZone?.(myPosition);
-                onNavMode(null);
-              }}
-              style={{
-                padding: '0.55rem 1rem', borderRadius: 20,
-                fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer',
-                whiteSpace: 'nowrap', background: '#7c3aed',
-                color: '#fff', border: 'none',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.22)', minHeight: 'unset',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-              </svg>
-              Zona aquí (rápido)
-            </button>
+          {/* Etiqueta modo rápido */}
+          {isReportQuick && (
+            <div style={{
+              padding: '0.2rem 0.65rem', borderRadius: 20,
+              fontSize: '0.68rem', fontWeight: 700,
+              background: isDark ? 'rgba(250,204,21,0.15)' : 'rgba(124,58,237,0.12)',
+              color: isDark ? '#fbbf24' : '#7c3aed',
+              border: `1px solid ${isDark ? 'rgba(250,204,21,0.3)' : 'rgba(124,58,237,0.25)'}`,
+              boxShadow: isDark
+                ? '0 0 8px rgba(250,204,21,0.2)'
+                : '0 0 8px rgba(124,58,237,0.15)',
+              whiteSpace: 'nowrap',
+            }}>
+              ⚡ Modo rápido
+            </div>
           )}
-          {NAV_MENU_OPTIONS.map(opt => (
-            <button key={opt.mode}
-              onClick={() => onNavMode(opt.mode)}
+
+          {REPORT_PILLS.map(pill => (
+            <button key={pill.mode}
+              onClick={() => handlePill(pill.mode)}
               style={{
+                display: 'flex', alignItems: 'center', gap: 7,
                 padding: '0.55rem 1rem', borderRadius: 20,
                 fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
-                whiteSpace: 'nowrap', background: opt.bg,
-                color: '#fff', border: 'none',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.22)', minHeight: 'unset',
+                whiteSpace: 'nowrap',
+                background: isReportQuick
+                  ? (isDark ? 'rgba(250,204,21,0.08)' : 'rgba(124,58,237,0.07)')
+                  : pill.color,
+                color: isReportQuick ? (isDark ? '#fbbf24' : '#7c3aed') : '#fff',
+                border: isReportQuick
+                  ? `1.5px solid ${isDark ? 'rgba(250,204,21,0.35)' : 'rgba(124,58,237,0.3)'}`
+                  : 'none',
+                boxShadow: isReportQuick
+                  ? (isDark ? '0 0 6px rgba(250,204,21,0.15)' : '0 0 6px rgba(124,58,237,0.12)')
+                  : '0 2px 8px rgba(0,0,0,0.22)',
+                minHeight: 'unset',
               }}>
-              {opt.label}
+              <span>{pill.icon}</span>
+              {pill.label}
             </button>
           ))}
         </div>

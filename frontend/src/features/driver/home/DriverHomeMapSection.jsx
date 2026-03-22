@@ -37,7 +37,8 @@ export default function DriverHomeMapSection({
   onSubmitImpassable,
   onSubmitPreference,
   bottomOffset,
-  onQuickZone,
+  onQuickReport,
+  isDark = false,
 }) {
   return (
     <div style={{ flex:1, minHeight:0, position:'relative', overflow:'hidden', zIndex:0 }}>
@@ -94,19 +95,20 @@ export default function DriverHomeMapSection({
         onNavMode={onNavMode}
         bottomOffset={bottomOffset + 16}
         myPosition={myPosition}
-        onQuickZone={onQuickZone}
+        isDark={isDark}
+        onQuickReport={onQuickReport}
       />
 
       {navMode === 'zone' && mapInstance && (
-        <ZonePlacer map={mapInstance} onConfirm={onSubmitZone} onCancel={() => onNavMode(null)} />
+        <ZonePlacer map={mapInstance} onConfirm={onSubmitZone} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
       )}
 
       {navMode === 'impassable' && mapInstance && (
-        <WayPicker map={mapInstance} mode="impassable" onConfirm={onSubmitImpassable} onCancel={() => onNavMode(null)} />
+        <WayPicker map={mapInstance} mode="impassable" onConfirm={onSubmitImpassable} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
       )}
 
       {navMode === 'preference' && mapInstance && (
-        <WayPicker map={mapInstance} mode="preference" onConfirm={onSubmitPreference} onCancel={() => onNavMode(null)} />
+        <WayPicker map={mapInstance} mode="preference" onConfirm={onSubmitPreference} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
       )}
     </div>
   );
