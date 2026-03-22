@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
-import PullToRefresh    from '../../components/PullToRefresh';
+import PullToRefresh from '../../components/PullToRefresh';
+import { IconChat, OrderChat } from '../../features/customer/orders/components';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
@@ -118,6 +119,7 @@ export default function DriverOrders() {
   const [releasingId, setReleasingId]     = useState(null);
   const [expanded, setExpanded]            = useState(null);
   const [rebalancingId, setRebalancingId] = useState(null);
+  const [chatOpen, setChatOpen]           = useState(null);
 
   // Grace window ref: tracks last time driver was ≤100m from each reference point
   const graceRef = useRef({});
@@ -439,6 +441,16 @@ export default function DriverOrders() {
                                 )}
                               </>
                             )}
+                            {/* Chat — solo pedidos activos */}
+                            <button
+                              onClick={() => setChatOpen(chatOpen === o.id ? null : o.id)}
+                              style={{ marginTop:'0.5rem', display:'flex', alignItems:'center', gap:'0.35rem',
+                                background:'none', border:'1px solid var(--border)', borderRadius:6,
+                                padding:'0.25rem 0.65rem', fontSize:'0.78rem', cursor:'pointer',
+                                color:'var(--text-secondary)', fontWeight:600 }}>
+                              <IconChat /> {chatOpen === o.id ? 'Cerrar chat' : 'Chat del pedido'}
+                            </button>
+                            {chatOpen === o.id && <OrderChat orderId={o.id} token={auth.token} />}
                           </div>
                         )}
                       </div>
