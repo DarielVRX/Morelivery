@@ -203,9 +203,6 @@ export function OrderChat({ orderId, token, refreshTick }) {
     apiFetch(`/orders/${orderId}/messages`, {}, token)
       .then(d => {
         if (cancelled) return;
-        console.log('auth.user keys:', Object.keys(auth.user || {}));
-        console.log('my id:', auth.user?.id, typeof auth.user?.id);
-        console.log('first msg sender_id:', d.messages?.[0]?.sender_id, typeof d.messages?.[0]?.sender_id);
         setMessages(d.messages || []);
         setWriteBlocked(d.writeBlocked || null);
         setIsAdminChat(d.isAdmin || false);
@@ -375,5 +372,4 @@ export function OrderChat({ orderId, token, refreshTick }) {
     </div>
   );
 }
-
 
