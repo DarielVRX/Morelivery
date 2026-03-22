@@ -317,10 +317,15 @@ export default function RestaurantPage() {
               </svg>
               Volver
             </button>
+            const initialPos = searchPos
+            ? { lat: searchPos.lat, lng: searchPos.lng }
+            : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
+
             <AddressSearchBar
-              userPos={gpsPos}
-              homeAddress={auth.user?.address || null}
-              onSelectPos={pos => {
+            userPos={gpsPos}
+            homeAddress={auth.user?.address || null}
+            initialPos={initialPos}
+            onSelectPos={pos => {
                 setSearchPos(pos);
                 setToast(null);
                 if (pos?.lat && pos?.lng) savePendingOrder({ delivery_lat: pos.lat, delivery_lng: pos.lng, delivery_address: pos.label });

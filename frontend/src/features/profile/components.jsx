@@ -6,7 +6,7 @@ const STADIA_KEY = import.meta.env?.VITE_STADIA_KEY || '';
 const STYLE_LIGHT = STADIA_KEY ? `https://tiles.stadiamaps.com/styles/alidade_smooth.json?api_key=${STADIA_KEY}` : 'https://tiles.openfreemap.org/styles/bright';
 const STYLE_DARK = STADIA_KEY ? `https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json?api_key=${STADIA_KEY}` : 'https://tiles.openfreemap.org/styles/bright';
 
-export function CPSearchBar({ token, onSelectAddress }) {
+export function CPSearchBar({ token, onSelectAddress, homeLat, homeLng }) {
   const [showMap, setShowMap] = useState(false);
   const [pinPlaced, setPinPlaced] = useState(false);
   const [cpVal, setCpVal] = useState('');
@@ -44,10 +44,11 @@ export function CPSearchBar({ token, onSelectAddress }) {
       const ml = await ensureMapLibreJS();
       if (cancelled || !mapContRef.current) return;
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const center = (homeLat && homeLng) ? [homeLng, homeLat] : [-101.195, 19.706];
       const map = new ml.Map({
         container: mapContRef.current,
         style: isDark ? STYLE_DARK : STYLE_LIGHT,
-        center: [-101.195, 19.706],
+        center,
         zoom: 13,
         attributionControl: false,
         maxBounds: [[-101.6, 19.5], [-100.8, 20.0]],

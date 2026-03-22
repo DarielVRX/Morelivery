@@ -185,11 +185,16 @@ export default function CustomerPayments() {
               : <span style={{display:'flex',alignItems:'center',gap:'0.3rem'}}><IconWarning />Sin dirección de entrega</span>
             }
             </div>
+            const initialPos = deliveryLat
+            ? { lat: deliveryLat, lng: deliveryLng }
+            : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
+
             <AddressSearchBar
-              variant="default"
-              userPos={gpsPos}
-              homeAddress={auth.user?.address || null}
-              onSelectPos={handleAddressChange}
+            variant="default"
+            userPos={gpsPos}
+            homeAddress={auth.user?.address || null}
+            initialPos={initialPos}
+            onSelectPos={handleAddressChange}
             />
             </div>
             </div>

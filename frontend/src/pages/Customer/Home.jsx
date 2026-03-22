@@ -257,11 +257,16 @@ export default function CustomerHome() {
               ¿Qué se te antoja?
             </div>
           </div>
+          const draft = readPendingOrder();
+          const initialPos = draft?.delivery_lat
+          ? { lat: draft.delivery_lat, lng: draft.delivery_lng }
+          : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
           <AddressSearchBar
-            userPos={userPos}
-            homeAddress={homeAddress}
-            onError={setMsg}
-            onSelectPos={(pos) => {
+          userPos={userPos}
+          homeAddress={homeAddress}
+          initialPos={initialPos}
+          onError={setMsg}
+          onSelectPos={(pos) => {
               setDeliveryPos(pos);
               if (pos?.lat && pos?.lng) {
                 savePendingOrder({ delivery_lat: pos.lat, delivery_lng: pos.lng, delivery_address: pos.label });
