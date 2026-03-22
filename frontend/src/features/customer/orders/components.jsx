@@ -312,6 +312,7 @@ export function OrderChat({ orderId, token, refreshTick }) {
           </span>
         )}
         {messages.map(m => (
+          console.log('msg:', m.sender_id, m.sender_role, 'isOwn:', m._own === true || m.sender_id === auth.user?.id);
           m.isSystem
             ? (
               <div key={m.id} style={{ textAlign: 'center', fontSize: '0.68rem',
