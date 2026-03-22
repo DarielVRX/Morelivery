@@ -1,5 +1,5 @@
 // frontend/src/App.jsx
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useRef } from 'react';
 import { Link, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
@@ -284,15 +284,29 @@ function RestaurantLayout() {
 }
 
 function DriverLayout() {
+  // useOrderManager vive en DriverHome pero necesitamos sus registradores
+  // aquí para pasarlos a DriverOrders y evitar una segunda conexión SSE.
+  // Los exponemos a través de una ref compartida vía contexto liviano.
+  // registerRef actúa como bus de eventos entre DriverHome (SSE owner)
+  // y DriverOrders (SSE consumer). Cada lado escribe su función en el ref
+  // y el otro lado la lee al disparar. No hay race condition porque ambos
+  // lados leen en el momento del evento, no al montar.
+  const registerRef = useRef({
+    // Escritos por DriverHome (vía useOrderManager):
+    onUpdate: null, onReconnect: null, onChat: null,
+    // Escritos por DriverOrders (vía useDriverOrders):
+    ordersUpdate: null, ordersReconnect: null, ordersChat: null,
+  });
+
   return (
     <ProtectedRole role="driver">
       <SplitLayout
-        ordersContent={<DriverOrders />}
+        ordersContent={<DriverOrders registerRef={registerRef} />}
         homeContent={
           <Suspense fallback={<Spinner />}>
             <Routes>
               <Route path="ganancias" element={<DriverEarnings />} />
-              <Route index            element={<DriverHome />} />
+              <Route index            element={<DriverHome registerRef={registerRef} />} />
             </Routes>
           </Suspense>
         }

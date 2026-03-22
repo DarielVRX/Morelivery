@@ -3,7 +3,7 @@
 // Toda la lógica de mapa está en DriverMap
 // Los componentes de UI son independientes y reciben solo props
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import ActiveOrderPanel from '../../components/ActiveOrderPanel';
 import OfferPanel from '../../components/OfferPanel';
@@ -22,9 +22,26 @@ import { ZONE_LABELS } from '../../utils/format';
 
 ensureDriverHomeAnimations();
 
-export default function DriverHome() {
+export default function DriverHome({ registerRef }) {
   const { auth, patchUser } = useAuth();
   const order = useOrderManager(auth.token, patchUser, auth.user?.driver);
+
+  // Conectar useDriverOrders (panel lateral) al SSE de useOrderManager.
+  // useDriverOrders escribe sus handlers en registerRef.current.{onUpdate,onReconnect,onChat}.
+  // Aquí los pasamos a useOrderManager para que los invoque al recibir eventos SSE.
+  useEffect(() => {
+    if (!registerRef) return;
+    // Esperar a que DriverOrders haya montado y escrito sus handlers
+    const wire = () => {
+      if (registerRef.current.onUpdate)    order.registerOrdersUpdate(registerRef.current.onUpdate);
+      if (registerRef.current.onReconnect) order.registerOrdersReconnect(registerRef.current.onReconnect);
+      if (registerRef.current.onChat)      order.registerOrdersChat(registerRef.current.onChat);
+    };
+    wire();
+    // Re-intentar en el siguiente tick por si DriverOrders monta después
+    const t = setTimeout(wire, 0);
+    return () => clearTimeout(t);
+  }, [registerRef, order.registerOrdersUpdate, order.registerOrdersReconnect, order.registerOrdersChat]);
   const badgeCount = order.pendingOffer ? 1 : (order.hasActiveOrder ? 1 : 0);
   useAppBadge(badgeCount);
 

@@ -30,6 +30,16 @@ export function useOrderManager(token, patchUser, userDriver) {
   const consecutiveTimeouts    = useRef(0);
   const lastOfferAlertRef      = useRef(null);
 
+  // Registradores para que useDriverOrders (DriverOrders panel) reciba eventos SSE
+  // sin abrir su propia conexión. Se registran una vez al montar.
+  const ordersUpdateListenerRef    = useRef(null);
+  const ordersReconnectListenerRef = useRef(null);
+  const ordersChatListenerRef      = useRef(null);
+
+  const registerOrdersUpdate    = useCallback((fn) => { ordersUpdateListenerRef.current    = fn; }, []);
+  const registerOrdersReconnect = useCallback((fn) => { ordersReconnectListenerRef.current = fn; }, []);
+  const registerOrdersChat      = useCallback((fn) => { ordersChatListenerRef.current      = fn; }, []);
+
   const hasActiveOrder = Boolean(
     activeOrder && !['delivered', 'cancelled'].includes(activeOrder.status)
   );
@@ -117,16 +127,30 @@ export function useOrderManager(token, patchUser, userDriver) {
     setTimeout(() => loadDataRef.current?.(), 800);
   }, []);
 
+  const handleOrderUpdate = useCallback(() => {
+    scheduleLoad();
+    ordersUpdateListenerRef.current?.();
+  }, []);
+
+  const handleReconnect = useCallback(() => {
+    loadDataRef.current?.();
+    ordersReconnectListenerRef.current?.();
+  }, []);
+
+  const handleChatMessage = useCallback((data) => {
+    ordersChatListenerRef.current?.(data);
+  }, []);
+
   useRealtimeOrders(
     token,
-    () => scheduleLoad(),          // onOrderUpdate
-    () => {},                      // onDriverLocation
-    handleNewOffer,                // onNewOffer
-    undefined,                     // onChatMessage
-    () => loadDataRef.current?.(), // onReconnect
-    undefined,                     // onKitchenEvent
-    handleTransferEvent,           // onTransferEvent
-    undefined,                     // onSupportMessage
+    handleOrderUpdate,        // onOrderUpdate  — reenvía a DriverOrders también
+    () => {},                 // onDriverLocation
+    handleNewOffer,           // onNewOffer
+    handleChatMessage,        // onChatMessage  — reenvía a DriverOrders también
+    handleReconnect,          // onReconnect    — reenvía a DriverOrders también
+    undefined,                // onKitchenEvent
+    handleTransferEvent,      // onTransferEvent
+    undefined,                // onSupportMessage
   );
 
   // Acciones
@@ -255,5 +279,7 @@ export function useOrderManager(token, patchUser, userDriver) {
     // Acciones
     loadData, toggleAvailability, acceptOffer, rejectOffer,
     changeStatus, doRelease, doRebalance, handleOfferExpired,
+    // Registradores SSE para DriverOrders (evita segunda conexión)
+    registerOrdersUpdate, registerOrdersReconnect, registerOrdersChat,
   };
 }
