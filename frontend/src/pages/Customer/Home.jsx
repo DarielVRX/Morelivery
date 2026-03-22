@@ -9,7 +9,8 @@ import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
 import { IconPin, IconSearch } from '../../features/customer/home/icons.jsx';
 import RestaurantCard from '../../features/customer/home/RestaurantCard.jsx';
 import SuggestionBanner from '../../features/customer/home/SuggestionBanner.jsx';
-import { fmt, haversineKm, toDraft } from '../../features/customer/home/utils.js';
+import { buildSuggestionDraft, buildSuggestionResponseBody } from '../../features/orders/drafts';
+import { fmt, haversineKm } from '../../features/customer/home/utils.js';
 
 export default function CustomerHome() {
   const { auth } = useAuth();
@@ -84,7 +85,7 @@ export default function CustomerHome() {
 
   function openSugg(order) {
     setSuggFor(order.id);
-    setSuggDrafts((prev) => ({ ...prev, [order.id]: prev[order.id] || toDraft(order.suggestion_items || []) }));
+    setSuggDrafts((prev) => ({ ...prev, [order.id]: prev[order.id] || buildSuggestionDraft(order.suggestion_items || []) }));
     if (order.restaurant_id) ensureMenu(order.restaurant_id);
   }
 
@@ -103,14 +104,7 @@ export default function CustomerHome() {
 
   async function respondSugg(orderId, accepted) {
     try {
-      const body = { accepted };
-      if (accepted) {
-        const draft = suggDrafts[orderId] || {};
-        const items = Object.entries(draft)
-          .filter(([, quantity]) => Number(quantity) > 0)
-          .map(([menuItemId, quantity]) => ({ menuItemId, quantity: Number(quantity) }));
-        if (items.length > 0) body.items = items;
-      }
+      const body = buildSuggestionResponseBody(accepted, suggDrafts[orderId] || {});
       await apiFetch(`/orders/${orderId}/suggestion-response`, { method: 'PATCH', body: JSON.stringify(body) }, auth.token);
       setSuggFor('');
       loadSuggestions();

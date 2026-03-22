@@ -3,7 +3,8 @@ import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 import { useAppBadge } from '../../hooks/useAppBadge';
-import { buildSuggestionDraft } from '../../features/orders/drafts';
+import { buildSuggestionDraft, buildSuggestionItems } from '../../features/orders/drafts';
+import { splitOrdersByTerminalStatus } from '../../features/orders/status';
 import { IconChat, OrderChat } from '../../features/customer/orders/components';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
@@ -263,8 +264,7 @@ export default function RestaurantOrders() {
   const READY_COOLDOWN_SECS = 5 * 60;
 
   async function sendSuggestion(order) {
-    const draft = suggDrafts[order.id] || {};
-    const items = Object.entries(draft).filter(([,q]) => q > 0).map(([menuItemId, quantity]) => ({ menuItemId, quantity }));
+    const items = buildSuggestionItems(suggDrafts[order.id] || {});
     if (items.length === 0) return setMsg('La sugerencia debe tener al menos 1 producto');
     try {
       await apiFetch(`/orders/${order.id}/suggest`, { method:'PATCH', body: JSON.stringify({ items }) }, auth.token);
@@ -306,8 +306,7 @@ export default function RestaurantOrders() {
     } catch (e) { setReportMsg(e.message); }
   }
 
-  const active = useMemo(() => orders.filter(o => !['delivered','cancelled'].includes(o.status)), [orders]);
-  const past   = useMemo(() => orders.filter(o =>  ['delivered','cancelled'].includes(o.status)), [orders]);
+  const { active, past } = useMemo(() => splitOrdersByTerminalStatus(orders), [orders]);
 
   useAppBadge(active.filter(o => ['created','pending_driver'].includes(o.status)).length);
 

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
-import { DriverMap, FeeBreakdown, fmt, HISTORY_PAGE, IconChat, IconChevronDown, IconChevronUp, IconStarEmpty, IconStarFilled, OrderChat, STATUS_LABELS, TipInput, toDraft } from '../../features/customer/orders/components';
+import { buildSuggestionDraft, buildSuggestionResponseBody } from '../../features/orders/drafts';
+import { DriverMap, FeeBreakdown, fmt, HISTORY_PAGE, IconChat, IconChevronDown, IconChevronUp, IconStarEmpty, IconStarFilled, OrderChat, STATUS_LABELS, TipInput } from '../../features/customer/orders/components';
 
 const STATUS_COLOR = {
   created:'#f59e0b', assigned:'#3b82f6', accepted:'#8b5cf6',
@@ -186,7 +187,7 @@ export default function CustomerOrders() {
 
       function openSuggestion(order) {
         setSuggestionFor(order.id);
-        setSuggDrafts(prev => ({ ...prev, [order.id]: prev[order.id] || toDraft(order.suggestion_items||[]) }));
+        setSuggDrafts(prev => ({ ...prev, [order.id]: prev[order.id] || buildSuggestionDraft(order.suggestion_items||[]) }));
         if (order.restaurant_id) loadMenu(order.restaurant_id);
       }
 
@@ -199,14 +200,7 @@ export default function CustomerOrders() {
 
       async function respondSuggestion(orderId, accepted) {
         try {
-          const body = { accepted };
-          if (accepted) {
-            const draft = suggDrafts[orderId] || {};
-            const items = Object.entries(draft)
-            .filter(([,q]) => Number(q) > 0)
-            .map(([menuItemId, qty]) => ({ menuItemId, quantity: Number(qty) }));
-            if (items.length > 0) body.items = items;
-          }
+          const body = buildSuggestionResponseBody(accepted, suggDrafts[orderId] || {});
           await apiFetch(`/orders/${orderId}/suggestion-response`, {
             method:'PATCH', body: JSON.stringify(body)
           }, auth.token);

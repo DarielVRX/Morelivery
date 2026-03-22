@@ -98,10 +98,6 @@ export function DriverMap({ lat, lng, driverName }) {
   return <div ref={ref} style={{ height: 180, borderRadius: 8, border: '1px solid var(--border)', marginTop: '0.5rem' }} />;
 }
 
-export function toDraft(items = []) {
-  return buildSuggestionDraft(items);
-}
-
 export function TipInput({ onValidAmount }) {
   const [val, setVal] = useState('');
   return <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}><input type="text" inputMode="numeric" pattern="[0-9]*" placeholder="$ otro" value={val} onChange={e => { const raw = e.target.value.replace(/[^0-9]/g, ''); setVal(raw); const cents = Math.round(Number(raw) * 100); if (cents > 0) onValidAmount(cents); else if (raw === '') onValidAmount(0); }} style={{ width: 62, fontSize: '0.75rem', padding: '0.2rem 0.4rem', border: '1px solid var(--border)', borderRadius: 6 }} /></div>;
