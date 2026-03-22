@@ -2,14 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { apiFetch } from '../api/client';
 import { splitOrdersByTerminalStatus } from '../features/orders/status';
-import { useRealtimeOrders } from './useRealtimeOrders';
 import { haversineMeters } from '../utils/geo';
 
 const STATUS_WITH_GPS = ['on_the_way', 'delivered'];
 const MAX_RADIUS_M = 100;
 const GRACE_MS = 3 * 60 * 1000;
 
-export function useDriverOrders(token) {
+export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, onExternalChat } = {}) {
   const [orders, setOrders] = useState([]);
   const [waitingOrders, setWaitingOrders] = useState([]);
   const [actionMsg, setActionMsg] = useState('');
@@ -65,18 +64,23 @@ export function useDriverOrders(token) {
     loadData();
   }, [loadData]);
 
-  useRealtimeOrders(
-    token,
-    () => loadOrdersRef.current?.(),
-    () => {},
-    undefined,
-    (data) => {
+  // Los eventos SSE vienen desde useOrderManager (instancia única).
+  // Registramos nuestros handlers en el ref compartido al montar.
+  useEffect(() => {
+    onExternalUpdate?.(() => loadOrdersRef.current?.());
+  }, [onExternalUpdate]);
+
+  useEffect(() => {
+    onExternalReconnect?.(() => loadDataRef.current?.());
+  }, [onExternalReconnect]);
+
+  useEffect(() => {
+    onExternalChat?.((data) => {
       if (data.orderId === chatOpenRef.current) {
-        setChatTick((value) => value + 1);
+        setChatTick((v) => v + 1);
       }
-    },
-    () => loadDataRef.current?.(),
-  );
+    });
+  }, [onExternalChat]);
 
   const setChatOpen = useCallback((valueOrUpdater) => {
     const nextValue = typeof valueOrUpdater === 'function'

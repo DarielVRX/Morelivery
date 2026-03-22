@@ -14,9 +14,9 @@ var STATUS_COLOR = {
   delivered:'#16a34a', cancelled:'#dc2626', pending_driver:'#ef4444',
 };
 
-export default function DriverOrders() {
+export default function DriverOrders({ registerRef }) {
   const { auth } = useAuth();
-  const view = useDriverOrdersPageState(auth.token);
+  const view = useDriverOrdersPageState(auth.token, registerRef);
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
