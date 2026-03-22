@@ -293,7 +293,6 @@ function AuthForm({ mode, appKey }) {
   function goTo(v) { setMessage({ text: '', ok: false }); setView(v); }
 
   return (
-    <PullToRefresh>
     <section className="auth-card">
 
     <div style={{ marginBottom:'0.25rem' }}>
@@ -515,7 +514,6 @@ function AuthForm({ mode, appKey }) {
       </p>
     )}
     </section>
-    </PullToRefresh>
   );
 }
 
