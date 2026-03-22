@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
+import { buildSuggestionDraft } from '../../orders/drafts';
 import { IconCustomer, IconDriver, IconRestaurant } from '../../../App';
 
 
@@ -98,9 +99,7 @@ export function DriverMap({ lat, lng, driverName }) {
 }
 
 export function toDraft(items = []) {
-  const d = {};
-  items.forEach(i => { d[i.menuItemId] = i.quantity; });
-  return d;
+  return buildSuggestionDraft(items);
 }
 
 export function TipInput({ onValidAmount }) {
@@ -374,4 +373,3 @@ export function OrderChat({ orderId, token, refreshTick }) {
     </div>
   );
 }
-
