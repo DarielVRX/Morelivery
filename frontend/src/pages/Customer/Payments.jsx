@@ -54,6 +54,9 @@ export default function CustomerPayments() {
   const [expiry,   setExpiry]   = useState('');
   const [cvv,      setCvv]      = useState('');
   const [name,     setName]     = useState('');
+  const initialPos = deliveryLat
+  ? { lat: deliveryLat, lng: deliveryLng }
+  : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
 
   // GPS para el AddressSearchBar
   useEffect(() => {
@@ -185,10 +188,6 @@ export default function CustomerPayments() {
               : <span style={{display:'flex',alignItems:'center',gap:'0.3rem'}}><IconWarning />Sin dirección de entrega</span>
             }
             </div>
-            const initialPos = deliveryLat
-            ? { lat: deliveryLat, lng: deliveryLng }
-            : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
-
             <AddressSearchBar
             variant="default"
             userPos={gpsPos}

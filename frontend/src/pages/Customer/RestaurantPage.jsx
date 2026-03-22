@@ -33,6 +33,9 @@ export default function RestaurantPage() {
 
   const isCustomer = auth.user?.role === 'customer';
   const hasAddress = Boolean(auth.user?.address && auth.user.address !== 'address-pending');
+  const initialPos = searchPos
+  ? { lat: searchPos.lat, lng: searchPos.lng }
+  : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
 
   // Load restaurant + menu
   useEffect(() => {
@@ -317,10 +320,6 @@ export default function RestaurantPage() {
               </svg>
               Volver
             </button>
-            const initialPos = searchPos
-            ? { lat: searchPos.lat, lng: searchPos.lng }
-            : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
-
             <AddressSearchBar
             userPos={gpsPos}
             homeAddress={auth.user?.address || null}
