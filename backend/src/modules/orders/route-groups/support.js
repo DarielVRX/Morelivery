@@ -1,6 +1,49 @@
 import { authenticate, authorize } from '../../../middlewares/auth.js';
 import { isMissingRelationError, notifyOrderParties } from '../shared.js';
 
+// ── Tiempos ───────────────────────────────────────────────────────────────────
+const CUSTOMER_GRACE_MS    = 30 * 60 * 1000; // 30 min post-entrega para escribir
+const CUSTOMER_COOLDOWN_MS = 30 * 1000;      // 30 s de enfriamiento antes de poder reintegrar
+
+// ── Reglas de escritura por rol y estado ─────────────────────────────────────
+// Devuelve null si está permitido, o un string con el motivo del bloqueo.
+// 'COOLDOWN' es una señal especial: customer puede ver el chat pero aún no escribir
+//   (primeros 30s post-entrega), y se le muestra el botón de reintegrar.
+function writeDeniedReason({ role, status, deliveredAt, chatReopenedAt, isAdmin }) {
+  if (isAdmin) return null;
+
+  const isOnTheWay = status === 'on_the_way';
+  const isTerminal = status === 'delivered' || status === 'cancelled';
+
+  // ── En camino ─────────────────────────────────────────────────────────────
+  // restaurant bloqueado; customer y driver pueden escribir.
+  // driver puede reintegrar a restaurant (gestionado en /reopen).
+  if (isOnTheWay) {
+    if (role === 'restaurant') return 'El pedido está en camino. El chat está cerrado para la tienda.';
+    return null;
+  }
+
+  // ── Pedido terminado ──────────────────────────────────────────────────────
+  if (isTerminal) {
+    if (role === 'restaurant') return 'El pedido ya fue entregado. El chat está cerrado para la tienda.';
+    if (role === 'driver')     return 'El pedido ya fue entregado. El chat está cerrado para el conductor.';
+    if (role === 'customer') {
+      const base = chatReopenedAt
+        ? new Date(chatReopenedAt).getTime()
+        : deliveredAt
+          ? new Date(deliveredAt).getTime()
+          : null;
+      if (!base) return 'El chat está cerrado.';
+      const elapsed = Date.now() - base;
+      if (elapsed > CUSTOMER_GRACE_MS)    return 'La ventana de chat post-entrega expiró (30 min).';
+      if (elapsed < CUSTOMER_COOLDOWN_MS) return 'COOLDOWN'; // frontend muestra botón de reintegrar
+      return null;
+    }
+  }
+
+  return null; // cualquier otro estado activo → todos pueden escribir
+}
+
 export function registerSupportRoutes(router, deps) {
   const { query, AppError, sseHub, logEvent } = deps;
 
@@ -21,17 +64,30 @@ export function registerSupportRoutes(router, deps) {
     } catch (error) { return next(error); }
   });
 
+  // ── GET mensajes ────────────────────────────────────────────────────────────
   router.get('/:id/messages', authenticate, async (req, res, next) => {
     try {
       const check = await query(
-        `SELECT o.customer_id, o.driver_id, r.owner_user_id AS restaurant_owner_id
+        `SELECT o.customer_id, o.driver_id, o.status, o.delivered_at, o.chat_reopened_at,
+                r.owner_user_id AS restaurant_owner_id
          FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
         [req.params.id]
       );
       if (check.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
-      const { customer_id, driver_id, restaurant_owner_id } = check.rows[0];
-      const uid = req.user.userId;
-      if (uid !== customer_id && uid !== driver_id && uid !== restaurant_owner_id) return next(new AppError(403, 'No tienes acceso a este pedido'));
+      const { customer_id, driver_id, restaurant_owner_id,
+              status, delivered_at, chat_reopened_at } = check.rows[0];
+      const uid     = req.user.userId;
+      const role    = req.user.role;
+      const isAdmin = role === 'admin';
+      const isParty = uid === customer_id || uid === driver_id || uid === restaurant_owner_id;
+      if (!isParty && !isAdmin) return next(new AppError(403, 'No tienes acceso a este pedido'));
+
+      const writeBlocked = writeDeniedReason({
+        role, status,
+        deliveredAt:    delivered_at,
+        chatReopenedAt: chat_reopened_at,
+        isAdmin,
+      });
 
       try {
         const msgs = await query(
@@ -41,14 +97,19 @@ export function registerSupportRoutes(router, deps) {
            WHERE m.order_id=$1 ORDER BY m.created_at ASC`,
           [req.params.id]
         );
-        return res.json({ messages: msgs.rows });
+        return res.json({
+          messages:     msgs.rows,
+          writeBlocked: writeBlocked || null,
+          isAdmin,
+        });
       } catch (e) {
-        if (isMissingRelationError(e)) return res.json({ messages: [] });
+        if (isMissingRelationError(e)) return res.json({ messages: [], writeBlocked: null, isAdmin });
         throw e;
       }
     } catch (error) { return next(error); }
   });
 
+  // ── POST mensaje ────────────────────────────────────────────────────────────
   router.post('/:id/messages', authenticate, async (req, res, next) => {
     try {
       const { text } = req.body || {};
@@ -56,28 +117,44 @@ export function registerSupportRoutes(router, deps) {
       if (text.trim().length > 500) return next(new AppError(400, 'El mensaje es demasiado largo (máx. 500 caracteres)'));
 
       const check = await query(
-        `SELECT o.customer_id, o.driver_id, r.owner_user_id AS restaurant_owner_id
+        `SELECT o.customer_id, o.driver_id, o.status, o.delivered_at, o.chat_reopened_at,
+                r.owner_user_id AS restaurant_owner_id
          FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
         [req.params.id]
       );
       if (check.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
-      const { customer_id, driver_id, restaurant_owner_id } = check.rows[0];
-      const uid = req.user.userId;
-      if (uid !== customer_id && uid !== driver_id && uid !== restaurant_owner_id) return next(new AppError(403, 'No tienes acceso a este pedido'));
+      const { customer_id, driver_id, restaurant_owner_id,
+              status, delivered_at, chat_reopened_at } = check.rows[0];
+      const uid     = req.user.userId;
+      const role    = req.user.role;
+      const isAdmin = role === 'admin';
+      const isParty = uid === customer_id || uid === driver_id || uid === restaurant_owner_id;
+      if (!isParty && !isAdmin) return next(new AppError(403, 'No tienes acceso a este pedido'));
+
+      const denied = writeDeniedReason({
+        role, status,
+        deliveredAt:    delivered_at,
+        chatReopenedAt: chat_reopened_at,
+        isAdmin,
+      });
+      if (denied) return next(new AppError(403, denied));
 
       try {
-        const msg = await query(`INSERT INTO order_messages(order_id, sender_id, text) VALUES($1,$2,$3) RETURNING *`, [req.params.id, uid, text.trim()]);
+        const msg = await query(
+          `INSERT INTO order_messages(order_id, sender_id, text) VALUES($1,$2,$3) RETURNING *`,
+          [req.params.id, uid, text.trim()]
+        );
         const recipients = [customer_id, driver_id, restaurant_owner_id].filter(id => id && id !== uid);
         const senderName = req.user.username || req.user.userId;
         for (const recipId of recipients) {
           sseHub.sendToUser(recipId, 'chat_message', {
-            orderId: req.params.id,
-            messageId: msg.rows[0].id,
-            senderId: uid,
+            orderId:    req.params.id,
+            messageId:  msg.rows[0].id,
+            senderId:   uid,
             senderName,
-            senderRole: req.user.role,
-            text: text.trim(),
-            createdAt: msg.rows[0].created_at,
+            senderRole: role,
+            text:       text.trim(),
+            createdAt:  msg.rows[0].created_at,
           });
         }
         return res.json({ message: msg.rows[0] });
@@ -85,6 +162,66 @@ export function registerSupportRoutes(router, deps) {
         if (isMissingRelationError(e)) return next(new AppError(503, 'El chat no está disponible todavía. Ejecuta la migración v8.'));
         throw e;
       }
+    } catch (error) { return next(error); }
+  });
+
+  // ── POST reabrir chat ───────────────────────────────────────────────────────
+  // Customer (post-delivered): reactiva ventana de 30 min, puede reintegrar a cualquiera.
+  // Driver (on_the_way): puede reintegrar a restaurant mientras el pedido sigue en ruta.
+  router.post('/:id/messages/reopen', authenticate, async (req, res, next) => {
+    try {
+      const check = await query(
+        `SELECT o.customer_id, o.driver_id, o.status, r.owner_user_id AS restaurant_owner_id
+         FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
+        [req.params.id]
+      );
+      if (check.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
+      const { customer_id, driver_id, restaurant_owner_id, status } = check.rows[0];
+      const uid  = req.user.userId;
+      const role = req.user.role;
+
+      if (role === 'restaurant') return next(new AppError(403, 'La tienda no puede reabrir el chat.'));
+      if (role === 'admin')      return next(new AppError(403, 'Admin no necesita reabrir el chat.'));
+
+      const isParty = uid === customer_id || uid === driver_id;
+      if (!isParty) return next(new AppError(403, 'No tienes acceso a este pedido'));
+
+      // Driver solo puede reintegrar mientras el pedido está on_the_way
+      if (role === 'driver' && status !== 'on_the_way') {
+        return next(new AppError(403, 'El conductor solo puede reintegrar a la tienda mientras el pedido está en camino.'));
+      }
+
+      // Customer solo puede reintegrar post-entrega
+      if (role === 'customer' && !['delivered', 'cancelled'].includes(status)) {
+        return next(new AppError(403, 'Solo puedes reabrir el chat después de recibir el pedido.'));
+      }
+
+      await query(
+        `UPDATE orders SET chat_reopened_at = NOW(), updated_at = NOW() WHERE id = $1`,
+        [req.params.id]
+      );
+
+      const recipients = [customer_id, driver_id, restaurant_owner_id].filter(id => id && id !== uid);
+      const senderName = req.user.username || uid;
+      const systemText = role === 'customer'
+        ? '📣 El cliente reabrió el chat.'
+        : '📣 El conductor reintegró a la tienda al chat.';
+
+      for (const recipId of recipients) {
+        sseHub.sendToUser(recipId, 'chat_message', {
+          orderId:    req.params.id,
+          messageId:  null,
+          senderId:   uid,
+          senderName,
+          senderRole: role,
+          text:       systemText,
+          createdAt:  new Date().toISOString(),
+          isSystem:   true,
+        });
+      }
+
+      logEvent('order.chat_reopened', { orderId: req.params.id, by: uid, role });
+      return res.json({ ok: true });
     } catch (error) { return next(error); }
   });
 

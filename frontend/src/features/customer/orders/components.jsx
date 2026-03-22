@@ -3,6 +3,30 @@ import { apiFetch } from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import { IconCustomer, IconDriver, IconRestaurant } from '../../../App';
 
+
+// ── Sonido suave para mensajes entrantes ─────────────────────────────────────
+function playMessageSound() {
+  if (typeof window === 'undefined') return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.2);
+    setTimeout(() => ctx.close().catch(() => {}), 400);
+  } catch (_) {}
+}
+
 export function IconChat() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>; }
 function IconSend() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>; }
 export function IconChevronUp() { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15"/></svg>; }
@@ -149,41 +173,70 @@ function MessageBubble({ m, isOwn }) {
 }
 
 // ── OrderChat ──────────────────────────────────────────────
-export function OrderChat({ orderId, token }) {
-  const [messages, setMessages] = useState([]);
-  const [text, setText] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
+export function OrderChat({ orderId, token, onNewMessage }) {
+  const [messages,     setMessages]     = useState([]);
+  const [writeBlocked, setWriteBlocked] = useState(null); // null = puede escribir
+  const [isAdminChat,  setIsAdminChat]  = useState(false);
+  const [text,         setText]         = useState('');
+  const [loading,      setLoading]      = useState(true);
+  const [sending,      setSending]      = useState(false);
+  const [reopening,      setReopening]      = useState(false);
   const bottomRef = useRef(null);
   const { auth } = useAuth();
 
+  const myRole = auth.user?.role || 'customer';
+  const myName = auth.user?.displayName || auth.user?.username || 'Tú';
+
+  // Notificar al padre cuando llegan mensajes nuevos (para recargar desde SSE)
+  useEffect(() => { onNewMessage?.(); }, [messages.length]);
+
+  async function loadMessages() {
+    try {
+      const d = await apiFetch(`/orders/${orderId}/messages`, {}, token);
+      setMessages(d.messages || []);
+      setWriteBlocked(d.writeBlocked || null);
+      setIsAdminChat(d.isAdmin || false);
+    } catch (_) {}
+    finally { setLoading(false); }
+  }
+
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      try {
-        const d = await apiFetch(`/orders/${orderId}/messages`, {}, token);
-        if (!cancelled) setMessages(d.messages || []);
-      } catch (_) {}
-      finally { if (!cancelled) setLoading(false); }
-    }
-    load();
+    setLoading(true);
+    apiFetch(`/orders/${orderId}/messages`, {}, token)
+      .then(d => {
+        if (cancelled) return;
+        setMessages(d.messages || []);
+        setWriteBlocked(d.writeBlocked || null);
+        setIsAdminChat(d.isAdmin || false);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [orderId, token]);
+
+  // Sonido al recibir mensaje ajeno
+  const prevMsgCount = useRef(0);
+  useEffect(() => {
+    const incoming = messages.filter(m => m.sender_id !== auth.user?.id && !m.isSystem);
+    if (incoming.length > prevMsgCount.current) playMessageSound();
+    prevMsgCount.current = incoming.length;
+  }, [messages]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   async function send() {
-    if (!text.trim() || sending) return;
+    if (!text.trim() || sending || writeBlocked) return;
     setSending(true);
     const optimistic = {
-      id: Date.now(),
-      sender_id: auth.user?.id,
-      sender_name: 'Tú',
-      sender_role: 'customer',
-      text: text.trim(),
-      created_at: new Date().toISOString(),
+      id:          Date.now(),
+      sender_id:   auth.user?.id,
+      sender_name: myName,
+      sender_role: myRole,
+      text:        text.trim(),
+      created_at:  new Date().toISOString(),
     };
     setMessages(m => [...m, optimistic]);
     const sent = text.trim();
@@ -192,58 +245,134 @@ export function OrderChat({ orderId, token }) {
       await apiFetch(`/orders/${orderId}/messages`, { method: 'POST', body: JSON.stringify({ text: sent }) }, token);
       const d = await apiFetch(`/orders/${orderId}/messages`, {}, token);
       setMessages(d.messages || []);
+      setWriteBlocked(d.writeBlocked || null);
     } catch {
       setMessages(m => m.filter(msg => msg.id !== optimistic.id));
       setText(sent);
     } finally { setSending(false); }
   }
 
+  async function reopen() {
+    setReopening(true);
+    try {
+      await apiFetch(`/orders/${orderId}/messages/reopen`, { method: 'POST' }, token);
+      await loadMessages();
+    } catch (_) {}
+    finally { setReopening(false); }
+  }
+
+  // Countdown para el enfriamiento de 30s (COOLDOWN)
+  const isCooldown = writeBlocked === 'COOLDOWN';
+  const [cooldownSecs, setCooldownSecs] = useState(0);
+  useEffect(() => {
+    if (!isCooldown) { setCooldownSecs(0); return; }
+    setCooldownSecs(30);
+    const id = setInterval(() => {
+      setCooldownSecs(s => {
+        if (s <= 1) { clearInterval(id); loadMessages(); return 0; }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isCooldown]);
+
+  // ¿Puede este rol reabrir el chat?
+  // customer: post-entrega dentro de ventana (excluye expirado)
+  // driver: solo durante on_the_way
+  const EXPIRED_MSG = 'La ventana de chat post-entrega expiró (30 min).';
+  const canReopen = writeBlocked && writeBlocked !== EXPIRED_MSG
+    && (myRole === 'customer' || myRole === 'driver');
+
   if (loading) return (
     <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', padding: '0.4rem 0' }}>
-    Cargando mensajes…
+      Cargando mensajes…
     </div>
   );
 
   return (
     <div style={{ marginTop: '0.5rem', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-    {/* Lista de mensajes */}
-    <div style={{ maxHeight: 180, overflowY: 'auto', padding: '0.6rem 0.65rem',
-      display: 'flex', flexDirection: 'column', gap: '0.5rem',
-      background: 'var(--bg-sunken)' }}>
-      {messages.length === 0 && (
-        <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', textAlign: 'center' }}>
-        Sin mensajes aún
-        </span>
+
+      {/* Banner admin */}
+      {isAdminChat && (
+        <div style={{ padding: '0.35rem 0.65rem', background: '#fef3c7', borderBottom: '1px solid #fde68a',
+          fontSize: '0.72rem', color: '#92400e', fontWeight: 600 }}>
+          👁 Estás escribiendo como Soporte — visible para todas las partes del pedido
+        </div>
       )}
-      {messages.map(m => (
-        <MessageBubble
-        key={m.id}
-        m={m}
-        isOwn={m.sender_role === 'customer'}
-        />
-      ))}
-      <div ref={bottomRef} />
+
+
+      {/* Lista de mensajes */}
+      <div style={{ maxHeight: 180, overflowY: 'auto', padding: '0.6rem 0.65rem',
+        display: 'flex', flexDirection: 'column', gap: '0.5rem',
+        background: 'var(--bg-sunken)' }}>
+        {messages.length === 0 && (
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', textAlign: 'center' }}>
+            Sin mensajes aún
+          </span>
+        )}
+        {messages.map(m => (
+          m.isSystem
+            ? (
+              <div key={m.id} style={{ textAlign: 'center', fontSize: '0.68rem',
+                color: 'var(--text-tertiary)', fontStyle: 'italic', padding: '0.1rem 0' }}>
+                {m.text}
+              </div>
+            )
+            : (
+              <MessageBubble
+                key={m.id}
+                m={m}
+                isOwn={m.sender_id === auth.user?.id || m.sender_role === myRole}
+              />
+            )
+        ))}
+        <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
-      <div style={{ display: 'flex', borderTop: '1px solid var(--border)', background: 'var(--bg-card)' }}>
-      <input
-      value={text}
-      onChange={e => setText(e.target.value)}
-      onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
-      placeholder="Escribe un mensaje…"
-      style={{ flex: 1, border: 'none', outline: 'none',
-        padding: '0.45rem 0.65rem', fontSize: '0.8rem', background: 'none' }}
-        />
-        <button
-        onClick={send}
-        disabled={!text.trim() || sending}
-        style={{ background: 'var(--brand)', color: '#fff', border: 'none',
-          padding: '0 0.75rem', cursor: 'pointer', fontSize: '0.8rem',
-          fontWeight: 700, opacity: text.trim() ? 1 : 0.45 }}>
-          {sending ? '…' : <IconSend />}
+      {/* Input o estado bloqueado */}
+      {writeBlocked ? (
+        <div style={{ padding: '0.5rem 0.65rem', background: 'var(--bg-raised)',
+          borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center',
+          gap: '0.5rem', flexWrap: 'wrap' }}>
+          <span style={{ flex: 1, fontSize: '0.72rem', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+            {isCooldown
+              ? `Podrás reintegrar el chat en ${cooldownSecs}s…`
+              : writeBlocked}
+          </span>
+          {canReopen && (
+            <button
+              onClick={reopen}
+              disabled={reopening || isCooldown}
+              style={{ padding: '0.2rem 0.65rem', fontSize: '0.72rem', fontWeight: 700,
+                border: '1px solid var(--brand)', borderRadius: 6, cursor: isCooldown ? 'default' : 'pointer',
+                background: 'var(--brand-light)', color: 'var(--brand)',
+                opacity: (reopening || isCooldown) ? 0.45 : 1 }}>
+              {reopening ? '…' : isCooldown ? `${cooldownSecs}s` : '↩ Reintegrar al chat'}
+            </button>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', borderTop: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+          <input
+            value={text}
+            onChange={e => setText(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
+            placeholder="Escribe un mensaje…"
+            style={{ flex: 1, border: 'none', outline: 'none',
+              padding: '0.45rem 0.65rem', fontSize: '0.8rem', background: 'none' }}
+          />
+          <button
+            onClick={send}
+            disabled={!text.trim() || sending}
+            style={{ background: 'var(--brand)', color: '#fff', border: 'none',
+              padding: '0 0.75rem', cursor: 'pointer', fontSize: '0.8rem',
+              fontWeight: 700, opacity: text.trim() ? 1 : 0.45 }}>
+            {sending ? '…' : <IconSend />}
           </button>
-          </div>
-          </div>
+        </div>
+      )}
+    </div>
   );
 }
+
+
