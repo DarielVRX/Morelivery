@@ -87,13 +87,7 @@ function useVariantTokens(variant) {
   };
 }
 
-export default function AddressSearchBar({
-  userPos,
-  homeAddress,
-  onSelectPos,
-  onError,
-  variant = 'hero',
-}) {
+export default function AddressSearchBar({ userPos, homeAddress, onSelectPos, onError, variant = 'hero', initialPos }) {
   const [open,      setOpen]      = useState(false);
   const [showMap,   setShowMap]   = useState(false);
   const [pinPlaced, setPinPlaced] = useState(false);
@@ -138,7 +132,9 @@ export default function AddressSearchBar({
       if (cancelled || !mapContRef.current) return;
 
       const isDark  = document.documentElement.getAttribute('data-theme') === 'dark';
-      const center  = userPos ? [userPos.lng, userPos.lat] : [-101.195, 19.706];
+      const center = initialPos?.lat ? [initialPos.lng, initialPos.lat]
+      : userPos ? [userPos.lng, userPos.lat]
+      : [-101.195, 19.706];
 
       const map = new ml.Map({
         container: mapContRef.current,
@@ -154,6 +150,19 @@ export default function AddressSearchBar({
           mapContRef.current.style.filter = 'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)';
         }
         map.resize();
+
+        // Colocar pin inicial si existe
+        if (initialPos?.lat && initialPos?.lng) {
+          map.setCenter([initialPos.lng, initialPos.lat]);
+          pendingPos.current = { lat: initialPos.lat, lng: initialPos.lng };
+          setPinPlaced(true);
+          const el = document.createElement('div');
+          el.style.cssText = 'font-size:24px;line-height:1;filter:drop-shadow(0 2px 4px #0005)';
+          el.textContent = '📍';
+          markerRef.current = new ml.Marker({ element: el, anchor: 'bottom' })
+          .setLngLat([initialPos.lng, initialPos.lat])
+          .addTo(map);
+        }
       });
 
       map.on('click', e => {
