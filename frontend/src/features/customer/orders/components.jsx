@@ -142,8 +142,7 @@ function MessageBubble({ m, isOwn }) {
   const { Icon } = cfg;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: cfg.align }}>
-    {/* Nombre + icono (solo mensajes ajenos) */}
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: isOwn ? 'flex-end' : 'flex-start' }}>
     {!isOwn && (
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem',
         marginBottom: '0.15rem', color: cfg.color, fontSize: '0.68rem', fontWeight: 700 }}>
@@ -151,18 +150,16 @@ function MessageBubble({ m, isOwn }) {
         {m.sender_name}
         </div>
     )}
-
     <div style={{
       background: cfg.color,
       color: cfg.textColor,
-      borderRadius: cfg.borderRadius,
+      borderRadius: isOwn ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
       padding: '0.3rem 0.6rem',
       fontSize: '0.8rem',
       maxWidth: '80%',
     }}>
     {m.text}
     </div>
-
     <span style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)', marginTop: '2px' }}>
     {new Date(m.created_at).toLocaleTimeString('es-MX', {
       timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit'
@@ -289,6 +286,11 @@ export function OrderChat({ orderId, token, refreshTick }) {
       Cargando mensajes…
     </div>
   );
+  console.log('messages debug:', messages.map(m => ({
+    sender_role: m.sender_role,
+    sender_id: m.sender_id,
+    isOwn: m._own === true || m.sender_id === auth.user?.id
+  })));
 
   return (
     <div style={{ marginTop: '0.5rem', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
