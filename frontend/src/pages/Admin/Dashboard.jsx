@@ -6,7 +6,7 @@ import { useRealtimeOrders } from '../../hooks/useRealtimeOrders';
 
 import { DashboardTabsBar, AssignmentTab } from '../../features/admin/dashboard/sections';
 import { useTick, fmt, fmtDate, Th, Td, Badge } from '../../features/admin/dashboard/shared';
-import PullToRefresh from '../components/PullToRefresh';
+import PullToRefresh from '../../components/PullToRefresh';
 
 // ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 export default function AdminDashboard() {
