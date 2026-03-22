@@ -16,7 +16,7 @@
 //                                        'default' usa variables CSS normales (Payments)
 
 import { useEffect, useRef, useState } from 'react';
-import { nominatimReverse } from '../../../utils/geocode';
+import { nominatimReverse } from '../../utils/geocode';
 
 const STADIA_KEY  = import.meta.env?.VITE_STADIA_KEY || '';
 const STYLE_LIGHT = STADIA_KEY
