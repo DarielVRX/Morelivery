@@ -250,6 +250,7 @@ function CustomerLayout() {
   return (
     <ProtectedRole role="customer">
       <SplitLayout
+        onRefresh={() => window.location.reload()}
         ordersContent={<CustomerOrders />}
         homeContent={
           <Suspense fallback={<Spinner />}>
@@ -269,6 +270,7 @@ function RestaurantLayout() {
   return (
     <ProtectedRole role="restaurant">
       <SplitLayout
+        onRefresh={() => window.location.reload()}
         ordersContent={<RestaurantOrders />}
         homeContent={
           <Suspense fallback={<Spinner />}>
@@ -301,6 +303,7 @@ function DriverLayout() {
   return (
     <ProtectedRole role="driver">
       <SplitLayout
+        onRefresh={() => registerRef.current.loadData?.()}
         ordersContent={<DriverOrders registerRef={registerRef} />}
         homeContent={
           <Suspense fallback={<Spinner />}>
