@@ -3,6 +3,7 @@ import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { apiFetch } from '../api/client';
+import PullToRefresh from './PullToRefresh'
 
 const ROLE_LABELS = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
 
@@ -67,6 +68,7 @@ export default function Layout({ children }) {
   }
 
   return (
+    <PullToRefresh>
     <div className="app-shell">
       <header className="app-header">
         <Link to={auth.user ? `/${role}` : '/'} className="brand-block" style={{ textDecoration:'none' }}>
@@ -142,5 +144,6 @@ export default function Layout({ children }) {
         </nav>
       )}
     </div>
+    </PullToRefresh>
   );
 }
