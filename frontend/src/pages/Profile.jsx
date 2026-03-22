@@ -375,13 +375,14 @@ export default function ProfilePage() {
       <span style={{ fontSize:'0.875rem', fontWeight:500, display:'block', marginBottom:'0.3rem' }}>Código postal</span>
       <CPSearchBar
         token={auth.token}
-        onSelectAddress={({ lat, lng, estado: e, ciudad: c, colonia: col, postalCode: cp }) => {
-          if (lat != null)  setHomeLat(lat);
-          if (lng != null)  setHomeLng(lng);
-          if (e   != null)  setEstado(e);
-          if (c   != null)  setCiudad(c);
-          if (col != null)  { setColonia(col); coloniaRef.current = col; }
-          if (cp  != null)  setPostalCode(cp);
+        onSelectAddress={({ lat, lng, estado: e, ciudad: c, colonia: col, postalCode: cp, colonias }) => {
+          if (lat != null) setHomeLat(lat);
+          if (lng != null) setHomeLng(lng);
+          if (e   != null) setEstado(e);
+          if (c   != null) setCiudad(c);
+          if (col != null && col !== '') { setColonia(col); coloniaRef.current = col; }
+          if (cp  != null) setPostalCode(cp);
+          if (colonias?.length) setColoniasList(colonias);
         }}
       />
     </div>
