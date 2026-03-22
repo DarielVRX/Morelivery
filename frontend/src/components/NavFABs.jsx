@@ -71,8 +71,8 @@ export default function NavFABs({
   const safeBot        = 'env(safe-area-inset-bottom, 0px)';
   const BASE_BOTTOM    = 164; // sobre las cards de pedido/oferta
   const GAP            = 12;
-  const SZ_PRIMARY     = 52;
-  const SZ_SECONDARY   = 42;
+  const SZ_PRIMARY     = 60;  // pulgar en ruta — WCAG 60px mínimo
+  const SZ_SECONDARY   = 52;  // secundario cómodo con una mano
 
   const centerBottom    = `calc(${BASE_BOTTOM}px + ${safeBot})`;
   const secondaryBottom = `calc(${BASE_BOTTOM + SZ_PRIMARY + GAP}px + ${safeBot})`;
@@ -160,8 +160,8 @@ export default function NavFABs({
             onClick={() => { onVoiceToggle(); onNavMode(null); }}
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
-              padding: '0.4rem 0.875rem', borderRadius: 20,
-              fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+              padding: '0.55rem 1rem', borderRadius: 20,
+              fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
               whiteSpace: 'nowrap',
               background: voiceEnabled ? '#f0fdf4' : '#f9fafb',
               color: voiceEnabled ? '#15803d' : '#6b7280',
@@ -176,8 +176,8 @@ export default function NavFABs({
             onClick={() => { onGoogleNav(); onNavMode(null); }}
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
-              padding: '0.4rem 0.875rem', borderRadius: 20,
-              fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+              padding: '0.55rem 1rem', borderRadius: 20,
+              fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
               whiteSpace: 'nowrap', background: 'var(--brand)',
               color: '#fff', border: 'none',
               boxShadow: '0 2px 8px rgba(0,0,0,0.2)', minHeight: 'unset',
@@ -236,8 +236,8 @@ export default function NavFABs({
             <button key={opt.mode}
               onClick={() => onNavMode(opt.mode)}
               style={{
-                padding: '0.35rem 0.875rem', borderRadius: 20,
-                fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                padding: '0.55rem 1rem', borderRadius: 20,
+                fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
                 whiteSpace: 'nowrap', background: opt.bg,
                 color: '#fff', border: 'none',
                 boxShadow: '0 2px 8px rgba(0,0,0,0.22)', minHeight: 'unset',

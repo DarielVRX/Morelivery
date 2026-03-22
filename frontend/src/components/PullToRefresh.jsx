@@ -10,6 +10,8 @@ const PTR_RESISTANCE = 0.45;
 const HEADER_ZONE    = 64; // px desde el top — solo iniciar el gesto aquí
 
 export default function PullToRefresh({ children, onRefresh }) {
+  const onRefreshRef = useRef(onRefresh);
+  useEffect(() => { onRefreshRef.current = onRefresh; }, [onRefresh]);
   const wrapRef      = useRef(null);
   const contentRef   = useRef(null);
   const indicatorRef = useRef(null);
@@ -43,18 +45,37 @@ export default function PullToRefresh({ children, onRefresh }) {
     }
   }
 
-  function _release() {
+  function _release(keepVisible = false) {
     const con = contentRef.current, ind = indicatorRef.current;
     ind?.classList.remove('pulling');
     ind?.classList.add('releasing');
     con?.classList.add('releasing');
-    _applyPull(0);
+    if (keepVisible) {
+      // Mantener indicador visible y centrado mientras dura el refresh
+      if (ind) ind.style.transform = 'translateX(-50%) translateY(0px)';
+      if (con) con.style.transform = 'translateY(44px)';
+    } else {
+      _applyPull(0);
+      setTimeout(() => {
+        ind?.classList.remove('releasing');
+        con?.classList.remove('releasing');
+      }, 250);
+      if (arcRef.current) arcRef.current.setAttribute('stroke-dasharray', '0 56.5');
+    }
+    pullRef.current = 0;
+  }
+
+  function _hideIndicator() {
+    const con = contentRef.current, ind = indicatorRef.current;
+    ind?.classList.add('releasing');
+    con?.classList.add('releasing');
+    if (ind) ind.style.transform = 'translateX(-50%) translateY(-50px)';
+    if (con) con.style.transform = 'translateY(0px)';
     setTimeout(() => {
       ind?.classList.remove('releasing');
       con?.classList.remove('releasing');
-    }, 250);
+    }, 280);
     if (arcRef.current) arcRef.current.setAttribute('stroke-dasharray', '0 56.5');
-    pullRef.current = 0;
   }
 
   useEffect(() => {
@@ -85,12 +106,13 @@ export default function PullToRefresh({ children, onRefresh }) {
       if (!shouldRefresh) { _release(); return; }
       loadingRef.current = true;
       setLoading(true);
-      _release();
-      if (onRefresh) {
-        Promise.resolve(onRefresh())
+      _release(true); // mantener indicador visible
+      if (onRefreshRef.current) {
+        Promise.resolve(onRefreshRef.current())
           .finally(() => {
             loadingRef.current = false;
             setLoading(false);
+            _hideIndicator();
           });
       } else {
         window.location.reload();
@@ -108,13 +130,14 @@ export default function PullToRefresh({ children, onRefresh }) {
       window.removeEventListener('touchend',    onTouchEnd);
     };
   }, []);
+  // onRefresh se maneja via ref — no necesita estar en deps
 
   return (
     <div ref={wrapRef} style={{ height:'100%', overflow:'hidden', position:'relative' }}>
 
       <div ref={indicatorRef} className="dh-ptr-indicator releasing">
-        <div style={{ width:36, height:36, borderRadius:'50%', background:'#fff',
-          boxShadow:'0 2px 12px rgba(0,0,0,0.18)', display:'flex',
+        <div style={{ width:44, height:44, borderRadius:'50%', background:'#fff',
+          boxShadow:'0 2px 14px rgba(0,0,0,0.2)', display:'flex',
           alignItems:'center', justifyContent:'center' }}>
           <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
             <circle cx="11" cy="11" r="9" stroke="#e5e7eb" strokeWidth="2.5"/>
