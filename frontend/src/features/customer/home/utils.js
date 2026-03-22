@@ -2,14 +2,6 @@ export function fmt(cents) {
   return `$${((cents ?? 0) / 100).toFixed(2)}`;
 }
 
-export function toDraft(items = []) {
-  const draft = {};
-  items.forEach((item) => {
-    draft[item.menuItemId] = item.quantity;
-  });
-  return draft;
-}
-
 export function haversineKm(lat1, lng1, lat2, lng2) {
   const R = 6371;
   const toRad = (value) => value * Math.PI / 180;
