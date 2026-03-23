@@ -51,6 +51,8 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     if (!registerRef) return;
     registerRef.current.activeZones      = home.activeZones;
     registerRef.current.activeImpassable = home.activeImpassable;
+    registerRef.current.myPreferences    = home.myPreferences;
+    registerRef.current.myPosition       = myPosition;
     registerRef.current.refreshZones     = home.refreshZones;
     registerRef.current.availability     = order.availability;
   }); // sin deps — actualizar en cada render para mantener datos frescos

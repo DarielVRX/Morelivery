@@ -10,7 +10,7 @@ import {
   submitImpassableRoads,
   submitRoadPreferences,
 } from './api';
-import { fetchAllImpassable } from '../alerts/api';
+import { fetchAllImpassable, fetchMyPreferences } from '../alerts/api';
 import {
   buildGoogleMapsAppUrl,
   buildGoogleMapsWebUrl,
@@ -32,6 +32,7 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
   const [centerMode, setCenterMode] = useState('nav');
   const [activeZones, setActiveZones] = useState([]);
   const [activeImpassable, setActiveImpassable] = useState([]);
+  const [myPreferences,    setMyPreferences]    = useState([]);
   const [navMode, setNavMode] = useState(null);
   const [mapInstance, setMapInstance] = useState(null);
 
@@ -50,6 +51,13 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
         if (Array.isArray(reports)) setActiveImpassable(reports);
       })
       .catch(() => {});
+    if (token) {
+      fetchMyPreferences(token)
+        .then((prefs) => {
+          if (Array.isArray(prefs)) setMyPreferences(prefs);
+        })
+        .catch(() => {});
+    }
   }, []);
 
   useEffect(() => {
@@ -281,6 +289,7 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
     centerMode,
     activeZones,
     activeImpassable,
+    myPreferences,
     navMode,
     setNavMode,
     mapInstance,

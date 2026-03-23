@@ -306,6 +306,8 @@ function DriverLayout() {
       <AlertsPanel
         zones={registerRef.current.activeZones ?? []}
         impassable={registerRef.current.activeImpassable ?? []}
+        preferences={registerRef.current.myPreferences ?? []}
+        myPosition={registerRef.current.myPosition ?? null}
         onCloseMobileDrawer={() => closeMobileDrawerRef.current?.()}
       />
     );

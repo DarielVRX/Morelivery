@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { haversineMeters } from '../../utils/geo';
 import {
   fetchAllZones, fetchAllImpassable, fetchMyPreferences,
   voteZone, deleteZone, confirmImpassable, deleteImpassable,
@@ -57,11 +58,7 @@ function ZoneCard({ zone, token, onRefresh }) {
     try { await voteZone(zone.id, v, token); onRefresh(); }
     catch (_) {} finally { setLoading(false); }
   }
-  async function del() {
-    setLoading(true);
-    try { await deleteZone(zone.id, token); onRefresh(); }
-    catch (_) {} finally { setLoading(false); }
-  }
+  // Zonas propias también usan voto dismiss — la eliminación directa está reservada para admin
 
   const expiresIn = zone.expires_at
     ? Math.max(0, Math.round((new Date(zone.expires_at) - Date.now()) / 3600000))
@@ -101,30 +98,29 @@ function ZoneCard({ zone, token, onRefresh }) {
             <span>✓ {zone.confirm_count || 0}</span>
             <span>✗ {zone.dismiss_count || 0}</span>
           </div>
+          {zone.pending_edit && (
+            <div style={{ marginTop: 4, fontSize: '0.68rem', color: '#92400e',
+              background: '#fffbeb', border: '1px solid #fbbf24',
+              borderRadius: 6, padding: '0.15rem 0.4rem', display: 'inline-block' }}>
+              ✏️ Cambio sugerido: {ZONE_TYPE_LABELS[zone.pending_edit.type] || zone.pending_edit.type}
+              {zone.pending_edit.estimated_hours ? ` · ${zone.pending_edit.estimated_hours}h` : ''}
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: 5, flexShrink: 0, marginLeft: 8 }}>
           {!zone.is_mine && (
-            <>
-              <button onClick={() => vote('confirm')} disabled={loading} style={{
-                padding: '0.25rem 0.5rem', borderRadius: 6, fontSize: '0.7rem', fontWeight: 700,
-                background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac',
-                cursor: 'pointer', minHeight: 'unset',
-              }}>✓</button>
-              <button onClick={() => vote('dismiss')} disabled={loading} style={{
-                padding: '0.25rem 0.5rem', borderRadius: 6, fontSize: '0.7rem', fontWeight: 700,
-                background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca',
-                cursor: 'pointer', minHeight: 'unset',
-              }}>✗</button>
-            </>
+            <button onClick={() => vote('confirm')} disabled={loading} style={{
+              padding: '0.25rem 0.5rem', borderRadius: 6, fontSize: '0.7rem', fontWeight: 700,
+              background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac',
+              cursor: 'pointer', minHeight: 'unset',
+            }}>✓ {zone.confirm_count || 0}/3</button>
           )}
-          {zone.is_mine && (
-            <button onClick={del} disabled={loading} style={{
-              padding: '0.25rem 0.5rem', borderRadius: 6, fontSize: '0.7rem',
-              background: 'var(--bg-raised)', color: 'var(--text-tertiary)',
-              border: '1px solid var(--border)', cursor: 'pointer', minHeight: 'unset',
-            }}>🗑</button>
-          )}
+          <button onClick={() => vote('dismiss')} disabled={loading} style={{
+            padding: '0.25rem 0.5rem', borderRadius: 6, fontSize: '0.7rem', fontWeight: 700,
+            background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca',
+            cursor: 'pointer', minHeight: 'unset',
+          }}>✗ {zone.dismiss_count || 0}/3</button>
         </div>
       </div>
     </div>
@@ -132,9 +128,14 @@ function ZoneCard({ zone, token, onRefresh }) {
 }
 
 // ── Impassable card ───────────────────────────────────────────────────────────
-function ImpassableCard({ report, token, onRefresh }) {
+function ImpassableCard({ report, token, onRefresh, myPosition }) {
   const [loading,  setLoading]  = useState(false);
   const [duration, setDuration] = useState('days');
+
+  const distM = myPosition && report.lat && report.lng
+    ? haversineMeters(myPosition.lat, myPosition.lng, Number(report.lat), Number(report.lng))
+    : Infinity;
+  const canConfirm = !report.is_mine && !report.confirmed && distM <= 50;
 
   async function confirm() {
     setLoading(true);
@@ -184,7 +185,7 @@ function ImpassableCard({ report, token, onRefresh }) {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, marginLeft: 8 }}>
-          {!report.is_mine && !report.confirmed && (
+          {canConfirm && (
             <div style={{ display: 'flex', gap: 4 }}>
               <select value={duration} onChange={e => setDuration(e.target.value)}
                 style={{ fontSize: '0.68rem', borderRadius: 6, border: '1px solid var(--border)',
@@ -198,6 +199,11 @@ function ImpassableCard({ report, token, onRefresh }) {
                 background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac',
                 cursor: 'pointer', minHeight: 'unset',
               }}>✓</button>
+            </div>
+          )}
+          {!report.is_mine && !report.confirmed && distM > 50 && distM !== Infinity && (
+            <div style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)', textAlign: 'right', marginBottom: 2 }}>
+              ~{Math.round(distM)}m
             </div>
           )}
           {report.is_mine && (
@@ -292,6 +298,7 @@ export default function AlertsPage() {
   const [impassable,    setImpassable]    = useState([]);
   const [preferences,   setPreferences]   = useState([]);
   const [loading,       setLoading]       = useState(true);
+  const [myPosition,    setMyPosition]    = useState(null);
 
   // Layer visibility
   const [showMine,      setShowMine]      = useState(true);
@@ -302,6 +309,16 @@ export default function AlertsPage() {
   const [zoneTypes, setZoneTypes] = useState(
     new Set(['traffic','construction','accident','flood','blocked','other'])
   );
+
+  // Obtener posición GPS para validar proximidad
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setMyPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => {},
+      { timeout: 8000, maximumAge: 30000, enableHighAccuracy: true }
+    );
+  }, []);
 
   const load = useCallback(async () => {
     if (!auth.token) return;
@@ -421,7 +438,7 @@ export default function AlertsPage() {
                   : null
                 }
                 {filteredImpassable.map(r => (
-                  <ImpassableCard key={r.way_id} report={r} token={auth.token} onRefresh={load} />
+                  <ImpassableCard key={r.way_id} report={r} token={auth.token} onRefresh={load} myPosition={myPosition} />
                 ))}
                 {showMine && preferences.map(p => (
                   <PreferenceCard key={p.way_id} pref={p} token={auth.token} onRefresh={load} />
