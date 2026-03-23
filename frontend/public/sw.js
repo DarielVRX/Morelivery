@@ -87,7 +87,8 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
 
   // API y SSE: nunca cachear — siempre red
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/events')) return;
+  const API_PREFIXES = ['/nav/', '/orders/', '/drivers/', '/auth/', '/restaurants/', '/users/', '/admin/', '/events'];
+  if (API_PREFIXES.some(p => url.pathname.startsWith(p))) return;
 
   // Solo GET
   if (request.method !== 'GET') return;

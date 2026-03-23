@@ -1,5 +1,12 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/nav/:path*",         "destination": "https://morelivery.onrender.com/nav/:path*" },
+    { "source": "/orders/:path*",      "destination": "https://morelivery.onrender.com/orders/:path*" },
+    { "source": "/drivers/:path*",     "destination": "https://morelivery.onrender.com/drivers/:path*" },
+    { "source": "/auth/:path*",        "destination": "https://morelivery.onrender.com/auth/:path*" },
+    { "source": "/restaurants/:path*", "destination": "https://morelivery.onrender.com/restaurants/:path*" },
+    { "source": "/users/:path*",       "destination": "https://morelivery.onrender.com/users/:path*" },
+    { "source": "/admin/:path*",       "destination": "https://morelivery.onrender.com/admin/:path*" },
+    { "source": "/(.*)",               "destination": "/index.html" }
   ]
 }
