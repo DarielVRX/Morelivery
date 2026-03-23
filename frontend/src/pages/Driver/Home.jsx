@@ -23,7 +23,7 @@ import { ZONE_LABELS } from '../../utils/format';
 
 ensureDriverHomeAnimations();
 
-export default function DriverHome({ registerRef }) {
+export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
   const { auth, patchUser } = useAuth();
   const { isDark } = useTheme();
   const order = useOrderManager(auth.token, patchUser, auth.user?.driver);
@@ -45,6 +45,15 @@ export default function DriverHome({ registerRef }) {
     const t = setTimeout(wire, 0);
     return () => clearTimeout(t);
   }, [registerRef, order.registerOrdersUpdate, order.registerOrdersReconnect, order.registerOrdersChat]);
+
+  // Exponer zonas e impassable via registerRef para que el wrapper construya AlertsPanel
+  useEffect(() => {
+    if (!registerRef) return;
+    registerRef.current.activeZones      = home.activeZones;
+    registerRef.current.activeImpassable = home.activeImpassable;
+    registerRef.current.refreshZones     = home.refreshZones;
+    registerRef.current.availability     = order.availability;
+  }); // sin deps — actualizar en cada render para mantener datos frescos
   const badgeCount = order.pendingOffer ? 1 : (order.hasActiveOrder ? 1 : 0);
   useAppBadge(badgeCount);
 

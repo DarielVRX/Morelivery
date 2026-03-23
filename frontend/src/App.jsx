@@ -7,6 +7,7 @@ import {IconSun, IconMoon} from './components/Layout';
 import Layout from './components/Layout';
 import PullToRefresh from './components/PullToRefresh';
 import SplitLayout from './components/SplitLayout';
+import AlertsPanel from './components/AlertsPanel';
 import AuthPage from './pages/AuthPage';
 import CustomerOrders   from './pages/Customer/Orders';
 import DriverOrders     from './pages/Driver/Orders';
@@ -288,31 +289,45 @@ function RestaurantLayout() {
 }
 
 function DriverLayout() {
-  // useOrderManager vive en DriverHome pero necesitamos sus registradores
-  // aquí para pasarlos a DriverOrders y evitar una segunda conexión SSE.
-  // Los exponemos a través de una ref compartida vía contexto liviano.
   // registerRef actúa como bus de eventos entre DriverHome (SSE owner)
-  // y DriverOrders (SSE consumer). Cada lado escribe su función en el ref
-  // y el otro lado la lee al disparar. No hay race condition porque ambos
-  // lados leen en el momento del evento, no al montar.
+  // y DriverOrders (SSE consumer), y ahora también expone activeZones/activeImpassable
+  // para que AlertsPanel pueda leerlos sin abrir conexiones adicionales.
   const registerRef = useRef({
-    // Escritos por DriverHome (vía useOrderManager):
     onUpdate: null, onReconnect: null, onChat: null,
-    // Escritos por DriverOrders (vía useDriverOrders):
     ordersUpdate: null, ordersReconnect: null, ordersChat: null,
+    activeZones: [], activeImpassable: [], refreshZones: null,
   });
+  const closeMobileDrawerRef = useRef(null);
+
+  // AlertsPanel se renderiza aquí para acceder a registerRef directamente.
+  // Se pasa como alertsContent a SplitLayout — se monta una vez y persiste.
+  function AlertsContent() {
+    return (
+      <AlertsPanel
+        zones={registerRef.current.activeZones ?? []}
+        impassable={registerRef.current.activeImpassable ?? []}
+        onCloseMobileDrawer={() => closeMobileDrawerRef.current?.()}
+      />
+    );
+  }
 
   return (
     <ProtectedRole role="driver">
       <SplitLayout
         onRefresh={() => registerRef.current.loadData?.()}
+        onCloseMobileDrawerRef={closeMobileDrawerRef}
+        totalAlerts={
+          (registerRef.current.activeZones?.length ?? 0) +
+          (registerRef.current.activeImpassable?.length ?? 0)
+        }
         ordersContent={<DriverOrders registerRef={registerRef} />}
+        alertsContent={<AlertsContent />}
         homeContent={
           <Suspense fallback={<Spinner />}>
             <Routes>
               <Route path="ganancias" element={<DriverEarnings />} />
               <Route path="alertas"   element={<DriverAlerts />} />
-              <Route index            element={<DriverHome registerRef={registerRef} />} />
+              <Route index            element={<DriverHome registerRef={registerRef} closeMobileDrawerRef={closeMobileDrawerRef} />} />
             </Routes>
           </Suspense>
         }

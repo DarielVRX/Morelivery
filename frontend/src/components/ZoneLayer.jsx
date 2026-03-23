@@ -154,7 +154,7 @@ function ZoneInfoCard({ zone, onSuggest, onClose, onVote, userId, votedIds = new
               background: '#fef2f2', color: '#dc2626',
               border: '1.5px solid #fca5a5',
               opacity: voting ? 0.6 : 1,
-            }}>✗ Ya no está</button>
+            }}>✗ Ya no está · {zone.dismiss_count ?? 0}/3</button>
           )}
         </div>
       )}

@@ -4,8 +4,12 @@
 import { useEffect, useState } from 'react';
 import PullToRefresh from './PullToRefresh';
 
-export default function SplitLayout({ homeContent, ordersContent, onRefresh }) {
+export default function SplitLayout({ homeContent, ordersContent, alertsContent, totalAlerts = 0, onRefresh, onCloseMobileDrawerRef }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [activeTab, setActiveTab]   = useState('orders');
+
+  // Exponer función de cierre para que componentes hijos puedan cerrar el drawer
+  if (onCloseMobileDrawerRef) onCloseMobileDrawerRef.current = () => setMobileOpen(false);
 
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? 'hidden' : '';
@@ -16,9 +20,47 @@ export default function SplitLayout({ homeContent, ordersContent, onRefresh }) {
     <PullToRefresh onRefresh={onRefresh}>
     <div className="split-root">
 
-    {/* ── Orders: una sola instancia — desktop col + mobile drawer ── */}
+    {/* ── Orders/Alerts: una sola instancia — desktop col + mobile drawer ── */}
     <aside className={`split-orders-col${mobileOpen ? ' mobile-open' : ''}`}>
-    {ordersContent}
+      {/* Header de pestañas */}
+      <div style={{
+        display: 'flex', flexShrink: 0,
+        borderBottom: '1px solid var(--border-light)',
+        background: 'var(--bg-card)',
+      }}>
+        <button onClick={() => setActiveTab('orders')} style={{
+          flex: 1, padding: '0.6rem 0', fontSize: '0.78rem', fontWeight: 700,
+          cursor: 'pointer', border: 'none', background: 'none',
+          borderBottom: activeTab === 'orders' ? '2px solid var(--brand)' : '2px solid transparent',
+          color: activeTab === 'orders' ? 'var(--brand)' : 'var(--text-secondary)',
+        }}>
+          📦 Pedidos
+        </button>
+        <button onClick={() => setActiveTab('alerts')} style={{
+          flex: 1, padding: '0.6rem 0', fontSize: '0.78rem', fontWeight: 700,
+          cursor: 'pointer', border: 'none', background: 'none',
+          borderBottom: activeTab === 'alerts' ? '2px solid var(--brand)' : '2px solid transparent',
+          color: activeTab === 'alerts' ? 'var(--brand)' : 'var(--text-secondary)',
+          position: 'relative',
+        }}>
+          🚨 Alertas
+          {totalAlerts > 0 && (
+            <span style={{
+              marginLeft: 4, fontSize: '0.65rem',
+              background: '#ef4444', color: '#fff',
+              borderRadius: 10, padding: '0 5px',
+            }}>{totalAlerts}</span>
+          )}
+        </button>
+      </div>
+
+      {/* Contenido de pestañas — ambos montados, solo uno visible */}
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'orders' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
+        {ordersContent}
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'alerts' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
+        {alertsContent}
+      </div>
     </aside>
 
     {/* ── Columna Home ──────────────────────────────────────────────── */}

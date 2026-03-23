@@ -16,7 +16,8 @@ var STATUS_COLOR = {
 
 export default function DriverOrders({ registerRef }) {
   const { auth } = useAuth();
-  const view = useDriverOrdersPageState(auth.token, registerRef);
+  const availability = registerRef?.current?.availability ?? false;
+  const view = useDriverOrdersPageState(auth.token, registerRef, availability);
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
