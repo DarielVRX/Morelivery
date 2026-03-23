@@ -52,7 +52,7 @@ function IconReport({ reportMode }) {
 const REPORT_PILLS = [
   { mode: 'zone',       label: 'Zona de alerta',   icon: '🚦', color: '#f97316' },
   { mode: 'impassable', label: 'Calle no viable',   icon: '⛔', color: '#ef4444' },
-  { mode: 'preference', label: 'Nota personal',     icon: '⭐', color: '#16a34a' },
+  { mode: 'preference', label: 'Preferencias',     icon: '⭐', color: '#16a34a' },
 ];
 
 export default function NavFABs({

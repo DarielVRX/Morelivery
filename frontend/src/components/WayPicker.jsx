@@ -7,7 +7,7 @@
 //   • Duración predeterminada: 'days'
 //   • Confirmación: toast translúcido 1s, sin interacción extra
 //
-// mode='preference' — Nota personal
+// mode='preference' — Preferencias
 //   • Misma detección de heading para identificar la vialidad correcta
 //   • Toma todos los segmentos de la misma calle (nombre/ref)
 //   • Panel con selector de tipo: preferida / difícil / evitar
@@ -385,7 +385,7 @@ export default function WayPicker({ map, mode = 'impassable', onConfirm, onCance
 
   const canConfirm = selected.length > 0 && !saving && !loading;
   const isPreference = mode === 'preference';
-  const title = isPreference ? 'Nota personal' : 'Calle no viable';
+  const title = isPreference ? 'Preferencias' : 'Calle no viable';
 
   return (
     <>
