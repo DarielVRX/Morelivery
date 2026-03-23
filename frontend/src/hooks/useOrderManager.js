@@ -145,14 +145,6 @@ export function useOrderManager(token, patchUser, userDriver) {
     setTimeout(() => loadDataRef.current?.(), 600);
   }, []);
 
-  // Guardar pico de mochila al aceptar oferta — se muestra en el header durante la ruta
-  const handleAcceptOffer = useCallback(async (setMsg) => {
-    if (!pendingOffer) return;
-    const bagPct = pendingOffer.bagOverflowPct ?? null;
-    await acceptOffer(setMsg);
-    if (bagPct !== null) setRouteBagPct(bagPct);
-  }, [pendingOffer]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const handleTransferEvent = useCallback((data) => {
     setTransferBanner(data);
     // Auto-dismiss después de 8 segundos
@@ -208,6 +200,14 @@ export function useOrderManager(token, patchUser, userDriver) {
     } catch (e) { onError?.(e.message); }
     finally { setLoadingOffer(false); }
   }
+
+  // Guardar pico de mochila al aceptar oferta — se muestra en el header durante la ruta
+  const handleAcceptOffer = async (setMsg) => {
+    if (!pendingOffer) return;
+    const bagPct = pendingOffer.bagOverflowPct ?? null;
+    await acceptOffer(setMsg);
+    if (bagPct !== null) setRouteBagPct(bagPct);
+  };
 
   async function rejectOffer(onError) {
     if (!pendingOffer) return;
