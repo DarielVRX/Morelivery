@@ -1,0 +1,2 @@
+ALTER TABLE impassable_reports ADD COLUMN IF NOT EXISTS coords JSONB;
+ALTER TABLE impassable_reports ADD COLUMN IF NOT EXISTS name TEXT;

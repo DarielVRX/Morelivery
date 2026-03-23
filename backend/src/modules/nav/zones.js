@@ -79,6 +79,27 @@ router.get('/active', async (_req, res, next) => {
   }
 });
 
+// GET /mine — zonas creadas por el driver autenticado
+router.get('/mine', authenticate, authorize(['driver', 'admin']), async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT z.*,
+              COALESCE(cv.confirm_count, 0) AS confirm_count,
+              COALESCE(dv.dismiss_count,  0) AS dismiss_count
+       FROM road_zones z
+       LEFT JOIN (SELECT zone_id, COUNT(*) AS confirm_count FROM zone_votes WHERE vote='confirm' GROUP BY zone_id) cv ON cv.zone_id = z.id
+       LEFT JOIN (SELECT zone_id, COUNT(*) AS dismiss_count FROM zone_votes WHERE vote='dismiss' GROUP BY zone_id) dv ON dv.zone_id = z.id
+       WHERE z.created_by = $1
+       ORDER BY z.created_at DESC`,
+      [req.user.userId]
+    );
+    return res.json({ zones: result.rows });
+  } catch (err) {
+    if (err?.code === '42P01') return res.json({ zones: [] });
+    return next(err);
+  }
+});
+
 // GET /near — zonas activas cercanas
 router.get('/near', async (req, res, next) => {
   try {

@@ -104,20 +104,45 @@ router.post('/impassable', authenticate, authorize(['driver']), async (req, res,
         throw new AppError(400, 'description no puede superar 500 caracteres');
       }
       try {
+        const coords = w?.coords ?? body.coords ?? null;
         const result = await query(
-          `INSERT INTO impassable_reports (way_id, lat, lng, description, estimated_duration, reported_by)
-           VALUES ($1, $2, $3, $4, $5, $6)
+          `INSERT INTO impassable_reports (way_id, lat, lng, coords, description, estimated_duration, reported_by)
+           VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+           ON CONFLICT (way_id, reported_by) DO UPDATE
+             SET lat=$2, lng=$3, coords=$4::jsonb, estimated_duration=$6, updated_at=NOW()
            RETURNING *`,
-          [way_id, lat, lng, description || null, estimated_duration, req.user.userId]
+          [way_id, lat, lng, coords ? JSON.stringify(coords) : null,
+           description || null, estimated_duration, req.user.userId]
         );
         reports.push(result.rows[0]);
       } catch (e) {
-        if (e?.code !== '23505') throw e; // ignorar duplicados (índice parcial único)
+        if (e?.code !== '23505') throw e;
       }
     }
 
     return res.status(201).json({ ok: true, reports });
   } catch (error) {
+    return next(error);
+  }
+});
+
+// GET /impassable/mine — reportes del driver autenticado (para edición)
+router.get('/impassable/mine', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT ir.*,
+              COUNT(ic.id)::int AS confirmation_count,
+              CASE WHEN ir.confirmed THEN 'confirmed' ELSE 'pending' END AS status
+       FROM impassable_reports ir
+       LEFT JOIN impassable_confirmations ic ON ic.way_id = ir.way_id
+       WHERE ir.reported_by = $1
+       GROUP BY ir.id
+       ORDER BY ir.created_at DESC`,
+      [req.user.userId]
+    );
+    return res.json({ reports: result.rows });
+  } catch (error) {
+    if (error?.code === '42P01') return res.json({ reports: [] });
     return next(error);
   }
 });
@@ -200,14 +225,26 @@ router.post('/impassable/:way_id/confirm', authenticate, authorize(['driver']), 
   }
 });
 
-// GET /impassable — reportes confirmados
-router.get('/impassable', async (_req, res, next) => {
+// GET /impassable — todos los reportes (confirmed + pending)
+// ?confirmed=true  → solo confirmados
+// ?confirmed=false → solo pendientes
+// sin filtro       → todos
+router.get('/impassable', async (req, res, next) => {
   try {
+    const filter = req.query.confirmed;
+    const whereClause = filter === 'true'
+      ? 'WHERE ir.confirmed = true'
+      : filter === 'false'
+        ? 'WHERE ir.confirmed = false'
+        : '';
+
     const result = await query(
-      `SELECT ir.*, COUNT(ic.id)::int AS confirmation_count
+      `SELECT ir.*,
+              COUNT(ic.id)::int AS confirmation_count,
+              CASE WHEN ir.confirmed THEN 'confirmed' ELSE 'pending' END AS status
        FROM impassable_reports ir
        LEFT JOIN impassable_confirmations ic ON ic.way_id = ir.way_id
-       WHERE ir.confirmed = true
+       ${whereClause}
        GROUP BY ir.id
        ORDER BY ir.created_at DESC`
     );
@@ -230,11 +267,12 @@ router.get('/impassable/near', async (req, res, next) => {
     }
 
     const result = await query(
-      `SELECT ir.*, COUNT(ic.id)::int AS confirmation_count
+      `SELECT ir.*,
+              COUNT(ic.id)::int AS confirmation_count,
+              CASE WHEN ir.confirmed THEN 'confirmed' ELSE 'pending' END AS status
        FROM impassable_reports ir
        LEFT JOIN impassable_confirmations ic ON ic.way_id = ir.way_id
-       WHERE ir.confirmed = true
-         AND SQRT(POW((ir.lat - $1) * 111320, 2) + POW((ir.lng - $2) * 111320 * COS(RADIANS($1)), 2)) <= $3
+       WHERE SQRT(POW((ir.lat - $1) * 111320, 2) + POW((ir.lng - $2) * 111320 * COS(RADIANS($1)), 2)) <= $3
        GROUP BY ir.id
        ORDER BY ir.created_at DESC`,
       [lat, lng, radius_m]
@@ -244,6 +282,48 @@ router.get('/impassable/near', async (req, res, next) => {
     if (error?.code === '42P01') return res.json({ reports: [] });
     return next(error);
   }
+});
+
+// DELETE /impassable/:way_id — eliminar propio reporte
+router.delete('/impassable/:way_id', authenticate, authorize(['driver', 'admin']), async (req, res, next) => {
+  try {
+    const { way_id } = req.params;
+    const result = req.user.role === 'admin'
+      ? await query(`DELETE FROM impassable_reports WHERE way_id=$1 RETURNING way_id`, [way_id])
+      : await query(`DELETE FROM impassable_reports WHERE way_id=$1 AND reported_by=$2 RETURNING way_id`,
+                    [way_id, req.user.userId]);
+    if (result.rowCount === 0) throw new AppError(404, 'Reporte no encontrado o sin permiso');
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+
+// PUT /preference/:way_id — editar preferencia personal
+router.put('/preference/:way_id', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const { way_id } = req.params;
+    const { preference } = req.body || {};
+    if (!VALID_PREFERENCES.includes(preference))
+      throw new AppError(400, `preference debe ser uno de: ${VALID_PREFERENCES.join(', ')}`);
+    const result = await query(
+      `UPDATE road_preferences SET preference=$1, updated_at=NOW()
+       WHERE driver_id=$2 AND way_id=$3 RETURNING *`,
+      [preference, req.user.userId, way_id]
+    );
+    if (result.rowCount === 0) throw new AppError(404, 'Preferencia no encontrada');
+    return res.json({ ok: true, preference: result.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+// DELETE /preference/:way_id — eliminar preferencia personal
+router.delete('/preference/:way_id', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const { way_id } = req.params;
+    await query(
+      `DELETE FROM road_preferences WHERE driver_id=$1 AND way_id=$2`,
+      [req.user.userId, way_id]
+    );
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
 });
 
 export default router;
