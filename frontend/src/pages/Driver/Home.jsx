@@ -46,17 +46,6 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     return () => clearTimeout(t);
   }, [registerRef, order.registerOrdersUpdate, order.registerOrdersReconnect, order.registerOrdersChat]);
 
-  // Exponer zonas e impassable via registerRef para que el wrapper construya AlertsPanel
-  useEffect(() => {
-    if (!registerRef) return;
-    registerRef.current.activeZones      = home.activeZones;
-    registerRef.current.activeImpassable = home.activeImpassable;
-    registerRef.current.myPreferences    = home.myPreferences;
-    registerRef.current.myPosition       = myPosition;
-    registerRef.current.refreshZones     = home.refreshZones;
-    registerRef.current.availability     = order.availability;
-    registerRef.current.token            = auth.token;
-  }); // sin deps — actualizar en cada render para mantener datos frescos
   const badgeCount = order.pendingOffer ? 1 : (order.hasActiveOrder ? 1 : 0);
   useAppBadge(badgeCount);
 
@@ -98,6 +87,18 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     impassableWays: [],
     routeGeometry: home.routeGeometry || [],
   });
+
+  // Exponer zonas e impassable via registerRef — después de home y myPosition
+  useEffect(() => {
+    if (!registerRef) return;
+    registerRef.current.activeZones      = home.activeZones;
+    registerRef.current.activeImpassable = home.activeImpassable;
+    registerRef.current.myPreferences    = home.myPreferences;
+    registerRef.current.myPosition       = myPosition;
+    registerRef.current.refreshZones     = home.refreshZones;
+    registerRef.current.availability     = order.availability;
+    registerRef.current.token            = auth.token;
+  }); // sin deps — actualizar en cada render para mantener datos frescos
 
   return (
     <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden', position:'relative' }}>
