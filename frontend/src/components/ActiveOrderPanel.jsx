@@ -14,6 +14,13 @@ const STATUS_LABEL = {
 };
 
 // ── SVG icons ─────────────────────────────────────────────────────────────────
+function IconNavigateActive() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/>
+    </svg>
+  );
+}
 function IconRoute() {
   return (
     <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
@@ -102,6 +109,7 @@ export default function ActiveOrderPanel({
   onConfirmRelease,
   onRebalance,
   onRoute,
+  routeActive = false,
   panelRef,  // ref para medir altura desde Home
 }) {
   if (!order) return null;
@@ -126,18 +134,23 @@ export default function ActiveOrderPanel({
       {/* ── Fila principal siempre visible ─────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 72 }}>
 
-        {/* Botón ruta — columna izquierda 20% */}
-        <button onClick={onRoute} title="Calcular ruta"
+        {/* Botón ruta — toggle: activo=navegar, inactivo=punto */}
+        <button onClick={onRoute} title={routeActive ? 'Desactivar ruta' : 'Calcular ruta'}
           style={{
             width: '20%', minWidth: 60, flexShrink: 0,
-            background: 'linear-gradient(135deg, #c97b7b 0%, #9e4f4f 100%)',
+            background: routeActive
+              ? 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)'
+              : 'linear-gradient(135deg, #c97b7b 0%, #9e4f4f 100%)',
             border: 'none', cursor: 'pointer', borderRadius: 0,
             display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center', gap: 4,
             color: '#fff',
+            transition: 'background 0.2s',
           }}>
-          <IconRoute />
-          <span style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em' }}>RUTA</span>
+          {routeActive ? <IconNavigateActive /> : <IconRoute />}
+          <span style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em' }}>
+            {routeActive ? 'NAV' : 'RUTA'}
+          </span>
         </button>
 
         {/* Info + toggle expand */}

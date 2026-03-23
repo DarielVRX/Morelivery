@@ -15,6 +15,7 @@ export default function DriverHomeMapSection({
   loadingPin,
   routeGeometry,
   allStops,
+  routeActive,
   myPosition,
   activeOrder,
   navHeadingDeg,
@@ -61,6 +62,7 @@ export default function DriverHomeMapSection({
         deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
         routeGeometry={routeGeometry}
         allStops={allStops}
+        routeActive={routeActive}
         onRouteError={setMsg}
         centerMode={centerMode}
         navHeadingDeg={navHeadingDeg}

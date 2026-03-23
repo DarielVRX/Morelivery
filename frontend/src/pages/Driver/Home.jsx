@@ -55,6 +55,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     registerRef.current.myPosition       = myPosition;
     registerRef.current.refreshZones     = home.refreshZones;
     registerRef.current.availability     = order.availability;
+    registerRef.current.token            = auth.token;
   }); // sin deps — actualizar en cada render para mantener datos frescos
   const badgeCount = order.pendingOffer ? 1 : (order.hasActiveOrder ? 1 : 0);
   useAppBadge(badgeCount);
@@ -121,6 +122,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
           loadingPin={home.loadingPin}
           routeGeometry={home.routeGeometry}
           allStops={home.allStops}
+          routeActive={home.routeActive}
           myPosition={myPosition}
           activeOrder={order.activeOrder}
           navHeadingDeg={home.navHeadingDeg}
@@ -193,7 +195,8 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
           onReleaseNoteChange={order.setReleaseNote}
           onConfirmRelease={() => order.doRelease(setMsg)}
           onRebalance={() => order.doRebalance(setMsg)}
-          onRoute={home.openRoadRouteApi}
+          onRoute={home.handleToggleRoute}
+          routeActive={home.routeActive}
           panelRef={activePanelRef}
         />
     </div>

@@ -22,6 +22,7 @@ export default function DriverMap({
   pickupPos, deliveryPos, pickupLabel, deliveryLabel,
   routeGeometry, onRouteError,
   allStops,
+  routeActive,
   centerMode, navHeadingDeg, onHeadingChange,
   centerSignal, onCenterDone,
   onMapReady,
@@ -41,6 +42,7 @@ export default function DriverMap({
   const prevWatchPosRef   = useRef(null);
   const hasActiveOrderRef = useRef(hasActiveOrder);
   const centerModeRef     = useRef(centerMode);
+  const routeActiveRef    = useRef(routeActive);
   const onHeadingRef      = useRef(onHeadingChange);
   const lastInteractionRef = useRef(Date.now());
   const zoomCtrlRef       = useRef(null);
@@ -92,6 +94,7 @@ export default function DriverMap({
   // ── Sincronizar refs sin recrear listeners ───────────────────────────────────
   useEffect(() => { hasActiveOrderRef.current = hasActiveOrder; }, [hasActiveOrder]);
   useEffect(() => { centerModeRef.current     = centerMode;       }, [centerMode]);
+  useEffect(() => { routeActiveRef.current    = routeActive;      }, [routeActive]);
   useEffect(() => { onHeadingRef.current      = onHeadingChange;  }, [onHeadingChange]);
 
   useEffect(() => {
@@ -119,7 +122,7 @@ export default function DriverMap({
           onHeadingRef.current?.(h);
           // OPT-6: rotar SVG directamente — sin recrear ni setState
           const svg = markersRef.current.driverSvg;
-          if (svg && centerModeRef.current === 'nav') svg.style.transform = `rotate(${h}deg)`;
+          if (svg && routeActiveRef.current) svg.style.transform = `rotate(${h}deg)`;
         }
         prevWatchPosRef.current = next;
         livePosRef.current      = next;
@@ -185,7 +188,7 @@ export default function DriverMap({
     const pos = livePosRef.current;
     if (!pos) return;
 
-    const isDrive = centerModeRef.current === 'nav';
+    const isDrive = routeActiveRef.current === true;
     const wrap    = document.createElement('div');
 
     if (isDrive) {
@@ -331,15 +334,15 @@ export default function DriverMap({
       // Al salir de nav: restablecer pitch y bearing
       map.easeTo({ pitch: 0, bearing: 0, duration: 300, essential: true });
     }
-  }, [centerMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [centerMode, routeActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // OPT-5: efecto SOLO para heading — muta SVG, sin recrear marcador
   useEffect(() => {
     const svg = markersRef.current.driverSvg;
     if (!svg) return;
-    svg.style.transform = centerMode === 'nav'
+    svg.style.transform = routeActive
       ? `rotate(${navHeadingDeg}deg)` : 'rotate(0deg)';
-  }, [navHeadingDeg, centerMode]);
+  }, [navHeadingDeg, routeActive]);
 
   // Pin personalizado — SVG pin + popup con dirección auto-ocultar 5s
   const pinPopupRef   = useRef(null);

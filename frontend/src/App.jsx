@@ -22,7 +22,6 @@ const RestaurantMenu     = lazy(() => import('./pages/Restaurant/Menu'));
 const RestaurantSchedule = lazy(() => import('./pages/Restaurant/Schedule'));
 const DriverHome     = lazy(() => import('./pages/Driver/Home'));
 const DriverEarnings = lazy(() => import('./pages/Driver/Earnings'));
-const DriverAlerts   = lazy(() => import('./pages/Driver/Alerts'));
 const AdminDashboard = lazy(() => import('./pages/Admin/Dashboard'));
 const ProfilePage    = lazy(() => import('./pages/Profile'));
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
@@ -308,7 +307,8 @@ function DriverLayout() {
         impassable={registerRef.current.activeImpassable ?? []}
         preferences={registerRef.current.myPreferences ?? []}
         myPosition={registerRef.current.myPosition ?? null}
-        onCloseMobileDrawer={() => closeMobileDrawerRef.current?.()}
+        token={registerRef.current.token ?? null}
+        onRefresh={() => registerRef.current.refreshZones?.()}
       />
     );
   }
@@ -328,7 +328,6 @@ function DriverLayout() {
           <Suspense fallback={<Spinner />}>
             <Routes>
               <Route path="ganancias" element={<DriverEarnings />} />
-              <Route path="alertas"   element={<DriverAlerts />} />
               <Route index            element={<DriverHome registerRef={registerRef} closeMobileDrawerRef={closeMobileDrawerRef} />} />
             </Routes>
           </Suspense>

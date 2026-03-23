@@ -30,6 +30,7 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
   const [navHeadingDeg, setNavHeadingDeg] = useState(0);
   const [centerSignal, setCenterSignal] = useState(null);
   const [centerMode, setCenterMode] = useState('nav');
+  const [routeActive, setRouteActive] = useState(false);
   const [activeZones, setActiveZones] = useState([]);
   const [activeImpassable, setActiveImpassable] = useState([]);
   const [myPreferences,    setMyPreferences]    = useState([]);
@@ -90,6 +91,7 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
     if (!activeOrder) {
       setRouteGeometry(null);
       setRouteSteps([]);
+      setRouteActive(false);
     }
   }, [activeOrder]);
 
@@ -117,23 +119,27 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
   }, [handleMapInteraction]);
 
   const handleCenterCycle = useCallback(() => {
-    // Ciclo: nav → overview → nav
-    // overview solo disponible si hay ruta activa
-    const next = centerModeRef.current === 'nav' && routeGeometry?.length
-      ? 'overview'
-      : 'nav';
-
+    // Con ruta activa: nav(pitch50,z17) → overview → nav
+    // Sin ruta activa: siempre 'free' (pitch0, z14)
+    if (!routeActive || !routeGeometry?.length) {
+      setCenterMode('nav');
+      centerModeRef.current = 'nav';
+      clearTimeout(autoCenterRef.current);
+      setCenterSignal('free');
+      return;
+    }
+    // Con ruta: ciclo nav ↔ overview
+    const next = centerModeRef.current === 'nav' ? 'overview' : 'nav';
     setCenterMode(next);
     centerModeRef.current = next;
     clearTimeout(autoCenterRef.current);
-
     if (next === 'nav') {
       setCenterSignal('nav');
       scheduleAutoCenter();
     } else {
       setCenterSignal('overview');
     }
-  }, [routeGeometry, scheduleAutoCenter]);
+  }, [routeActive, routeGeometry, scheduleAutoCenter]);
 
   const onRouteToPin = useCallback((pinPos) => {
     if (!pinPos) return;
@@ -147,6 +153,22 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
       })
       .catch(() => onMessage('No se pudo calcular la ruta al pin'));
   }, [myPosition, onMessage, token]);
+
+  const handleToggleRoute = useCallback(() => {
+    if (routeActive) {
+      // Desactivar: limpiar ruta y volver a modo nav libre
+      setRouteActive(false);
+      setRouteGeometry(null);
+      setRouteSteps([]);
+      // Restablecer centerMode a nav sin ruta (comportamiento libre)
+      setCenterMode('nav');
+      centerModeRef.current = 'nav';
+      setCenterSignal('nav');
+      return;
+    }
+    // Activar: calcular ruta (la lógica original)
+    openRoadRouteApi();
+  }, [routeActive, openRoadRouteApi]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openRoadRouteApi = useCallback(() => {
     if (!activeOrder) return;
@@ -187,6 +209,7 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
           const steps = results.flatMap(d => Array.isArray(d?.steps) ? d.steps : []);
           setRouteGeometry(combined);
           setRouteSteps(steps);
+          setRouteActive(true);
           // Resumen del primer tramo
           const first = results[0];
           if (first) onMessage(formatRouteSummary(first));
@@ -295,6 +318,8 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
     mapInstance,
     setMapInstance,
     lastInteractionRef,
+    routeActive,
+    handleToggleRoute,
     onRouteToPin,
     allStops,
     refreshZones,
