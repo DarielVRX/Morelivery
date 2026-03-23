@@ -8,7 +8,7 @@
 // El driver hace pan/zoom sobre el mapa para ajustar posición y tamaño.
 // Radio en metros se calcula al pasar de step 'place' a 'type'.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const CIRCLE_PX = 110;
 
