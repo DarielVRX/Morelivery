@@ -1,5 +1,5 @@
 // frontend/src/App.jsx
-import { lazy, Suspense, useRef } from 'react';
+import { lazy, Suspense, useRef, useState } from 'react';
 import { Link, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
@@ -295,20 +295,25 @@ function DriverLayout() {
     onUpdate: null, onReconnect: null, onChat: null,
     ordersUpdate: null, ordersReconnect: null, ordersChat: null,
     activeZones: [], activeImpassable: [], refreshZones: null,
+    notifyAlertsUpdate: null,
   });
   const closeMobileDrawerRef = useRef(null);
 
-  // AlertsPanel se renderiza aquí para acceder a registerRef directamente.
-  // Se pasa como alertsContent a SplitLayout — se monta una vez y persiste.
+  // alertsTick: estado real que fuerza re-render de AlertsContent cuando Home actualiza el ref
+  const [alertsTick, setAlertsTick] = useState(0);
+  registerRef.current.notifyAlertsUpdate = () => setAlertsTick(t => t + 1);
+
+  // AlertsPanel lee directamente del ref — re-renderiza cuando alertsTick cambia
   function AlertsContent() {
     return (
       <AlertsPanel
+        key={alertsTick}
         zones={registerRef.current.activeZones ?? []}
         impassable={registerRef.current.activeImpassable ?? []}
         preferences={registerRef.current.myPreferences ?? []}
         myPosition={registerRef.current.myPosition ?? null}
         token={registerRef.current.token ?? null}
-        onRefresh={() => registerRef.current.refreshZones?.()}
+        onRefresh={() => { registerRef.current.refreshZones?.(); }}
       />
     );
   }
