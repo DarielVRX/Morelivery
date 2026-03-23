@@ -34,6 +34,25 @@ export default function ZonePlacer({ map, onConfirm, onCancel, bottomOffset = 0 
   const [zoneType, setZoneType] = useState(null);
   const [captured, setCaptured] = useState(null);    // {lat,lng,radius_m} fijado en step 1
   const [saving,   setSaving]   = useState(false);
+  const markerRef  = useRef(null); // marcador fijo post-confirmación de área
+
+  // Colocar marcador fijo al confirmar el área
+  useEffect(() => {
+    if (!map || !captured || typeof window === 'undefined') return;
+    // Necesitamos _ml — intentar desde window
+    const ml = window.__maplibre_instance__ || null;
+    if (!ml) return; // si no está disponible, el círculo CSS ya mostró la posición
+    if (markerRef.current) { markerRef.current.remove(); markerRef.current = null; }
+    const el = document.createElement('div');
+    el.style.cssText = `width:${CIRCLE_PX*2}px;height:${CIRCLE_PX*2}px;border-radius:50%;
+      border:2.5px solid ${circleColor};background:${circleColor}1a;
+      box-shadow:0 0 0 3px ${circleColor}33;pointer-events:none;
+      transform:translate(-50%,-50%);`;
+    markerRef.current = new ml.Marker({ element: el, anchor: 'center' })
+      .setLngLat([captured.lng, captured.lat])
+      .addTo(map);
+    return () => { markerRef.current?.remove(); markerRef.current = null; };
+  }, [captured, map, circleColor]);
 
   const sel = ZONE_TYPES.find(t => t.value === zoneType) || null;
   const circleColor = sel ? sel.color : '#e3aaaa';
@@ -53,9 +72,15 @@ export default function ZonePlacer({ map, onConfirm, onCancel, bottomOffset = 0 
 
   function handleStep1() {
     if (!map) return;
+    // Capturar centro y radio en este instante exacto antes de que el panel
+    // cambie el tamaño del mapa y desplace el centro visual
     const c = map.getCenter();
-    const r = Math.max(20, Math.min(2000, Math.round(CIRCLE_PX * metersPerPx(c.lat, map.getZoom()))));
-    setCaptured({ lat: c.lat, lng: c.lng, radius_m: r });
+    const zoom = map.getZoom();
+    const r = Math.max(20, Math.min(2000, Math.round(CIRCLE_PX * metersPerPx(c.lat, zoom))));
+    const fixed = { lat: c.lat, lng: c.lng, radius_m: r };
+    setCaptured(fixed);
+    // Fijar el mapa en ese punto para que el panel no desplace la vista
+    map.setCenter([c.lng, c.lat]);
     setStep('type');
   }
 

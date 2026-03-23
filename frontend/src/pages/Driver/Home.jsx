@@ -130,7 +130,7 @@ export default function DriverHome({ registerRef }) {
           isDark={isDark}
           onQuickReport={async (type, pos) => {
             if (type === 'zone') {
-              home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'other', radius: 500, estimated_hours: 1 });
+              home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'other', radius_m: 500, estimated_hours: 1 });
             } else if (type === 'impassable') {
               try {
                 const ways = await quickSelectWays(pos, 'impassable');

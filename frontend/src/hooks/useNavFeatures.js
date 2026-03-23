@@ -16,17 +16,7 @@ function euclideanMeters(lat1, lng1, lat2, lng2) {
   return Math.sqrt(dlat * dlat + dlng * dlng);
 }
 
-// Verifica si algún punto de la ruta pasa cerca del waypoint impassable
-function routeUsesWay(routeCoords, wayCoords, thresholdM = 30) {
-  if (!routeCoords?.length || !wayCoords?.length) return false;
-  for (const rp of routeCoords) {
-    for (const wp of wayCoords) {
-      const d = euclideanMeters(rp.lat ?? rp[1], rp.lng ?? rp[0], wp[1], wp[0]);
-      if (d < thresholdM) return true;
-    }
-  }
-  return false;
-}
+// routeUsesWay eliminado — la alerta de calles ahora usa distancia al polyline directamente
 
 export function useNavFeatures({
   steps         = [],
@@ -134,33 +124,40 @@ export function useNavFeatures({
     }
   }, [currentPos?.lat, currentPos?.lng, activeZones, voiceEnabled, onVoice, onZoneAlert]);
 
-  // ── Alertas de calles no viables (solo si la ruta pasa por ahí) ───────────
+  // ── Alertas de calles no viables ────────────────────────────────────────────
+  // Alerta cuando el conductor está a menos de 50m de CUALQUIER nodo del way
+  // (no solo del primer nodo), independientemente de si la ruta pasa por ahí
   useEffect(() => {
-    if (!currentPos || !impassableWays.length || !routeGeometry.length) return;
+    if (!currentPos || !impassableWays.length) return;
     const now      = Date.now();
     const COOLDOWN = 180_000;
+    const ALERT_DIST = 50; // metros desde cualquier nodo del tramo
 
     for (const way of impassableWays) {
-      if (!routeUsesWay(routeGeometry, way.coords)) continue;
+      if (!way.coords?.length) continue;
 
-      const dist = euclideanMeters(
-        currentPos.lat, currentPos.lng,
-        way.coords[0]?.[1] ?? currentPos.lat,
-        way.coords[0]?.[0] ?? currentPos.lng
-      );
-      if (dist > 300) continue;
+      // Distancia mínima al polyline completo (todos los nodos)
+      let minDist = Infinity;
+      for (const coord of way.coords) {
+        // coords pueden ser [lng, lat] o {lat, lng}
+        const cLat = Array.isArray(coord) ? coord[1] : coord.lat;
+        const cLng = Array.isArray(coord) ? coord[0] : coord.lng;
+        const d = euclideanMeters(currentPos.lat, currentPos.lng, cLat, cLng);
+        if (d < minDist) minDist = d;
+      }
+      if (minDist > ALERT_DIST) continue;
 
       const last = wayAlertedMap.current.get(way.way_id) || 0;
       if (now - last < COOLDOWN) continue;
       wayAlertedMap.current.set(way.way_id, now);
 
-      const msg = `Atención: la calle ${way.name || 'adelante'} está reportada como no viable`;
+      const msg = `⚠️ Calle no viable cerca: ${way.name || 'tramo adelante'}`;
       if (voiceEnabled) {
         try { window.speechSynthesis?.speak(new SpeechSynthesisUtterance(msg)); } catch (_) {}
       }
       onVoice?.(msg);
     }
-  }, [currentPos?.lat, currentPos?.lng, impassableWays, routeGeometry, voiceEnabled, onVoice]);
+  }, [currentPos?.lat, currentPos?.lng, impassableWays, voiceEnabled, onVoice]);
 
   return { voiceEnabled, setVoiceEnabled, wakeLockActive };
 }

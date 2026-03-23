@@ -277,6 +277,7 @@ export default function DriverMap({
         }
       });
       mapRef.current = map;
+      window.__map = map;
       onMapReady?.(map);
     }).catch(() => onRouteError?.('No se pudo inicializar el mapa'));
 

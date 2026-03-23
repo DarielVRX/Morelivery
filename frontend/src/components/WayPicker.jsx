@@ -166,8 +166,24 @@ const DESELECT_RADIUS = 25;
 
 // ── Standalone helpers (también usados por quickSelectWays) ─────────────────
 
+// Prioridad de tipo de vía — menor = más prioritario
+const HIGHWAY_PRIORITY = {
+  motorway: 1, trunk: 2, primary: 3, secondary: 4,
+  tertiary: 5, residential: 6, living_street: 7,
+  unclassified: 8, service: 9, track: 10,
+  footway: 11, cycleway: 11, path: 11,
+};
+function hwPriority(w) { return HIGHWAY_PRIORITY[w.highway] ?? 9; }
+
 export function pickByHeading(ways, tapped, heading) {
-  const sorted = [...ways].sort((a, b) => distToWay(tapped, a.coords) - distToWay(tapped, b.coords));
+  // Ordenar por distancia al punto tocado, luego por prioridad de vía
+  const sorted = [...ways].sort((a, b) => {
+    const dA = distToWay(tapped, a.coords);
+    const dB = distToWay(tapped, b.coords);
+    // Si la diferencia de distancia es menor a 15m, priorizar por tipo de vía
+    if (Math.abs(dA - dB) < 15) return hwPriority(a) - hwPriority(b);
+    return dA - dB;
+  });
   if (heading === null || heading === undefined) return sorted[0];
   const aligned = sorted.filter(w => {
     const wb = wayBearing(w.coords);

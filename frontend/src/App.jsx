@@ -5,13 +5,13 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import {IconSun, IconMoon} from './components/Layout';
 import Layout from './components/Layout';
+import PullToRefresh from './components/PullToRefresh';
 import SplitLayout from './components/SplitLayout';
 import AuthPage from './pages/AuthPage';
 import CustomerOrders   from './pages/Customer/Orders';
 import DriverOrders     from './pages/Driver/Orders';
 import RestaurantOrders from './pages/Restaurant/Orders';
 import { usePermissions } from './hooks/usePermissions';
-import PullToRefresh from './components/PullToRefresh'
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const CustomerHome      = lazy(() => import('./pages/Customer/Home'));
@@ -21,6 +21,7 @@ const RestaurantMenu     = lazy(() => import('./pages/Restaurant/Menu'));
 const RestaurantSchedule = lazy(() => import('./pages/Restaurant/Schedule'));
 const DriverHome     = lazy(() => import('./pages/Driver/Home'));
 const DriverEarnings = lazy(() => import('./pages/Driver/Earnings'));
+const DriverAlerts   = lazy(() => import('./pages/Driver/Alerts'));
 const AdminDashboard = lazy(() => import('./pages/Admin/Dashboard'));
 const ProfilePage    = lazy(() => import('./pages/Profile'));
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
@@ -111,7 +112,6 @@ function LandingScreen() {
   }
 
   return (
-    <PullToRefresh>
     <div style={{
       minHeight: '100dvh', background: 'var(--bg-card)',
       display: 'flex', flexDirection: 'column',
@@ -178,7 +178,6 @@ function LandingScreen() {
         .landing-btn:hover { transform:translateY(-2px); box-shadow:0 4px 16px rgba(227,170,170,0.35); }
       `}</style>
     </div>
-    </PullToRefresh>
   );
 }
 
@@ -197,7 +196,6 @@ function AuthScreen({ mode = 'login' }) {
   const wrongRole = auth.user && auth.user.role !== appKey;
 
   return (
-    <PullToRefresh>
     <div style={{ minHeight: '100dvh', background: 'var(--bg-card)', display: 'flex', flexDirection: 'column' }}>
       <header style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -246,7 +244,6 @@ function AuthScreen({ mode = 'login' }) {
         </div>
       </div>
     </div>
-    </PullToRefresh>
   );
 }
 
@@ -314,6 +311,7 @@ function DriverLayout() {
           <Suspense fallback={<Spinner />}>
             <Routes>
               <Route path="ganancias" element={<DriverEarnings />} />
+              <Route path="alertas"   element={<DriverAlerts />} />
               <Route index            element={<DriverHome registerRef={registerRef} />} />
             </Routes>
           </Suspense>
@@ -330,7 +328,7 @@ function AppRoutes() {
       <Routes>
         <Route path="/profile" element={
           <Suspense fallback={<Spinner />}>
-            <ProtectedAny><ProfilePage /></ProtectedAny>
+            <ProtectedAny><PullToRefresh><ProfilePage /></PullToRefresh></ProtectedAny>
           </Suspense>
         } />
         <Route path="/customer/*"   element={<CustomerLayout />} />
@@ -338,7 +336,7 @@ function AppRoutes() {
         <Route path="/driver/*"     element={<DriverLayout />} />
         <Route path="/admin" element={
           <Suspense fallback={<Spinner />}>
-            <ProtectedRole role="admin"><AdminDashboard /></ProtectedRole>
+            <ProtectedRole role="admin"><PullToRefresh><AdminDashboard /></PullToRefresh></ProtectedRole>
           </Suspense>
         } />
         <Route path="*" element={<Navigate to="/" replace />} />
