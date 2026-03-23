@@ -7,11 +7,11 @@ var NAV_REPORT_MODES = ['zone', 'impassable', 'preference'];
 // En modo rápido envía directo sin pasos intermedios
 
 function IconCenter({ mode }) {
-  const color = mode === 'off' ? 'var(--text-secondary)' : '#fff';
+  const color = mode === 'free' ? 'var(--text-secondary)' : '#fff';
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
       stroke={color} strokeWidth="2.2" strokeLinecap="round">
-      <circle cx="12" cy="12" r="3.5" fill={mode !== 'off' ? color : 'none'}/>
+      <circle cx="12" cy="12" r="3.5" fill={mode !== 'free' ? color : 'none'}/>
       <line x1="12" y1="2"  x2="12" y2="7"/>
       <line x1="12" y1="17" x2="12" y2="22"/>
       <line x1="2"  y1="12" x2="7"  y2="12"/>
@@ -92,7 +92,7 @@ export default function NavFABs({
     : `calc(${BASE + SZ_P + GAP + SZ_S + GAP}px + ${safeBot})`;
 
   const centerBg =
-    centerMode === 'follow'   ? 'var(--brand)' :
+    centerMode === 'nav'      ? 'var(--brand)' :
     centerMode === 'overview' ? '#4f46e5'      : '#fff';
 
   // Colores del FAB de reporte según estado
@@ -139,15 +139,15 @@ export default function NavFABs({
     <>
       {/* ── Centrar ─────────────────────────────────────────────────── */}
       <button onClick={onCenterCycle} title={
-        centerMode === 'follow' ? 'Seguimiento activo' :
+        centerMode === 'nav'      ? 'Navegación activa' :
         centerMode === 'overview' ? 'Vista de ruta' : 'Centrar en mi posición'}
         aria-label="Centrar mapa" className="dh-fab"
         style={{
           ...fabBase, bottom: centerBottom,
           width: SZ_P, height: SZ_P, background: centerBg,
-          border: centerMode === 'off' ? '1.5px solid var(--border)' : 'none',
-          boxShadow: centerMode !== 'off' ? '0 4px 16px rgba(0,0,0,0.28)' : '0 2px 10px rgba(0,0,0,0.16)',
-          color: centerMode !== 'off' ? '#fff' : 'var(--text-secondary)',
+          border: centerMode === 'free' ? '1.5px solid var(--border)' : 'none',
+          boxShadow: centerMode !== 'free' ? '0 4px 16px rgba(0,0,0,0.28)' : '0 2px 10px rgba(0,0,0,0.16)',
+          color: centerMode !== 'free' ? '#fff' : 'var(--text-secondary)',
         }}>
         <IconCenter mode={centerMode} />
       </button>

@@ -371,7 +371,7 @@ export async function getOfferPayload(orderId, driverId) {
 }
 
 /** Pedidos sin conductor para el panel "en espera" del driver (con su cooldown) */
-export async function getPendingAssignmentOrders(driverId) {
+export async function getPendingAssignmentOrders(driverId, isAvailable = false) {
   const r = await query(
     `SELECT o.id, o.status, o.total_cents, o.service_fee_cents, o.delivery_fee_cents,
             o.tip_cents, o.payment_method, o.created_at,
@@ -384,6 +384,10 @@ export async function getPendingAssignmentOrders(driverId) {
               SELECT 1 FROM order_driver_offers od2
               WHERE od2.order_id=o.id AND od2.status='pending'
             ) AS has_pending_offer,
+            (
+              SELECT COUNT(*)::int FROM order_driver_offers od3
+              WHERE od3.order_id=o.id
+            ) AS offer_count,
             GREATEST(0, EXTRACT(EPOCH FROM (
               od.wait_until - NOW()
             )))::int AS cooldown_secs
@@ -397,13 +401,23 @@ export async function getPendingAssignmentOrders(driverId) {
           AND od.wait_until > NOW()
      WHERE o.driver_id IS NULL
        AND o.status IN ('created','pending_driver','accepted','preparing','ready')
+       -- Solo mostrar pedidos con has_pending_offer=true
+       AND EXISTS (
+         SELECT 1 FROM order_driver_offers od4
+         WHERE od4.order_id=o.id AND od4.status='pending'
+       )
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od2
          WHERE od2.order_id=o.id AND od2.driver_id=$1 AND od2.status='pending'
        )
+       -- Si driver no está disponible, ocultar pedidos con >= 5 ofertas enviadas
+       AND ($2::boolean = true OR (
+         SELECT COUNT(*)::int FROM order_driver_offers od5
+         WHERE od5.order_id=o.id
+       ) < 5)
      ORDER BY o.created_at ASC
      LIMIT 20`,
-    [driverId]
+    [driverId, isAvailable]
   );
   return r.rows;
 }

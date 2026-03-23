@@ -14,17 +14,19 @@ export default function DriverHomeMapSection({
   pinAddress,
   loadingPin,
   routeGeometry,
+  allStops,
   myPosition,
   activeOrder,
-  navFollowEnabled,
   navHeadingDeg,
   onHeadingChange,
   centerSignal,
   onCenterDone,
+  onRouteToPin,
   setMapInstance,
   mapInstance,
   activeZones,
   token,
+  userId,
   centerMode,
   voiceEnabled,
   navMode,
@@ -58,8 +60,9 @@ export default function DriverHomeMapSection({
         pickupLabel={activeOrder?.restaurant_name || 'Tienda'}
         deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
         routeGeometry={routeGeometry}
+        allStops={allStops}
         onRouteError={setMsg}
-        navFollowEnabled={navFollowEnabled}
+        centerMode={centerMode}
         navHeadingDeg={navHeadingDeg}
         onHeadingChange={onHeadingChange}
         centerSignal={centerSignal}
@@ -69,6 +72,7 @@ export default function DriverHomeMapSection({
         pinAddress={pinAddress}
         loadingPin={loadingPin}
         onClearPin={() => setCustomPin(null)}
+        onRouteToPin={onRouteToPin}
       />
 
       {mapInstance && (
@@ -76,6 +80,7 @@ export default function DriverHomeMapSection({
           map={mapInstance}
           zones={activeZones}
           token={token}
+          userId={userId}
           onZoneClick={(zone) => setMsg(`Zona: ${ZONE_LABELS[zone?.type] || zone?.type}`)}
         />
       )}

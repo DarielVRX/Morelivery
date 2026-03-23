@@ -11,6 +11,7 @@ function IconHome()     { return <svg viewBox="0 0 36 36" fill="none" stroke="cu
 function IconSchedule() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>; }
 function IconClock()    { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>; }
 function IconProfile()  { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>; }
+function IconAlert()    { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>; }
 export function IconSun() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
   strokeLinecap="round" strokeLinejoin="round" width="18" height="18"
@@ -30,7 +31,7 @@ export function IconMoon() {
 function getNavItems(role) {
   if (role === 'customer')   return [{ to:'/customer', label:'Inicio', Icon:IconHome }];
   if (role === 'restaurant') return [{ to:'/restaurant', label:'Inicio', Icon:IconHome },{ to:'/restaurant/horario', label:'Horario', Icon:IconSchedule }];
-  if (role === 'driver')     return [{ to:'/driver', label:'Inicio', Icon:IconHome },{ to:'/driver/ganancias', label:'Ganancias', Icon:IconClock }];
+  if (role === 'driver')     return [{ to:'/driver', label:'Inicio', Icon:IconHome },{ to:'/driver/ganancias', label:'Ganancias', Icon:IconClock },{ to:'/driver/alertas', label:'Alertas', Icon:IconAlert }];
   return [];
 }
 

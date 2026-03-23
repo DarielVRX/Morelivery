@@ -8,7 +8,7 @@ const STATUS_WITH_GPS = ['on_the_way', 'delivered'];
 const MAX_RADIUS_M = 100;
 const GRACE_MS = 3 * 60 * 1000;
 
-export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, onExternalChat } = {}) {
+export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, onExternalChat, availability } = {}) {
   const [orders, setOrders] = useState([]);
   const [waitingOrders, setWaitingOrders] = useState([]);
   const [actionMsg, setActionMsg] = useState('');
@@ -45,10 +45,11 @@ export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, 
   const loadWaitingOrders = useCallback(async () => {
     if (!token) return;
     try {
-      const pending = await apiFetch('/orders/pending-assignment', {}, token).catch(() => ({ orders: [] }));
+      const qs = availability ? '?available=1' : '';
+      const pending = await apiFetch(`/orders/pending-assignment${qs}`, {}, token).catch(() => ({ orders: [] }));
       setWaitingOrders(pending.orders || []);
     } catch (_) {}
-  }, [token]);
+  }, [token, availability]);
 
   const loadData = useCallback(async ({ includeWaiting = true } = {}) => {
     await loadOrders();

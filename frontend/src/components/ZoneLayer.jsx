@@ -77,10 +77,13 @@ function buildGeoJson(zones) {
 }
 
 // ── ZoneInfoCard — cuadro flotante sobre el mapa ───────────────────────────────
-function ZoneInfoCard({ zone, onSuggest, onClose }) {
+function ZoneInfoCard({ zone, onSuggest, onClose, onVote, userId, votedIds = new Set(), voting = false }) {
   const color = ZONE_COLORS[zone.type] || ZONE_COLORS.other;
   const label = ZONE_LABELS[zone.type]  || '⚠️ Zona de alerta';
-  const hasPending = Boolean(zone.pending_edit);
+  const hasPending   = Boolean(zone.pending_edit);
+  const isOwner      = userId && zone.created_by && String(zone.created_by) === String(userId);
+  const alreadyVoted = votedIds.has(String(zone.id));
+  const showConfirm  = !isOwner && !alreadyVoted;
 
   return (
     <div style={{
@@ -130,6 +133,35 @@ function ZoneInfoCard({ zone, onSuggest, onClose }) {
           <span style={{ fontSize: '1rem' }}>✏️</span>
           Un conductor sugirió un cambio
         </button>
+      )}
+
+      {/* Votos — Confirmar / Ya no está */}
+      {(showConfirm || !alreadyVoted) && (
+        <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.45rem' }}>
+          {showConfirm && (
+            <button onClick={() => onVote?.('confirm')} disabled={voting} style={{
+              flex: 1, padding: '0.45rem 0', borderRadius: 9, fontWeight: 700,
+              fontSize: '0.76rem', cursor: voting ? 'wait' : 'pointer',
+              background: '#f0fdf4', color: '#15803d',
+              border: '1.5px solid #86efac',
+              opacity: voting ? 0.6 : 1,
+            }}>✓ Confirmar</button>
+          )}
+          {!alreadyVoted && (
+            <button onClick={() => onVote?.('dismiss')} disabled={voting} style={{
+              flex: 1, padding: '0.45rem 0', borderRadius: 9, fontWeight: 700,
+              fontSize: '0.76rem', cursor: voting ? 'wait' : 'pointer',
+              background: '#fef2f2', color: '#dc2626',
+              border: '1.5px solid #fca5a5',
+              opacity: voting ? 0.6 : 1,
+            }}>✗ Ya no está</button>
+          )}
+        </div>
+      )}
+      {alreadyVoted && (
+        <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: '0.45rem', textAlign: 'center' }}>
+          Ya votaste en esta zona
+        </div>
       )}
 
       {/* Sugerir cambio */}
@@ -378,10 +410,48 @@ function SuggestModal({ zone, mode, onClose, onDone, token }) {
 }
 
 // ── ZoneLayer ─────────────────────────────────────────────────────────────────
-export default function ZoneLayer({ map, zones = [], onZoneClick, token }) {
+export default function ZoneLayer({ map, zones = [], onZoneClick, token, userId }) {
   const zonesRef          = useRef(zones);
   const [selected, setSelected] = useState(null);    // zona tocada
   const [suggestMode, setSuggestMode] = useState(null); // 'menu'|'review_edit'
+  const [voting, setVoting] = useState(false);
+
+  // IDs de zonas votadas — persistidos en localStorage
+  const [votedIds, setVotedIds] = useState(() => {
+    try {
+      const stored = localStorage.getItem('zone_voted_ids');
+      return new Set(stored ? JSON.parse(stored) : []);
+    } catch { return new Set(); }
+  });
+
+  function markVoted(zoneId) {
+    setVotedIds(prev => {
+      const next = new Set(prev);
+      next.add(String(zoneId));
+      try { localStorage.setItem('zone_voted_ids', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }
+
+  async function handleVote(voteType) {
+    if (!selected || !token) return;
+    setVoting(true);
+    try {
+      const base = import.meta.env?.VITE_API_URL || '';
+      const res  = await fetch(`${base}/nav/zones/${selected.id}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ vote: voteType }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.message || 'Error'); }
+      markVoted(selected.id);
+      setSelected(null);
+    } catch (e) {
+      console.warn('[ZoneLayer] vote error:', e.message);
+    } finally {
+      setVoting(false);
+    }
+  }
 
   zonesRef.current = zones;
 
@@ -437,6 +507,10 @@ export default function ZoneLayer({ map, zones = [], onZoneClick, token }) {
           zone={selected}
           onClose={() => setSelected(null)}
           onSuggest={(m) => setSuggestMode(m)}
+          onVote={handleVote}
+          userId={userId}
+          votedIds={votedIds}
+          voting={voting}
         />
       )}
       {selected && suggestMode && (

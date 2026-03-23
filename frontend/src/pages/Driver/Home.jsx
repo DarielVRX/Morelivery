@@ -62,10 +62,15 @@ export default function DriverHome({ registerRef }) {
   }, [order.hasActiveOrder, order.pendingOffer]);
 
   const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, order.availability, order.hasActiveOrder);
+
+  // Mantener useOrderManager al tanto de la posición para calcular stop más próximo
+  useEffect(() => { order.setMyPosition(myPosition); }, [myPosition]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const home = useDriverHomeRuntime({
     token: auth.token,
     availability: order.availability,
     activeOrder: order.activeOrder,
+    activeOrders: order.activeOrders,
     hasActiveOrder: order.hasActiveOrder,
     myPosition,
     onMessage: setMsg,
@@ -104,17 +109,19 @@ export default function DriverHome({ registerRef }) {
           pinAddress={home.pinAddress}
           loadingPin={home.loadingPin}
           routeGeometry={home.routeGeometry}
+          allStops={home.allStops}
           myPosition={myPosition}
           activeOrder={order.activeOrder}
-          navFollowEnabled={home.navFollowEnabled}
           navHeadingDeg={home.navHeadingDeg}
           onHeadingChange={home.setNavHeadingDeg}
           centerSignal={home.centerSignal}
           onCenterDone={() => home.setCenterSignal(null)}
+          onRouteToPin={home.onRouteToPin}
           setMapInstance={home.setMapInstance}
           mapInstance={home.mapInstance}
           activeZones={home.activeZones}
           token={auth.token}
+          userId={auth.user?.id}
           centerMode={home.centerMode}
           voiceEnabled={voiceEnabled}
           navMode={home.navMode}
