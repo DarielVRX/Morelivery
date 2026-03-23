@@ -1,158 +1,255 @@
 // components/AlertsPanel.jsx
-// Panel de alertas con dos sub-pestañas: Zonas y Vialidad
-// Chips de filtro multi-selección por tipo
-// Al tocar una alerta: flyTo en el mapa via window.__map
+// Panel completo de alertas — reemplaza la página /alertas
+// • Zonas: votar confirm/dismiss, ver pending_edit
+// • Vialidad: confirmar impassable (si ≤50m), eliminar propias
+// • Preferencias: editar, eliminar
+// • Multi-selección: tocar selecciona en mapa, "Ver todas" → fitBounds
+
+import { useCallback, useState } from 'react';
+import { haversineMeters } from '../utils/geo';
+import {
+  voteZone, confirmImpassable, deleteImpassable,
+  updatePreference, deletePreference,
+} from '../features/driver/alerts/api';
 
 const ZONE_COLORS = {
-  traffic:      '#f97316',
-  construction: '#eab308',
-  accident:     '#ef4444',
-  flood:        '#3b82f6',
-  blocked:      '#8b5cf6',
-  other:        '#6b7280',
+  traffic: '#f97316', construction: '#eab308', accident: '#ef4444',
+  flood: '#3b82f6', blocked: '#8b5cf6', other: '#6b7280',
 };
-
 const ZONE_LABELS = {
-  traffic:      '🚦 Tráfico',
-  construction: '🚧 Obra',
-  accident:     '🚨 Accidente',
-  flood:        '🌊 Inundación',
-  blocked:      '⛔ Bloqueada',
-  other:        '⚠️ Otro',
+  traffic: '🚦 Tráfico', construction: '🚧 Obra', accident: '🚨 Accidente',
+  flood: '🌊 Inundación', blocked: '⛔ Bloqueada', other: '⚠️ Otro',
 };
-
 const ZONE_TYPES = ['traffic', 'construction', 'accident', 'flood', 'blocked', 'other'];
+const PREF_COLORS = { preferred: '#16a34a', difficult: '#f59e0b', avoid: '#ef4444' };
+const PREF_LABELS = { preferred: '⭐ Favorita', difficult: '⚠️ Difícil', avoid: '🚫 Evitar' };
+const DUR_LABELS  = { days: '~días', weeks: '~semanas', months: '~meses', permanent: 'Permanente' };
 
-const IMP_COLORS = {
-  pending:   '#f97316',
-  confirmed: '#ef4444',
-};
-
-const IMP_LABELS = {
-  days:      '~días',
-  weeks:     '~semanas',
-  months:    '~meses',
-  permanent: 'Permanente',
-};
-
-import { useState } from 'react';
-import { haversineMeters } from '../utils/geo';
-
-function timeAgo(dateStr) {
-  if (!dateStr) return '';
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const m = Math.floor(diff / 60000);
+function timeAgo(d) {
+  if (!d) return '';
+  const m = Math.floor((Date.now() - new Date(d)) / 60000);
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h`;
   return `${Math.floor(h / 24)}d`;
 }
 
-function flyTo(lat, lng, onClose) {
+function flyToOne(lat, lng) {
+  window.__map?.flyTo({ center: [lng, lat], zoom: 16, pitch: 0, bearing: 0, duration: 500, essential: true });
+}
+
+function fitBoundsMultiple(points) {
   const map = window.__map;
-  if (!map) return;
-  map.flyTo({ center: [lng, lat], zoom: 16, pitch: 0, bearing: 0, duration: 600, essential: true });
-  onClose?.();
+  if (!map || !points.length) return;
+  if (points.length === 1) { flyToOne(points[0][0], points[0][1]); return; }
+  const ml = window.__maplibregl;
+  if (!ml) { flyToOne(points[0][0], points[0][1]); return; }
+  try {
+    const lnglats = points.map(([lat, lng]) => [lng, lat]);
+    const b = lnglats.reduce((acc, pt) => acc.extend(pt), new ml.LngLatBounds(lnglats[0], lnglats[0]));
+    map.fitBounds(b, { padding: 80, maxZoom: 16, duration: 600, essential: true });
+  } catch { flyToOne(points[0][0], points[0][1]); }
 }
 
-// ── Sub-pestaña Zonas ─────────────────────────────────────────────────────────
-function ZoneItem({ z, onClose }) {
-  const color = ZONE_COLORS[z.type] || ZONE_COLORS.other;
+function SectionHeader({ label, onSelectAll, allSelected }) {
   return (
-    <button onClick={() => flyTo(z.lat, z.lng, onClose)} style={{
-      width: '100%', textAlign: 'left', background: 'none', border: 'none',
-      borderBottom: '1px solid var(--border-light)', cursor: 'pointer',
-      padding: '0.55rem 0.75rem',
-      display: 'flex', alignItems: 'flex-start', gap: 10,
-    }}>
-      <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0, marginTop: 4 }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.78rem', fontWeight: 700, color }}>
-            {ZONE_LABELS[z.type] || '⚠️ Alerta'}
-          </span>
-          <span style={{ fontSize: '0.66rem', color: 'var(--text-tertiary)' }}>{timeAgo(z.created_at)}</span>
-        </div>
-        <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: 2 }}>
-          r: {z.radius_m}m · exp: {z.estimated_hours}h
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 3, fontSize: '0.66rem', color: 'var(--text-tertiary)' }}>
-          <span>✓ {z.confirm_count ?? 0}/3</span>
-          <span>✗ {z.dismiss_count ?? 0}/3</span>
-          {z.confirmed && <span style={{ color: '#16a34a', fontWeight: 700 }}>Validada</span>}
-          {z.pending_edit && <span style={{ color: '#92400e' }}>✏️ cambio sugerido</span>}
-        </div>
-      </div>
-    </button>
-  );
-}
-
-function SectionHeader({ label }) {
-  return (
-    <div style={{ padding: '0.3rem 0.75rem', fontSize: '0.66rem', fontWeight: 700,
+    <div style={{
+      padding: '0.28rem 0.75rem', fontSize: '0.66rem', fontWeight: 700,
       textTransform: 'uppercase', letterSpacing: '0.05em',
       color: 'var(--text-tertiary)', background: 'var(--bg-raised)',
-      borderBottom: '1px solid var(--border-light)' }}>
-      {label}
+      borderBottom: '1px solid var(--border-light)',
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    }}>
+      <span>{label}</span>
+      {onSelectAll && (
+        <button onClick={onSelectAll} style={{
+          fontSize: '0.62rem', fontWeight: 700, cursor: 'pointer',
+          background: 'none', border: 'none', padding: 0,
+          color: allSelected ? 'var(--brand)' : 'var(--text-tertiary)',
+          textDecoration: 'underline',
+        }}>{allSelected ? 'Deselec.' : 'Ver todas'}</button>
+      )}
     </div>
   );
 }
 
-function ZonesTab({ zones, onClose }) {
-  const [activeFilters, setActiveFilters] = useState(new Set());
+function SelectDot({ selected, color }) {
+  return (
+    <div style={{
+      width: 18, height: 18, borderRadius: '50%', flexShrink: 0, marginTop: 2,
+      border: `2px solid ${selected ? color : 'var(--border)'}`,
+      background: selected ? color : 'transparent',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      transition: 'all 0.12s',
+    }}>
+      {selected && (
+        <svg width="10" height="10" viewBox="0 0 10 10">
+          <polyline points="1.5 5 4 7.5 8.5 2.5" stroke="#fff" strokeWidth="1.8" fill="none" strokeLinecap="round"/>
+        </svg>
+      )}
+    </div>
+  );
+}
 
-  function toggleFilter(type) {
-    setActiveFilters(prev => {
-      const next = new Set(prev);
-      if (next.has(type)) next.delete(type); else next.add(type);
-      return next;
-    });
+// ── ZonesTab ──────────────────────────────────────────────────────────────────
+function ZonesTab({ zones, token, onRefresh, myPosition, selected, onToggle, onSelectGroup }) {
+  const [typeFilters,    setTypeFilters]    = useState(new Set());
+  const [layerMine,      setLayerMine]      = useState(true);
+  const [layerPending,   setLayerPending]   = useState(true);
+  const [layerConfirmed, setLayerConfirmed] = useState(true);
+  const [voting,         setVoting]         = useState(null);
+
+  function toggleType(t) {
+    setTypeFilters(prev => { const n = new Set(prev); n.has(t) ? n.delete(t) : n.add(t); return n; });
   }
 
-  const filtered = activeFilters.size === 0 ? zones : zones.filter(z => activeFilters.has(z.type));
+  async function vote(zone, v, e) {
+    e.stopPropagation();
+    setVoting(zone.id);
+    try { await voteZone(zone.id, v, token); onRefresh(); }
+    catch (_) {} finally { setVoting(null); }
+  }
+
   const presentTypes = ZONE_TYPES.filter(t => zones.some(z => z.type === t));
 
-  // Separar: pendientes de confirmación (confirm_count < 3 y no confirmadas) vs confirmadas
-  const needsVotes  = filtered.filter(z => !z.confirmed && (z.confirm_count ?? 0) < 3);
-  const confirmed   = filtered.filter(z => z.confirmed || (z.confirm_count ?? 0) >= 3);
+  const filtered = zones.filter(z => {
+    if (typeFilters.size > 0 && !typeFilters.has(z.type)) return false;
+    if (z.is_mine && !layerMine) return false;
+    if (!z.is_mine && z.confirmed  && !layerConfirmed) return false;
+    if (!z.is_mine && !z.confirmed && !layerPending)   return false;
+    return true;
+  });
+
+  const mine      = filtered.filter(z => z.is_mine);
+  const pending   = filtered.filter(z => !z.is_mine && !z.confirmed);
+  const confirmed = filtered.filter(z => !z.is_mine && z.confirmed);
+
+  const LayerBtn = ({ label, active, color, count, onClick }) => (
+    <button onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: 4,
+      padding: '0.2rem 0.55rem', borderRadius: 20, fontSize: '0.68rem',
+      fontWeight: active ? 700 : 500, cursor: 'pointer', minHeight: 'unset',
+      background: active ? color + '18' : 'var(--bg-raised)',
+      color: active ? color : 'var(--text-tertiary)',
+      border: `1.5px solid ${active ? color : 'var(--border)'}`,
+    }}>
+      {label}
+      {count > 0 && (
+        <span style={{ background: active ? color : 'var(--border)',
+          color: active ? '#fff' : 'var(--text-tertiary)',
+          borderRadius: 10, padding: '0 4px', fontSize: '0.6rem', fontWeight: 700 }}>
+          {count}
+        </span>
+      )}
+    </button>
+  );
+
+  function renderZone(z) {
+    const color = ZONE_COLORS[z.type] || ZONE_COLORS.other;
+    const isSel = selected.has(`z:${z.id}`);
+    return (
+      <div key={z.id} onClick={() => onToggle(`z:${z.id}`, z.lat, z.lng)} style={{
+        borderBottom: '1px solid var(--border-light)', cursor: 'pointer',
+        padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'flex-start', gap: 8,
+        background: isSel ? color + '0d' : 'none', transition: 'background 0.12s',
+      }}>
+        <SelectDot selected={isSel} color={color} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.76rem', fontWeight: 700, color }}>
+              {ZONE_LABELS[z.type] || '⚠️ Alerta'}
+              {z.is_mine && <span style={{ marginLeft: 5, fontSize: '0.62rem',
+                background: 'var(--brand-light)', color: 'var(--brand)',
+                borderRadius: 6, padding: '0.05rem 0.3rem' }}>Mía</span>}
+              {z.confirmed && <span style={{ marginLeft: 5, fontSize: '0.62rem',
+                background: '#f0fdf4', color: '#16a34a',
+                borderRadius: 6, padding: '0.05rem 0.3rem' }}>✓ Validada</span>}
+            </span>
+            <span style={{ fontSize: '0.64rem', color: 'var(--text-tertiary)' }}>{timeAgo(z.created_at)}</span>
+          </div>
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginTop: 1 }}>
+            r: {z.radius_m}m · {z.estimated_hours}h
+          </div>
+          <div style={{ display: 'flex', gap: 5, marginTop: 3, alignItems: 'center', flexWrap: 'wrap' }}
+               onClick={e => e.stopPropagation()}>
+            {!z.is_mine && (
+              <button onClick={e => vote(z, 'confirm', e)} disabled={voting === z.id} style={{
+                padding: '0.15rem 0.4rem', borderRadius: 5, fontSize: '0.66rem', fontWeight: 700,
+                background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac',
+                cursor: 'pointer', minHeight: 'unset',
+              }}>✓ {z.confirm_count || 0}/3</button>
+            )}
+            <button onClick={e => vote(z, 'dismiss', e)} disabled={voting === z.id} style={{
+              padding: '0.15rem 0.4rem', borderRadius: 5, fontSize: '0.66rem', fontWeight: 700,
+              background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca',
+              cursor: 'pointer', minHeight: 'unset',
+            }}>✗ {z.dismiss_count || 0}/3</button>
+            {z.pending_edit && (
+              <span style={{ fontSize: '0.62rem', color: '#92400e',
+                background: '#fffbeb', border: '1px solid #fbbf24',
+                borderRadius: 5, padding: '0.05rem 0.3rem' }}>
+                ✏️ {ZONE_LABELS[z.pending_edit.type] || z.pending_edit.type}
+                {z.pending_edit.estimated_hours ? ` · ${z.pending_edit.estimated_hours}h` : ''}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap',
+        padding: '0.4rem 0.75rem 0.25rem', borderBottom: '1px solid var(--border-light)' }}>
+        <LayerBtn label="Mías"       active={layerMine}      color="var(--brand)" count={zones.filter(z => z.is_mine).length}               onClick={() => setLayerMine(v => !v)} />
+        <LayerBtn label="Pendientes" active={layerPending}   color="#f59e0b"      count={zones.filter(z => !z.is_mine && !z.confirmed).length} onClick={() => setLayerPending(v => !v)} />
+        <LayerBtn label="Confirm."   active={layerConfirmed} color="#16a34a"      count={zones.filter(z => !z.is_mine && z.confirmed).length}  onClick={() => setLayerConfirmed(v => !v)} />
+      </div>
       {presentTypes.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap',
-          padding: '0.5rem 0.75rem 0.25rem', borderBottom: '1px solid var(--border-light)' }}>
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap',
+          padding: '0.25rem 0.75rem', borderBottom: '1px solid var(--border-light)' }}>
           {presentTypes.map(t => {
-            const active = activeFilters.has(t);
-            const color  = ZONE_COLORS[t];
+            const act = typeFilters.has(t); const col = ZONE_COLORS[t];
             return (
-              <button key={t} onClick={() => toggleFilter(t)} style={{
-                padding: '0.22rem 0.6rem', borderRadius: 20, fontSize: '0.7rem',
-                fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
-                background: active ? color : color + '14',
-                color: active ? '#fff' : color,
-                border: `1.5px solid ${color}`,
-                transition: 'background 0.15s, color 0.15s',
+              <button key={t} onClick={() => toggleType(t)} style={{
+                padding: '0.15rem 0.5rem', borderRadius: 20, fontSize: '0.66rem', minHeight: 'unset',
+                fontWeight: act ? 700 : 500, cursor: 'pointer',
+                background: act ? col : col + '14', color: act ? '#fff' : col,
+                border: `1.5px solid ${col}`,
               }}>{ZONE_LABELS[t]}</button>
             );
           })}
         </div>
       )}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0.4rem 0' }}>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
         {filtered.length === 0 && (
           <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>
-            Sin zonas activas
+            Sin zonas con estos filtros
           </div>
         )}
-        {needsVotes.length > 0 && (
+        {mine.length > 0 && (
           <>
-            <SectionHeader label={`⏳ Pendientes de confirmación · ${needsVotes.length}`} />
-            {needsVotes.map(z => <ZoneItem key={z.id} z={z} onClose={onClose} />)}
+            <SectionHeader label={`Mías · ${mine.length}`}
+              onSelectAll={() => onSelectGroup(mine.map(z => [`z:${z.id}`, z.lat, z.lng]))}
+              allSelected={mine.every(z => selected.has(`z:${z.id}`))} />
+            {mine.map(renderZone)}
+          </>
+        )}
+        {pending.length > 0 && (
+          <>
+            <SectionHeader label={`⏳ Pendientes · ${pending.length}`}
+              onSelectAll={() => onSelectGroup(pending.map(z => [`z:${z.id}`, z.lat, z.lng]))}
+              allSelected={pending.every(z => selected.has(`z:${z.id}`))} />
+            {pending.map(renderZone)}
           </>
         )}
         {confirmed.length > 0 && (
           <>
-            <SectionHeader label={`✓ Confirmadas · ${confirmed.length}`} />
-            {confirmed.map(z => <ZoneItem key={z.id} z={z} onClose={onClose} />)}
+            <SectionHeader label={`✓ Confirmadas · ${confirmed.length}`}
+              onSelectAll={() => onSelectGroup(confirmed.map(z => [`z:${z.id}`, z.lat, z.lng]))}
+              allSelected={confirmed.every(z => selected.has(`z:${z.id}`))} />
+            {confirmed.map(renderZone)}
           </>
         )}
       </div>
@@ -160,104 +257,197 @@ function ZonesTab({ zones, onClose }) {
   );
 }
 
-const PREF_COLORS = { preferred: '#16a34a', difficult: '#f59e0b', avoid: '#ef4444' };
-const PREF_LABELS = { preferred: '⭐ Favorita', difficult: '⚠️ Difícil', avoid: '🚫 Evitar' };
+// ── VialidadTab ───────────────────────────────────────────────────────────────
+function VialidadTab({ impassable, preferences, token, onRefresh, myPosition, selected, onToggle, onSelectGroup }) {
+  const [duration,  setDuration]  = useState('days');
+  const [confirming, setConfirming] = useState(null);
+  const [deleting,   setDeleting]   = useState(null);
+  const [editing,    setEditing]    = useState(null);
+  const [editPref,   setEditPref]   = useState('preferred');
 
-function ImpItem({ r, onClose, myPosition }) {
-  const color = r.confirmed ? '#16a34a' : '#f97316';
-  const distM = myPosition && r.lat && r.lng
-    ? haversineMeters(myPosition.lat, myPosition.lng, Number(r.lat), Number(r.lng))
-    : null;
-  const nearby = distM !== null && distM <= 50;
-  return (
-    <button onClick={() => flyTo(r.lat, r.lng, onClose)} style={{
-      width: '100%', textAlign: 'left', background: 'none', border: 'none',
-      borderBottom: '1px solid var(--border-light)', cursor: 'pointer',
-      padding: '0.55rem 0.75rem', display: 'flex', alignItems: 'flex-start', gap: 10,
-    }}>
-      <div style={{ width: 10, height: 10, borderRadius: 2, background: color, flexShrink: 0, marginTop: 4 }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.78rem', fontWeight: 700, color }}>
-            {r.confirmed ? '🔴 Confirmada' : '⏳ Pendiente'}
-          </span>
-          <span style={{ fontSize: '0.66rem', color: 'var(--text-tertiary)' }}>{timeAgo(r.created_at)}</span>
-        </div>
-        {r.description && (
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: 2,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {r.description}
+  async function doConfirm(way_id, e) {
+    e.stopPropagation();
+    setConfirming(way_id);
+    try { await confirmImpassable(way_id, duration, token); onRefresh(); }
+    catch (_) {} finally { setConfirming(null); }
+  }
+  async function doDeleteImp(way_id, e) {
+    e.stopPropagation();
+    setDeleting(way_id);
+    try { await deleteImpassable(way_id, token); onRefresh(); }
+    catch (_) {} finally { setDeleting(null); }
+  }
+  async function doSavePref(way_id, e) {
+    e.stopPropagation();
+    setDeleting(way_id + '_s');
+    try { await updatePreference(way_id, editPref, token); setEditing(null); onRefresh(); }
+    catch (_) {} finally { setDeleting(null); }
+  }
+  async function doDeletePref(way_id, e) {
+    e.stopPropagation();
+    setDeleting(way_id);
+    try { await deletePreference(way_id, token); onRefresh(); }
+    catch (_) {} finally { setDeleting(null); }
+  }
+
+  const pending   = impassable.filter(r => !r.confirmed);
+  const confirmed = impassable.filter(r => r.confirmed);
+
+  function renderImp(r) {
+    const isSel   = selected.has(`i:${r.way_id}`);
+    const color   = r.confirmed ? '#16a34a' : '#f97316';
+    const distM   = myPosition && r.lat && r.lng
+      ? haversineMeters(myPosition.lat, myPosition.lng, Number(r.lat), Number(r.lng))
+      : null;
+    const canConf = !r.is_mine && !r.confirmed && distM !== null && distM <= 50;
+    return (
+      <div key={r.way_id} onClick={() => onToggle(`i:${r.way_id}`, r.lat, r.lng)} style={{
+        borderBottom: '1px solid var(--border-light)', cursor: 'pointer',
+        padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'flex-start', gap: 8,
+        background: isSel ? color + '0d' : 'none',
+      }}>
+        <SelectDot selected={isSel} color={color} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.76rem', fontWeight: 700, color }}>
+              {r.confirmed ? '🔴 Confirmada' : '⏳ Pendiente'}
+              {r.is_mine && <span style={{ marginLeft: 5, fontSize: '0.62rem',
+                background: 'var(--brand-light)', color: 'var(--brand)',
+                borderRadius: 6, padding: '0.05rem 0.3rem' }}>Mía</span>}
+            </span>
+            <span style={{ fontSize: '0.64rem', color: 'var(--text-tertiary)' }}>{timeAgo(r.created_at)}</span>
           </div>
-        )}
-        <div style={{ display: 'flex', gap: 8, marginTop: 3, fontSize: '0.66rem', color: 'var(--text-tertiary)' }}>
-          <span>✓ {r.confirmation_count ?? 0} confirm.</span>
-          {r.estimated_duration && <span>{IMP_LABELS[r.estimated_duration] || r.estimated_duration}</span>}
-          {!r.confirmed && (
-            nearby
-              ? <span style={{ color: '#16a34a', fontWeight: 700 }}>📍 Cerca — confirmar en página</span>
-              : distM !== null
-                ? <span>~{Math.round(distM)}m para confirmar</span>
-                : null
+          {r.description && (
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: 1,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {r.description}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 5, marginTop: 3, alignItems: 'center', flexWrap: 'wrap' }}
+               onClick={e => e.stopPropagation()}>
+            <span style={{ fontSize: '0.64rem', color: 'var(--text-tertiary)' }}>
+              ✓ {r.confirmation_count ?? 0}
+              {r.estimated_duration ? ` · ${DUR_LABELS[r.estimated_duration] || r.estimated_duration}` : ''}
+            </span>
+            {canConf && (
+              <>
+                <select value={duration} onChange={e => setDuration(e.target.value)}
+                  style={{ fontSize: '0.64rem', borderRadius: 5, border: '1px solid var(--border)',
+                    padding: '0.1rem 0.25rem', background: 'var(--bg-card)' }}>
+                  {['days','weeks','months','permanent'].map(d =>
+                    <option key={d} value={d}>{DUR_LABELS[d]}</option>)}
+                </select>
+                <button onClick={e => doConfirm(r.way_id, e)} disabled={confirming === r.way_id} style={{
+                  padding: '0.15rem 0.4rem', borderRadius: 5, fontSize: '0.66rem', fontWeight: 700,
+                  background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac',
+                  cursor: 'pointer', minHeight: 'unset',
+                }}>{confirming === r.way_id ? '…' : '✓ Confirmar'}</button>
+              </>
+            )}
+            {!canConf && !r.confirmed && distM !== null && (
+              <span style={{ fontSize: '0.62rem', color: 'var(--text-tertiary)' }}>
+                {distM <= 50 ? '📍 Cerca' : `~${Math.round(distM)}m`}
+              </span>
+            )}
+            {r.is_mine && (
+              <button onClick={e => doDeleteImp(r.way_id, e)} disabled={deleting === r.way_id} style={{
+                padding: '0.15rem 0.35rem', borderRadius: 5, fontSize: '0.66rem',
+                background: 'var(--bg-raised)', color: 'var(--text-tertiary)',
+                border: '1px solid var(--border)', cursor: 'pointer', minHeight: 'unset',
+              }}>{deleting === r.way_id ? '…' : '🗑'}</button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderPref(p) {
+    const isSel  = selected.has(`p:${p.way_id}`);
+    const color  = PREF_COLORS[p.preference] || '#6b7280';
+    const isEdit = editing === p.way_id;
+    const isDel  = deleting === p.way_id;
+    return (
+      <div key={p.way_id} onClick={() => onToggle(`p:${p.way_id}`, p.lat, p.lng)} style={{
+        borderBottom: '1px solid var(--border-light)', cursor: 'pointer',
+        padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'flex-start', gap: 8,
+        background: isSel ? color + '0d' : 'none',
+      }}>
+        <SelectDot selected={isSel} color={color} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: '0.76rem', fontWeight: 700, color }}>
+            {PREF_LABELS[p.preference] || p.preference}
+          </div>
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)', marginTop: 1 }}>
+            {p.name || p.way_id}
+          </div>
+          {isEdit ? (
+            <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}
+                 onClick={e => e.stopPropagation()}>
+              {Object.entries(PREF_LABELS).map(([v, l]) => (
+                <button key={v} onClick={() => setEditPref(v)} style={{
+                  padding: '0.15rem 0.4rem', borderRadius: 5, fontSize: '0.64rem', fontWeight: 700,
+                  cursor: 'pointer', minHeight: 'unset',
+                  background: editPref === v ? PREF_COLORS[v] : 'var(--bg-raised)',
+                  color: editPref === v ? '#fff' : 'var(--text-secondary)',
+                  border: `1px solid ${editPref === v ? PREF_COLORS[v] : 'var(--border)'}`,
+                }}>{l}</button>
+              ))}
+              <button onClick={e => doSavePref(p.way_id, e)} style={{
+                padding: '0.15rem 0.4rem', borderRadius: 5, fontSize: '0.64rem', fontWeight: 700,
+                background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac',
+                cursor: 'pointer', minHeight: 'unset',
+              }}>✓</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 4, marginTop: 3 }} onClick={e => e.stopPropagation()}>
+              <button onClick={e => { e.stopPropagation(); setEditPref(p.preference); setEditing(p.way_id); }} style={{
+                padding: '0.15rem 0.35rem', borderRadius: 5, fontSize: '0.66rem',
+                background: 'var(--bg-raised)', color: 'var(--brand)',
+                border: '1px solid var(--border)', cursor: 'pointer', minHeight: 'unset',
+              }}>✎</button>
+              <button onClick={e => doDeletePref(p.way_id, e)} disabled={isDel} style={{
+                padding: '0.15rem 0.35rem', borderRadius: 5, fontSize: '0.66rem',
+                background: 'var(--bg-raised)', color: 'var(--text-tertiary)',
+                border: '1px solid var(--border)', cursor: 'pointer', minHeight: 'unset',
+              }}>{isDel ? '…' : '🗑'}</button>
+            </div>
           )}
         </div>
       </div>
-    </button>
-  );
-}
-
-function VialidadTab({ reports, preferences = [], onClose, myPosition }) {
-  // Separar: pendientes (sin confirmación suficiente) vs confirmadas vs personales
-  const pending   = reports.filter(r => !r.confirmed);
-  const confirmed = reports.filter(r => r.confirmed);
-
-  const hasContent = pending.length || confirmed.length || preferences.length;
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0.4rem 0' }}>
-        {!hasContent && (
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {!impassable.length && !preferences.length && (
           <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>
             Sin reportes de vialidad
           </div>
         )}
-
         {pending.length > 0 && (
           <>
-            <SectionHeader label={`⏳ Pendientes de confirmación · ${pending.length}`} />
-            {pending.map(r => <ImpItem key={r.way_id} r={r} onClose={onClose} myPosition={myPosition} />)}
+            <SectionHeader label={`⏳ Pendientes · ${pending.length}`}
+              onSelectAll={() => onSelectGroup(pending.map(r => [`i:${r.way_id}`, r.lat, r.lng]))}
+              allSelected={pending.every(r => selected.has(`i:${r.way_id}`))} />
+            {pending.map(renderImp)}
           </>
         )}
-
         {confirmed.length > 0 && (
           <>
-            <SectionHeader label={`🔴 Confirmadas · ${confirmed.length}`} />
-            {confirmed.map(r => <ImpItem key={r.way_id} r={r} onClose={onClose} myPosition={myPosition} />)}
+            <SectionHeader label={`🔴 Confirmadas · ${confirmed.length}`}
+              onSelectAll={() => onSelectGroup(confirmed.map(r => [`i:${r.way_id}`, r.lat, r.lng]))}
+              allSelected={confirmed.every(r => selected.has(`i:${r.way_id}`))} />
+            {confirmed.map(renderImp)}
           </>
         )}
-
         {preferences.length > 0 && (
           <>
-            <SectionHeader label={`⭐ Mis preferencias · ${preferences.length}`} />
-            {preferences.map(p => {
-              const color = PREF_COLORS[p.preference] || '#6b7280';
-              return (
-                <button key={p.way_id} onClick={() => flyTo(p.lat, p.lng, onClose)} style={{
-                  width: '100%', textAlign: 'left', background: 'none', border: 'none',
-                  borderBottom: '1px solid var(--border-light)', cursor: 'pointer',
-                  padding: '0.55rem 0.75rem', display: 'flex', alignItems: 'flex-start', gap: 10,
-                }}>
-                  <div style={{ width: 10, height: 10, borderRadius: 2, background: color, flexShrink: 0, marginTop: 4 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.78rem', fontWeight: 700, color }}>
-                      {PREF_LABELS[p.preference] || p.preference}
-                    </div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginTop: 2 }}>
-                      {p.name || p.way_id}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+            <SectionHeader label={`⭐ Mis preferencias · ${preferences.length}`}
+              onSelectAll={() => onSelectGroup(preferences.map(p => [`p:${p.way_id}`, p.lat, p.lng]))}
+              allSelected={preferences.every(p => selected.has(`p:${p.way_id}`))} />
+            {preferences.map(renderPref)}
           </>
         )}
       </div>
@@ -266,37 +456,127 @@ function VialidadTab({ reports, preferences = [], onClose, myPosition }) {
 }
 
 // ── AlertsPanel ───────────────────────────────────────────────────────────────
-export default function AlertsPanel({ zones = [], impassable = [], preferences = [], myPosition = null, onCloseMobileDrawer }) {
-  const [subTab, setSubTab] = useState('zones');
+export default function AlertsPanel({
+  zones = [], impassable = [], preferences = [],
+  myPosition = null, token, onRefresh,
+}) {
+  const [tab,      setTab]      = useState('zones');
+  const [selected, setSelected] = useState(new Set());
+
+  const coordMap = useCallback(() => {
+    const m = new Map();
+    zones.forEach(z       => m.set(`z:${z.id}`,      [Number(z.lat),   Number(z.lng)]));
+    impassable.forEach(r  => m.set(`i:${r.way_id}`,  [Number(r.lat),   Number(r.lng)]));
+    preferences.forEach(p => m.set(`p:${p.way_id}`,  [Number(p.lat),   Number(p.lng)]));
+    return m;
+  }, [zones, impassable, preferences]);
+
+  function onToggle(key, lat, lng) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      const pts = [...next].map(k => coordMap().get(k)).filter(p => p && p[0] && p[1]);
+      if (pts.length) fitBoundsMultiple(pts);
+      return next;
+    });
+  }
+
+  function onSelectGroup(items) {
+    const keys   = items.map(i => i[0]);
+    const allSel = keys.every(k => selected.has(k));
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (allSel) { keys.forEach(k => next.delete(k)); }
+      else        { keys.forEach(k => next.add(k)); }
+      const pts = [...next].map(k => coordMap().get(k)).filter(p => p && p[0] && p[1]);
+      if (pts.length) fitBoundsMultiple(pts);
+      return next;
+    });
+    if (!allSel) {
+      const pts = items.map(([, lat, lng]) => [Number(lat), Number(lng)]).filter(p => p[0] && p[1]);
+      fitBoundsMultiple(pts);
+    }
+  }
+
+  function selectAll() {
+    const cm  = coordMap();
+    setSelected(new Set(cm.keys()));
+    const pts = [...cm.values()].filter(p => p && p[0] && p[1]);
+    fitBoundsMultiple(pts);
+  }
+
+  const totalAll = zones.length + impassable.length + preferences.length;
 
   const tabStyle = (active) => ({
-    flex: 1, padding: '0.5rem 0', fontSize: '0.78rem', fontWeight: 700,
+    flex: 1, padding: '0.5rem 0', fontSize: '0.76rem', fontWeight: 700,
     cursor: 'pointer', border: 'none', background: 'none',
     borderBottom: active ? '2px solid var(--brand)' : '2px solid transparent',
     color: active ? 'var(--brand)' : 'var(--text-secondary)',
-    transition: 'color 0.15s, border-color 0.15s',
   });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      {/* Sub-pestañas */}
+      {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border-light)', flexShrink: 0 }}>
-        <button style={tabStyle(subTab === 'zones')} onClick={() => setSubTab('zones')}>
-          🚦 Zonas {zones.length > 0 && <span style={{ fontSize: '0.65rem', marginLeft: 3,
-            background: 'var(--brand)', color: '#fff', borderRadius: 10, padding: '0 5px' }}>
-            {zones.length}
-          </span>}
+        <button style={tabStyle(tab === 'zones')} onClick={() => setTab('zones')}>
+          🚦 Zonas
+          {zones.length > 0 && (
+            <span style={{ marginLeft: 4, fontSize: '0.62rem',
+              background: 'var(--brand)', color: '#fff', borderRadius: 10, padding: '0 5px' }}>
+              {zones.length}
+            </span>
+          )}
         </button>
-        <button style={tabStyle(subTab === 'vialidad')} onClick={() => setSubTab('vialidad')}>
-          🛣 Vialidad {(impassable.length + preferences.length) > 0 && <span style={{ fontSize: '0.65rem', marginLeft: 3,
-            background: '#ef4444', color: '#fff', borderRadius: 10, padding: '0 5px' }}>
-            {impassable.length + preferences.length}
-          </span>}
+        <button style={tabStyle(tab === 'vialidad')} onClick={() => setTab('vialidad')}>
+          🛣 Vialidad
+          {(impassable.length + preferences.length) > 0 && (
+            <span style={{ marginLeft: 4, fontSize: '0.62rem',
+              background: '#ef4444', color: '#fff', borderRadius: 10, padding: '0 5px' }}>
+              {impassable.length + preferences.length}
+            </span>
+          )}
         </button>
       </div>
 
-      {subTab === 'zones'    && <ZonesTab    zones={zones}       onClose={onCloseMobileDrawer} />}
-      {subTab === 'vialidad' && <VialidadTab reports={impassable} preferences={preferences} myPosition={myPosition} onClose={onCloseMobileDrawer} />}
+      {/* Barra de selección */}
+      {totalAll > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0.28rem 0.75rem', background: 'var(--bg-raised)',
+          borderBottom: '1px solid var(--border-light)', flexShrink: 0, fontSize: '0.68rem',
+        }}>
+          <span style={{ color: 'var(--text-tertiary)' }}>
+            {selected.size > 0 ? `${selected.size} en mapa` : 'Toca para ver en mapa'}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {selected.size > 0 && (
+              <button onClick={() => setSelected(new Set())} style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--text-tertiary)', fontSize: '0.68rem', fontWeight: 600,
+              }}>✕ Limpiar</button>
+            )}
+            <button onClick={selectAll} style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--brand)', fontSize: '0.68rem', fontWeight: 700,
+            }}>Ver todas</button>
+          </div>
+        </div>
+      )}
+
+      {tab === 'zones' && (
+        <ZonesTab zones={zones} token={token} onRefresh={onRefresh}
+          myPosition={myPosition} selected={selected}
+          onToggle={onToggle} onSelectGroup={onSelectGroup} />
+      )}
+      {tab === 'vialidad' && (
+        <VialidadTab impassable={impassable} preferences={preferences}
+          token={token} onRefresh={onRefresh} myPosition={myPosition}
+          selected={selected} onToggle={onToggle} onSelectGroup={onSelectGroup} />
+      )}
     </div>
   );
 }
