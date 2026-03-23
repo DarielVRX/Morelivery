@@ -2,11 +2,12 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { useDriverOrders } from '../../../hooks/useDriverOrders';
 
-export function useDriverOrdersPageState(token, registerRef) {
+export function useDriverOrdersPageState(token, registerRef, availability) {
   const orderState = useDriverOrders(token, {
     onExternalUpdate:    registerRef ? (fn) => { registerRef.current.onUpdate    = fn; } : undefined,
     onExternalReconnect: registerRef ? (fn) => { registerRef.current.onReconnect = fn; } : undefined,
     onExternalChat:      registerRef ? (fn) => { registerRef.current.onChat      = fn; } : undefined,
+    availability,
   });
   const [tab, setTab] = useState('active');
   const [reportingId, setReportingId] = useState(null);

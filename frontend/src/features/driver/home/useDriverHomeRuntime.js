@@ -10,6 +10,7 @@ import {
   submitImpassableRoads,
   submitRoadPreferences,
 } from './api';
+import { fetchAllImpassable } from '../alerts/api';
 import {
   buildGoogleMapsAppUrl,
   buildGoogleMapsWebUrl,
@@ -30,6 +31,7 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
   const [centerSignal, setCenterSignal] = useState(null);
   const [centerMode, setCenterMode] = useState('nav');
   const [activeZones, setActiveZones] = useState([]);
+  const [activeImpassable, setActiveImpassable] = useState([]);
   const [navMode, setNavMode] = useState(null);
   const [mapInstance, setMapInstance] = useState(null);
 
@@ -41,6 +43,11 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
     fetchActiveZones()
       .then((data) => {
         if (Array.isArray(data?.zones)) setActiveZones(data.zones);
+      })
+      .catch(() => {});
+    fetchAllImpassable(token)
+      .then((reports) => {
+        if (Array.isArray(reports)) setActiveImpassable(reports);
       })
       .catch(() => {});
   }, []);
@@ -273,6 +280,7 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
     setCenterSignal,
     centerMode,
     activeZones,
+    activeImpassable,
     navMode,
     setNavMode,
     mapInstance,

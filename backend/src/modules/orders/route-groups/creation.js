@@ -18,7 +18,10 @@ export function registerCreationRoutes(router, deps) {
 
   router.get('/pending-assignment', authenticate, authorize(['driver']), async (req, res, next) => {
     try {
-      const orders = await getPendingAssignmentOrders(req.user.userId);
+      const orders = await getPendingAssignmentOrders(
+        req.user.userId,
+        req.query.available === '1'  // ← agregar
+      );
       return res.json({ orders });
     } catch (error) { return next(error); }
   });
