@@ -11,6 +11,7 @@ import { getNotifPriorityMode } from '../utils/format';
 
 export function useOrderManager(token, patchUser, userDriver) {
   const [activeOrder,    setActiveOrder]    = useState(null);
+  const [activeOrders,   setActiveOrders]   = useState([]);
   const [availability,   setAvailability]   = useState(false);
   const [pendingOffer,   setPendingOffer]   = useState(null);
   const [offerMinimized, setOfferMinimized] = useState(false);
@@ -26,6 +27,7 @@ export function useOrderManager(token, patchUser, userDriver) {
   const [notifPriorityMode, setNotifPriorityMode] = useState(getNotifPriorityMode);
 
   const loadDataRef            = useRef(null);
+  const myPositionRef          = useRef(null);
   const loadDebounceRef        = useRef(null);
   const consecutiveTimeouts    = useRef(0);
   const lastOfferAlertRef      = useRef(null);
@@ -85,9 +87,31 @@ export function useOrderManager(token, patchUser, userDriver) {
         apiFetch('/orders/my?active=1', {}, token),
         apiFetch('/drivers/offers',     {}, token),
       ]);
-      const active = (od.orders || [])
-        .filter(o => !['delivered', 'cancelled'].includes(o.status))
-        .sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at))[0] || null;
+      const orders = (od.orders || []).filter(o => !['delivered', 'cancelled'].includes(o.status));
+      setActiveOrders(orders);
+      // Stop más próximo: si hay posición GPS, mostrar el pedido cuyo próximo stop esté más cerca
+      const active = (() => {
+        if (!orders.length) return null;
+        if (orders.length === 1) return orders[0];
+        const pos = myPositionRef.current;
+        if (!pos) {
+          // Sin GPS: fallback al más antiguo
+          return orders.sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at))[0];
+        }
+        return orders.reduce((best, o) => {
+          // Determinar próximo stop según status
+          const isOTW = o.status === 'on_the_way';
+          const sLat = isOTW ? Number(o.customer_lat)    : Number(o.restaurant_lat);
+          const sLng = isOTW ? Number(o.customer_lng)    : Number(o.restaurant_lng);
+          if (!sLat || !sLng) return best;
+          const dist = haversineMeters(pos.lat, pos.lng, sLat, sLng);
+          const bLat = best._nextStopLat;
+          const bLng = best._nextStopLng;
+          const bestDist = (bLat && bLng) ? haversineMeters(pos.lat, pos.lng, bLat, bLng) : Infinity;
+          if (dist < bestDist) { o._nextStopLat = sLat; o._nextStopLng = sLng; return o; }
+          return best;
+        }, orders[0]);
+      })();
       setActiveOrder(active);
       if (!active) setRouteBagPct(null);
       const newOffer = (off.offers || []).length > 0 ? off.offers[0] : null;
@@ -250,6 +274,10 @@ export function useOrderManager(token, patchUser, userDriver) {
 
   async function doRelease(onError) {
     if (!activeOrder) return;
+    if (releaseNote.trim().length < 10) {
+      onError?.('El motivo debe tener al menos 10 caracteres');
+      return;
+    }
     try {
       await apiFetch(`/drivers/orders/${activeOrder.id}/release`,
         { method: 'POST', body: JSON.stringify({ note: releaseNote }) }, token);
@@ -279,11 +307,12 @@ export function useOrderManager(token, patchUser, userDriver) {
 
   return {
     // Estado
-    activeOrder, availability, pendingOffer, offerMinimized, loadingOffer,
+    activeOrder, activeOrders, availability, pendingOffer, offerMinimized, loadingOffer,
     loadingStatus, releaseNote, showRelease, orderExpanded,
     notifPermission, notifPriorityMode, hasActiveOrder,
     transferBanner,
     // Setters de UI
+    setMyPosition: (pos) => { myPositionRef.current = pos; },
     setOfferMinimized, setOrderExpanded, setShowRelease, setReleaseNote,
     setTransferBanner,
     // Estado de ruta

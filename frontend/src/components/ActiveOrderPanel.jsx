@@ -1,4 +1,5 @@
 // components/ActiveOrderPanel.jsx
+import { useState } from 'react';
 import { getDriverEarningCents, getOrderGrandTotalCents, isCashPayment } from '../features/driver/shared/orderUtils';
 import { fmt } from '../utils/format';
 import FeeBreakdown from './FeeBreakdown';
@@ -282,11 +283,26 @@ export default function ActiveOrderPanel({
             {showRelease && (
               <div style={{ marginTop: '0.25rem' }}>
                 <textarea value={releaseNote} onChange={e => onReleaseNoteChange(e.target.value)}
-                  placeholder="Motivo (obligatorio)" rows={2}
+                  placeholder="Motivo (obligatorio, mín. 10 caracteres)" rows={2}
                   style={{ width: '100%', boxSizing: 'border-box',
-                    marginBottom: '0.3rem', fontSize: '0.82rem' }} />
+                    marginBottom: '0.15rem', fontSize: '0.82rem' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between',
+                  alignItems: 'center', marginBottom: '0.3rem' }}>
+                  <span style={{
+                    fontSize: '0.68rem',
+                    color: releaseNote.trim().length < 10 ? '#dc2626' : 'var(--text-tertiary)',
+                  }}>
+                    {releaseNote.trim().length}/10 mín.
+                  </span>
+                </div>
                 <div style={{ display: 'flex', gap: '0.3rem' }}>
-                  <button className="btn-sm btn-danger" onClick={onConfirmRelease}>Confirmar</button>
+                  <button className="btn-sm btn-danger"
+                    onClick={onConfirmRelease}
+                    disabled={releaseNote.trim().length < 10}
+                    style={{ opacity: releaseNote.trim().length < 10 ? 0.45 : 1,
+                      cursor: releaseNote.trim().length < 10 ? 'not-allowed' : 'pointer' }}>
+                    Confirmar
+                  </button>
                   <button className="btn-sm"
                     onClick={() => { onToggleRelease(); onReleaseNoteChange(''); }}>Cancelar</button>
                 </div>

@@ -21,13 +21,15 @@ export default function DriverMap({
   driverPos, customPin, onCustomPin, hasActiveOrder,
   pickupPos, deliveryPos, pickupLabel, deliveryLabel,
   routeGeometry, onRouteError,
-  navFollowEnabled, navHeadingDeg, onHeadingChange,
+  allStops,
+  centerMode, navHeadingDeg, onHeadingChange,
   centerSignal, onCenterDone,
   onMapReady,
   bottomOffset = 8,
   pinAddress,
   loadingPin,
   onClearPin,
+  onRouteToPin,
 }) {
   const { isDark }        = useTheme();
   const containerRef      = useRef(null);
@@ -38,8 +40,9 @@ export default function DriverMap({
   const watchIdRef        = useRef(null);
   const prevWatchPosRef   = useRef(null);
   const hasActiveOrderRef = useRef(hasActiveOrder);
-  const navFollowRef      = useRef(navFollowEnabled);
+  const centerModeRef     = useRef(centerMode);
   const onHeadingRef      = useRef(onHeadingChange);
+  const lastInteractionRef = useRef(Date.now());
   const zoomCtrlRef       = useRef(null);
   const zoomTimeRef       = useRef(null);
   const isDarkRef         = useRef(isDark);
@@ -87,8 +90,8 @@ export default function DriverMap({
   }, [isDark]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Sincronizar refs sin recrear listeners ───────────────────────────────────
-  useEffect(() => { hasActiveOrderRef.current = hasActiveOrder;  }, [hasActiveOrder]);
-  useEffect(() => { navFollowRef.current      = navFollowEnabled; }, [navFollowEnabled]);
+  useEffect(() => { hasActiveOrderRef.current = hasActiveOrder; }, [hasActiveOrder]);
+  useEffect(() => { centerModeRef.current     = centerMode;       }, [centerMode]);
   useEffect(() => { onHeadingRef.current      = onHeadingChange;  }, [onHeadingChange]);
 
   useEffect(() => {
@@ -116,7 +119,7 @@ export default function DriverMap({
           onHeadingRef.current?.(h);
           // OPT-6: rotar SVG directamente — sin recrear ni setState
           const svg = markersRef.current.driverSvg;
-          if (svg && navFollowRef.current) svg.style.transform = `rotate(${h}deg)`;
+          if (svg && centerModeRef.current === 'nav') svg.style.transform = `rotate(${h}deg)`;
         }
         prevWatchPosRef.current = next;
         livePosRef.current      = next;
@@ -124,14 +127,35 @@ export default function DriverMap({
         // Mover marcador sin setState — mutación DOM directa
         if (markersRef.current.driver && mapRef.current) {
           markersRef.current.driver.setLngLat([next.lng, next.lat]);
-          if (navFollowRef.current) {
-            const map = mapRef.current;
-            const h   = liveHeadingRef.current;
-            map.easeTo({
-              center: [next.lng, next.lat], bearing: h, pitch: 0, zoom: 19,
-              duration: 250, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
-              essential: true,
-            });
+          const map  = mapRef.current;
+          const mode = centerModeRef.current;
+          if (mode === 'nav') {
+            const sinceInteraction = Date.now() - lastInteractionRef.current;
+            if (sinceInteraction > 5000) {
+              const h = liveHeadingRef.current;
+              map.easeTo({
+                center: [next.lng, next.lat], bearing: h, pitch: 50, zoom: 17,
+                duration: 250, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
+                essential: true,
+              });
+            }
+          } else if (mode === 'free') {
+            const prevPos = prevWatchPosRef.current;
+            if (prevPos) {
+              // Distancia haversine simplificada en metros
+              const R   = 6371000;
+              const dLat = (next.lat - prevPos.lat) * Math.PI / 180;
+              const dLng = (next.lng - prevPos.lng) * Math.PI / 180;
+              const a   = Math.sin(dLat/2)**2 + Math.cos(prevPos.lat*Math.PI/180)*Math.cos(next.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+              const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+              const currentZoom = map.getZoom();
+              if (dist > 200 && currentZoom > 10) {
+                map.easeTo({
+                  center: [next.lng, next.lat], pitch: 0, bearing: 0, zoom: 14,
+                  duration: 400, essential: true,
+                });
+              }
+            }
           }
         }
       },
@@ -147,8 +171,8 @@ export default function DriverMap({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Construir marcador del driver ────────────────────────────────────────────
-  // Modo navegar (navFollowEnabled=true)  → flecha 60×60 px  (75% de 80px original)
-  // Modo normal  (navFollowEnabled=false) → punto  20×20 px  (25% de 80px original)
+  // Modo nav  (centerMode='nav')  → flecha 60×60 px  (75% de 80px original)
+  // Modo libre (centerMode!='nav') → punto  20×20 px  (25% de 80px original)
   //
   // OPT-6: createElementNS para mantener referencia directa al SVG sin innerHTML.
   //        Cuando cambia el heading se muta solo svg.style.transform.
@@ -161,7 +185,7 @@ export default function DriverMap({
     const pos = livePosRef.current;
     if (!pos) return;
 
-    const isDrive = navFollowRef.current;
+    const isDrive = centerModeRef.current === 'nav';
     const wrap    = document.createElement('div');
 
     if (isDrive) {
@@ -260,6 +284,10 @@ export default function DriverMap({
       };
       ['mousedown', 'touchstart', 'wheel', 'dragstart'].forEach(ev => map.on(ev, showZoom));
 
+      // Actualizar lastInteractionRef en cualquier interacción del mapa
+      const onMapInteract = () => { lastInteractionRef.current = Date.now(); };
+      ['mousedown', 'touchstart', 'wheel', 'dragstart', 'touchmove'].forEach(ev => map.on(ev, onMapInteract));
+
       // OPT-7: leer hasActiveOrder desde ref, no closure estático
       map.on('click', (e) => {
         if (hasActiveOrderRef.current) return;
@@ -287,28 +315,31 @@ export default function DriverMap({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // OPT-5: reconstruir marcador (dot↔arrow) y centrar al cambiar modo follow
+  // OPT-5: reconstruir marcador (dot↔arrow) y centrar al cambiar modo nav
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !_ml) return;
     _buildDriverMarker(_ml, map);
-    if (navFollowEnabled) {
+    if (centerMode === 'nav') {
       const pos = livePosRef.current;
       if (!pos) return;
       const h = liveHeadingRef.current || navHeadingDeg || 0;
-      map.easeTo({ center: [pos.lng, pos.lat], bearing: h, pitch: 0, zoom: 19,
+      map.easeTo({ center: [pos.lng, pos.lat], bearing: h, pitch: 50, zoom: 17,
         duration: 350, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
         essential: true });
+    } else {
+      // Al salir de nav: restablecer pitch y bearing
+      map.easeTo({ pitch: 0, bearing: 0, duration: 300, essential: true });
     }
-  }, [navFollowEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [centerMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // OPT-5: efecto SOLO para heading — muta SVG, sin recrear marcador
   useEffect(() => {
     const svg = markersRef.current.driverSvg;
     if (!svg) return;
-    svg.style.transform = navFollowEnabled
+    svg.style.transform = centerMode === 'nav'
       ? `rotate(${navHeadingDeg}deg)` : 'rotate(0deg)';
-  }, [navHeadingDeg, navFollowEnabled]);
+  }, [navHeadingDeg, centerMode]);
 
   // Pin personalizado — SVG pin + popup con dirección auto-ocultar 5s
   const pinPopupRef   = useRef(null);
@@ -350,9 +381,9 @@ export default function DriverMap({
     const sub = isDarkMode ? '#9ca3af' : '#9e4f4f';
     const html = `<div style="font-size:0.78rem;font-family:inherit;max-width:200px;background:${bg};color:${txt};border-radius:6px;padding:6px 8px;">
       <div style="font-weight:600;margin-bottom:3px;line-height:1.3;">${pinAddress}</div>
-      <button onclick="this.dispatchEvent(new CustomEvent('clearpin',{bubbles:true}))"
-        style="font-size:0.7rem;color:${sub};background:none;border:none;cursor:pointer;padding:0;">
-        Quitar pin
+      <button onclick="this.dispatchEvent(new CustomEvent('routetopin',{bubbles:true}))"
+        style="font-size:0.7rem;color:${sub};background:none;border:none;cursor:pointer;padding:0;margin-top:2px;">
+        📍 Ruta hasta aquí
       </button>
     </div>`;
 
@@ -363,14 +394,17 @@ export default function DriverMap({
 
     pinPopupRef.current = popup;
 
-    // Escuchar el evento del botón "Quitar pin"
+    // Escuchar el evento del botón "Ruta al pin"
     const el = popup.getElement();
-    el?.addEventListener('clearpin', () => { onClearPin?.(); });
+    el?.addEventListener('routetopin', () => {
+      onRouteToPin?.({ lat: customPin.lat, lng: customPin.lng });
+    });
 
-    // Auto-ocultar tras 5s
+    // Auto-ocultar popup Y pin tras 5s
     pinHideTimer.current = setTimeout(() => {
       popup.remove();
       pinPopupRef.current = null;
+      onClearPin?.();
     }, 5000);
 
     return () => clearTimeout(pinHideTimer.current);
@@ -433,19 +467,23 @@ export default function DriverMap({
     const map = mapRef.current;
     const pos = livePosRef.current || driverPos;
 
-    if (centerSignal === 'follow') {
+    if (centerSignal === 'nav') {
       if (!pos) { onCenterDone?.(); return; }
       const h       = liveHeadingRef.current || navHeadingDeg || 0;
       const offsetY = Math.round(map.getContainer().clientHeight * 0.18);
-      map.easeTo({ center: [pos.lng, pos.lat], zoom: 19, pitch: 0, bearing: h,
+      map.easeTo({ center: [pos.lng, pos.lat], zoom: 17, pitch: 50, bearing: h,
         duration: 350, offset: [0, offsetY], essential: true });
 
     } else if (centerSignal === 'overview') {
-      // Collect all relevant points
+      // Collect all relevant points — usar allStops para vista multi-pedido
       const pts = [];
-      if (pos)         pts.push([pos.lng, pos.lat]);
-      if (pickupPos)   pts.push([pickupPos.lng, pickupPos.lat]);
-      if (deliveryPos) pts.push([deliveryPos.lng, deliveryPos.lat]);
+      if (pos) pts.push([pos.lng, pos.lat]);
+      if (allStops?.length) {
+        allStops.forEach(s => pts.push([s.lng, s.lat]));
+      } else {
+        if (pickupPos)   pts.push([pickupPos.lng, pickupPos.lat]);
+        if (deliveryPos) pts.push([deliveryPos.lng, deliveryPos.lat]);
+      }
 
       if (pts.length >= 2 && _ml) {
         try {
@@ -469,9 +507,9 @@ export default function DriverMap({
       }
 
     } else {
-      // 'free' — north up, medium zoom
+      // 'free' — north up, zoom 14 sin pitch
       if (!pos) { onCenterDone?.(); return; }
-      map.easeTo({ center: [pos.lng, pos.lat], zoom: 15, pitch: 0, bearing: 0,
+      map.easeTo({ center: [pos.lng, pos.lat], zoom: 14, pitch: 0, bearing: 0,
         duration: 350, essential: true });
     }
 

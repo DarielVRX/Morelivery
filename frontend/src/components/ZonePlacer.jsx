@@ -36,6 +36,10 @@ export default function ZonePlacer({ map, onConfirm, onCancel, bottomOffset = 0 
   const [saving,   setSaving]   = useState(false);
   const markerRef  = useRef(null); // marcador fijo post-confirmación de área
 
+  // Derivados — declarados antes de cualquier useEffect que los referencie
+  const sel = ZONE_TYPES.find(t => t.value === zoneType) || null;
+  const circleColor = sel ? sel.color : '#e3aaaa';
+
   // Colocar marcador fijo al confirmar el área
   useEffect(() => {
     if (!map || !captured || typeof window === 'undefined') return;
@@ -53,9 +57,6 @@ export default function ZonePlacer({ map, onConfirm, onCancel, bottomOffset = 0 
       .addTo(map);
     return () => { markerRef.current?.remove(); markerRef.current = null; };
   }, [captured, map, circleColor]);
-
-  const sel = ZONE_TYPES.find(t => t.value === zoneType) || null;
-  const circleColor = sel ? sel.color : '#e3aaaa';
 
   // Radio en tiempo real
   useEffect(() => {
