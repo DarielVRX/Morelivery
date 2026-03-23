@@ -31,7 +31,7 @@ export function IconMoon() {
 function getNavItems(role) {
   if (role === 'customer')   return [{ to:'/customer', label:'Inicio', Icon:IconHome }];
   if (role === 'restaurant') return [{ to:'/restaurant', label:'Inicio', Icon:IconHome },{ to:'/restaurant/horario', label:'Horario', Icon:IconSchedule }];
-  if (role === 'driver')     return [{ to:'/driver', label:'Inicio', Icon:IconHome },{ to:'/driver/ganancias', label:'Ganancias', Icon:IconClock };
+  if (role === 'driver')     return [{ to:'/driver', label:'Inicio', Icon:IconHome },{ to:'/driver/ganancias', label:'Ganancias', Icon:IconClock }];
   return [];
 }
 
