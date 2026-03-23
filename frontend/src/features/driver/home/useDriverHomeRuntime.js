@@ -154,22 +154,6 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
       .catch(() => onMessage('No se pudo calcular la ruta al pin'));
   }, [myPosition, onMessage, token]);
 
-  const handleToggleRoute = useCallback(() => {
-    if (routeActive) {
-      // Desactivar: limpiar ruta y volver a modo nav libre
-      setRouteActive(false);
-      setRouteGeometry(null);
-      setRouteSteps([]);
-      // Restablecer centerMode a nav sin ruta (comportamiento libre)
-      setCenterMode('nav');
-      centerModeRef.current = 'nav';
-      setCenterSignal('nav');
-      return;
-    }
-    // Activar: calcular ruta (la lógica original)
-    openRoadRouteApi();
-  }, [routeActive, openRoadRouteApi]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const openRoadRouteApi = useCallback(() => {
     if (!activeOrder) return;
 
@@ -236,6 +220,21 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
 
     buildRoute(waypoints[0]);
   }, [activeOrder, activeOrders, myPosition, onMessage, token]);
+
+  const handleToggleRoute = useCallback(() => {
+    if (routeActive) {
+      // Desactivar: limpiar ruta y volver a modo nav libre
+      setRouteActive(false);
+      setRouteGeometry(null);
+      setRouteSteps([]);
+      setCenterMode('nav');
+      centerModeRef.current = 'nav';
+      setCenterSignal('nav');
+      return;
+    }
+    // Activar: calcular ruta
+    openRoadRouteApi();
+  }, [routeActive, openRoadRouteApi]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openGoogleNavigation = useCallback(() => {
     const target = getGoogleNavigationTarget(activeOrder);
