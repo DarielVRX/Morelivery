@@ -13,7 +13,6 @@ import CustomerOrders   from './pages/Customer/Orders';
 import DriverOrders     from './pages/Driver/Orders';
 import RestaurantOrders from './pages/Restaurant/Orders';
 import { usePermissions } from './hooks/usePermissions';
-import pushRoutes from '../../backend/src/modules/push/routes.js';
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const CustomerHome      = lazy(() => import('./pages/Customer/Home'));
@@ -38,8 +37,6 @@ const APPS = [
   { key:'restaurant', label:'Tienda',    description:'Gestiona tu negocio', home:'/restaurant' },
   { key:'driver',     label:'Conductor', description:'Reparte y gana',      home:'/driver'     },
 ];
-
-app.use('/api/push', pushRoutes);
 
 function findApp(key) {
   return APPS.find(a => a.key === key) ?? (key === 'admin' ? ADMIN_APP : null);
