@@ -192,7 +192,19 @@ export default function AdminDashboard() {
 
   return (
     <PullToRefresh>
-    <div style={{ padding: '1rem', maxWidth: 1200, margin: '0 auto' }}>
+    <div
+    style={{
+      padding: '1rem',
+      maxWidth: 1200,
+      margin: '0 auto',
+      height: '100vh',
+      overflowY: 'auto',
+      position: 'relative'
+    }}
+    onTouchStart={handleTouchStart}
+    onTouchMove={handleTouchMove}
+    onTouchEnd={handleTouchEnd}
+    >
     <div style={{ margin: '-1rem -1rem 1.25rem', padding: '0.75rem 1rem 0.65rem', background: 'var(--promo-gradient)', color: '#fff' }}>
     <div style={{ fontWeight: 800, fontSize: '1.05rem' }}>🛠 Panel de administración</div>
     <div style={{ fontSize: '0.75rem', opacity: 0.8, marginTop: '0.1rem' }}>Vista completa del sistema</div>
