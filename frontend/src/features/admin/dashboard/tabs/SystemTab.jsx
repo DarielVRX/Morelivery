@@ -285,7 +285,7 @@ export default function SystemTab({ onMessage }) {
   }, []);
 
   useEffect(() => {
-    refreshStatus();
+    //refreshStatus();
   }, [refreshStatus]);
 
   return (
