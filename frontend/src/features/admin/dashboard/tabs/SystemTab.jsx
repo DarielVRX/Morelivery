@@ -1,7 +1,7 @@
 // frontend/src/features/admin/dashboard/SystemTab.jsx
 import { useCallback, useEffect, useState } from 'react';
-import { apiFetch } from '../../../api/client';
-import { useAuth } from '../../../contexts/AuthContext';
+import { apiFetch } from '../../../../api/client';
+import { useAuth } from '../../../../contexts/AuthContext';
 
 // Funciones auxiliares
 async function requestNotificationPermissionTest() {
