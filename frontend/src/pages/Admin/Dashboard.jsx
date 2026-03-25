@@ -145,19 +145,16 @@ export default function AdminDashboard() {
     reports: loadReports,
     notes: loadNotes,
     ratings: loadRatings,
-    system: () => {},
-    feed: () => {},
+    system: () => Promise.resolve(),  // ← devuelve promesa resuelta
+    feed: () => Promise.resolve(),
   };
 
-  // Función de carga con debounce y cooldown
   const debouncedLoad = useCallback((force = false) => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
 
-    // Cooldown: no recargar la misma pestaña más de una vez cada 2 segundos
     const now = Date.now();
     const last = lastReload.current[tab] || 0;
     if (!force && now - last < 2000) return;
-
     if (!force && loading) return;
 
     debounceTimer.current = setTimeout(() => {
@@ -165,7 +162,7 @@ export default function AdminDashboard() {
       if (fn) {
         setLoading(true);
         lastReload.current[tab] = Date.now();
-        fn().catch(e => setMsg(e.message)).finally(() => setLoading(false));
+        Promise.resolve(fn()).catch(e => setMsg(e.message)).finally(() => setLoading(false));
       }
       debounceTimer.current = null;
     }, 300);
