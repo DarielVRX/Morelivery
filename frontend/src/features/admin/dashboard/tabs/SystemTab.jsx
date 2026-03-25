@@ -1,5 +1,5 @@
 // frontend/src/features/admin/dashboard/SystemTab.jsx
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../../../api/client';
 import { useAuth } from '../../../../contexts/AuthContext';
 
@@ -62,6 +62,7 @@ async function testClipboard() {
 
 export default function SystemTab({ onMessage }) {
   const { auth } = useAuth();
+  const refreshTimeout = useRef(null);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState({
     sseConnected: 0,
@@ -81,49 +82,39 @@ export default function SystemTab({ onMessage }) {
     if (!auth.token) return;
     setLoading(true);
     try {
-      // 1. SSE
-      try {
-        const sse = await apiFetch('/admin/sse-status', {}, auth.token);
-        setStatus(prev => ({ ...prev, sseConnected: sse.connected, sseByRole: sse.byRole }));
-      } catch (e) { console.warn(e); }
+      // Only fetch system‑specific endpoints
+      const sse = await apiFetch('/admin/sse-status', {}, auth.token);
+      setStatus(prev => ({ ...prev, sseConnected: sse.connected, sseByRole: sse.byRole }));
 
-      // 2. Service Worker
       if ('serviceWorker' in navigator) {
         const reg = await navigator.serviceWorker.getRegistration();
         setStatus(prev => ({ ...prev, swActive: !!reg?.active }));
       }
 
-      // 3. Push subscription
       if ('serviceWorker' in navigator && 'PushManager' in window) {
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.getSubscription();
         setStatus(prev => ({ ...prev, pushSubscribed: !!sub }));
       }
 
-      // 4. Geolocation
       if ('geolocation' in navigator && navigator.permissions?.query) {
         const perm = await navigator.permissions.query({ name: 'geolocation' });
         setStatus(prev => ({ ...prev, geolocation: perm.state }));
       }
 
-      // 5. Persistent storage
       if (navigator.storage?.persisted) {
         const persisted = await navigator.storage.persisted();
         setStatus(prev => ({ ...prev, persistentStorage: persisted ? 'granted' : 'denied' }));
       }
 
-      // 6. Wake Lock
       setStatus(prev => ({ ...prev, wakeLock: 'wakeLock' in navigator ? 'supported' : 'unsupported' }));
 
-      // 7. Clipboard
       const clipStatus = await testClipboard();
       setStatus(prev => ({ ...prev, clipboard: clipStatus }));
 
-      // 8. Battery
       const battery = await getBatteryStatus();
       setStatus(prev => ({ ...prev, battery }));
 
-      // 9. Network
       setStatus(prev => ({ ...prev, network: getNetworkInfo() }));
     } catch (e) {
       onMessage?.(`Error: ${e.message}`);
@@ -131,6 +122,11 @@ export default function SystemTab({ onMessage }) {
       setLoading(false);
     }
   }, [auth.token, onMessage]);
+
+  // Refresh only when the component mounts, not on every render
+  useEffect(() => {
+    refreshStatus();
+  }, []); // empty dependency array
 
   const handleTestPush = async () => {
     setStatus(prev => ({ ...prev, testPushResult: null }));
