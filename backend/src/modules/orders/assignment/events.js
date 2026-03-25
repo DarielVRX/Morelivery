@@ -19,10 +19,12 @@ import {
   expireAllPendingForDriver,
   expireTimedOutOffersInDB,
   getOpenOrder, getQueuedOrders,
+  getOrderForSse,           // nueva
 } from './queries.js';
 import { query } from '../../../config/db.js';
 import { serializedOffer, hasActiveChain } from './queue.js';
 import { offerNextDrivers } from './core.js';
+import { sseHub } from '../../events/hub.js';   // nueva
 
 // ─── Aceptar ──────────────────────────────────────────────────────────────────
 
@@ -43,6 +45,20 @@ export async function acceptOffer(orderId, driverId) {
 
   await acceptPendingOffer(orderId, driverId);
   await expireCompetingOffers(orderId, driverId);
+
+  // Emitir order_update
+  const orderData = await getOrderForSse(orderId);
+  if (orderData) {
+    const payload = {
+      orderId,
+      status: 'assigned',
+      totalCents: orderData.total_cents,
+      restaurantName: orderData.restaurant_name,
+      customerName: orderData.customer_name,
+    };
+    sseHub.sendToUser(orderData.customer_id, 'order_update', payload);
+    sseHub.sendToUser(orderData.restaurant_id, 'order_update', payload);
+  }
 
   log(orderId, `🎉 ASIGNADO → driver=${driverId.slice(0,8)}`);
   return true;
@@ -114,7 +130,7 @@ export async function expireTimedOutOffers(onOffer) {
   if (expired.length > 0) {
     console.log(
       `[assign] expireTimedOutOffers: ${expired.length} oferta(s) expiradas:`,
-      expired.map(r => `order=${r.order_id} driver=${r.driver_id}`).join(', ')
+                expired.map(r => `order=${r.order_id} driver=${r.driver_id}`).join(', ')
     );
   }
 
@@ -169,10 +185,10 @@ export async function requestRebalance(orderId, driverId) {
   // 1. Verificar que el pedido existe, está asignado a este driver y no fue recogido
   const orderRow = await query(
     `SELECT id, status, picked_up_at, is_disputed
-     FROM orders
-     WHERE id = $1 AND driver_id = $2
-       AND status IN ('assigned','accepted','preparing','ready')
-       AND picked_up_at IS NULL`,
+    FROM orders
+    WHERE id = $1 AND driver_id = $2
+    AND status IN ('assigned','accepted','preparing','ready')
+    AND picked_up_at IS NULL`,
     [orderId, driverId]
   );
   if (orderRow.rowCount === 0) {
@@ -196,35 +212,71 @@ export async function requestRebalance(orderId, driverId) {
   const disputedUntil = new Date(Date.now() + REBALANCE_DISPUTE_TIMEOUT_S * 1000);
   await query(
     `UPDATE orders
-     SET is_disputed = true,
-         disputed_until = $1,
-         disputed_by = $2,
-         updated_at = NOW()
-     WHERE id = $3`,
+    SET is_disputed = true,
+    disputed_until = $1,
+    disputed_by = $2,
+    updated_at = NOW()
+    WHERE id = $3`,
     [disputedUntil, driverId, orderId]
   );
 
   // 4. Cooldown largo para el driver en este pedido (registro en order_driver_offers)
   await query(
     `INSERT INTO order_driver_offers(order_id, driver_id, status, wait_until)
-     VALUES ($1, $2, 'released', NOW() + ($3 * INTERVAL '1 second'))
-     ON CONFLICT (order_id, driver_id)
-     DO UPDATE SET status='released',
-                   wait_until = NOW() + ($3 * INTERVAL '1 second'),
-                   updated_at = NOW()`,
-    [orderId, driverId, REBALANCE_COOLDOWN_SECONDS]
+    VALUES ($1, $2, 'released', NOW() + ($3 * INTERVAL '1 second'))
+    ON CONFLICT (order_id, driver_id)
+    DO UPDATE SET status='released',
+    wait_until = NOW() + ($3 * INTERVAL '1 second'),
+              updated_at = NOW()`,
+              [orderId, driverId, REBALANCE_COOLDOWN_SECONDS]
   );
 
   // 5. Incrementar contadores sesión + histórico
   await query(
     `UPDATE driver_profiles
-     SET session_rebalances = session_rebalances + 1,
-         total_rebalances   = total_rebalances + 1
-     WHERE user_id = $1`,
+    SET session_rebalances = session_rebalances + 1,
+    total_rebalances   = total_rebalances + 1
+    WHERE user_id = $1`,
     [driverId]
   );
 
   log(orderId, `en disputa hasta ${disputedUntil.toISOString()} — cooldown driver=${driverId.slice(0,8)} ${REBALANCE_COOLDOWN_SECONDS}s`);
+  return { ok: true };
+}
+
+/**
+ * Cancelar una disputa manualmente (driver original).
+ * @returns {{ ok: boolean, reason?: string }}
+ */
+export async function cancelDispute(orderId, driverId) {
+  log(orderId, `cancelDispute driver=${driverId.slice(0,8)}`);
+
+  // Verificar que el pedido está en disputa y el driver es el original
+  const orderRow = await query(
+    `SELECT id, driver_id, disputed_by, is_disputed
+    FROM orders
+    WHERE id = $1 AND is_disputed = true AND driver_id = $2`,
+    [orderId, driverId]
+  );
+  if (orderRow.rowCount === 0) {
+    return { ok: false, reason: 'No hay disputa activa para este pedido' };
+  }
+
+  // Cancelar disputa: quitar flags, resetear disputed_until, limpiar disputed_by
+  await query(
+    `UPDATE orders
+    SET is_disputed = false,
+    disputed_until = NULL,
+    disputed_by = NULL,
+    updated_at = NOW()
+    WHERE id = $1`,
+    [orderId]
+  );
+
+  // Opcional: enviar notificación SSE al driver que recibió la oferta (si la hay) de que ya no está disponible
+  // (No necesario para este ticket)
+
+  log(orderId, `disputa cancelada manualmente por driver=${driverId.slice(0,8)}`);
   return { ok: true };
 }
 
@@ -235,14 +287,14 @@ export async function requestRebalance(orderId, driverId) {
 export async function expireDisputedOrders() {
   const r = await query(
     `UPDATE orders
-     SET is_disputed    = false,
-         disputed_until = NULL,
-         disputed_by    = NULL,
-         updated_at     = NOW()
-     WHERE is_disputed = true
-       AND disputed_until < NOW()
-       AND driver_id IS NOT NULL
-     RETURNING id, driver_id`,
+    SET is_disputed    = false,
+    disputed_until = NULL,
+    disputed_by    = NULL,
+    updated_at     = NOW()
+    WHERE is_disputed = true
+    AND disputed_until < NOW()
+    AND driver_id IS NOT NULL
+    RETURNING id, driver_id`,
     []
   );
 

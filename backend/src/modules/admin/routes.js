@@ -5,6 +5,7 @@ import { authenticate, authorize } from '../../middlewares/auth.js';
 import { AppError } from '../../utils/errors.js';
 import { registerUser } from '../auth/service.js';
 import { getParamsWithMeta, saveParam } from '../../engine/params.js';
+import { sseHub } from '../events/hub.js';
 
 const router = Router();
 
@@ -419,6 +420,16 @@ router.get('/ratings', authenticate, authorize(['admin']), async (req, res, next
     ).catch(() => ({ rows: [] }));
     return res.json({ ratings: r.rows });
   } catch (error) { return next(error); }
+});
+
+// ── GET /admin/sse-status ───────────────────────────────────────────────────
+router.get('/sse-status', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const stats = sseHub.getStats();
+    return res.json(stats);
+  } catch (error) {
+    return next(error);
+  }
 });
 
 export default router;

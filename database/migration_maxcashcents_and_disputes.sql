@@ -1,0 +1,2 @@
+ALTER TABLE restaurants ADD COLUMN max_cash_cents INT NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS dispute_cancelled_by_driver BOOLEAN DEFAULT FALSE;
