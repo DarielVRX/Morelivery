@@ -1,4 +1,4 @@
-// backend/modules/admin/routes.js
+// backend/src/modules/admin/routes.js
 import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
@@ -6,6 +6,20 @@ import { AppError } from '../../utils/errors.js';
 import { registerUser } from '../auth/service.js';
 import { getParamsWithMeta, saveParam } from '../../engine/params.js';
 import { sseHub } from '../events/hub.js';
+import webpush from 'web-push';
+
+// Configurar VAPID (asegúrate de tener las variables de entorno)
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+if (vapidPublicKey && vapidPrivateKey) {
+  webpush.setVapidDetails(
+    'mailto:admin@morelivery.com',
+    vapidPublicKey,
+    vapidPrivateKey
+  );
+} else {
+  console.warn('[admin] VAPID keys no configuradas, push no funcionará');
+}
 
 const router = Router();
 
@@ -18,27 +32,27 @@ router.get('/orders', authenticate, authorize(['admin']), async (req, res, next)
     const where = whereClause; // alias para mantener compatibilidad
 
     const result = await query(`
-      SELECT
-        o.id, o.status, o.total_cents, o.delivery_address,
-        o.created_at, o.updated_at,
-        o.accepted_at, o.preparing_at, o.ready_at,
-        o.picked_up_at, o.delivered_at, o.cancelled_at,
-        o.suggestion_status, o.driver_note, o.restaurant_note,
-        c.id AS customer_id, c.full_name AS customer_name,
-        r.id AS restaurant_id, r.name AS restaurant_name,
-        d.id AS driver_id, d.full_name AS driver_name,
-        dp.is_available AS driver_available, dp.vehicle_type,
-        (SELECT COUNT(*)::int FROM order_driver_offers od WHERE od.order_id=o.id AND od.status='pending')  AS pending_offers,
-        (SELECT COUNT(*)::int FROM order_driver_offers od WHERE od.order_id=o.id AND od.status='rejected') AS rejected_offers,
-        (SELECT COUNT(*)::int FROM order_driver_offers od WHERE od.order_id=o.id AND od.status='expired')  AS expired_offers
-      FROM orders o
-      JOIN restaurants r ON r.id = o.restaurant_id
-      JOIN users c ON c.id = o.customer_id
-      LEFT JOIN users d ON d.id = o.driver_id
-      LEFT JOIN driver_profiles dp ON dp.user_id = o.driver_id
-      ${where}
-      ORDER BY o.created_at DESC
-      LIMIT $1 OFFSET $2`, params);
+    SELECT
+    o.id, o.status, o.total_cents, o.delivery_address,
+    o.created_at, o.updated_at,
+    o.accepted_at, o.preparing_at, o.ready_at,
+    o.picked_up_at, o.delivered_at, o.cancelled_at,
+    o.suggestion_status, o.driver_note, o.restaurant_note,
+    c.id AS customer_id, c.full_name AS customer_name,
+    r.id AS restaurant_id, r.name AS restaurant_name,
+    d.id AS driver_id, d.full_name AS driver_name,
+    dp.is_available AS driver_available, dp.vehicle_type,
+    (SELECT COUNT(*)::int FROM order_driver_offers od WHERE od.order_id=o.id AND od.status='pending')  AS pending_offers,
+                               (SELECT COUNT(*)::int FROM order_driver_offers od WHERE od.order_id=o.id AND od.status='rejected') AS rejected_offers,
+                               (SELECT COUNT(*)::int FROM order_driver_offers od WHERE od.order_id=o.id AND od.status='expired')  AS expired_offers
+                               FROM orders o
+                               JOIN restaurants r ON r.id = o.restaurant_id
+                               JOIN users c ON c.id = o.customer_id
+                               LEFT JOIN users d ON d.id = o.driver_id
+                               LEFT JOIN driver_profiles dp ON dp.user_id = o.driver_id
+                               ${where}
+                               ORDER BY o.created_at DESC
+                               LIMIT $1 OFFSET $2`, params);
 
     const orderIds = result.rows.map(r => r.id);
     let itemsByOrder = new Map();
@@ -46,8 +60,8 @@ router.get('/orders', authenticate, authorize(['admin']), async (req, res, next)
       try {
         const items = await query(
           `SELECT oi.order_id, COALESCE(mi.name,'Producto') AS name, oi.quantity, oi.unit_price_cents
-           FROM order_items oi LEFT JOIN menu_items mi ON mi.id = oi.menu_item_id
-           WHERE oi.order_id = ANY($1::uuid[])`, [orderIds]);
+          FROM order_items oi LEFT JOIN menu_items mi ON mi.id = oi.menu_item_id
+          WHERE oi.order_id = ANY($1::uuid[])`, [orderIds]);
         for (const row of items.rows) {
           if (!itemsByOrder.has(row.order_id)) itemsByOrder.set(row.order_id, []);
           itemsByOrder.get(row.order_id).push({ name: row.name, quantity: row.quantity, unitPriceCents: row.unit_price_cents });
@@ -70,60 +84,60 @@ router.get('/metrics', authenticate, authorize(['admin']), async (req, res, next
     const [summary, timings, byRestaurant, byDriver, byCustomer, byHour] = await Promise.all([
 
       query(`SELECT
-        COUNT(*)::int                                              AS total_orders,
-        COUNT(*) FILTER (WHERE status='delivered')::int           AS delivered,
-        COUNT(*) FILTER (WHERE status='cancelled')::int           AS cancelled,
-        COUNT(*) FILTER (WHERE status NOT IN ('delivered','cancelled'))::int AS active,
-        ROUND(AVG(total_cents) FILTER (WHERE status='delivered'))::int       AS avg_ticket_cents,
-        COALESCE(SUM(total_cents) FILTER (WHERE status='delivered'),0)::bigint AS revenue_cents
-        FROM orders WHERE created_at > NOW() - (${days}::int * INTERVAL '1 day')`),
+      COUNT(*)::int                                              AS total_orders,
+            COUNT(*) FILTER (WHERE status='delivered')::int           AS delivered,
+            COUNT(*) FILTER (WHERE status='cancelled')::int           AS cancelled,
+            COUNT(*) FILTER (WHERE status NOT IN ('delivered','cancelled'))::int AS active,
+            ROUND(AVG(total_cents) FILTER (WHERE status='delivered'))::int       AS avg_ticket_cents,
+            COALESCE(SUM(total_cents) FILTER (WHERE status='delivered'),0)::bigint AS revenue_cents
+            FROM orders WHERE created_at > NOW() - (${days}::int * INTERVAL '1 day')`),
 
-      query(`SELECT
-        ROUND(AVG(EXTRACT(EPOCH FROM (accepted_at   - created_at))  /60))::int AS avg_min_to_accept,
-        ROUND(AVG(EXTRACT(EPOCH FROM (preparing_at  - accepted_at)) /60))::int AS avg_min_to_prepare,
-        ROUND(AVG(EXTRACT(EPOCH FROM (ready_at      - preparing_at))/60))::int AS avg_min_to_ready,
-        ROUND(AVG(EXTRACT(EPOCH FROM (picked_up_at  - ready_at))    /60))::int AS avg_min_to_pickup,
-        ROUND(AVG(EXTRACT(EPOCH FROM (delivered_at  - picked_up_at))/60))::int AS avg_min_to_deliver,
-        ROUND(AVG(EXTRACT(EPOCH FROM (delivered_at  - created_at))  /60))::int AS avg_total_min
-        FROM orders WHERE status='delivered' AND created_at > NOW() - (${days}::int * INTERVAL '1 day')`),
+                                                                                             query(`SELECT
+                                                                                             ROUND(AVG(EXTRACT(EPOCH FROM (accepted_at   - created_at))  /60))::int AS avg_min_to_accept,
+                                                                                                   ROUND(AVG(EXTRACT(EPOCH FROM (preparing_at  - accepted_at)) /60))::int AS avg_min_to_prepare,
+                                                                                                   ROUND(AVG(EXTRACT(EPOCH FROM (ready_at      - preparing_at))/60))::int AS avg_min_to_ready,
+                                                                                                   ROUND(AVG(EXTRACT(EPOCH FROM (picked_up_at  - ready_at))    /60))::int AS avg_min_to_pickup,
+                                                                                                   ROUND(AVG(EXTRACT(EPOCH FROM (delivered_at  - picked_up_at))/60))::int AS avg_min_to_deliver,
+                                                                                                   ROUND(AVG(EXTRACT(EPOCH FROM (delivered_at  - created_at))  /60))::int AS avg_total_min
+                                                                                                   FROM orders WHERE status='delivered' AND created_at > NOW() - (${days}::int * INTERVAL '1 day')`),
 
-      query(`SELECT r.id, r.name,
-        COUNT(o.id)::int                                               AS total_orders,
-        COUNT(o.id) FILTER (WHERE o.status='delivered')::int           AS delivered,
-        COUNT(o.id) FILTER (WHERE o.status='cancelled')::int           AS cancelled,
-        ROUND(AVG(o.total_cents) FILTER (WHERE o.status='delivered'))::int AS avg_ticket_cents,
-        COALESCE(SUM(o.total_cents) FILTER (WHERE o.status='delivered'),0)::bigint AS revenue_cents,
-        ROUND(AVG(EXTRACT(EPOCH FROM (o.delivered_at - o.created_at))/60) FILTER (WHERE o.status='delivered'))::int AS avg_total_min
-        FROM restaurants r LEFT JOIN orders o ON o.restaurant_id=r.id AND o.created_at > NOW() - (${days}::int * INTERVAL '1 day')
-        GROUP BY r.id, r.name ORDER BY total_orders DESC`),
+                                                                                             query(`SELECT r.id, r.name,
+                                                                                                   COUNT(o.id)::int                                               AS total_orders,
+                                                                                                   COUNT(o.id) FILTER (WHERE o.status='delivered')::int           AS delivered,
+                                                                                                   COUNT(o.id) FILTER (WHERE o.status='cancelled')::int           AS cancelled,
+                                                                                                   ROUND(AVG(o.total_cents) FILTER (WHERE o.status='delivered'))::int AS avg_ticket_cents,
+                                                                                                   COALESCE(SUM(o.total_cents) FILTER (WHERE o.status='delivered'),0)::bigint AS revenue_cents,
+                                                                                                   ROUND(AVG(EXTRACT(EPOCH FROM (o.delivered_at - o.created_at))/60) FILTER (WHERE o.status='delivered'))::int AS avg_total_min
+                                                                                                   FROM restaurants r LEFT JOIN orders o ON o.restaurant_id=r.id AND o.created_at > NOW() - (${days}::int * INTERVAL '1 day')
+                                                                                                   GROUP BY r.id, r.name ORDER BY total_orders DESC`),
 
-      query(`SELECT d.id, d.full_name AS name,
-        dp.is_available, dp.vehicle_type,
-        COUNT(o.id)::int                                               AS total_orders,
-        COUNT(o.id) FILTER (WHERE o.status='delivered')::int           AS delivered,
-        COUNT(o.id) FILTER (WHERE o.status='cancelled')::int           AS cancelled,
-        ROUND(AVG(EXTRACT(EPOCH FROM (o.delivered_at - o.picked_up_at))/60) FILTER (WHERE o.status='delivered'))::int AS avg_delivery_min,
-        COUNT(odo.id) FILTER (WHERE odo.status='rejected')::int        AS total_rejections,
-        COUNT(odo.id) FILTER (WHERE odo.status='expired')::int         AS total_expirations
-        FROM users d JOIN driver_profiles dp ON dp.user_id=d.id
-        LEFT JOIN orders o ON o.driver_id=d.id AND o.created_at > NOW() - (${days}::int * INTERVAL '1 day')
-        LEFT JOIN order_driver_offers odo ON odo.driver_id=d.id
-        WHERE d.role='driver'
-        GROUP BY d.id, d.full_name, dp.is_available, dp.vehicle_type
-        ORDER BY delivered DESC`),
+                                                                                             query(`SELECT d.id, d.full_name AS name,
+                                                                                                   dp.is_available, dp.vehicle_type,
+                                                                                                   COUNT(o.id)::int                                               AS total_orders,
+                                                                                                   COUNT(o.id) FILTER (WHERE o.status='delivered')::int           AS delivered,
+                                                                                                   COUNT(o.id) FILTER (WHERE o.status='cancelled')::int           AS cancelled,
+                                                                                                   ROUND(AVG(EXTRACT(EPOCH FROM (o.delivered_at - o.picked_up_at))/60) FILTER (WHERE o.status='delivered'))::int AS avg_delivery_min,
+                                                                                                   COUNT(odo.id) FILTER (WHERE odo.status='rejected')::int        AS total_rejections,
+                                                                                                   COUNT(odo.id) FILTER (WHERE odo.status='expired')::int         AS total_expirations
+                                                                                                   FROM users d JOIN driver_profiles dp ON dp.user_id=d.id
+                                                                                                   LEFT JOIN orders o ON o.driver_id=d.id AND o.created_at > NOW() - (${days}::int * INTERVAL '1 day')
+                                                                                                   LEFT JOIN order_driver_offers odo ON odo.driver_id=d.id
+                                                                                                   WHERE d.role='driver'
+                                                                                                   GROUP BY d.id, d.full_name, dp.is_available, dp.vehicle_type
+                                                                                                   ORDER BY delivered DESC`),
 
-      query(`SELECT c.id, c.full_name AS name,
-        COUNT(o.id)::int                                               AS total_orders,
-        COUNT(o.id) FILTER (WHERE o.status='delivered')::int           AS delivered,
-        COUNT(o.id) FILTER (WHERE o.status='cancelled')::int           AS cancelled,
-        COALESCE(SUM(o.total_cents) FILTER (WHERE o.status='delivered'),0)::bigint AS total_spent_cents
-        FROM users c LEFT JOIN orders o ON o.customer_id=c.id AND o.created_at > NOW() - (${days}::int * INTERVAL '1 day')
-        WHERE c.role='customer'
-        GROUP BY c.id, c.full_name ORDER BY total_orders DESC LIMIT 50`),
+                                                                                             query(`SELECT c.id, c.full_name AS name,
+                                                                                                   COUNT(o.id)::int                                               AS total_orders,
+                                                                                                   COUNT(o.id) FILTER (WHERE o.status='delivered')::int           AS delivered,
+                                                                                                   COUNT(o.id) FILTER (WHERE o.status='cancelled')::int           AS cancelled,
+                                                                                                   COALESCE(SUM(o.total_cents) FILTER (WHERE o.status='delivered'),0)::bigint AS total_spent_cents
+                                                                                                   FROM users c LEFT JOIN orders o ON o.customer_id=c.id AND o.created_at > NOW() - (${days}::int * INTERVAL '1 day')
+                                                                                                   WHERE c.role='customer'
+                                                                                                   GROUP BY c.id, c.full_name ORDER BY total_orders DESC LIMIT 50`),
 
-      query(`SELECT EXTRACT(HOUR FROM created_at)::int AS hour, COUNT(*)::int AS orders
-        FROM orders WHERE created_at > NOW() - (${days}::int * INTERVAL '1 day')
-        GROUP BY hour ORDER BY hour`),
+                                                                                             query(`SELECT EXTRACT(HOUR FROM created_at)::int AS hour, COUNT(*)::int AS orders
+                                                                                             FROM orders WHERE created_at > NOW() - (${days}::int * INTERVAL '1 day')
+                                                                                             GROUP BY hour ORDER BY hour`),
     ]);
 
     return res.json({
@@ -141,13 +155,13 @@ router.get('/metrics', authenticate, authorize(['admin']), async (req, res, next
 router.get('/users', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
     const result = await query(`
-      SELECT u.id, u.full_name, u.email, u.role, u.status, u.created_at,
-             dp.is_available, dp.vehicle_type, dp.is_verified,
-             r.name AS restaurant_name, r.is_open AS restaurant_is_open
-      FROM users u
-      LEFT JOIN driver_profiles dp ON dp.user_id=u.id
-      LEFT JOIN restaurants r ON r.owner_user_id=u.id
-      ORDER BY u.created_at DESC`);
+    SELECT u.id, u.full_name, u.email, u.role, u.status, u.created_at,
+    dp.is_available, dp.vehicle_type, dp.is_verified,
+    r.name AS restaurant_name, r.is_open AS restaurant_is_open
+    FROM users u
+    LEFT JOIN driver_profiles dp ON dp.user_id=u.id
+    LEFT JOIN restaurants r ON r.owner_user_id=u.id
+    ORDER BY u.created_at DESC`);
     return res.json({ users: result.rows });
   } catch (error) { return next(error); }
 });
@@ -179,7 +193,7 @@ router.patch('/orders/:id/status', authenticate, authorize(['admin']), async (re
     const tsClause = tsCol ? `, ${tsCol} = NOW()` : '';
     await query(
       `UPDATE orders SET status=$1, restaurant_note=COALESCE($2, restaurant_note), updated_at=NOW()${tsClause} WHERE id=$3`,
-      [status, note || null, req.params.id]
+                [status, note || null, req.params.id]
     );
     return res.json({ ok: true });
   } catch (error) { return next(error); }
@@ -189,126 +203,125 @@ router.patch('/orders/:id/status', authenticate, authorize(['admin']), async (re
 router.get('/offer-stats', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
     const result = await query(`
-      SELECT
-        o.id                                          AS order_id,
-        o.status,
-        o.created_at,
-        r.name                                        AS restaurant_name,
-        -- Ronda actual = drivers distintos procesados + 1
-        (SELECT COUNT(DISTINCT driver_id)::int
-           FROM order_driver_offers
-           WHERE order_id = o.id
-             AND status IN ('rejected','expired','released')) + 1  AS round,
-        -- Ofertas pendientes ahora mismo
-        (SELECT COUNT(*)::int FROM order_driver_offers
-           WHERE order_id = o.id AND status = 'pending')           AS pending,
-        -- Total rechazos
-        (SELECT COUNT(*)::int FROM order_driver_offers
-           WHERE order_id = o.id AND status = 'rejected')          AS rejected,
-        -- Total expiradas
-        (SELECT COUNT(*)::int FROM order_driver_offers
-           WHERE order_id = o.id AND status = 'expired')           AS expired,
-        -- Driver con oferta pendiente ahora
-        (SELECT split_part(u.full_name,'_',1)
-           FROM order_driver_offers od2
-           JOIN users u ON u.id = od2.driver_id
-           WHERE od2.order_id = o.id AND od2.status = 'pending'
-           LIMIT 1)                                                AS current_driver
-      FROM orders o
-      JOIN restaurants r ON r.id = o.restaurant_id
-      WHERE o.driver_id IS NULL
-        AND o.status NOT IN ('delivered','cancelled')
-      ORDER BY o.created_at ASC
-      LIMIT 50
-    `);
+    SELECT
+    o.id                                          AS order_id,
+    o.status,
+    o.created_at,
+    r.name                                        AS restaurant_name,
+    -- Ronda actual = drivers distintos procesados + 1
+    (SELECT COUNT(DISTINCT driver_id)::int
+    FROM order_driver_offers
+    WHERE order_id = o.id
+    AND status IN ('rejected','expired','released')) + 1  AS round,
+                               -- Ofertas pendientes ahora mismo
+                               (SELECT COUNT(*)::int FROM order_driver_offers
+                               WHERE order_id = o.id AND status = 'pending')           AS pending,
+                               -- Total rechazos
+                               (SELECT COUNT(*)::int FROM order_driver_offers
+                               WHERE order_id = o.id AND status = 'rejected')          AS rejected,
+                               -- Total expiradas
+                               (SELECT COUNT(*)::int FROM order_driver_offers
+                               WHERE order_id = o.id AND status = 'expired')           AS expired,
+                               -- Driver con oferta pendiente ahora
+                               (SELECT split_part(u.full_name,'_',1)
+                               FROM order_driver_offers od2
+                               JOIN users u ON u.id = od2.driver_id
+                               WHERE od2.order_id = o.id AND od2.status = 'pending'
+                               LIMIT 1)                                                AS current_driver
+                               FROM orders o
+                               JOIN restaurants r ON r.id = o.restaurant_id
+                               WHERE o.driver_id IS NULL
+                               AND o.status NOT IN ('delivered','cancelled')
+                               ORDER BY o.created_at ASC
+                               LIMIT 50
+                               `);
     return res.json({ stats: result.rows });
   } catch (error) { return next(error); }
 });
-
 
 /* ── GET /admin/assignment-live — estado en vivo de todos los pedidos activos + drivers ── */
 router.get('/assignment-live', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
     // ── 1. Todos los pedidos activos (no entregados ni cancelados) ─────────
     const ordersResult = await query(`
-      SELECT
-        o.id, o.status, o.created_at, o.updated_at,
-        o.total_cents, o.payment_method, o.tip_cents,
-        o.service_fee_cents, o.delivery_fee_cents,
-        r.name    AS restaurant_name,
-        r.is_open AS restaurant_open,
-        r.address AS restaurant_address,
-        c.full_name AS customer_name,
-        -- Driver asignado
-        d.id        AS driver_id,
-        d.full_name AS driver_name,
-        dp.is_available AS driver_available,
-        dp.vehicle_type,
-        -- Ronda
-        (SELECT COUNT(DISTINCT od.driver_id)::int
-           FROM order_driver_offers od
-           WHERE od.order_id=o.id
-             AND od.status IN ('rejected','expired','released')) + 1  AS round,
-        -- Oferta pending ahora mismo
-        (SELECT od2.driver_id
-           FROM order_driver_offers od2
-           WHERE od2.order_id=o.id AND od2.status='pending'
-           LIMIT 1)                                                   AS pending_driver_id,
-        (SELECT u2.full_name
-           FROM order_driver_offers od2
-           JOIN users u2 ON u2.id=od2.driver_id
-           WHERE od2.order_id=o.id AND od2.status='pending'
-           LIMIT 1)                                                   AS pending_driver_name,
-        (SELECT od2.updated_at
-           FROM order_driver_offers od2
-           WHERE od2.order_id=o.id AND od2.status='pending'
-           LIMIT 1)                                                   AS offer_started_at,
-        -- Contadores
-        (SELECT COUNT(*)::int FROM order_driver_offers od WHERE od.order_id=o.id AND od.status='rejected') AS rejected_count,
-        (SELECT COUNT(*)::int FROM order_driver_offers od WHERE od.order_id=o.id AND od.status='expired')  AS expired_count
-      FROM orders o
-      JOIN restaurants r ON r.id=o.restaurant_id
-      JOIN users c ON c.id=o.customer_id
-      LEFT JOIN users d ON d.id=o.driver_id
-      LEFT JOIN driver_profiles dp ON dp.user_id=o.driver_id
-      WHERE o.status NOT IN ('delivered','cancelled')
-      ORDER BY o.created_at ASC
-      LIMIT 100
-    `);
+    SELECT
+    o.id, o.status, o.created_at, o.updated_at,
+    o.total_cents, o.payment_method, o.tip_cents,
+    o.service_fee_cents, o.delivery_fee_cents,
+    r.name    AS restaurant_name,
+    r.is_open AS restaurant_open,
+    r.address AS restaurant_address,
+    c.full_name AS customer_name,
+    -- Driver asignado
+    d.id        AS driver_id,
+    d.full_name AS driver_name,
+    dp.is_available AS driver_available,
+    dp.vehicle_type,
+    -- Ronda
+    (SELECT COUNT(DISTINCT od.driver_id)::int
+    FROM order_driver_offers od
+    WHERE od.order_id=o.id
+    AND od.status IN ('rejected','expired','released')) + 1  AS round,
+                                     -- Oferta pending ahora mismo
+                                     (SELECT od2.driver_id
+                                     FROM order_driver_offers od2
+                                     WHERE od2.order_id=o.id AND od2.status='pending'
+                                     LIMIT 1)                                                   AS pending_driver_id,
+                                     (SELECT u2.full_name
+                                     FROM order_driver_offers od2
+                                     JOIN users u2 ON u2.id=od2.driver_id
+                                     WHERE od2.order_id=o.id AND od2.status='pending'
+                                     LIMIT 1)                                                   AS pending_driver_name,
+                                     (SELECT od2.updated_at
+                                     FROM order_driver_offers od2
+                                     WHERE od2.order_id=o.id AND od2.status='pending'
+                                     LIMIT 1)                                                   AS offer_started_at,
+                                     -- Contadores
+                                     (SELECT COUNT(*)::int FROM order_driver_offers od WHERE od.order_id=o.id AND od.status='rejected') AS rejected_count,
+                                     (SELECT COUNT(*)::int FROM order_driver_offers od WHERE od.order_id=o.id AND od.status='expired')  AS expired_count
+                                     FROM orders o
+                                     JOIN restaurants r ON r.id=o.restaurant_id
+                                     JOIN users c ON c.id=o.customer_id
+                                     LEFT JOIN users d ON d.id=o.driver_id
+                                     LEFT JOIN driver_profiles dp ON dp.user_id=o.driver_id
+                                     WHERE o.status NOT IN ('delivered','cancelled')
+                                     ORDER BY o.created_at ASC
+                                     LIMIT 100
+                                     `);
 
     // ── 2. Estado de todos los drivers ─────────────────────────────────────
     const driversResult = await query(`
-      SELECT
-        u.id, u.full_name, u.status AS user_status,
-        dp.is_available, dp.vehicle_type, dp.driver_number,
-        dp.last_lat, dp.last_lng,
-        -- Pedidos activos asignados
-        (SELECT COUNT(*)::int FROM orders o
-           WHERE o.driver_id=u.id
-             AND o.status IN ('assigned','accepted','preparing','ready','on_the_way')
-        ) AS active_orders,
-        -- ¿Tiene pending offer ahora mismo?
-        (SELECT od.order_id FROM order_driver_offers od
-           WHERE od.driver_id=u.id AND od.status='pending'
-           ORDER BY od.updated_at DESC LIMIT 1)                    AS pending_offer_order_id,
-        (SELECT od.updated_at FROM order_driver_offers od
-           WHERE od.driver_id=u.id AND od.status='pending'
-           ORDER BY od.updated_at DESC LIMIT 1)                    AS pending_offer_started_at,
-        -- Cooldowns activos — pedidos donde tiene wait_until > NOW()
-        (SELECT json_agg(json_build_object(
-           'order_id', od.order_id,
-           'wait_until', od.wait_until,
-           'secs_left', GREATEST(0, EXTRACT(EPOCH FROM (od.wait_until - NOW()))::int)
-         ))
-           FROM order_driver_offers od
-           WHERE od.driver_id=u.id
-             AND od.status IN ('rejected','released','expired')
-             AND od.wait_until > NOW()
-        )                                                          AS cooldowns
-      FROM users u
-      JOIN driver_profiles dp ON dp.user_id=u.id
-      WHERE u.role='driver'
-      ORDER BY dp.driver_number ASC
+    SELECT
+    u.id, u.full_name, u.status AS user_status,
+    dp.is_available, dp.vehicle_type, dp.driver_number,
+    dp.last_lat, dp.last_lng,
+    -- Pedidos activos asignados
+    (SELECT COUNT(*)::int FROM orders o
+    WHERE o.driver_id=u.id
+    AND o.status IN ('assigned','accepted','preparing','ready','on_the_way')
+    ) AS active_orders,
+    -- ¿Tiene pending offer ahora mismo?
+    (SELECT od.order_id FROM order_driver_offers od
+    WHERE od.driver_id=u.id AND od.status='pending'
+    ORDER BY od.updated_at DESC LIMIT 1)                    AS pending_offer_order_id,
+    (SELECT od.updated_at FROM order_driver_offers od
+    WHERE od.driver_id=u.id AND od.status='pending'
+    ORDER BY od.updated_at DESC LIMIT 1)                    AS pending_offer_started_at,
+    -- Cooldowns activos — pedidos donde tiene wait_until > NOW()
+    (SELECT json_agg(json_build_object(
+      'order_id', od.order_id,
+      'wait_until', od.wait_until,
+      'secs_left', GREATEST(0, EXTRACT(EPOCH FROM (od.wait_until - NOW()))::int)
+    ))
+    FROM order_driver_offers od
+    WHERE od.driver_id=u.id
+    AND od.status IN ('rejected','released','expired')
+    AND od.wait_until > NOW()
+    )                                                          AS cooldowns
+    FROM users u
+    JOIN driver_profiles dp ON dp.user_id=u.id
+    WHERE u.role='driver'
+    ORDER BY dp.driver_number ASC
     `);
 
     return res.json({
@@ -319,7 +332,6 @@ router.get('/assignment-live', authenticate, authorize(['admin']), async (req, r
 });
 
 // ── GET /admin/engine-params — listar todos los parámetros del motor ──────────
-
 router.get('/engine-params', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
     const params = await getParamsWithMeta();
@@ -339,10 +351,10 @@ router.patch('/engine-params/:key', authenticate, authorize(['admin']), async (r
     return res.json({ ok: true, params });
   } catch (error) {
     if (error.message?.startsWith('Parámetro desconocido') ||
-        error.message?.startsWith('Valor inválido')) {
+      error.message?.startsWith('Valor inválido')) {
       return next(new AppError(400, error.message));
-    }
-    return next(error);
+      }
+      return next(error);
   }
 });
 
@@ -352,16 +364,16 @@ router.get('/reports', authenticate, authorize(['admin']), async (req, res, next
     const reviewed = req.query.reviewed === 'true';
     const r = await query(
       `SELECT rp.id, rp.order_id, rp.reporter_role, rp.reason, rp.text, rp.reviewed, rp.created_at,
-              u.full_name AS reporter_name,
-              o.status AS order_status,
-              rest.name AS restaurant_name
-       FROM order_reports rp
-       JOIN users u ON u.id = rp.reporter_id
-       JOIN orders o ON o.id = rp.order_id
-       JOIN restaurants rest ON rest.id = o.restaurant_id
-       WHERE rp.reviewed = $1
-       ORDER BY rp.created_at DESC
-       LIMIT 100`,
+      u.full_name AS reporter_name,
+      o.status AS order_status,
+      rest.name AS restaurant_name
+      FROM order_reports rp
+      JOIN users u ON u.id = rp.reporter_id
+      JOIN orders o ON o.id = rp.order_id
+      JOIN restaurants rest ON rest.id = o.restaurant_id
+      WHERE rp.reviewed = $1
+      ORDER BY rp.created_at DESC
+      LIMIT 100`,
       [reviewed]
     );
     return res.json({ reports: r.rows });
@@ -381,18 +393,18 @@ router.get('/order-notes', authenticate, authorize(['admin']), async (req, res, 
   try {
     const r = await query(
       `SELECT o.id, o.status, o.driver_note, o.restaurant_note, o.cancelled_at,
-              o.created_at, o.updated_at,
-              rest.name AS restaurant_name,
-              c.full_name AS customer_name,
-              d.full_name AS driver_name
-       FROM orders o
-       JOIN restaurants rest ON rest.id = o.restaurant_id
-       JOIN users c ON c.id = o.customer_id
-       LEFT JOIN users d ON d.id = o.driver_id
-       WHERE (o.driver_note IS NOT NULL OR o.restaurant_note IS NOT NULL)
-         AND o.status IN ('cancelled', 'delivered')
-       ORDER BY o.updated_at DESC
-       LIMIT 100`,
+      o.created_at, o.updated_at,
+      rest.name AS restaurant_name,
+      c.full_name AS customer_name,
+      d.full_name AS driver_name
+      FROM orders o
+      JOIN restaurants rest ON rest.id = o.restaurant_id
+      JOIN users c ON c.id = o.customer_id
+      LEFT JOIN users d ON d.id = o.driver_id
+      WHERE (o.driver_note IS NOT NULL OR o.restaurant_note IS NOT NULL)
+      AND o.status IN ('cancelled', 'delivered')
+      ORDER BY o.updated_at DESC
+      LIMIT 100`,
       []
     );
     return res.json({ notes: r.rows });
@@ -404,25 +416,25 @@ router.get('/ratings', authenticate, authorize(['admin']), async (req, res, next
   try {
     const r = await query(
       `SELECT rt.id, rt.order_id, rt.restaurant_stars, rt.driver_stars,
-              rt.restaurant_rates_driver, rt.driver_rates_restaurant,
-              rt.comment, rt.driver_comment, rt.restaurant_comment,
-              rt.created_at,
-              rest.name AS restaurant_name,
-              c.full_name AS customer_name,
-              d.full_name AS driver_name
-       FROM order_ratings rt
-       JOIN restaurants rest ON rest.id = rt.restaurant_id
-       JOIN users c ON c.id = rt.customer_id
-       LEFT JOIN users d ON d.id = rt.driver_id
-       ORDER BY rt.created_at DESC
-       LIMIT 200`,
+      rt.restaurant_rates_driver, rt.driver_rates_restaurant,
+      rt.comment, rt.driver_comment, rt.restaurant_comment,
+      rt.created_at,
+      rest.name AS restaurant_name,
+      c.full_name AS customer_name,
+      d.full_name AS driver_name
+      FROM order_ratings rt
+      JOIN restaurants rest ON rest.id = rt.restaurant_id
+      JOIN users c ON c.id = rt.customer_id
+      LEFT JOIN users d ON d.id = rt.driver_id
+      ORDER BY rt.created_at DESC
+      LIMIT 200`,
       []
     ).catch(() => ({ rows: [] }));
     return res.json({ ratings: r.rows });
   } catch (error) { return next(error); }
 });
 
-// ── GET /admin/sse-status ───────────────────────────────────────────────────
+// ── GET /admin/sse-status — estado de conexiones SSE ─────────────────────────
 router.get('/sse-status', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
     const stats = sseHub.getStats();
@@ -432,21 +444,43 @@ router.get('/sse-status', authenticate, authorize(['admin']), async (req, res, n
   }
 });
 
-// ── POST /admin/test-push ───────────────────────────────────────────────────
+// ── POST /admin/test-push — enviar notificación push de prueba ───────────────
 router.post('/test-push', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
-    // Enviar notificación de prueba al admin actual
     const adminId = req.user.userId;
-    // Usar SSE hub para enviar evento de prueba
-    sseHub.sendToUser(adminId, 'test_push', {
-      title: 'Notificación de prueba',
-      body: 'Este es un mensaje de prueba desde el panel de administración',
+
+    // Obtener suscripción push del admin
+    const subResult = await query(
+      `SELECT endpoint, keys FROM push_subscriptions WHERE user_id = $1 LIMIT 1`,
+      [adminId]
+    );
+
+    if (subResult.rowCount === 0) {
+      return res.status(400).json({ error: 'No hay suscripción push registrada para este usuario' });
+    }
+
+    const subscription = {
+      endpoint: subResult.rows[0].endpoint,
+      keys: subResult.rows[0].keys,
+    };
+
+    const payload = JSON.stringify({
+      title: '🔔 Notificación de prueba',
+      body: 'Esta es una notificación push de alta prioridad.',
       tag: 'test',
+      group: 'test',
+      priority: 'high',
       url: '/admin',
+      vibrate: [300, 100, 300, 100, 300],
+      requireInteraction: true,
     });
-    return res.json({ ok: true });
+
+    await webpush.sendNotification(subscription, payload);
+
+    res.json({ ok: true });
   } catch (error) {
-    return next(error);
+    console.error('Error enviando push test:', error);
+    return next(new AppError(500, 'Error al enviar notificación push'));
   }
 });
 

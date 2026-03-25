@@ -1,5 +1,5 @@
-// frontend/src/features/admin/dashboard/SystemTab.jsx
-import { useCallback, useEffect, useRef, useState } from 'react';
+// frontend/src/features/admin/dashboard/tabs/SystemTab.jsx
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { apiFetch } from '../../../../api/client';
 import { useAuth } from '../../../../contexts/AuthContext';
 
@@ -60,6 +60,33 @@ async function testClipboard() {
   }
 }
 
+async function testCamera() {
+  if (!navigator.mediaDevices?.getUserMedia) return 'unsupported';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    stream.getTracks().forEach(track => track.stop());
+    return 'granted';
+  } catch (err) {
+    if (err.name === 'NotAllowedError') return 'denied';
+    return 'error';
+  }
+}
+
+function formatBattery(battery) {
+  if (!battery) return 'No disponible';
+  let text = `${battery.level}%`;
+  if (battery.charging) text += ' (Cargando)';
+  if (battery.dischargingTime !== Infinity && battery.dischargingTime > 0) {
+    const mins = Math.round(battery.dischargingTime / 60);
+    text += ` · Autonomía: ${mins} min`;
+  } else if (battery.charging) {
+    // No mostrar autonomía si está cargando
+  } else if (battery.dischargingTime === Infinity) {
+    text += ' · Autonomía infinita (enchufado)';
+  }
+  return text;
+}
+
 export default function SystemTab({ onMessage }) {
   const { auth } = useAuth();
   const refreshTimeout = useRef(null);
@@ -75,6 +102,7 @@ export default function SystemTab({ onMessage }) {
     clipboard: 'unknown',
     battery: null,
     network: null,
+    camera: 'unknown',
     testPushResult: null,
   });
 
@@ -82,40 +110,54 @@ export default function SystemTab({ onMessage }) {
     if (!auth.token) return;
     setLoading(true);
     try {
-      // Only fetch system‑specific endpoints
-      const sse = await apiFetch('/admin/sse-status', {}, auth.token);
-      setStatus(prev => ({ ...prev, sseConnected: sse.connected, sseByRole: sse.byRole }));
+      // 1. SSE
+      try {
+        const sse = await apiFetch('/admin/sse-status', {}, auth.token);
+        setStatus(prev => ({ ...prev, sseConnected: sse.connected, sseByRole: sse.byRole }));
+      } catch (e) { console.warn(e); }
 
+      // 2. Service Worker
       if ('serviceWorker' in navigator) {
         const reg = await navigator.serviceWorker.getRegistration();
         setStatus(prev => ({ ...prev, swActive: !!reg?.active }));
       }
 
+      // 3. Push subscription
       if ('serviceWorker' in navigator && 'PushManager' in window) {
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.getSubscription();
         setStatus(prev => ({ ...prev, pushSubscribed: !!sub }));
       }
 
+      // 4. Geolocation
       if ('geolocation' in navigator && navigator.permissions?.query) {
         const perm = await navigator.permissions.query({ name: 'geolocation' });
         setStatus(prev => ({ ...prev, geolocation: perm.state }));
       }
 
+      // 5. Persistent storage
       if (navigator.storage?.persisted) {
         const persisted = await navigator.storage.persisted();
         setStatus(prev => ({ ...prev, persistentStorage: persisted ? 'granted' : 'denied' }));
       }
 
+      // 6. Wake Lock
       setStatus(prev => ({ ...prev, wakeLock: 'wakeLock' in navigator ? 'supported' : 'unsupported' }));
 
+      // 7. Clipboard
       const clipStatus = await testClipboard();
       setStatus(prev => ({ ...prev, clipboard: clipStatus }));
 
+      // 8. Battery
       const battery = await getBatteryStatus();
       setStatus(prev => ({ ...prev, battery }));
 
+      // 9. Network
       setStatus(prev => ({ ...prev, network: getNetworkInfo() }));
+
+      // 10. Camera
+      const cameraStatus = await testCamera();
+      setStatus(prev => ({ ...prev, camera: cameraStatus }));
     } catch (e) {
       onMessage?.(`Error: ${e.message}`);
     } finally {
@@ -123,17 +165,12 @@ export default function SystemTab({ onMessage }) {
     }
   }, [auth.token, onMessage]);
 
-  // Refresh only when the component mounts, not on every render
-  useEffect(() => {
-    refreshStatus();
-  }, []); // empty dependency array
-
   const handleTestPush = async () => {
     setStatus(prev => ({ ...prev, testPushResult: null }));
     const result = await testPushNotification(auth.token);
     setStatus(prev => ({ ...prev, testPushResult: result }));
     if (result.ok) {
-      onMessage?.('Notificación de prueba enviada (revisa el centro de notificaciones)');
+      onMessage?.('Notificación push enviada (revisa tu dispositivo)');
     } else {
       onMessage?.(`Error: ${result.error}`);
     }
@@ -194,7 +231,7 @@ export default function SystemTab({ onMessage }) {
 
     {status.testPushResult && (
       <div className={`flash ${status.testPushResult.ok ? 'flash-ok' : 'flash-error'}`} style={{ marginBottom: '1rem' }}>
-      {status.testPushResult.ok ? '✅ Notificación enviada (revisa el centro de notificaciones)' : `❌ Error: ${status.testPushResult.error}`}
+      {status.testPushResult.ok ? '✅ Notificación push enviada' : `❌ Error: ${status.testPushResult.error}`}
       </div>
     )}
 
@@ -262,19 +299,26 @@ export default function SystemTab({ onMessage }) {
     </div>
     </div>
 
+    {/* Cámara */}
+    <div className="card" style={{ padding: '0.8rem', border: '1px solid var(--border)', borderRadius: 8 }}>
+    <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>📷 Cámara</div>
+    <div>Estado: <strong>{status.camera}</strong></div>
+    <button
+    onClick={async () => {
+      const newStatus = await testCamera();
+      setStatus(prev => ({ ...prev, camera: newStatus }));
+      onMessage?.(newStatus === 'granted' ? 'Permiso de cámara concedido' : 'Permiso denegado o error');
+    }}
+    style={{ marginTop: '0.5rem', fontSize: '0.75rem' }}
+    >
+    Probar acceso
+    </button>
+    </div>
+
     {/* Battery */}
     <div className="card" style={{ padding: '0.8rem', border: '1px solid var(--border)', borderRadius: 8 }}>
     <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>🔋 Batería</div>
-    {status.battery ? (
-      <>
-      <div>Nivel: {status.battery.level}%</div>
-      <div>Cargando: {status.battery.charging ? 'Sí' : 'No'}</div>
-      {status.battery.chargingTime !== Infinity && <div>Tiempo de carga: {Math.round(status.battery.chargingTime / 60)} min</div>}
-      {status.battery.dischargingTime !== Infinity && <div>Autonomía: {Math.round(status.battery.dischargingTime / 60)} min</div>}
-      </>
-    ) : (
-      <div>No disponible</div>
-    )}
+    <div>{formatBattery(status.battery)}</div>
     </div>
 
     {/* Network */}
