@@ -432,4 +432,22 @@ router.get('/sse-status', authenticate, authorize(['admin']), async (req, res, n
   }
 });
 
+// ── POST /admin/test-push ───────────────────────────────────────────────────
+router.post('/test-push', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    // Enviar notificación de prueba al admin actual
+    const adminId = req.user.userId;
+    // Usar SSE hub para enviar evento de prueba
+    sseHub.sendToUser(adminId, 'test_push', {
+      title: 'Notificación de prueba',
+      body: 'Este es un mensaje de prueba desde el panel de administración',
+      tag: 'test',
+      url: '/admin',
+    });
+    return res.json({ ok: true });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 export default router;
