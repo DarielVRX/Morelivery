@@ -13,7 +13,7 @@ import CustomerOrders   from './pages/Customer/Orders';
 import DriverOrders     from './pages/Driver/Orders';
 import RestaurantOrders from './pages/Restaurant/Orders';
 import { usePermissions } from './hooks/usePermissions';
-import pushRoutes from './modules/push/routes.js';
+import pushRoutes from '../../backend/src/modules/push/routes.js';
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const CustomerHome      = lazy(() => import('./pages/Customer/Home'));
