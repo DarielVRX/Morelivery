@@ -50,6 +50,7 @@ export default function AdminDashboard() {
   }, [auth.token]);
 
   const loadOrders = useCallback(async () => {
+    if (!auth.token) return;
     const qs = statusFilter ? `?status=${statusFilter}&limit=200` : '?limit=200';
     const d = await apiFetch(`/admin/orders${qs}`, {}, auth.token);
     setOrders(d.orders || []);
