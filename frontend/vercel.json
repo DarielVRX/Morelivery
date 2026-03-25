@@ -1,12 +1,11 @@
 {
   "rewrites": [
-    { "source": "/nav/:path*",         "destination": "https://morelivery.onrender.com/nav/:path*" },
-    { "source": "/orders/:path*",      "destination": "https://morelivery.onrender.com/orders/:path*" },
-    { "source": "/drivers/:path*",     "destination": "https://morelivery.onrender.com/drivers/:path*" },
-    { "source": "/auth/:path*",        "destination": "https://morelivery.onrender.com/auth/:path*" },
-    { "source": "/restaurants/:path*", "destination": "https://morelivery.onrender.com/restaurants/:path*" },
-    { "source": "/users/:path*",       "destination": "https://morelivery.onrender.com/users/:path*" },
-    { "source": "/admin/:path*",       "destination": "https://morelivery.onrender.com/admin/:path*" },
-    { "source": "/(.*)",               "destination": "/index.html" }
+    { "source": "/api/(.*)",        "destination": "https://morelivery.onrender.com/api/$1" },
+    { "source": "/auth/(.*)",       "destination": "https://morelivery.onrender.com/auth/$1" },
+    { "source": "/orders/(.*)",     "destination": "https://morelivery.onrender.com/orders/$1" },
+    { "source": "/drivers/(.*)",    "destination": "https://morelivery.onrender.com/drivers/$1" },
+    { "source": "/restaurants/(.*)", "destination": "https://morelivery.onrender.com/restaurants/$1" },
+    { "source": "/users/(.*)",      "destination": "https://morelivery.onrender.com/users/$1" },
+    { "source": "/(.*)",            "destination": "/index.html" }
   ]
 }
