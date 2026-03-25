@@ -116,7 +116,7 @@ async function requestPushSubscription(token) {
         applicationServerKey: urlBase64ToUint8Array(vapidKey),
       });
     }
-    await apiFetch('/auth/push/subscribe', {
+    await apiFetch('/push/subscribe', {
       method: 'POST',
       body: JSON.stringify(sub.toJSON()),
     }, token);
