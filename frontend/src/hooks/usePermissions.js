@@ -7,6 +7,7 @@
 //   - Geolocalización
 //   - Persistent storage (evita que el OS elimine el SW en móvil)
 //   - Wake lock (pantalla activa para drivers en ruta)
+//   - Clipboard, Battery, Network Information
 //
 // Se llama desde App.jsx al detectar sesión activa por primera vez,
 // y desde Profile.jsx para mostrar el estado actual y permitir reactivar.
@@ -53,19 +54,97 @@ async function subscribeToPush(token) {
   }
 }
 
+// ── Nuevos permisos ───────────────────────────────────────────────────────────
+export async function requestClipboardPermission() {
+  if (!navigator.clipboard?.read) return 'unsupported';
+  try {
+    // Intenta leer texto vacío para solicitar permiso (navegadores modernos piden)
+    await navigator.clipboard.readText();
+    return 'granted';
+  } catch (e) {
+    if (e.name === 'NotAllowedError') return 'denied';
+    if (e.name === 'NotFoundError') return 'empty';
+    return 'error';
+  }
+}
+
+export async function getBatteryStatus() {
+  if (!('getBattery' in navigator)) return null;
+  try {
+    const battery = await navigator.getBattery();
+    return {
+      level: battery.level,
+      charging: battery.charging,
+      chargingTime: battery.chargingTime,
+      dischargingTime: battery.dischargingTime,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function getNetworkInfo() {
+  if (!('connection' in navigator)) return null;
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  return {
+    type: conn.type,
+    effectiveType: conn.effectiveType,
+    downlink: conn.downlink,
+    rtt: conn.rtt,
+    saveData: conn.saveData,
+  };
+}
+
+// ── Wake Lock con persistencia mejorada ───────────────────────────────────────
+function setupWakeLockPersistence(wakeLockRef, setStatus) {
+  // Re-adquirir cuando la página se vuelve visible O cuando la pantalla se desbloquea
+  const reacquire = () => {
+    if (document.visibilityState === 'visible' && !wakeLockRef.current) {
+      navigator.wakeLock?.request('screen').then(lock => {
+        wakeLockRef.current = lock;
+        setStatus(s => ({ ...s, wakeLock: 'active' }));
+        lock.addEventListener('release', () => {
+          wakeLockRef.current = null;
+          setStatus(s => ({ ...s, wakeLock: 'supported' }));
+        });
+      }).catch(() => {});
+    }
+  };
+
+  document.addEventListener('visibilitychange', reacquire);
+  // pageshow se dispara cuando la pantalla se desbloquea/la app vuelve de background
+  window.addEventListener('pageshow', reacquire);
+  // También cuando la pantalla se apaga/enciende (via pagehide)
+  window.addEventListener('pagehide', () => {
+    if (wakeLockRef.current) {
+      wakeLockRef.current.release().catch(() => {});
+      wakeLockRef.current = null;
+    }
+  });
+
+  return () => {
+    document.removeEventListener('visibilitychange', reacquire);
+    window.removeEventListener('pageshow', reacquire);
+    window.removeEventListener('pagehide', () => {});
+  };
+}
+
 // ── Estado de cada permiso ────────────────────────────────────────────────────
 function getInitialState() {
   return {
     notifications: typeof window !== 'undefined' && 'Notification' in window
-      ? Notification.permission   // 'default' | 'granted' | 'denied'
-      : 'unsupported',
+    ? Notification.permission   // 'default' | 'granted' | 'denied'
+    : 'unsupported',
     geolocation: typeof navigator !== 'undefined' && 'geolocation' in navigator
-      ? 'unknown'                 // no hay API síncrona para leer el estado
-      : 'unsupported',
+    ? 'unknown'                 // no hay API síncrona para leer el estado
+    : 'unsupported',
     persistentStorage: 'unknown',
     wakeLock: typeof navigator !== 'undefined' && 'wakeLock' in navigator
-      ? 'supported'
-      : 'unsupported',
+    ? 'supported'
+    : 'unsupported',
+    clipboard: 'unknown',
+    battery: null,
+    network: null,
   };
 }
 
@@ -82,6 +161,17 @@ export function usePermissions(token, role) {
     navigator.storage.persisted().then(persisted => {
       setStatus(s => ({ ...s, persistentStorage: persisted ? 'granted' : 'default' }));
     }).catch(() => {});
+  }, []);
+
+  // Leer network info (no es asíncrono)
+  useEffect(() => {
+    const updateNetwork = () => setStatus(s => ({ ...s, network: getNetworkInfo() }));
+    updateNetwork();
+    const conn = navigator.connection;
+    if (conn) {
+      conn.addEventListener('change', updateNetwork);
+      return () => conn.removeEventListener('change', updateNetwork);
+    }
   }, []);
 
   // ── Solicitar todos los permisos en secuencia ─────────────────────────────
@@ -125,12 +215,12 @@ export function usePermissions(token, role) {
             await new Promise((resolve) => {
               navigator.geolocation.getCurrentPosition(
                 () => { setStatus(s => ({ ...s, geolocation: 'granted' })); resolve(); },
-                (err) => {
-                  const state = err.code === 1 ? 'denied' : 'error';
-                  setStatus(s => ({ ...s, geolocation: state }));
-                  resolve();
-                },
-                { timeout: 8000, maximumAge: 60000 }
+                                                       (err) => {
+                                                         const state = err.code === 1 ? 'denied' : 'error';
+                                                         setStatus(s => ({ ...s, geolocation: state }));
+                                                         resolve();
+                                                       },
+                                                       { timeout: 8000, maximumAge: 60000 }
               );
             });
           } else {
@@ -147,6 +237,14 @@ export function usePermissions(token, role) {
         setStatus(s => ({ ...s, persistentStorage: granted ? 'granted' : 'denied' }));
       } catch (_) {}
     }
+
+    // 6. Clipboard (solo verificar estado, no pedir automáticamente)
+    const clipStatus = await requestClipboardPermission();
+    setStatus(s => ({ ...s, clipboard: clipStatus }));
+
+    // 7. Battery (no requiere permiso, solo lectura)
+    const battery = await getBatteryStatus();
+    setStatus(s => ({ ...s, battery }));
 
     // Marcar como solicitado para no volver a pedir automáticamente
     try { localStorage.setItem(STORAGE_KEY, '1'); } catch (_) {}
@@ -180,15 +278,8 @@ export function usePermissions(token, role) {
   // Re-adquirir wake lock si la página vuelve a ser visible (iOS/Android la libera al minimizar)
   useEffect(() => {
     if (status.wakeLock !== 'active') return;
-    function onVisible() {
-      if (document.visibilityState === 'visible' && !wakeLockRef.current) {
-        navigator.wakeLock?.request('screen').then(lock => {
-          wakeLockRef.current = lock;
-        }).catch(() => {});
-      }
-    }
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
+    const cleanup = setupWakeLockPersistence(wakeLockRef, setStatus);
+    return cleanup;
   }, [status.wakeLock]);
 
   // ── Auto-request al primer login (una sola vez) ───────────────────────────
@@ -223,5 +314,9 @@ export function usePermissions(token, role) {
     requestAll,       // llamar manualmente desde Profile
     requestWakeLock,  // toggle wake lock (solo drivers)
     subscribeToPush:  () => subscribeToPush(token), // re-suscribir si expiró
+    // Funciones auxiliares para consultar estado actual de nuevos permisos
+    getClipboardStatus: () => requestClipboardPermission(),
+    getBatteryStatus:   () => getBatteryStatus(),
+    getNetworkInfo:     () => getNetworkInfo(),
   };
 }
