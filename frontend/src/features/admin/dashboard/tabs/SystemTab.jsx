@@ -3,38 +3,13 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { apiFetch } from '../../../../api/client';
 import { useAuth } from '../../../../contexts/AuthContext';
 
-function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const raw = window.atob(base64);
-  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
-}
-
 // Funciones auxiliares
-const requestNotifications = async () => {
-  if (!('Notification' in window)) {
-    onMessage?.('Notificaciones no soportadas');
-    return;
-  }
+async function requestNotificationPermissionTest() {
+  if (!('Notification' in window)) return 'unsupported';
+  if (Notification.permission === 'granted') return 'granted';
   const result = await Notification.requestPermission();
-  if (result === 'granted') {
-    onMessage?.('Permiso de notificaciones concedido. Intentando suscribir push...');
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(import.meta.env.VITE_VAPID_PUBLIC_KEY)
-      });
-      await apiFetch('/push/subscribe', { method: 'POST', body: JSON.stringify(sub.toJSON()) }, auth.token);
-      setStatus(prev => ({ ...prev, pushSubscribed: true }));
-      onMessage?.('✅ Suscripción push completada');
-    } catch (e) {
-      onMessage?.(`Error al suscribir push: ${e.message}`);
-    }
-  } else {
-    onMessage?.('Permiso de notificaciones denegado');
-  }
-};
+  return result;
+}
 
 async function testPushNotification(token) {
   try {
@@ -76,7 +51,6 @@ async function testClipboard() {
   if (!navigator.clipboard?.writeText) return 'unsupported';
   try {
     await navigator.clipboard.writeText('Morelivery test');
-    // Leer para verificar permiso de lectura (si aplica)
     const read = await navigator.clipboard.readText().catch(() => null);
     return read !== null ? 'read+write' : 'write-only';
   } catch (e) {
@@ -85,15 +59,25 @@ async function testClipboard() {
   }
 }
 
-async function testCamera() {
-  if (!navigator.mediaDevices?.getUserMedia) return 'unsupported';
+// Función para probar cámara con preview
+async function testCameraWithPreview(videoRef, setCameraStatus) {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setCameraStatus('unsupported');
+    return;
+  }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-    stream.getTracks().forEach(track => track.stop());
-    return 'granted';
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.play();
+    }
+    setCameraStatus('granted');
+    // No detenemos el stream aún; se detendrá cuando se cierre la preview o se desmonte
+    return stream;
   } catch (err) {
-    if (err.name === 'NotAllowedError') return 'denied';
-    return 'error';
+    if (err.name === 'NotAllowedError') setCameraStatus('denied');
+    else setCameraStatus('error');
+    return null;
   }
 }
 
@@ -112,10 +96,46 @@ function formatBattery(battery) {
   return text;
 }
 
+// Función para solicitar suscripción push manualmente
+async function requestPushSubscription(token) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return { ok: false, error: 'Push no soportado' };
+  }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+      if (!vapidKey) return { ok: false, error: 'Falta clave VAPID' };
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      });
+    }
+    await apiFetch('/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify(sub.toJSON()),
+    }, token);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = window.atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
 export default function SystemTab({ onMessage }) {
   const { auth } = useAuth();
   const refreshTimeout = useRef(null);
+  const videoRef = useRef(null);
+  const cameraStreamRef = useRef(null);
   const [loading, setLoading] = useState(false);
+  const [cameraPreview, setCameraPreview] = useState(false);
   const [status, setStatus] = useState({
     sseConnected: 0,
     sseByRole: {},
@@ -180,9 +200,16 @@ export default function SystemTab({ onMessage }) {
       // 9. Network
       setStatus(prev => ({ ...prev, network: getNetworkInfo() }));
 
-      // 10. Camera
-      const cameraStatus = await testCamera();
-      setStatus(prev => ({ ...prev, camera: cameraStatus }));
+      // 10. Camera (solo estado, sin stream)
+      if (navigator.mediaDevices?.getUserMedia) {
+        // Solo verificamos soporte, el estado de permiso lo vemos con navigator.permissions
+        if (navigator.permissions?.query) {
+          const perm = await navigator.permissions.query({ name: 'camera' });
+          setStatus(prev => ({ ...prev, camera: perm.state }));
+        }
+      } else {
+        setStatus(prev => ({ ...prev, camera: 'unsupported' }));
+      }
     } catch (e) {
       onMessage?.(`Error: ${e.message}`);
     } finally {
@@ -200,6 +227,16 @@ export default function SystemTab({ onMessage }) {
       onMessage?.(`Error: ${result.error}`);
     }
     setTimeout(() => setStatus(prev => ({ ...prev, testPushResult: null })), 5000);
+  };
+
+  const handleRequestPushSubscription = async () => {
+    const result = await requestPushSubscription(auth.token);
+    if (result.ok) {
+      onMessage?.('✅ Suscripción push registrada');
+      refreshStatus(); // actualizar estado
+    } else {
+      onMessage?.(`❌ Error: ${result.error}`);
+    }
   };
 
   const handleToggleWakeLock = async () => {
@@ -226,6 +263,35 @@ export default function SystemTab({ onMessage }) {
     }
   };
 
+  const handleCameraTest = async () => {
+    if (cameraPreview) {
+      // Detener stream y cerrar preview
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach(track => track.stop());
+        cameraStreamRef.current = null;
+      }
+      setCameraPreview(false);
+    } else {
+      // Abrir preview
+      const stream = await testCameraWithPreview(videoRef, (state) => setStatus(prev => ({ ...prev, camera: state })));
+      if (stream) {
+        cameraStreamRef.current = stream;
+        setCameraPreview(true);
+      } else {
+        onMessage?.('No se pudo acceder a la cámara');
+      }
+    }
+  };
+
+  // Limpiar stream al desmontar
+  useEffect(() => {
+    return () => {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
+
   useEffect(() => {
     refreshStatus();
   }, [refreshStatus]);
@@ -233,23 +299,18 @@ export default function SystemTab({ onMessage }) {
   return (
     <div>
     <div style={{ marginBottom: '1rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-    <button
-    onClick={refreshStatus}
-    disabled={loading}
-    style={{ padding: '0.4rem 0.8rem', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem' }}
-    >
+    <button onClick={refreshStatus} disabled={loading} style={{ padding: '0.4rem 0.8rem', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem' }}>
     {loading ? 'Actualizando…' : '↻ Actualizar estado'}
     </button>
-    <button
-    onClick={handleTestPush}
-    style={{ padding: '0.4rem 0.8rem', background: 'var(--brand)', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem' }}
-    >
+    <button onClick={handleTestPush} style={{ padding: '0.4rem 0.8rem', background: 'var(--brand)', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem' }}>
     📢 Probar notificación push
     </button>
-    <button
-    onClick={handleToggleWakeLock}
-    style={{ padding: '0.4rem 0.8rem', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem' }}
-    >
+    {!status.pushSubscribed && (
+      <button onClick={handleRequestPushSubscription} style={{ padding: '0.4rem 0.8rem', background: '#f59e0b', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem' }}>
+      🔔 Activar push
+      </button>
+    )}
+    <button onClick={handleToggleWakeLock} style={{ padding: '0.4rem 0.8rem', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem' }}>
     {status.wakeLock === 'active' ? '🔓 Liberar Wake Lock' : '🔒 Activar Wake Lock'}
     </button>
     </div>
@@ -272,9 +333,6 @@ export default function SystemTab({ onMessage }) {
     <div className="card" style={{ padding: '0.8rem', border: '1px solid var(--border)', borderRadius: 8 }}>
     <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>⚙️ Service Worker</div>
     <div>Estado: {status.swActive ? '✅ Activo' : '❌ Inactivo'}</div>
-    <div style={{ fontSize: '0.75rem', marginTop: '0.3rem', color: 'var(--text-tertiary)' }}>
-    {status.swActive ? 'Registrado correctamente' : 'No registrado o no soportado'}
-    </div>
     </div>
 
     {/* Push Subscription */}
@@ -282,9 +340,9 @@ export default function SystemTab({ onMessage }) {
     <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>🔔 Push</div>
     <div>Suscripción: {status.pushSubscribed ? '✅ Activa' : '❌ No suscrita'}</div>
     {!status.pushSubscribed && (
-      <div style={{ fontSize: '0.7rem', marginTop: '0.3rem', color: 'var(--warn)' }}>
-      La suscripción push puede requerir permisos de notificaciones.
-      </div>
+      <button onClick={handleRequestPushSubscription} style={{ marginTop: '0.5rem', fontSize: '0.75rem' }}>
+      Registrar suscripción
+      </button>
     )}
     </div>
 
@@ -292,52 +350,39 @@ export default function SystemTab({ onMessage }) {
     <div className="card" style={{ padding: '0.8rem', border: '1px solid var(--border)', borderRadius: 8 }}>
     <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>📍 Geolocalización</div>
     <div>Estado: <strong>{status.geolocation}</strong></div>
-    <div style={{ fontSize: '0.75rem', marginTop: '0.3rem', color: 'var(--text-tertiary)' }}>
-    {status.geolocation === 'granted' ? 'Permiso concedido' : status.geolocation === 'denied' ? 'Permiso denegado' : 'No se ha solicitado'}
-    </div>
     </div>
 
     {/* Persistent Storage */}
     <div className="card" style={{ padding: '0.8rem', border: '1px solid var(--border)', borderRadius: 8 }}>
     <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>💾 Almacenamiento persistente</div>
     <div>Estado: <strong>{status.persistentStorage === 'granted' ? '✅ Activo' : '❌ No activado'}</strong></div>
-    <div style={{ fontSize: '0.75rem', marginTop: '0.3rem', color: 'var(--text-tertiary)' }}>
-    {status.persistentStorage === 'granted' ? 'Los datos no serán eliminados por el sistema' : 'Actívalo para evitar que el navegador borre la caché'}
-    </div>
     </div>
 
     {/* Wake Lock */}
     <div className="card" style={{ padding: '0.8rem', border: '1px solid var(--border)', borderRadius: 8 }}>
     <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>🔋 Wake Lock</div>
     <div>Soporte: {status.wakeLock === 'unsupported' ? '❌ No soportado' : '✅ Soportado'}</div>
-    {status.wakeLock !== 'unsupported' && (
-      <div>Estado actual: {status.wakeLock === 'active' ? '🟢 Activo' : status.wakeLock === 'released' ? '⚪ Liberado' : '⚪ Inactivo'}</div>
-    )}
+    {status.wakeLock !== 'unsupported' && <div>Estado actual: {status.wakeLock === 'active' ? '🟢 Activo' : '⚪ Inactivo'}</div>}
     </div>
 
     {/* Clipboard */}
     <div className="card" style={{ padding: '0.8rem', border: '1px solid var(--border)', borderRadius: 8 }}>
     <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>📋 Clipboard</div>
     <div>Permiso: <strong>{status.clipboard}</strong></div>
-    <div style={{ fontSize: '0.75rem', marginTop: '0.3rem', color: 'var(--text-tertiary)' }}>
-    {status.clipboard === 'granted' ? 'Lectura/escritura permitida' : 'Puede requerir interacción del usuario'}
-    </div>
     </div>
 
     {/* Cámara */}
     <div className="card" style={{ padding: '0.8rem', border: '1px solid var(--border)', borderRadius: 8 }}>
     <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>📷 Cámara</div>
     <div>Estado: <strong>{status.camera}</strong></div>
-    <button
-    onClick={async () => {
-      const newStatus = await testCamera();
-      setStatus(prev => ({ ...prev, camera: newStatus }));
-      onMessage?.(newStatus === 'granted' ? 'Permiso de cámara concedido' : 'Permiso denegado o error');
-    }}
-    style={{ marginTop: '0.5rem', fontSize: '0.75rem' }}
-    >
-    Probar acceso
+    <button onClick={handleCameraTest} style={{ marginTop: '0.5rem', fontSize: '0.75rem' }}>
+    {cameraPreview ? 'Cerrar cámara' : 'Probar cámara'}
     </button>
+    {cameraPreview && (
+      <div style={{ marginTop: '0.5rem', width: '100%', background: '#000', borderRadius: 4, overflow: 'hidden' }}>
+      <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: 'auto', maxHeight: 200 }} />
+      </div>
+    )}
     </div>
 
     {/* Battery */}
