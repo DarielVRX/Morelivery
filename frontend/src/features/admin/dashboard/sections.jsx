@@ -42,6 +42,7 @@ export function DashboardTabsBar({
   );
 }
 
+// AssignmentTab se exporta aparte, fuera del componente DashboardTabsBar
 export function AssignmentTab({ liveData, tick }) {
   const unassignedOrders = liveData.orders.filter((order) => !order.driver_id);
   const sortedDrivers = [...liveData.drivers].sort((a, b) => {
@@ -172,7 +173,6 @@ export function AssignmentTab({ liveData, tick }) {
       </table>
       </div>
     )}
-    </div>
     </div>
   );
 }
