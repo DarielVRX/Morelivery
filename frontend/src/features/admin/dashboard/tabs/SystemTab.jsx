@@ -3,13 +3,38 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { apiFetch } from '../../../../api/client';
 import { useAuth } from '../../../../contexts/AuthContext';
 
-// Funciones auxiliares
-async function requestNotificationPermissionTest() {
-  if (!('Notification' in window)) return 'unsupported';
-  if (Notification.permission === 'granted') return 'granted';
-  const result = await Notification.requestPermission();
-  return result;
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = window.atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
 }
+
+// Funciones auxiliares
+const requestNotifications = async () => {
+  if (!('Notification' in window)) {
+    onMessage?.('Notificaciones no soportadas');
+    return;
+  }
+  const result = await Notification.requestPermission();
+  if (result === 'granted') {
+    onMessage?.('Permiso de notificaciones concedido. Intentando suscribir push...');
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(import.meta.env.VITE_VAPID_PUBLIC_KEY)
+      });
+      await apiFetch('/push/subscribe', { method: 'POST', body: JSON.stringify(sub.toJSON()) }, auth.token);
+      setStatus(prev => ({ ...prev, pushSubscribed: true }));
+      onMessage?.('✅ Suscripción push completada');
+    } catch (e) {
+      onMessage?.(`Error al suscribir push: ${e.message}`);
+    }
+  } else {
+    onMessage?.('Permiso de notificaciones denegado');
+  }
+};
 
 async function testPushNotification(token) {
   try {
