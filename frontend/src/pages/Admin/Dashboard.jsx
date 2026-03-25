@@ -285,9 +285,6 @@ export default function AdminDashboard() {
     feedCount={liveOffers.length + orderLog.length}
     />
 
-    {msg && <p className="flash flash-error" style={{ marginBottom: '0.75rem' }}>{msg}</p>}
-    {loading && <div style={{ color: 'var(--text-tertiary)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Cargando…</div>}
-
     {tab === 'assignment' && <AssignmentTab liveData={liveData} tick={dashboardTick} />}
     {tab === 'orders' && (
       <OrdersTab

@@ -24,21 +24,21 @@ export function DashboardTabsBar({
 
   return (
     <div style={{ display:'flex', gap:'0.25rem', marginBottom:'1.25rem', borderBottom:'1px solid var(--border)', paddingBottom:'0.5rem', flexWrap:'wrap' }}>
-      {tabBtn('assignment', `🛵 Asignaciones${unassignedCount ? ` (${unassignedCount})` : ''}`)}
-      {tabBtn('orders', '📦 Pedidos')}
-      {tabBtn('metrics', '📊 Métricas')}
-      {tabBtn('users', '👥 Usuarios')}
-      {tabBtn('engine', '⚙️ Motor')}
-      {tabBtn('reports', `🚨 Reportes${reportsCount > 0 ? ` (${reportsCount})` : ''}`)}
-      {tabBtn('notes', '📝 Notas')}
-      {tabBtn('ratings', '⭐ Ratings')}
-      {tabBtn('feed', `📡 Feed${feedCount > 0 ? ` (${feedCount})` : ''}`)}
-      <button onClick={onReload} style={{ marginLeft:'auto', padding:'0.4rem 0.75rem', border:'1px solid var(--border)', borderRadius:8, cursor:'pointer', fontSize:'0.8rem', background:'var(--bg-card)' }}>
-        ↻ Actualizar
-      </button>
+    {tabBtn('assignment', `🛵 Asignaciones${unassignedCount ? ` (${unassignedCount})` : ''}`)}
+    {tabBtn('orders', '📦 Pedidos')}
+    {tabBtn('metrics', '📊 Métricas')}
+    {tabBtn('users', '👥 Usuarios')}
+    {tabBtn('engine', '⚙️ Motor')}
+    {tabBtn('reports', `🚨 Reportes${reportsCount > 0 ? ` (${reportsCount})` : ''}`)}
+    {tabBtn('notes', '📝 Notas')}
+    {tabBtn('ratings', '⭐ Ratings')}
+    {tabBtn('feed', `📡 Feed${feedCount > 0 ? ` (${feedCount})` : ''}`)}
+    {tabBtn('system', '🔧 Sistema')}  {/* ← Agregar esta línea */}
+    <button onClick={onReload} style={{ marginLeft:'auto', padding:'0.4rem 0.75rem', border:'1px solid var(--border)', borderRadius:8, cursor:'pointer', fontSize:'0.8rem', background:'var(--bg-card)' }}>
+    ↻ Actualizar
+    </button>
     </div>
   );
-}
 
 export function AssignmentTab({ liveData, tick }) {
   const unassignedOrders = liveData.orders.filter((order) => !order.driver_id);
