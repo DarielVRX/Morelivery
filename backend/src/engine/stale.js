@@ -138,6 +138,47 @@ export async function cleanStaleEntities(onOffer) {
       }
     }
 
+    // Cancelar disputas automáticamente si el driver original está a menos de 2 km del pickup
+    const activeDisputes = await query(
+      `SELECT o.id, o.driver_id, o.restaurant_id,
+      COALESCE(ru.home_lat, rest.lat) AS rest_lat,
+                                       COALESCE(ru.home_lng, rest.lng) AS rest_lng,
+                                       dp.last_lat AS driver_lat,
+                                       dp.last_lng AS driver_lng
+                                       FROM orders o
+                                       JOIN restaurants rest ON rest.id = o.restaurant_id
+                                       LEFT JOIN users ru ON ru.id = rest.owner_user_id
+                                       JOIN driver_profiles dp ON dp.user_id = o.driver_id
+                                       WHERE o.is_disputed = true
+                                       AND o.picked_up_at IS NULL
+                                       AND o.driver_id IS NOT NULL
+                                       AND dp.last_lat IS NOT NULL AND dp.last_lng IS NOT NULL`
+    );
+
+    const cancelled = [];
+    for (const dispute of activeDisputes) {
+      const distance = haversineMeters(
+        { lat: dispute.driver_lat, lng: dispute.driver_lng },
+        { lat: dispute.rest_lat, lng: dispute.rest_lng }
+      );
+      if (distance < 2000) { // < 2 km
+        await query(
+          `UPDATE orders SET is_disputed = false, disputed_until = NULL, disputed_by = NULL, updated_at = NOW()
+          WHERE id = $1`,
+          [dispute.id]
+        );
+        cancelled.push(dispute.id);
+        // Notificar al driver que la disputa se canceló automáticamente
+        sseHub.sendToUser(dispute.driver_id, 'dispute_cancelled_auto', {
+          orderId: dispute.id,
+          message: 'Tu disputa fue cancelada porque estás cerca del restaurante.',
+        });
+      }
+    }
+    if (cancelled.length) {
+      console.log(`[stale] ${cancelled.length} disputa(s) canceladas automáticamente por proximidad`);
+    }
+
   } catch (e) {
     console.error('[stale] error en cleanStaleEntities:', e.message);
   }

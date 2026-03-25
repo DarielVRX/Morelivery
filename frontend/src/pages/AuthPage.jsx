@@ -156,6 +156,10 @@ function AuthForm({ mode, appKey }) {
       method: 'POST',
       body: JSON.stringify({ email, password, role: appKey || undefined }),
     });
+    if (appKey === 'admin' && data.user.role !== 'admin') {
+      msg('Esta cuenta no es de administrador. Accede desde la sección correspondiente.');
+      return;
+    }
     if (appKey && data.user.role !== appKey) {
       const labels = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
       msg(`Esta cuenta es de tipo "${labels[data.user.role] || data.user.role}". Accede desde la sección correcta.`);
@@ -178,6 +182,11 @@ function AuthForm({ mode, appKey }) {
     if (appKey && validRoles.includes(appKey)) {
       roleRef.current = appKey;
     }
+    {appKey === 'admin' && (
+      <div style={{ background: '#e6f7ff', border: '1px solid #91d5ff', borderRadius: 8, padding: '0.6rem', marginBottom: '0.75rem', fontSize: '0.8rem' }}>
+      🔐 Acceso exclusivo para administradores.
+      </div>
+    )}
   }, [appKey]);
 
   const handleGoogleResponse = useCallback(async (response) => {
