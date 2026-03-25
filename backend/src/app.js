@@ -12,9 +12,12 @@ export function createApp() {
   registerHealthEndpoints(app);
   registerApplicationRoutes(app);
 
+  // Montar pushRoutes ANTES de los handlers de error/404
+  app.use('/api/push', pushRoutes);
+
+  // Estos van al final, después de todas las rutas
   app.use(notFoundHandler);
   app.use(errorHandler);
-  app.use('/api/push', pushRoutes);
 
   return app;
 }
