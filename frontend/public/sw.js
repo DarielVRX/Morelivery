@@ -23,6 +23,11 @@ const SHELL_ASSETS  = [
 // de IndexedDB y está disponible en el mismo contexto que los demás caches.
 const SYNC_QUEUE_KEY = 'morelivery-sync-queue';
 const SYNC_TAG       = 'morelivery-status-sync';
+const VOICE_CACHE = 'morelivery-voices-v1';
+const VOICE_ASSETS = [
+  '/voices/recordatorio-30s.mp3',
+'/voices/recordatorio-3min.mp3',
+];
 
 async function readQueue() {
   try {
@@ -43,11 +48,14 @@ async function writeQueue(queue) {
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(SHELL_CACHE).then(cache =>
-      cache.addAll(SHELL_ASSETS).catch(() => {
-        // Si algún asset falla (ej. logo.svg grande), continuar igual
-      })
-    )
+    Promise.all([
+      caches.open(SHELL_CACHE).then(cache =>
+      cache.addAll(SHELL_ASSETS).catch(() => {})
+      ),
+      caches.open(VOICE_CACHE).then(cache =>
+      cache.addAll(VOICE_ASSETS).catch(() => {})
+      ),
+    ])
   );
 });
 
@@ -169,6 +177,24 @@ self.addEventListener('sync', (event) => {
   );
 });
 
+async function playVoice(voiceName) {
+  try {
+    const cache = await caches.open(VOICE_CACHE);
+    const response = await cache.match(`/voices/${voiceName}.mp3`);
+    if (!response) {
+      console.warn(`Voz no encontrada: ${voiceName}`);
+      return;
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.play();
+    audio.onended = () => URL.revokeObjectURL(url);
+  } catch (e) {
+    console.warn('Voice play error:', e);
+  }
+}
+
 
 // Mantener conteo acumulado de notificaciones no vistas por categoría.
 // Cuando llega una nueva del mismo tag-group, se reemplaza la notificación
@@ -270,16 +296,20 @@ self.addEventListener('push', (event) => {
   try { payload = event.data.json(); } catch { payload = { title: 'Morelivery', body: event.data.text() }; }
 
   const {
-    title    = 'Morelivery',
-    body     = '',
-    tag      = 'general',
-    group    = tag,
-    url      = '/',
+    title = 'Morelivery',
+    body = '',
+    tag = 'general',
+    group = tag,
+    url = '/',
     priority = 'normal',
+    voice,
   } = payload;
 
   event.waitUntil(
-    showGroupedNotification({ group, title, body, url, priority, tag: group })
+    Promise.all([
+      showGroupedNotification({ group, title, body, url, priority, tag: group }),
+                voice ? playVoice(voice) : Promise.resolve(),
+    ])
   );
 });
 

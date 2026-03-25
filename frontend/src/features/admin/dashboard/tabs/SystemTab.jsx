@@ -210,6 +210,27 @@ export default function SystemTab({ onMessage }) {
     }
   }, [auth.token, onMessage]);
 
+  const scheduleVoiceReminders = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      onMessage?.('❌ Push no soportado en este navegador');
+      return;
+    }
+
+    try {
+      const result = await apiFetch('/admin/schedule-voice-reminders', {
+        method: 'POST',
+      }, auth.token);
+
+      if (result.ok) {
+        onMessage?.('✅ Recordatorios programados: en 30s y en 3 minutos');
+      } else {
+        onMessage?.(`❌ Error: ${result.error}`);
+      }
+    } catch (err) {
+      onMessage?.(`❌ Error: ${err.message}`);
+    }
+  };
+
   const handleTestPush = async () => {
     setStatus(prev => ({ ...prev, testPushResult: null }));
     const result = await testPushNotification(auth.token);
@@ -397,6 +418,12 @@ export default function SystemTab({ onMessage }) {
       <div>No disponible</div>
     )}
     </div>
+    <button
+    onClick={scheduleVoiceReminders}
+    style={{ padding: '0.4rem 0.8rem', background: '#8b5cf6', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem' }}
+    >
+    🎤 Programar recordatorios de voz (30s y 3min)
+    </button>
     </div>
     </div>
   );

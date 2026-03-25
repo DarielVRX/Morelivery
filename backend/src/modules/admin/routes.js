@@ -484,4 +484,70 @@ router.post('/test-push', authenticate, authorize(['admin']), async (req, res, n
   }
 });
 
+// POST /admin/schedule-voice-reminders
+router.post('/schedule-voice-reminders', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const adminId = req.user.userId;
+
+    // Obtener suscripción push del admin
+    const subResult = await query(
+      `SELECT endpoint, keys FROM push_subscriptions WHERE user_id = $1 LIMIT 1`,
+      [adminId]
+    );
+
+    if (subResult.rowCount === 0) {
+      return res.status(400).json({ error: 'No hay suscripción push registrada para este usuario' });
+    }
+
+    const subscription = {
+      endpoint: subResult.rows[0].endpoint,
+      keys: subResult.rows[0].keys,
+    };
+
+    // Programar primera notificación (30s)
+    setTimeout(async () => {
+      const payload30s = JSON.stringify({
+        title: '🔔 Recordatorio de prueba (30s)',
+                                        body: 'Han pasado 30 segundos. Esto es una prueba de notificación push con voz.',
+                                        voice: 'recordatorio-30s',
+                                        priority: 'high',
+                                        tag: 'test-reminder-30s',
+                                        url: '/admin',
+                                        vibrate: [300, 100, 300],
+      });
+      try {
+        await webpush.sendNotification(subscription, payload30s);
+        console.log('[admin] Push 30s enviado');
+      } catch (e) {
+        console.error('Error en push 30s:', e);
+      }
+    }, 30000);
+
+    // Programar segunda notificación (3 minutos = 180000 ms)
+    setTimeout(async () => {
+      const payload3min = JSON.stringify({
+        title: '⏰ Recordatorio de prueba (3 min)',
+                                         body: 'Han pasado 3 minutos. Segunda notificación de prueba con voz.',
+                                         voice: 'recordatorio-3min',
+                                         priority: 'high',
+                                         tag: 'test-reminder-3min',
+                                         url: '/admin',
+                                         vibrate: [300, 100, 300, 100, 300],
+                                         requireInteraction: true,
+      });
+      try {
+        await webpush.sendNotification(subscription, payload3min);
+        console.log('[admin] Push 3min enviado');
+      } catch (e) {
+        console.error('Error en push 3min:', e);
+      }
+    }, 180000);
+
+    res.json({ ok: true, message: 'Recordatorios programados' });
+  } catch (error) {
+    console.error('Error en schedule-voice-reminders:', error);
+    next(error);
+  }
+});
+
 export default router;
