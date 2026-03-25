@@ -19,6 +19,9 @@ import RatingsTab from '../../features/admin/dashboard/tabs/RatingsTab';
 import FeedTab from '../../features/admin/dashboard/tabs/FeedTab';
 import SystemTab from '../../features/admin/dashboard/tabs/SystemTab';
 
+// Orden de pestañas para swipe
+const TABS_ORDER = ['assignment', 'orders', 'metrics', 'users', 'engine', 'reports', 'notes', 'ratings', 'feed', 'system'];
+
 export default function AdminDashboard() {
   const { auth } = useAuth();
   const [tab, setTab] = useState('assignment');
@@ -43,8 +46,45 @@ export default function AdminDashboard() {
   const [metricDays, setMetricDays] = useState(7);
   const [paramMsg, setParamMsg] = useState('');
 
+  // Debounce y cooldown
+  const debounceTimer = useRef(null);
+  const lastReload = useRef({});
+
+  // Swipe handling
+  const touchStartX = useRef(0);
+  const touchEndX = useRef(0);
+  const minSwipeDistance = 50;
+
+  const handleTouchStart = (e) => {
+    touchStartX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchMove = (e) => {
+    touchEndX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = () => {
+    const distance = touchEndX.current - touchStartX.current;
+    const currentIndex = TABS_ORDER.indexOf(tab);
+
+    if (Math.abs(distance) > minSwipeDistance) {
+      if (distance > 0 && currentIndex > 0) {
+        // Swipe derecha → pestaña anterior
+        setTab(TABS_ORDER[currentIndex - 1]);
+      } else if (distance < 0 && currentIndex < TABS_ORDER.length - 1) {
+        // Swipe izquierda → pestaña siguiente
+        setTab(TABS_ORDER[currentIndex + 1]);
+      }
+    }
+
+    // Reset
+    touchStartX.current = 0;
+    touchEndX.current = 0;
+  };
+
   // Funciones de carga
   const loadAssignment = useCallback(async () => {
+    if (!auth.token) return;
     const d = await apiFetch('/admin/assignment-live', {}, auth.token);
     setLiveData(d);
   }, [auth.token]);
@@ -57,21 +97,25 @@ export default function AdminDashboard() {
   }, [auth.token, statusFilter]);
 
   const loadMetrics = useCallback(async () => {
+    if (!auth.token) return;
     const d = await apiFetch(`/admin/metrics?days=${metricDays}`, {}, auth.token);
     setMetrics(d);
   }, [auth.token, metricDays]);
 
   const loadUsers = useCallback(async () => {
+    if (!auth.token) return;
     const d = await apiFetch('/admin/users', {}, auth.token);
     setUsers(d.users || []);
   }, [auth.token]);
 
   const loadEngine = useCallback(async () => {
+    if (!auth.token) return;
     const d = await apiFetch('/admin/engine-params', {}, auth.token);
     setEngineParams(d.params || []);
   }, [auth.token]);
 
   const loadReports = useCallback(async () => {
+    if (!auth.token) return;
     const [pending, done] = await Promise.all([
       apiFetch('/admin/reports?reviewed=false', {}, auth.token),
                                               apiFetch('/admin/reports?reviewed=true', {}, auth.token),
@@ -81,11 +125,13 @@ export default function AdminDashboard() {
   }, [auth.token]);
 
   const loadNotes = useCallback(async () => {
+    if (!auth.token) return;
     const d = await apiFetch('/admin/order-notes', {}, auth.token);
     setNotes(d.notes || []);
   }, [auth.token]);
 
   const loadRatings = useCallback(async () => {
+    if (!auth.token) return;
     const d = await apiFetch('/admin/ratings', {}, auth.token);
     setRatings(d.ratings || []);
   }, [auth.token]);
@@ -103,15 +149,32 @@ export default function AdminDashboard() {
     feed: () => {},
   };
 
-  const load = useCallback(() => {
-    const fn = loaders[tab];
-    if (fn) {
-      setLoading(true);
-      fn().catch(e => setMsg(e.message)).finally(() => setLoading(false));
-    }
-  }, [tab, loaders]);
+  // Función de carga con debounce y cooldown
+  const debouncedLoad = useCallback((force = false) => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
 
-  useEffect(() => { load(); }, [load]);
+    // Cooldown: no recargar la misma pestaña más de una vez cada 2 segundos
+    const now = Date.now();
+    const last = lastReload.current[tab] || 0;
+    if (!force && now - last < 2000) return;
+
+    if (!force && loading) return;
+
+    debounceTimer.current = setTimeout(() => {
+      const fn = loaders[tab];
+      if (fn) {
+        setLoading(true);
+        lastReload.current[tab] = Date.now();
+        fn().catch(e => setMsg(e.message)).finally(() => setLoading(false));
+      }
+      debounceTimer.current = null;
+    }, 300);
+  }, [tab, loaders, loading]);
+
+  // Cargar al cambiar de tab
+  useEffect(() => {
+    debouncedLoad();
+  }, [tab, debouncedLoad]);
 
   // Handlers de acciones
   const handleForceOrderStatus = async (orderId, currentStatus) => {
@@ -166,7 +229,6 @@ export default function AdminDashboard() {
     try {
       await apiFetch(`/admin/reports/${reportId}/review`, { method: 'PATCH' }, auth.token);
       setReports(prev => prev.filter(r => r.id !== reportId));
-      // Opcional: recargar reportsDone
       const done = await apiFetch('/admin/reports?reviewed=true', {}, auth.token);
       setReportsDone(done.reports || []);
     } catch (e) { setMsg(e.message); }
@@ -178,16 +240,18 @@ export default function AdminDashboard() {
     (data) => {
       const entry = { ts: Date.now(), type: 'order', orderId: data.orderId?.slice(0,8), extra: data.status || '' };
       setOrderLog(prev => [entry, ...prev].slice(0, 50));
-      if (['assignment', 'orders'].includes(tab)) load();
+      if (['assignment', 'orders'].includes(tab)) {
+        debouncedLoad(); // con debounce y cooldown
+      }
     },
     () => {},
                     (data) => {
                       const entry = { ts: Date.now(), type: 'offer', orderId: data.orderId?.slice(0,8), extra: `driver:${(data.driverId||'').slice(0,8)}` };
                       setLiveOffers(prev => [entry, ...prev].slice(0, 50));
-                      if (tab === 'assignment') load();
+                      if (tab === 'assignment') debouncedLoad();
                     },
                     undefined,
-                    () => { if (['assignment', 'orders'].includes(tab)) load(); },
+                    () => { if (['assignment', 'orders'].includes(tab)) debouncedLoad(); },
   );
 
   return (
@@ -207,13 +271,15 @@ export default function AdminDashboard() {
     >
     <div style={{ margin: '-1rem -1rem 1.25rem', padding: '0.75rem 1rem 0.65rem', background: 'var(--promo-gradient)', color: '#fff' }}>
     <div style={{ fontWeight: 800, fontSize: '1.05rem' }}>🛠 Panel de administración</div>
-    <div style={{ fontSize: '0.75rem', opacity: 0.8, marginTop: '0.1rem' }}>Vista completa del sistema</div>
+    <div style={{ fontSize: '0.75rem', opacity: 0.8, marginTop: '0.1rem' }}>
+    Desliza lateralmente para cambiar de pestaña
+    </div>
     </div>
 
     <DashboardTabsBar
     tab={tab}
     onTabChange={setTab}
-    onReload={load}
+    onReload={() => debouncedLoad(true)}
     unassignedCount={liveData.orders.filter(o => !o.driver_id).length}
     reportsCount={reports.length}
     feedCount={liveOffers.length + orderLog.length}
