@@ -59,11 +59,10 @@ async function testClipboard() {
   }
 }
 
-// Función para probar cámara con preview
 async function testCameraWithPreview(videoRef, setCameraStatus) {
   if (!navigator.mediaDevices?.getUserMedia) {
     setCameraStatus('unsupported');
-    return;
+    return null;
   }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -72,7 +71,6 @@ async function testCameraWithPreview(videoRef, setCameraStatus) {
       videoRef.current.play();
     }
     setCameraStatus('granted');
-    // No detenemos el stream aún; se detendrá cuando se cierre la preview o se desmonte
     return stream;
   } catch (err) {
     if (err.name === 'NotAllowedError') setCameraStatus('denied');
@@ -96,7 +94,13 @@ function formatBattery(battery) {
   return text;
 }
 
-// Función para solicitar suscripción push manualmente
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = window.atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
 async function requestPushSubscription(token) {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     return { ok: false, error: 'Push no soportado' };
@@ -106,13 +110,13 @@ async function requestPushSubscription(token) {
     let sub = await reg.pushManager.getSubscription();
     if (!sub) {
       const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-      if (!vapidKey) return { ok: false, error: 'Falta clave VAPID' };
+      if (!vapidKey) return { ok: false, error: 'Falta clave VAPID en frontend' };
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(vapidKey),
       });
     }
-    await apiFetch('/push/subscribe', {
+    await apiFetch('/auth/push/subscribe', {
       method: 'POST',
       body: JSON.stringify(sub.toJSON()),
     }, token);
@@ -122,16 +126,8 @@ async function requestPushSubscription(token) {
   }
 }
 
-function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const raw = window.atob(base64);
-  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
-}
-
 export default function SystemTab({ onMessage }) {
   const { auth } = useAuth();
-  const refreshTimeout = useRef(null);
   const videoRef = useRef(null);
   const cameraStreamRef = useRef(null);
   const [loading, setLoading] = useState(false);
@@ -200,9 +196,8 @@ export default function SystemTab({ onMessage }) {
       // 9. Network
       setStatus(prev => ({ ...prev, network: getNetworkInfo() }));
 
-      // 10. Camera (solo estado, sin stream)
+      // 10. Camera
       if (navigator.mediaDevices?.getUserMedia) {
-        // Solo verificamos soporte, el estado de permiso lo vemos con navigator.permissions
         if (navigator.permissions?.query) {
           const perm = await navigator.permissions.query({ name: 'camera' });
           setStatus(prev => ({ ...prev, camera: perm.state }));
@@ -233,7 +228,7 @@ export default function SystemTab({ onMessage }) {
     const result = await requestPushSubscription(auth.token);
     if (result.ok) {
       onMessage?.('✅ Suscripción push registrada');
-      refreshStatus(); // actualizar estado
+      refreshStatus();
     } else {
       onMessage?.(`❌ Error: ${result.error}`);
     }
@@ -265,14 +260,12 @@ export default function SystemTab({ onMessage }) {
 
   const handleCameraTest = async () => {
     if (cameraPreview) {
-      // Detener stream y cerrar preview
       if (cameraStreamRef.current) {
         cameraStreamRef.current.getTracks().forEach(track => track.stop());
         cameraStreamRef.current = null;
       }
       setCameraPreview(false);
     } else {
-      // Abrir preview
       const stream = await testCameraWithPreview(videoRef, (state) => setStatus(prev => ({ ...prev, camera: state })));
       if (stream) {
         cameraStreamRef.current = stream;
@@ -283,7 +276,6 @@ export default function SystemTab({ onMessage }) {
     }
   };
 
-  // Limpiar stream al desmontar
   useEffect(() => {
     return () => {
       if (cameraStreamRef.current) {
