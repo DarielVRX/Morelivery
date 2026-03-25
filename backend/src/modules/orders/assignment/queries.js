@@ -9,13 +9,13 @@ import { ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER, OFFER_TIMEOUT_SECONDS } 
 export async function getOpenOrder(orderId) {
   const r = await query(
     `SELECT id, created_at, offer_cooldown_triggered,
-            restaurant_lat, restaurant_lng,
-            delivery_lat, delivery_lng,
-            last_driver_id
-     FROM orders
-     WHERE id=$1 AND driver_id IS NULL
-       AND status NOT IN ('delivered','cancelled')`,
-    [orderId]
+    restaurant_lat, restaurant_lng,
+    delivery_lat, delivery_lng,
+    last_driver_id
+    FROM orders
+    WHERE id=$1 AND driver_id IS NULL
+    AND status NOT IN ('delivered','cancelled')`,
+                        [orderId]
   );
   return r.rows[0] ?? null;
 }
@@ -30,30 +30,30 @@ export async function getQueuedOrders(driverId = null) {
   // Todos los pedidos abiertos sin oferta pending activa
   const r = await query(
     `SELECT o.id, o.created_at,
-            -- ¿Tiene al menos un driver disponible sin cooldown para este pedido?
-            EXISTS (
-              SELECT 1 FROM driver_profiles dp
-              JOIN users u ON u.id = dp.user_id
-              WHERE dp.is_available = true AND u.status = 'active'
-                AND (SELECT COUNT(*) FROM orders oo
-                     WHERE oo.driver_id=dp.user_id AND oo.status=ANY($1::text[])
-                    ) < $2
-                AND NOT EXISTS (
-                  SELECT 1 FROM order_driver_offers od2
-                  WHERE od2.driver_id=dp.user_id AND od2.status='pending')
-                AND NOT EXISTS (
-                  SELECT 1 FROM order_driver_offers od3
-                  WHERE od3.order_id=o.id AND od3.driver_id=dp.user_id
-                    AND od3.status IN ('rejected','released','expired')
-                    AND od3.wait_until > NOW())
-            ) AS has_candidates
-     FROM orders o
-     WHERE o.driver_id IS NULL
-       AND o.status NOT IN ('delivered','cancelled')
-       AND NOT EXISTS (
-         SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id=o.id AND od.status='pending')
-     ORDER BY has_candidates DESC, o.created_at ASC`,
+    -- ¿Tiene al menos un driver disponible sin cooldown para este pedido?
+    EXISTS (
+      SELECT 1 FROM driver_profiles dp
+      JOIN users u ON u.id = dp.user_id
+      WHERE dp.is_available = true AND u.status = 'active'
+      AND (SELECT COUNT(*) FROM orders oo
+      WHERE oo.driver_id=dp.user_id AND oo.status=ANY($1::text[])
+      ) < $2
+      AND NOT EXISTS (
+        SELECT 1 FROM order_driver_offers od2
+        WHERE od2.driver_id=dp.user_id AND od2.status='pending')
+      AND NOT EXISTS (
+        SELECT 1 FROM order_driver_offers od3
+        WHERE od3.order_id=o.id AND od3.driver_id=dp.user_id
+        AND od3.status IN ('rejected','released','expired')
+        AND od3.wait_until > NOW())
+    ) AS has_candidates
+    FROM orders o
+    WHERE o.driver_id IS NULL
+    AND o.status NOT IN ('delivered','cancelled')
+    AND NOT EXISTS (
+      SELECT 1 FROM order_driver_offers od
+      WHERE od.order_id=o.id AND od.status='pending')
+    ORDER BY has_candidates DESC, o.created_at ASC`,
     [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
   );
   return r.rows; // [{id, created_at, has_candidates}]
@@ -62,7 +62,7 @@ export async function getQueuedOrders(driverId = null) {
 
 /**
  * El primer pedido disponible para un driver específico.
- * "Disponible" = 
+ * "Disponible" =
  *   - Pedido sin driver asignado
  *   - Sin oferta pending activa (ni para este driver ni de otro — libre para ofrecer)
  *   - El driver no tiene cooldown para este pedido
@@ -75,49 +75,49 @@ export async function getQueuedOrders(driverId = null) {
 export async function getFirstAvailableOrderForDriver(driverId) {
   const r = await query(
     `SELECT o.id, o.created_at,
-            NOT EXISTS (
-              SELECT 1 FROM order_driver_offers od
-              WHERE od.order_id=o.id AND od.status IN ('rejected','released','expired')
-                AND od.wait_until > NOW()
-            ) AS has_candidates
-     FROM orders o
-     WHERE o.driver_id IS NULL
-       AND o.status NOT IN ('delivered','cancelled')
-       AND EXISTS (
-         SELECT 1
-         FROM driver_profiles dp
-         JOIN users u ON u.id = dp.user_id
-         WHERE dp.user_id=$1::uuid
-           AND dp.is_available=true
-           AND u.status='active'
-       )
-       -- Sin oferta pending activa para ningún driver (el pedido está libre)
-       AND NOT EXISTS (
-         SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id=o.id AND od.status='pending')
-       -- El driver no tiene cooldown para este pedido
-       AND NOT EXISTS (
-         SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id=o.id AND od.driver_id=$1::uuid
-           AND od.status IN ('rejected','released','expired')
-           AND od.wait_until > NOW())
-       -- El driver no lo aceptó ya
-       AND NOT EXISTS (
-         SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id=o.id AND od.driver_id=$1::uuid AND od.status='accepted')
-       -- El driver no tiene ya una pending offer activa en otro pedido
-       AND NOT EXISTS (
-         SELECT 1 FROM order_driver_offers od
-         WHERE od.driver_id=$1::uuid AND od.status='pending')
-       -- El driver está bajo el límite de capacidad
-       AND (SELECT COUNT(*) FROM orders oo
-            WHERE oo.driver_id=$1::uuid AND oo.status=ANY($2::text[])
-           ) < $3
-     ORDER BY
-       -- Pedidos sin ningún cooldown activo (más urgentes) primero
-       has_candidates DESC,
-       o.created_at ASC
-     LIMIT 1`,
+    NOT EXISTS (
+      SELECT 1 FROM order_driver_offers od
+      WHERE od.order_id=o.id AND od.status IN ('rejected','released','expired')
+      AND od.wait_until > NOW()
+    ) AS has_candidates
+    FROM orders o
+    WHERE o.driver_id IS NULL
+    AND o.status NOT IN ('delivered','cancelled')
+    AND EXISTS (
+      SELECT 1
+      FROM driver_profiles dp
+      JOIN users u ON u.id = dp.user_id
+      WHERE dp.user_id=$1::uuid
+      AND dp.is_available=true
+      AND u.status='active'
+    )
+    -- Sin oferta pending activa para ningún driver (el pedido está libre)
+    AND NOT EXISTS (
+      SELECT 1 FROM order_driver_offers od
+      WHERE od.order_id=o.id AND od.status='pending')
+    -- El driver no tiene cooldown para este pedido
+    AND NOT EXISTS (
+      SELECT 1 FROM order_driver_offers od
+      WHERE od.order_id=o.id AND od.driver_id=$1::uuid
+      AND od.status IN ('rejected','released','expired')
+      AND od.wait_until > NOW())
+    -- El driver no lo aceptó ya
+    AND NOT EXISTS (
+      SELECT 1 FROM order_driver_offers od
+      WHERE od.order_id=o.id AND od.driver_id=$1::uuid AND od.status='accepted')
+    -- El driver no tiene ya una pending offer activa en otro pedido
+    AND NOT EXISTS (
+      SELECT 1 FROM order_driver_offers od
+      WHERE od.driver_id=$1::uuid AND od.status='pending')
+    -- El driver está bajo el límite de capacidad
+    AND (SELECT COUNT(*) FROM orders oo
+    WHERE oo.driver_id=$1::uuid AND oo.status=ANY($2::text[])
+    ) < $3
+    ORDER BY
+    -- Pedidos sin ningún cooldown activo (más urgentes) primero
+    has_candidates DESC,
+    o.created_at ASC
+    LIMIT 1`,
     [driverId, ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
   );
   return r.rows[0] ?? null;
@@ -126,7 +126,7 @@ export async function getFirstAvailableOrderForDriver(driverId) {
 export async function markPendingDriver(orderId) {
   await query(
     `UPDATE orders SET status='pending_driver', updated_at=NOW()
-     WHERE id=$1 AND driver_id IS NULL`,
+    WHERE id=$1 AND driver_id IS NULL`,
     [orderId]
   );
 }
@@ -135,14 +135,14 @@ export async function markPendingDriver(orderId) {
 export async function assignDriverToOrder(orderId, driverId) {
   const r = await query(
     `WITH lock AS (
-       SELECT id FROM orders
-       WHERE id=$1 AND driver_id IS NULL
-         AND status NOT IN ('delivered','cancelled')
-       FOR UPDATE SKIP LOCKED
-     )
-     UPDATE orders
-       SET driver_id=$2, status='assigned', last_driver_id=$2, updated_at=NOW()
-     FROM lock WHERE orders.id=lock.id RETURNING orders.id`,
+      SELECT id FROM orders
+      WHERE id=$1 AND driver_id IS NULL
+      AND status NOT IN ('delivered','cancelled')
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE orders
+    SET driver_id=$2, status='assigned', last_driver_id=$2, updated_at=NOW()
+    FROM lock WHERE orders.id=lock.id RETURNING orders.id`,
     [orderId, driverId]
   );
   return r.rowCount > 0;
@@ -152,7 +152,7 @@ export async function assignDriverToOrder(orderId, driverId) {
 export async function unassignDriverFromOrder(orderId, driverId) {
   await query(
     `UPDATE orders SET driver_id=NULL, status='pending_driver', updated_at=NOW()
-     WHERE id=$1 AND driver_id=$2`,
+    WHERE id=$1 AND driver_id=$2`,
     [orderId, driverId]
   );
 }
@@ -163,9 +163,9 @@ export async function unassignDriverFromOrder(orderId, driverId) {
 export async function getOfferRound(orderId) {
   const r = await query(
     `SELECT COUNT(DISTINCT driver_id)::int AS n
-     FROM order_driver_offers
-     WHERE order_id=$1 AND status IN ('rejected','expired','released')`,
-    [orderId]
+    FROM order_driver_offers
+    WHERE order_id=$1 AND status IN ('rejected','expired','released')`,
+                        [orderId]
   );
   return r.rows[0]?.n ?? 0;
 }
@@ -174,25 +174,25 @@ export async function getOfferRound(orderId) {
 export async function getEligibleDrivers(orderId) {
   const r = await query(
     `SELECT dp.user_id, dp.driver_number
-     FROM driver_profiles dp
-     JOIN users u ON u.id = dp.user_id
-     WHERE dp.is_available = true
-       AND u.status = 'active'
-       -- Bajo el límite de capacidad
-       AND (SELECT COUNT(*) FROM orders o
-            WHERE o.driver_id=dp.user_id AND o.status=ANY($1::text[])
-           ) < $2
-       -- No ya aceptó este pedido
-       AND NOT EXISTS (
-         SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id=$3 AND od.driver_id=dp.user_id AND od.status='accepted')
-       -- Sin cooldown activo para este pedido
-       AND NOT EXISTS (
-         SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id=$3 AND od.driver_id=dp.user_id
-           AND od.status IN ('rejected','released','expired')
-           AND od.wait_until > NOW())
-     ORDER BY dp.driver_number ASC`,
+    FROM driver_profiles dp
+    JOIN users u ON u.id = dp.user_id
+    WHERE dp.is_available = true
+    AND u.status = 'active'
+    -- Bajo el límite de capacidad
+    AND (SELECT COUNT(*) FROM orders o
+    WHERE o.driver_id=dp.user_id AND o.status=ANY($1::text[])
+    ) < $2
+    -- No ya aceptó este pedido
+    AND NOT EXISTS (
+      SELECT 1 FROM order_driver_offers od
+      WHERE od.order_id=$3 AND od.driver_id=dp.user_id AND od.status='accepted')
+    -- Sin cooldown activo para este pedido
+    AND NOT EXISTS (
+      SELECT 1 FROM order_driver_offers od
+      WHERE od.order_id=$3 AND od.driver_id=dp.user_id
+      AND od.status IN ('rejected','released','expired')
+      AND od.wait_until > NOW())
+    ORDER BY dp.driver_number ASC`,
     [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER, orderId]
   );
   return r.rows; // [{user_id, driver_number}]
@@ -205,26 +205,26 @@ export async function getEligibleDrivers(orderId) {
 export async function getEligibleIdleDrivers(orderId) {
   const r = await query(
     `SELECT dp.user_id, dp.driver_number
-     FROM driver_profiles dp
-     JOIN users u ON u.id = dp.user_id
-     WHERE dp.is_available = true
-       AND u.status = 'active'
-       AND (SELECT COUNT(*) FROM orders o
-            WHERE o.driver_id=dp.user_id AND o.status=ANY($1::text[])
-           ) < $2
-       AND NOT EXISTS (
-         SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id=$3 AND od.driver_id=dp.user_id AND od.status='accepted')
-       AND NOT EXISTS (
-         SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id=$3 AND od.driver_id=dp.user_id
-           AND od.status IN ('rejected','released','expired')
-           AND od.wait_until > NOW())
-       -- Sin oferta pending en NINGÚN pedido (libre para recibir)
-       AND NOT EXISTS (
-         SELECT 1 FROM order_driver_offers od
-         WHERE od.driver_id=dp.user_id AND od.status='pending')
-     ORDER BY dp.driver_number ASC`,
+    FROM driver_profiles dp
+    JOIN users u ON u.id = dp.user_id
+    WHERE dp.is_available = true
+    AND u.status = 'active'
+    AND (SELECT COUNT(*) FROM orders o
+    WHERE o.driver_id=dp.user_id AND o.status=ANY($1::text[])
+    ) < $2
+    AND NOT EXISTS (
+      SELECT 1 FROM order_driver_offers od
+      WHERE od.order_id=$3 AND od.driver_id=dp.user_id AND od.status='accepted')
+    AND NOT EXISTS (
+      SELECT 1 FROM order_driver_offers od
+      WHERE od.order_id=$3 AND od.driver_id=dp.user_id
+      AND od.status IN ('rejected','released','expired')
+      AND od.wait_until > NOW())
+    -- Sin oferta pending en NINGÚN pedido (libre para recibir)
+    AND NOT EXISTS (
+      SELECT 1 FROM order_driver_offers od
+      WHERE od.driver_id=dp.user_id AND od.status='pending')
+    ORDER BY dp.driver_number ASC`,
     [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER, orderId]
   );
   return r.rows;
@@ -243,7 +243,7 @@ export async function driverHasPendingOffer(driverId) {
 export async function getPendingOffer(orderId) {
   const r = await query(
     `SELECT driver_id FROM order_driver_offers
-     WHERE order_id=$1 AND status='pending' LIMIT 1`,
+    WHERE order_id=$1 AND status='pending' LIMIT 1`,
     [orderId]
   );
   return r.rows[0] ?? null;
@@ -253,17 +253,17 @@ export async function getPendingOffer(orderId) {
 export async function upsertPendingOffer(orderId, driverId, bagOverflowPct = 0) {
   await query(
     `INSERT INTO order_driver_offers(order_id,driver_id,status,wait_until,bag_overflow_pct)
-     VALUES($1,$2,'pending',NULL,$3)
-     ON CONFLICT(order_id,driver_id)
-     DO UPDATE SET status='pending', updated_at=NOW(), wait_until=NULL, bag_overflow_pct=$3`,
-    [orderId, driverId, bagOverflowPct]
+    VALUES($1,$2,'pending',NULL,$3)
+    ON CONFLICT(order_id,driver_id)
+    DO UPDATE SET status='pending', updated_at=NOW(), wait_until=NULL, bag_overflow_pct=$3`,
+              [orderId, driverId, bagOverflowPct]
   );
 }
 
 export async function acceptPendingOffer(orderId, driverId) {
   await query(
     `UPDATE order_driver_offers SET status='accepted', updated_at=NOW()
-     WHERE order_id=$1 AND driver_id=$2`,
+    WHERE order_id=$1 AND driver_id=$2`,
     [orderId, driverId]
   );
 }
@@ -272,7 +272,7 @@ export async function acceptPendingOffer(orderId, driverId) {
 export async function expireCompetingOffers(orderId, acceptedDriverId) {
   await query(
     `UPDATE order_driver_offers SET status='expired', updated_at=NOW()
-     WHERE order_id=$1 AND driver_id<>$2 AND status='pending'`,
+    WHERE order_id=$1 AND driver_id<>$2 AND status='pending'`,
     [orderId, acceptedDriverId]
   );
 }
@@ -281,8 +281,8 @@ export async function expireCompetingOffers(orderId, acceptedDriverId) {
 export async function rejectDriverOffer(orderId, driverId, cooldownSecs) {
   await query(
     `UPDATE order_driver_offers
-     SET status='rejected', wait_until=NOW()+($3*INTERVAL '1 second'), updated_at=NOW()
-     WHERE order_id=$1 AND driver_id=$2 AND status='pending'`,
+    SET status='rejected', wait_until=NOW()+($3*INTERVAL '1 second'), updated_at=NOW()
+    WHERE order_id=$1 AND driver_id=$2 AND status='pending'`,
     [orderId, driverId, cooldownSecs]
   );
 }
@@ -291,8 +291,8 @@ export async function rejectDriverOffer(orderId, driverId, cooldownSecs) {
 export async function releaseDriverOffer(orderId, driverId, cooldownSecs) {
   await query(
     `UPDATE order_driver_offers
-     SET status='released', wait_until=NOW()+($3*INTERVAL '1 second'), updated_at=NOW()
-     WHERE order_id=$1 AND driver_id=$2`,
+    SET status='released', wait_until=NOW()+($3*INTERVAL '1 second'), updated_at=NOW()
+    WHERE order_id=$1 AND driver_id=$2`,
     [orderId, driverId, cooldownSecs]
   );
 }
@@ -301,9 +301,9 @@ export async function releaseDriverOffer(orderId, driverId, cooldownSecs) {
 export async function expireAllPendingForDriver(driverId, exceptOrderId = null) {
   const r = await query(
     `UPDATE order_driver_offers SET status='expired', updated_at=NOW()
-     WHERE driver_id=$1 AND status='pending'
-       AND ($2::uuid IS NULL OR order_id<>$2)
-     RETURNING order_id`,
+    WHERE driver_id=$1 AND status='pending'
+    AND ($2::uuid IS NULL OR order_id<>$2)
+    RETURNING order_id`,
     [driverId, exceptOrderId]
   );
   return r.rows.map(r => r.order_id);
@@ -316,13 +316,13 @@ export async function expireAllPendingForDriver(driverId, exceptOrderId = null) 
 export async function expireTimedOutOffersInDB(timeoutSecs, cooldownSecs) {
   const r = await query(
     `UPDATE order_driver_offers
-     SET status='expired',
-         wait_until=NOW()+($2::int*INTERVAL '1 second'),
-         updated_at=NOW()
-     WHERE status='pending'
-       AND updated_at < NOW()-($1::int*INTERVAL '1 second')
-     RETURNING order_id, driver_id`,
-    [timeoutSecs, cooldownSecs]
+    SET status='expired',
+    wait_until=NOW()+($2::int*INTERVAL '1 second'),
+                        updated_at=NOW()
+                        WHERE status='pending'
+                        AND updated_at < NOW()-($1::int*INTERVAL '1 second')
+                        RETURNING order_id, driver_id`,
+                        [timeoutSecs, cooldownSecs]
   );
   return r.rows;
 }
@@ -332,9 +332,9 @@ export async function expireTimedOutOffersInDB(timeoutSecs, cooldownSecs) {
 export async function getDriverProfile(driverId) {
   const r = await query(
     `SELECT dp.is_available,
-            (SELECT COUNT(*)::int FROM orders o
-             WHERE o.driver_id=$1::uuid AND o.status=ANY($2::text[])) AS active_count
-     FROM driver_profiles dp WHERE dp.user_id=$1::uuid`,
+    (SELECT COUNT(*)::int FROM orders o
+    WHERE o.driver_id=$1::uuid AND o.status=ANY($2::text[])) AS active_count
+    FROM driver_profiles dp WHERE dp.user_id=$1::uuid`,
     [driverId, ACTIVE_STATUSES]
   );
   return r.rows[0] ?? null;
@@ -345,27 +345,27 @@ export async function getDriverProfile(driverId) {
 export async function getOfferPayload(orderId, driverId) {
   const r = await query(
     `SELECT o.id,
-            o.total_cents, o.service_fee_cents, o.delivery_fee_cents, o.tip_cents,
-            o.payment_method,
-            r.name    AS restaurant_name,
-            COALESCE(ru.address, r.address) AS restaurant_address,
-            COALESCE(ru.lat, r.lat)     AS restaurant_lat,
-            COALESCE(ru.lng, r.lng)     AS restaurant_lng,
-            -- Usar dirección fresca del cliente (puede haberse actualizado desde que se creó el pedido)
-            COALESCE(o.delivery_address, c.address) AS customer_address,
-            COALESCE(o.delivery_lat, c.lat) AS customer_lat,
-            COALESCE(o.delivery_lng, c.lng) AS customer_lng,
-            od.bag_overflow_pct,
-            GREATEST(0, EXTRACT(EPOCH FROM (
-              od.updated_at + ($3::int * INTERVAL '1 second') - NOW()
-            )))::int AS seconds_left
-     FROM orders o
-     JOIN restaurants r ON r.id=o.restaurant_id
-     LEFT JOIN users ru ON ru.id=r.owner_user_id
-     JOIN users c       ON c.id=o.customer_id
-     JOIN order_driver_offers od ON od.order_id=o.id AND od.driver_id=$2
-     WHERE o.id=$1`,
-    [orderId, driverId, OFFER_TIMEOUT_SECONDS]
+    o.total_cents, o.service_fee_cents, o.delivery_fee_cents, o.tip_cents,
+    o.payment_method,
+    r.name    AS restaurant_name,
+    COALESCE(ru.address, r.address) AS restaurant_address,
+                        COALESCE(ru.lat, r.lat)     AS restaurant_lat,
+                        COALESCE(ru.lng, r.lng)     AS restaurant_lng,
+                        -- Usar dirección fresca del cliente (puede haberse actualizado desde que se creó el pedido)
+                        COALESCE(o.delivery_address, c.address) AS customer_address,
+                        COALESCE(o.delivery_lat, c.lat) AS customer_lat,
+                        COALESCE(o.delivery_lng, c.lng) AS customer_lng,
+                        od.bag_overflow_pct,
+                        GREATEST(0, EXTRACT(EPOCH FROM (
+                          od.updated_at + ($3::int * INTERVAL '1 second') - NOW()
+                        )))::int AS seconds_left
+                        FROM orders o
+                        JOIN restaurants r ON r.id=o.restaurant_id
+                        LEFT JOIN users ru ON ru.id=r.owner_user_id
+                        JOIN users c       ON c.id=o.customer_id
+                        JOIN order_driver_offers od ON od.order_id=o.id AND od.driver_id=$2
+                        WHERE o.id=$1`,
+                        [orderId, driverId, OFFER_TIMEOUT_SECONDS]
   );
   return r.rows[0] ?? null;
 }
@@ -374,50 +374,50 @@ export async function getOfferPayload(orderId, driverId) {
 export async function getPendingAssignmentOrders(driverId, isAvailable = false) {
   const r = await query(
     `SELECT o.id, o.status, o.total_cents, o.service_fee_cents, o.delivery_fee_cents,
-            o.tip_cents, o.payment_method, o.created_at,
-            r.name AS restaurant_name, COALESCE(ru.address, r.address) AS restaurant_address,
-            COALESCE(ru.lat, r.lat) AS restaurant_lat, COALESCE(ru.lng, r.lng) AS restaurant_lng,
-            COALESCE(o.delivery_address, c.address) AS customer_address,
-            COALESCE(o.delivery_lat, c.lat) AS customer_lat,
-            COALESCE(o.delivery_lng, c.lng) AS customer_lng,
-            EXISTS (
-              SELECT 1 FROM order_driver_offers od2
-              WHERE od2.order_id=o.id AND od2.status='pending'
-            ) AS has_pending_offer,
-            (
-              SELECT COUNT(*)::int FROM order_driver_offers od3
-              WHERE od3.order_id=o.id
-            ) AS offer_count,
-            GREATEST(0, EXTRACT(EPOCH FROM (
-              od.wait_until - NOW()
-            )))::int AS cooldown_secs
-     FROM orders o
-     JOIN restaurants r ON r.id=o.restaurant_id
-     LEFT JOIN users ru ON ru.id=r.owner_user_id
-     JOIN users c       ON c.id=o.customer_id
-     LEFT JOIN order_driver_offers od
-       ON od.order_id=o.id AND od.driver_id=$1
-          AND od.status IN ('rejected','released','expired')
-          AND od.wait_until > NOW()
-     WHERE o.driver_id IS NULL
-       AND o.status IN ('created','pending_driver','accepted','preparing','ready')
-       -- Solo mostrar pedidos con has_pending_offer=true
-       AND EXISTS (
-         SELECT 1 FROM order_driver_offers od4
-         WHERE od4.order_id=o.id AND od4.status='pending'
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM order_driver_offers od2
-         WHERE od2.order_id=o.id AND od2.driver_id=$1 AND od2.status='pending'
-       )
-       -- Si driver no está disponible, ocultar pedidos con >= 5 ofertas enviadas
-       AND ($2::boolean = true OR (
-         SELECT COUNT(*)::int FROM order_driver_offers od5
-         WHERE od5.order_id=o.id
-       ) < 5)
-     ORDER BY o.created_at ASC
-     LIMIT 20`,
-    [driverId, isAvailable]
+    o.tip_cents, o.payment_method, o.created_at,
+    r.name AS restaurant_name, COALESCE(ru.address, r.address) AS restaurant_address,
+                        COALESCE(ru.lat, r.lat) AS restaurant_lat, COALESCE(ru.lng, r.lng) AS restaurant_lng,
+                        COALESCE(o.delivery_address, c.address) AS customer_address,
+                        COALESCE(o.delivery_lat, c.lat) AS customer_lat,
+                        COALESCE(o.delivery_lng, c.lng) AS customer_lng,
+                        EXISTS (
+                          SELECT 1 FROM order_driver_offers od2
+                          WHERE od2.order_id=o.id AND od2.status='pending'
+                        ) AS has_pending_offer,
+                        (
+                          SELECT COUNT(*)::int FROM order_driver_offers od3
+                          WHERE od3.order_id=o.id
+                        ) AS offer_count,
+                        GREATEST(0, EXTRACT(EPOCH FROM (
+                          od.wait_until - NOW()
+                        )))::int AS cooldown_secs
+                        FROM orders o
+                        JOIN restaurants r ON r.id=o.restaurant_id
+                        LEFT JOIN users ru ON ru.id=r.owner_user_id
+                        JOIN users c       ON c.id=o.customer_id
+                        LEFT JOIN order_driver_offers od
+                        ON od.order_id=o.id AND od.driver_id=$1
+                        AND od.status IN ('rejected','released','expired')
+                        AND od.wait_until > NOW()
+                        WHERE o.driver_id IS NULL
+                        AND o.status IN ('created','pending_driver','accepted','preparing','ready')
+                        -- Solo mostrar pedidos con has_pending_offer=true
+                        AND EXISTS (
+                          SELECT 1 FROM order_driver_offers od4
+                          WHERE od4.order_id=o.id AND od4.status='pending'
+                        )
+                        AND NOT EXISTS (
+                          SELECT 1 FROM order_driver_offers od2
+                          WHERE od2.order_id=o.id AND od2.driver_id=$1 AND od2.status='pending'
+                        )
+                        -- Si driver no está disponible, ocultar pedidos con >= 5 ofertas enviadas
+                        AND ($2::boolean = true OR (
+                          SELECT COUNT(*)::int FROM order_driver_offers od5
+                          WHERE od5.order_id=o.id
+                        ) < 5)
+                        ORDER BY o.created_at ASC
+                        LIMIT 20`,
+                        [driverId, isAvailable]
   );
   return r.rows;
 }
@@ -428,21 +428,21 @@ export async function getPendingAssignmentOrders(driverId, isAvailable = false) 
 export async function getNearestCooldownDriver(orderId) {
   const r = await query(
     `SELECT od.driver_id,
-            EXTRACT(EPOCH FROM (od.wait_until - NOW()))::float AS secs_remaining
-     FROM order_driver_offers od
-     JOIN driver_profiles dp ON dp.user_id = od.driver_id
-     JOIN users u ON u.id = od.driver_id
-     WHERE od.order_id = $1
-       AND od.status IN ('rejected','expired','released')
-       AND od.wait_until > NOW()
-       AND dp.is_available = true
-       AND u.status = 'active'
-       AND NOT EXISTS (
-         SELECT 1 FROM order_driver_offers od2
-         WHERE od2.driver_id = od.driver_id AND od2.status = 'pending'
-       )
-     ORDER BY od.wait_until ASC
-     LIMIT 1`,
+    EXTRACT(EPOCH FROM (od.wait_until - NOW()))::float AS secs_remaining
+    FROM order_driver_offers od
+    JOIN driver_profiles dp ON dp.user_id = od.driver_id
+    JOIN users u ON u.id = od.driver_id
+    WHERE od.order_id = $1
+    AND od.status IN ('rejected','expired','released')
+    AND od.wait_until > NOW()
+    AND dp.is_available = true
+    AND u.status = 'active'
+    AND NOT EXISTS (
+      SELECT 1 FROM order_driver_offers od2
+      WHERE od2.driver_id = od.driver_id AND od2.status = 'pending'
+    )
+    ORDER BY od.wait_until ASC
+    LIMIT 1`,
     [orderId]
   );
   return r.rows[0] ?? null; // { driver_id, secs_remaining }
@@ -455,20 +455,20 @@ export async function getNearestCooldownDriver(orderId) {
  */
 export async function reduceCooldown(orderId, driverId, newWaitSecs) {
   const waitSql    = newWaitSecs < 1
-    ? `NOW() - INTERVAL '2 seconds'`
-    : `NOW() + ($2::float * INTERVAL '1 second')`;
+  ? `NOW() - INTERVAL '2 seconds'`
+  : `NOW() + ($2::float * INTERVAL '1 second')`;
   const waitParams = newWaitSecs < 1 ? [orderId, driverId] : [orderId, newWaitSecs, driverId];
   const driverParam = newWaitSecs < 1 ? '$2' : '$3';
 
   const r = await query(
     `UPDATE order_driver_offers
-     SET wait_until = ${waitSql}, updated_at = NOW()
-     WHERE order_id  = $1
-       AND driver_id = ${driverParam}
-       AND status    IN ('rejected','expired','released')
-       AND wait_until > NOW()
-       AND updated_at < NOW() - INTERVAL '1 second'`,
-    waitParams
+    SET wait_until = ${waitSql}, updated_at = NOW()
+    WHERE order_id  = $1
+    AND driver_id = ${driverParam}
+    AND status    IN ('rejected','expired','released')
+    AND wait_until > NOW()
+    AND updated_at < NOW() - INTERVAL '1 second'`,
+                        waitParams
   );
   return r.rowCount > 0;
 }
@@ -482,6 +482,24 @@ export async function reduceCooldown(orderId, driverId, newWaitSecs) {
 export async function setCooldownTriggered(orderId) {
   await query(
     `UPDATE orders SET offer_cooldown_triggered = true, updated_at = NOW() WHERE id = $1`,
+              [orderId]
+  );
+}
+
+// ─── Para SSE: obtener datos del pedido para enviar order_update ─────────────
+
+export async function getOrderForSse(orderId) {
+  const r = await query(
+    `SELECT o.id, o.status, o.total_cents, o.created_at,
+    o.customer_id, o.restaurant_id,
+    r.name AS restaurant_name,
+    c.full_name AS customer_name,
+    c.role AS customer_role
+    FROM orders o
+    JOIN restaurants r ON r.id = o.restaurant_id
+    JOIN users c ON c.id = o.customer_id
+    WHERE o.id = $1`,
     [orderId]
   );
+  return r.rows[0] || null;
 }

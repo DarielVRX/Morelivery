@@ -150,22 +150,28 @@ async function estimateRouteEta(driver) {
  * Criterio: assignment inicial — solo ETA al restaurante, sin minGain ni maxRouteEta.
  * El created_at original se preserva para no sacrificar el SLA.
  */
+* Carga pedidos en disputa (rebalanceo manual solicitado por el driver).
+* Criterio: assignment inicial — solo ETA al restaurante, sin minGain ni maxRouteEta.
+* El created_at original se preserva para no sacrificar el SLA.
+*
+* MODIFICACIÓN: Ya no se filtra por disputed_until > NOW() para eliminar el timeout automático.
+* Las disputas ahora son indefinidas hasta cancelación manual o por distancia.
+*/
 async function loadDisputedOrders() {
   const r = await query(
     `SELECT o.id, o.driver_id, o.created_at,
-            COALESCE(ru.home_lat, rest.lat) AS rest_lat,
-            COALESCE(ru.home_lng, rest.lng) AS rest_lng,
-            o.delivery_lat  AS cust_lat,
-            o.delivery_lng  AS cust_lng,
-            o.disputed_by
-     FROM orders o
-     JOIN restaurants rest ON rest.id = o.restaurant_id
-     LEFT JOIN users ru ON ru.id = rest.owner_user_id
-     WHERE o.is_disputed = true
-       AND o.disputed_until > NOW()
-       AND o.picked_up_at IS NULL
-     ORDER BY o.disputed_until ASC`,
-    []
+    COALESCE(ru.home_lat, rest.lat) AS rest_lat,
+                        COALESCE(ru.home_lng, rest.lng) AS rest_lng,
+                        o.delivery_lat  AS cust_lat,
+                        o.delivery_lng  AS cust_lng,
+                        o.disputed_by
+                        FROM orders o
+                        JOIN restaurants rest ON rest.id = o.restaurant_id
+                        LEFT JOIN users ru ON ru.id = rest.owner_user_id
+                        WHERE o.is_disputed = true
+                        AND o.picked_up_at IS NULL
+                        ORDER BY o.created_at ASC`,
+                        []
   );
 
   return r.rows.map(row => ({
@@ -174,9 +180,10 @@ async function loadDisputedOrders() {
     disputedBy:    row.disputed_by,
     createdAt:     row.created_at,
     restaurantPos: { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
-    customerPos:   { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
+                            customerPos:   { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
   }));
 }
+
 
 /**
  * Motor de rebalanceo principal.

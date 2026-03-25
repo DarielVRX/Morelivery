@@ -3,13 +3,7 @@ let _id = 0;
 
 class SseHub {
   constructor() {
-    // Map<clientId, { userId, role, res }>
     this._clients = new Map();
-
-    // Heartbeat cada 25 s — reinicia el timer de idle en Render (timeout: 55 s) y en
-    // proxies HTTP intermedios. Un comentario SSE (": ping\n\n") es ignorado por el
-    // cliente pero mantiene el socket TCP vivo. Si write() lanza, el cliente ya se fue
-    // (red caída, cambio de WiFi en el móvil) → se limpia del mapa inmediatamente.
     this._heartbeat = setInterval(() => {
       for (const [clientId, c] of this._clients) {
         try {
@@ -21,7 +15,6 @@ class SseHub {
     }, 25_000);
   }
 
-  /** Llamar en shutdown graceful para no dejar el interval colgado en tests/dev. */
   destroy() {
     clearInterval(this._heartbeat);
     this._clients.clear();
@@ -52,12 +45,9 @@ class SseHub {
       if (set.has(c.userId)) this._send(c.res, event, data);
   }
 
-  /** Notificar a admins y al driver específico cuando hay nueva oferta */
   notifyNewOffer(driverId, offerId, orderData) {
     const payload = { type: 'new_offer', offerId, ...orderData };
-    // Al driver: evento especial para mostrar notificación sin esperar poll
     this.sendToUser(driverId, 'new_offer', payload);
-    // A admins: actualización en tiempo real del panel
     this.sendToRole('admin', 'offer_assigned', {
       driverId,
       driverName: orderData.driverName,
@@ -74,6 +64,18 @@ class SseHub {
   }
 
   get size() { return this._clients.size; }
+
+  // Nuevo: obtener estadísticas para admin
+  getStats() {
+    const byRole = new Map();
+    for (const c of this._clients.values()) {
+      byRole.set(c.role, (byRole.get(c.role) || 0) + 1);
+    }
+    return {
+      connected: this._clients.size,
+      byRole: Object.fromEntries(byRole),
+    };
+  }
 }
 
 export const sseHub = new SseHub();
