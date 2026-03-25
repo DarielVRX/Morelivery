@@ -150,7 +150,7 @@ async function estimateRouteEta(driver) {
  * Criterio: assignment inicial — solo ETA al restaurante, sin minGain ni maxRouteEta.
  * El created_at original se preserva para no sacrificar el SLA.
  */
-* Carga pedidos en disputa (rebalanceo manual solicitado por el driver).
+/* Carga pedidos en disputa (rebalanceo manual solicitado por el driver).
 * Criterio: assignment inicial — solo ETA al restaurante, sin minGain ni maxRouteEta.
 * El created_at original se preserva para no sacrificar el SLA.
 *
