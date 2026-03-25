@@ -86,9 +86,7 @@ function formatBattery(battery) {
   if (battery.dischargingTime !== Infinity && battery.dischargingTime > 0) {
     const mins = Math.round(battery.dischargingTime / 60);
     text += ` · Autonomía: ${mins} min`;
-  } else if (battery.charging) {
-    // No mostrar autonomía si está cargando
-  } else if (battery.dischargingTime === Infinity) {
+  } else if (battery.dischargingTime === Infinity && !battery.charging) {
     text += ' · Autonomía infinita (enchufado)';
   }
   return text;
@@ -228,7 +226,8 @@ export default function SystemTab({ onMessage }) {
     const result = await requestPushSubscription(auth.token);
     if (result.ok) {
       onMessage?.('✅ Suscripción push registrada');
-      refreshStatus();
+      // Actualizar estado manualmente sin llamar a refreshStatus para que el botón no desaparezca
+      setStatus(prev => ({ ...prev, pushSubscribed: true }));
     } else {
       onMessage?.(`❌ Error: ${result.error}`);
     }
@@ -284,9 +283,10 @@ export default function SystemTab({ onMessage }) {
     };
   }, []);
 
+  // No cargar automáticamente para evitar que el botón desaparezca
   useEffect(() => {
-    //refreshStatus();
-  }, [refreshStatus]);
+    // refreshStatus(); // comentado
+  }, []);
 
   return (
     <div>

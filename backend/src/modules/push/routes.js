@@ -4,6 +4,7 @@ import { query } from '../../config/db.js';
 
 const router = Router();
 
+// POST /api/push/subscribe
 router.post('/subscribe', authenticate, async (req, res, next) => {
     try {
         const { endpoint, keys } = req.body;
@@ -19,6 +20,7 @@ router.post('/subscribe', authenticate, async (req, res, next) => {
 
         res.json({ ok: true });
     } catch (error) {
+        console.error('Error en push/subscribe:', error);
         next(error);
     }
 });
