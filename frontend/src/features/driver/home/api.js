@@ -23,8 +23,10 @@ export function submitImpassableRoads({ position, ways, token }) {
       lng: position.lng,
       ways: ways.map((way) => ({
         way_id:             way.way_id,
+        name:               way.name   || null,
+        coords:             way.coords || null,   // [lng,lat][] — GeoJSON order
         estimated_duration: way.estimated_duration,
-        description:        way.description,
+        description:        way.description || null,
       })),
     }),
   }, token);
@@ -35,9 +37,11 @@ export function submitRoadPreferences({ ways, token }) {
     method: 'POST',
     body: JSON.stringify({
       ways: ways.map((way) => ({
-        way_id:     way.way_id,
-        preference: way.preference,
-        description: way.description,
+        way_id:      way.way_id,
+        preference:  way.preference,
+        name:        way.name   || null,
+        coords:      way.coords || null,          // [lng,lat][] — GeoJSON order
+        description: way.description || null,
       })),
     }),
   }, token);
