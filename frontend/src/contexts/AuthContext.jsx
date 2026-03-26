@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AUTH_EXPIRED_EVENT } from '../api/client';
-import { clearSessionDelivery } from '../utils/sessionDelivery';
 
 const AuthContext = createContext(null);
 const STORAGE_KEY = 'morelivery_auth_v1';
@@ -38,12 +37,22 @@ export function AuthProvider({ children }) {
   }, [auth]);
 
   const login = useCallback((payload) => setAuth(payload), []);
+
+  // patchUser declarado ANTES de cualquier useEffect que lo use
+  const patchUser = useCallback((patch) =>
+    setAuth(prev => ({ ...prev, user: { ...(prev.user || {}), ...patch } }))
+  , []);
+
   const logout = useCallback(() => {
-    // Limpiar dirección de sesión al salir
+    // Limpiar dirección de sesión al salir — import dinámico para evitar circular
     try {
       const stored = window.localStorage.getItem(STORAGE_KEY);
       const token = stored ? JSON.parse(stored)?.token : null;
-      if (token) clearSessionDelivery(token);
+      if (token) {
+        import('../utils/sessionDelivery').then(({ clearSessionDelivery }) => {
+          clearSessionDelivery(token);
+        }).catch(() => {});
+      }
     } catch (_) {}
     setAuth({ token: '', user: null });
   }, []);
@@ -58,15 +67,11 @@ export function AuthProvider({ children }) {
   // Escuchar orders_blocked via SSE — marcar en el user object para bloquear UI
   useEffect(() => {
     function handleBlocked(e) {
-      // No hacer logout — solo actualizar el user para que la UI muestre el aviso
       patchUser({ orders_blocked: true, orders_blocked_reason: e.detail?.reason || 'late_cancellation' });
     }
     window.addEventListener('sse_orders_blocked', handleBlocked);
     return () => window.removeEventListener('sse_orders_blocked', handleBlocked);
   }, [patchUser]);
-  const patchUser = useCallback((patch) =>
-    setAuth(prev => ({ ...prev, user: { ...(prev.user || {}), ...patch } }))
-  , []);
 
   const value = useMemo(() => ({ auth, login, logout, patchUser }), [auth, login, logout, patchUser]);
 
