@@ -231,7 +231,12 @@ export default function SystemTab({ onMessage }) {
   };
 
   // Dispara notificación de prueba siempre a través del SW (funciona en móvil)
-  const fireTestNotif = async () => {
+  const testVoiceReminders = async () => {
+    try {
+      const r = await apiFetch('/admin/schedule-voice-reminders', { method: 'POST' }, auth.token);
+      onMessage?.('🎤 Programado: push en 30s y en 5 minutos');
+    } catch (e) { onMessage?.(`❌ ${e.message}`); }
+  };
     try {
       const reg = await navigator.serviceWorker.ready;
       reg.active?.postMessage({
@@ -318,7 +323,8 @@ export default function SystemTab({ onMessage }) {
   };
 
   const testClipboard = async () => {
-    const text = `Morelivery-test-${Date.now()}`;
+    // Nota: no escribir URLs — Chrome Android muestra notificación "presione para copiar URL"
+    const text = `morelivery-test-${Date.now()}`;
     try {
       await navigator.clipboard.writeText(text);
       const read = await navigator.clipboard.readText();
@@ -430,22 +436,62 @@ export default function SystemTab({ onMessage }) {
       <Card title="🔔 Notificaciones y Push">
         {row('Permiso notificaciones', <Badge state={s.notifications === 'granted' ? 'granted' : s.notifications === 'denied' ? 'denied' : 'prompt'} />)}
         {row('Suscripción push', s.push === null ? '?' : s.push ? <Badge state="granted" /> : <Badge state="denied" />)}
+
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.65rem' }}>
           {s.notifications !== 'granted' && (
             <Btn variant="warning" onClick={requestNotifications}>Solicitar permiso</Btn>
           )}
           {s.notifications === 'granted' && (
-            <Btn onClick={fireTestNotif}>🔔 Notif. local de prueba</Btn>
+            <Btn onClick={fireTestNotif}>🔔 Notif. local</Btn>
           )}
           {!s.push && s.notifications === 'granted' && (
             <Btn variant="warning" onClick={requestPush}>Registrar push</Btn>
           )}
           {s.push && (
             <Btn variant="primary" onClick={testPush} disabled={pushSending}>
-              {pushSending ? 'Enviando…' : '📨 Enviar push de prueba'}
+              {pushSending ? 'Enviando…' : '📨 Push de prueba'}
             </Btn>
           )}
+          {s.push && (
+            <Btn onClick={testVoiceReminders}>📳 Prueba push (30s + 5min)</Btn>
+          )}
         </div>
+
+        {/* Notificación con botones de acción — preview */}
+        {s.notifications === 'granted' && (
+          <div style={{ marginTop: '0.85rem' }}>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.4rem', fontWeight: 600 }}>
+              Acciones en notificación (verificación visual):
+            </div>
+            <div style={{ background: 'var(--bg-app, #f5f5f5)', border: '1px solid var(--border)', borderRadius: 10, padding: '0.65rem 0.8rem', fontSize: '0.82rem' }}>
+              <div style={{ fontWeight: 700, marginBottom: '0.15rem' }}>🛵 Nueva oferta de pedido</div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', marginBottom: '0.55rem' }}>Restaurante Centro · $85.00 · 1.2 km</div>
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => { fireTestNotif(); onMessage?.('(Botón Aceptar — sin acción real aún)'); }}
+                  style={{ background: '#22c55e', color: '#fff', border: 'none', borderRadius: 7, padding: '0.3rem 0.8rem', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
+                >
+                  ✅ Aceptar
+                </button>
+                <button
+                  onClick={() => onMessage?.('(Botón Rechazar — sin acción real aún)')}
+                  style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 7, padding: '0.3rem 0.8rem', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
+                >
+                  ❌ Rechazar
+                </button>
+                <button
+                  onClick={() => onMessage?.('(Botón Ver ruta — sin acción real aún)')}
+                  style={{ background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 7, padding: '0.3rem 0.8rem', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
+                >
+                  🗺 Ver ruta
+                </button>
+              </div>
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+              Las acciones reales en notificaciones del sistema requieren el campo <code>actions</code> en el SW — pendiente de implementar.
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Geolocalización */}
