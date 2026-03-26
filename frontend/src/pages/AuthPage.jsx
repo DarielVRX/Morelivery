@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../api/client';
 import { validatePassword, PasswordStrength } from '../utils/passwordUtils.jsx';
+import FingerprintJS from '@fingerprintjs/fingerprintjs';
 import PullToRefresh from '../components/PullToRefresh';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
@@ -90,7 +91,10 @@ function AuthForm({ mode, appKey }) {
   const lastCp         = useRef('');
 
   const [forgotEmail,  setForgotEmail]  = useState('');
+  const [phone,        setPhone]        = useState('');
   const [installPrompt, setInstallPrompt] = useState(null);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [showResend,    setShowResend]    = useState(false);
   const [message, setMessage] = useState({ text: '', ok: false });
   const [loading, setLoading] = useState(false);
 
@@ -146,15 +150,24 @@ function AuthForm({ mode, appKey }) {
     return [parts, colonia, ciudad, estado, postalCode].filter(Boolean).join(', ');
   }
 
+  async function getFingerprint() {
+    try {
+      const fp = await FingerprintJS.load();
+      const result = await fp.get();
+      return result.visitorId;
+    } catch { return undefined; }
+  }
+
   const submitLogin = useCallback(async () => {
     const email    = emailRef.current?.value?.trim()    || '';
     const password = passwordRef.current?.value         || '';
   if (!email || !password) { msg('Ingresa tu correo y contraseña'); return; }
   setLoading(true);
   try {
+    const deviceFingerprint = await getFingerprint();
     const data = await apiFetch('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password, role: appKey || undefined }),
+      body: JSON.stringify({ email, password, role: appKey || undefined, deviceFingerprint }),
     });
     if (appKey === 'admin' && data.user.role !== 'admin') {
       msg('Esta cuenta no es de administrador. Accede desde la sección correspondiente.');
@@ -169,6 +182,7 @@ function AuthForm({ mode, appKey }) {
     navigate(`/${data.user.role}`);
   } catch (e) {
     msg(e.message);
+    if (e.message?.includes('verificar tu correo')) setShowResend(true);
   } finally {
     setLoading(false);
   }
@@ -242,6 +256,7 @@ function AuthForm({ mode, appKey }) {
     const pwdErr = validatePassword(regPwd);
     if (pwdErr)                { msg(pwdErr); return; }
     if (regPwd !== regPwdConf) { msg('Las contraseñas no coinciden'); return; }
+    if (role === 'customer' && !phone.trim()) { msg('El número de teléfono es obligatorio'); return; }
     if (role === 'restaurant' && (!postalCode || !calle)) {
       msg('Ingresa la dirección completa de tu tienda'); return;
     }
@@ -251,28 +266,31 @@ function AuthForm({ mode, appKey }) {
     ? buildAddress()
     : undefined;
 
+    const deviceFingerprint = await getFingerprint();
     setLoading(true);
     try {
       await apiFetch('/auth/register', {
         method: 'POST',
         body: JSON.stringify({
-          email:       regEmail.trim(),
-                             password:    regPwd,
-                             fullName:    fullName.trim(),
-                             alias:       alias.trim(),
-                             username:    usernameCandidate,
-                             role,
-                             address:     addressFull,
-                             postalCode:  postalCode  || undefined,
-                             estado:      estado      || undefined,
-                             ciudad:      ciudad      || undefined,
-                             colonia:     colonia     || undefined,
-                             calle:       calle       || undefined,
-                             numero:      numero      || undefined,
-                             displayName: role === 'restaurant' ? (alias.trim() || undefined) : undefined,
+          email:             regEmail.trim(),
+          password:          regPwd,
+          fullName:          fullName.trim(),
+          alias:             alias.trim(),
+          username:          usernameCandidate,
+          role,
+          phone:             phone.trim() || undefined,
+          address:           addressFull,
+          postalCode:        postalCode  || undefined,
+          estado:            estado      || undefined,
+          ciudad:            ciudad      || undefined,
+          colonia:           colonia     || undefined,
+          calle:             calle       || undefined,
+          numero:            numero      || undefined,
+          displayName:       role === 'restaurant' ? (alias.trim() || undefined) : undefined,
+          deviceFingerprint,
         }),
       });
-      msg('¡Registro exitoso! Ya puedes iniciar sesión.', true);
+      msg('¡Registro exitoso! Revisa tu correo para verificar tu cuenta.', true);
       setShowVerifyHint(true);
       setView('login');
     } catch (e) {
@@ -297,6 +315,24 @@ function AuthForm({ mode, appKey }) {
       setLoading(false);
     }
   }, [forgotEmail]);
+
+  const submitResend = useCallback(async () => {
+    const email = emailRef.current?.value?.trim() || '';
+    if (!email) { msg('Ingresa tu correo para reenviar la verificación'); return; }
+    setResendLoading(true);
+    try {
+      await apiFetch('/auth/resend-verification', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
+      msg('Correo de verificación reenviado. Revisa tu bandeja.', true);
+      setShowResend(false);
+    } catch (e) {
+      msg(e.message);
+    } finally {
+      setResendLoading(false);
+    }
+  }, []);
 
   function handleKey(e, fn) { if (e.key === 'Enter') fn(); }
   function goTo(v) { setMessage({ text: '', ok: false }); setView(v); }
@@ -424,10 +460,18 @@ function AuthForm({ mode, appKey }) {
       ¿No tienes cuenta? <strong>Regístrate</strong>
       </button>
       </div>
+
+      {showResend && (
+        <div style={{ marginTop:'0.5rem', padding:'0.65rem 0.9rem', background:'#fffbeb', border:'1px solid #f6e05e', borderRadius:8, fontSize:'0.82rem', color:'#744210' }}>
+          📬 ¿No recibiste el correo?{' '}
+          <button type="button" onClick={submitResend} disabled={resendLoading}
+            style={{ background:'none', border:'none', cursor:'pointer', color:'var(--primary)', fontWeight:700, padding:0, fontSize:'0.82rem' }}>
+            {resendLoading ? 'Enviando…' : 'Reenviar verificación'}
+          </button>
+        </div>
+      )}
       </>
     )}
-
-    {/* ── REGISTER ── */}
     {view === 'register' && (
       <>
       <div className="row">
@@ -444,6 +488,12 @@ function AuthForm({ mode, appKey }) {
       <label>Correo electrónico
       <input value={regEmail} onChange={e => setRegEmail(e.target.value)} type="email" placeholder="tu@correo.com" autoComplete="email" />
       </label>
+      {role === 'customer' && (
+        <label>Teléfono <span style={{ color:'var(--error)', fontSize:'0.75rem' }}>*requerido</span>
+        <input value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g,'').slice(0,15))}
+          type="tel" placeholder="Ej: 4431234567" autoComplete="tel" inputMode="numeric" />
+        </label>
+      )}
       {!appKey && (
         <label>Tipo de cuenta
         <select value={role} onChange={e => setRole(e.target.value)}>
