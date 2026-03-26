@@ -97,6 +97,7 @@ export default function DriverOrders({ registerRef }) {
                       onToggleExpand={() => view.setExpanded(view.expanded === order.id ? null : order.id)}
                       onChangeStatus={(status) => view.changeStatusWithGps(order.id, status, order)}
                       onRebalance={() => view.doRebalance(order.id)}
+                      onCancelDispute={() => view.doCancelDispute(order.id)}
                       onStartRelease={() => view.setReleasingId(order.id)}
                       onReleaseNoteChange={view.setReleaseNote}
                       onConfirmRelease={() => view.confirmRelease(order.id)}
@@ -148,3 +149,4 @@ export default function DriverOrders({ registerRef }) {
     </div>
   );
 }
+
