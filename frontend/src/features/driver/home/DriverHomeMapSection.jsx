@@ -1,14 +1,12 @@
-// components/DriverHomeMapSection.jsx
 import DriverMap from '../../../components/DriverMap';
 import NavFABs from '../../../components/NavFABs';
+import RoadPrefsLayer from '../../../components/RoadPrefsLayer';
 import WayPicker from '../../../components/WayPicker';
 import ZoneLayer from '../../../components/ZoneLayer';
 import ZonePlacer from '../../../components/ZonePlacer';
-import RoadPrefsLayer from '../../../components/RoadPrefsLayer';
 import { ZONE_LABELS } from '../../../utils/format';
 
 import { useEffect, useRef } from 'react';
-
 export default function DriverHomeMapSection({
   availability,
   hasActiveOrder,
@@ -29,8 +27,8 @@ export default function DriverHomeMapSection({
   setMapInstance,
   mapInstance,
   activeZones,
-  activeImpassable,     // nueva prop
-  myPreferences,        // nueva prop
+  activeImpassable,
+  myPreferences,
   token,
   userId,
   centerMode,
@@ -50,86 +48,85 @@ export default function DriverHomeMapSection({
 }) {
   return (
     <div style={{ flex:1, minHeight:0, position:'relative', overflow:'hidden', zIndex:0 }}>
-    {!customPin && !hasActiveOrder && availability && (
-      <div style={{ position:'absolute', top:8, left:'50%', transform:'translateX(-50%)', background:'rgba(0,0,0,0.55)', color:'#fff', borderRadius:20, padding:'0.25rem 0.75rem', fontSize:'0.72rem', zIndex:5, pointerEvents:'none', whiteSpace:'nowrap' }}>
-      📍 Toca el mapa para marcar tu posición
-      </div>
-    )}
+      {!customPin && !hasActiveOrder && availability && (
+        <div style={{ position:'absolute', top:8, left:'50%', transform:'translateX(-50%)', background:'rgba(0,0,0,0.55)', color:'#fff', borderRadius:20, padding:'0.25rem 0.75rem', fontSize:'0.72rem', zIndex:5, pointerEvents:'none', whiteSpace:'nowrap' }}>
+          📍 Toca el mapa para marcar tu posición
+        </div>
+      )}
 
-    <DriverMap
-    driverPos={myPosition}
-    customPin={customPin}
-    onCustomPin={setCustomPin}
-    hasActiveOrder={hasActiveOrder}
-    pickupPos={activeOrder?.restaurant_lat ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) } : null}
-    deliveryPos={activeOrder?.customer_lat ? { lat: Number(activeOrder.customer_lat), lng: Number(activeOrder.customer_lng) } : null}
-    pickupLabel={activeOrder?.restaurant_name || 'Tienda'}
-    deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
-    routeGeometry={routeGeometry}
-    allStops={allStops}
-    routeActive={routeActive}
-    onRouteError={setMsg}
-    centerMode={centerMode}
-    navHeadingDeg={navHeadingDeg}
-    onHeadingChange={onHeadingChange}
-    centerSignal={centerSignal}
-    onCenterDone={onCenterDone}
-    onMapReady={setMapInstance}
-    bottomOffset={bottomOffset}
-    pinAddress={pinAddress}
-    loadingPin={loadingPin}
-    onClearPin={() => setCustomPin(null)}
-    onRouteToPin={onRouteToPin}
-    // Props para layers de vialidad
-    impassableWays={activeImpassable}
-    roadPreferences={myPreferences}
-    />
-
-    {mapInstance && (
-      <>
-      <ZoneLayer
-      map={mapInstance}
-      zones={activeZones}
-      token={token}
-      userId={userId}
-      onZoneClick={(zone) => setMsg(`Zona: ${ZONE_LABELS[zone?.type] || zone?.type}`)}
-      bottomOffset={bottomOffset}
+      <DriverMap
+        driverPos={myPosition}
+        customPin={customPin}
+        onCustomPin={setCustomPin}
+        hasActiveOrder={hasActiveOrder}
+        pickupPos={activeOrder?.restaurant_lat ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) } : null}
+        deliveryPos={activeOrder?.customer_lat ? { lat: Number(activeOrder.customer_lat), lng: Number(activeOrder.customer_lng) } : null}
+        pickupLabel={activeOrder?.restaurant_name || 'Tienda'}
+        deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
+        routeGeometry={routeGeometry}
+        allStops={allStops}
+        routeActive={routeActive}
+        onRouteError={setMsg}
+        centerMode={centerMode}
+        navHeadingDeg={navHeadingDeg}
+        onHeadingChange={onHeadingChange}
+        centerSignal={centerSignal}
+        onCenterDone={onCenterDone}
+        onMapReady={setMapInstance}
+        bottomOffset={bottomOffset}
+        pinAddress={pinAddress}
+        loadingPin={loadingPin}
+        onClearPin={() => setCustomPin(null)}
+        onRouteToPin={onRouteToPin}
+        impassableWays={activeImpassable}
+        roadPreferences={myPreferences}
       />
-      <RoadPrefsLayer
-      map={mapInstance}
-      impassableWays={activeImpassable}
-      roadPreferences={myPreferences}
+
+      {mapInstance && (
+        <>
+          <ZoneLayer
+            map={mapInstance}
+            zones={activeZones}
+            token={token}
+            userId={userId}
+            onZoneClick={(zone) => setMsg(`Zona: ${ZONE_LABELS[zone?.type] || zone?.type}`)}
+            bottomOffset={bottomOffset}
+          />
+          <RoadPrefsLayer
+            map={mapInstance}
+            impassableWays={activeImpassable}
+            roadPreferences={myPreferences}
+          />
+        </>
+      )}
+
+      <NavFABs
+        hasActiveOrder={hasActiveOrder}
+        routeGeometry={routeGeometry}
+        centerMode={centerMode}
+        voiceEnabled={voiceEnabled}
+        navMode={navMode}
+        onCenterCycle={onCenterCycle}
+        onVoiceToggle={onVoiceToggle}
+        onGoogleNav={onGoogleNav}
+        onNavMode={onNavMode}
+        bottomOffset={bottomOffset + 16}
+        myPosition={myPosition}
+        isDark={isDark}
+        onQuickReport={onQuickReport}
       />
-      </>
-    )}
 
-    <NavFABs
-    hasActiveOrder={hasActiveOrder}
-    routeGeometry={routeGeometry}
-    centerMode={centerMode}
-    voiceEnabled={voiceEnabled}
-    navMode={navMode}
-    onCenterCycle={onCenterCycle}
-    onVoiceToggle={onVoiceToggle}
-    onGoogleNav={onGoogleNav}
-    onNavMode={onNavMode}
-    bottomOffset={bottomOffset + 16}
-    myPosition={myPosition}
-    isDark={isDark}
-    onQuickReport={onQuickReport}
-    />
+      {navMode === 'zone' && mapInstance && (
+        <ZonePlacer map={mapInstance} onConfirm={onSubmitZone} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
+      )}
 
-    {navMode === 'zone' && mapInstance && (
-      <ZonePlacer map={mapInstance} onConfirm={onSubmitZone} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
-    )}
+      {navMode === 'impassable' && mapInstance && (
+        <WayPicker map={mapInstance} mode="impassable" onConfirm={onSubmitImpassable} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
+      )}
 
-    {navMode === 'impassable' && mapInstance && (
-      <WayPicker map={mapInstance} mode="impassable" onConfirm={onSubmitImpassable} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
-    )}
-
-    {navMode === 'preference' && mapInstance && (
-      <WayPicker map={mapInstance} mode="preference" onConfirm={onSubmitPreference} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
-    )}
+      {navMode === 'preference' && mapInstance && (
+        <WayPicker map={mapInstance} mode="preference" onConfirm={onSubmitPreference} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
+      )}
     </div>
   );
 }

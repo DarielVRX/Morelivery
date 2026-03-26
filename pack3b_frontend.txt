@@ -18,81 +18,90 @@ const STATUS_LABEL = {
 function IconNavigateActive() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/>
+    <polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/>
     </svg>
   );
 }
 function IconRoute() {
   return (
     <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="6" cy="19" r="2"/>
-      <circle cx="18" cy="5" r="2"/>
-      <path d="M6 17V9a6 6 0 016-6h.5"/>
-      <path d="M18 7v8a6 6 0 01-6 6h-.5"/>
+    stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="6" cy="19" r="2"/>
+    <circle cx="18" cy="5" r="2"/>
+    <path d="M6 17V9a6 6 0 016-6h.5"/>
+    <path d="M18 7v8a6 6 0 01-6 6h-.5"/>
     </svg>
   );
 }
 function IconChevron({ up }) {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
-      style={{ transform: up ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
-      <polyline points="6 9 12 15 18 9"/>
+    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+    style={{ transform: up ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+    <polyline points="6 9 12 15 18 9"/>
     </svg>
   );
 }
 function IconOTW() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/>
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/>
     </svg>
   );
 }
 function IconDelivered() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-      <polyline points="20 6 9 17 4 12"/>
+    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+    <polyline points="20 6 9 17 4 12"/>
     </svg>
   );
 }
 function IconRelevo() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="17 1 21 5 17 9"/>
-      <path d="M3 11V9a4 4 0 014-4h14"/>
-      <polyline points="7 23 3 19 7 15"/>
-      <path d="M21 13v2a4 4 0 01-4 4H3"/>
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="17 1 21 5 17 9"/>
+    <path d="M3 11V9a4 4 0 014-4h14"/>
+    <polyline points="7 23 3 19 7 15"/>
+    <path d="M21 13v2a4 4 0 01-4 4H3"/>
     </svg>
   );
 }
 function IconRelease() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 6L6 18M6 6l12 12"/>
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 6L6 18M6 6l12 12"/>
     </svg>
   );
 }
 function IconCard() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <rect x="1" y="4" width="22" height="16" rx="2"/>
-      <line x1="1" y1="10" x2="23" y2="10"/>
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <rect x="1" y="4" width="22" height="16" rx="2"/>
+    <line x1="1" y1="10" x2="23" y2="10"/>
     </svg>
   );
 }
 function IconCash() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <rect x="2" y="6" width="20" height="12" rx="2"/>
-      <circle cx="12" cy="12" r="2"/>
-      <path d="M6 12h.01M18 12h.01"/>
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <rect x="2" y="6" width="20" height="12" rx="2"/>
+    <circle cx="12" cy="12" r="2"/>
+    <path d="M6 12h.01M18 12h.01"/>
+    </svg>
+  );
+}
+function IconCancelDispute() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5z"/>
+    <path d="M12 8v4l3 3"/>
     </svg>
   );
 }
@@ -109,9 +118,10 @@ export default function ActiveOrderPanel({
   onReleaseNoteChange,
   onConfirmRelease,
   onRebalance,
+  onCancelDispute,
   onRoute,
   routeActive = false,
-  panelRef,  // ref para medir altura desde Home
+  panelRef,
 }) {
   if (!order) return null;
 
@@ -123,146 +133,162 @@ export default function ActiveOrderPanel({
   const canOTW      = order.status === 'ready';
   const canDeliver  = order.status === 'on_the_way';
   const canRelevo   = !['on_the_way','delivered','cancelled'].includes(order.status) && !order.picked_up_at && !order.is_disputed;
-  const canRelease  = !['on_the_way','delivered','cancelled'].includes(order.status);
+  const canRelease  = !['on_the_way','delivered','cancelled'].includes(order.status) && !order.is_disputed;
+  const canCancelDispute = order.is_disputed === true;
 
   return (
     <div ref={panelRef} style={{
       flexShrink: 0, background: 'var(--bg-card)',
-      borderTop: '2px solid var(--success)', zIndex: 10,
-      position: 'absolute', bottom: 0, left: 0, right: 0,
-      display: 'flex', flexDirection: 'column',
+          borderTop: '2px solid var(--success)', zIndex: 10,
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          display: 'flex', flexDirection: 'column',
     }}>
-      {/* ── Fila principal siempre visible ─────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 72 }}>
+    {/* ── Fila principal siempre visible ─────────────────────────────────── */}
+    <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 72 }}>
 
-        {/* Botón ruta — toggle: activo=navegar, inactivo=punto */}
-        <button onClick={onRoute} title={routeActive ? 'Desactivar ruta' : 'Calcular ruta'}
-          style={{
-            width: '20%', minWidth: 60, flexShrink: 0,
-            background: routeActive
-              ? 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)'
-              : 'linear-gradient(135deg, #c97b7b 0%, #9e4f4f 100%)',
-            border: 'none', cursor: 'pointer', borderRadius: 0,
-            display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', gap: 4,
-            color: '#fff',
-            transition: 'background 0.2s',
-          }}>
-          {routeActive ? <IconNavigateActive /> : <IconRoute />}
-          <span style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em' }}>
-            {routeActive ? 'NAV' : 'RUTA'}
+    {/* Botón ruta — toggle: activo=navegar, inactivo=punto */}
+    <button onClick={onRoute} title={routeActive ? 'Desactivar ruta' : 'Calcular ruta'}
+    style={{
+      width: '20%', minWidth: 60, flexShrink: 0,
+      background: routeActive
+      ? 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)'
+      : 'linear-gradient(135deg, #c97b7b 0%, #9e4f4f 100%)',
+          border: 'none', cursor: 'pointer', borderRadius: 0,
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 4,
+          color: '#fff',
+          transition: 'background 0.2s',
+    }}>
+    {routeActive ? <IconNavigateActive /> : <IconRoute />}
+    <span style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em' }}>
+    {routeActive ? 'NAV' : 'RUTA'}
+    </span>
+    </button>
+
+    {/* Info + toggle expand */}
+    <div onClick={onToggleExpand} style={{
+      flex: 1, padding: '0.5rem 0.75rem 0.5rem 0.75rem',
+      cursor: 'pointer', userSelect: 'none', minWidth: 0,
+      display: 'flex', flexDirection: 'column', justifyContent: 'center',
+    }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <span style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase',
+      letterSpacing: '0.5px', color: 'var(--success)' }}>
+      {STATUS_LABEL[order.status] || order.status}
+      </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      {order.is_disputed && (
+        <span style={{ fontSize: '0.62rem', fontWeight: 700,
+          background: '#fef9c3', color: '#854d0e',
+          border: '1px solid #fde047', borderRadius: 6,
+          padding: '0.1rem 0.4rem' }}>
+          En disputa
           </span>
-        </button>
-
-        {/* Info + toggle expand */}
-        <div onClick={onToggleExpand} style={{
-          flex: 1, padding: '0.5rem 0.75rem 0.5rem 0.75rem',
-          cursor: 'pointer', userSelect: 'none', minWidth: 0,
-          display: 'flex', flexDirection: 'column', justifyContent: 'center',
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase',
-              letterSpacing: '0.5px', color: 'var(--success)' }}>
-              {STATUS_LABEL[order.status] || order.status}
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {order.is_disputed && (
-                <span style={{ fontSize: '0.62rem', fontWeight: 700,
-                  background: '#fef9c3', color: '#854d0e',
-                  border: '1px solid #fde047', borderRadius: 6,
-                  padding: '0.1rem 0.4rem' }}>
-                  En disputa
-                </span>
-              )}
-              <IconChevron up={expanded} />
-            </div>
-          </div>
-
-          <div style={{ fontSize: '0.82rem', marginTop: '0.15rem', overflow: 'hidden',
-            textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            <strong>{isOTW ? (order.customer_name || 'Cliente') : order.restaurant_name}</strong>
-          </div>
-
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '0.1rem',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {isOTW
-              ? (order.customer_address || order.delivery_address || '')
-              : (order.restaurant_address || '')}
-          </div>
-
-          {/* Pago */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: '0.2rem',
-            fontSize: '0.72rem' }}>
-            {isCash
-              ? <><IconCash /><span style={{ fontWeight: 700, color: 'var(--brand)' }}>
-                  {isOTW ? `Cobrar ${fmt(total)}` : `Pagar ${fmt(order.total_cents || 0)}`}
-                </span></>
-              : <><IconCard /><span style={{ color: 'var(--text-tertiary)' }}>
-                  {order.payment_method === 'card' ? 'Tarjeta — no cobrar' : 'SPEI — no cobrar'}
-                </span></>
-            }
-          </div>
-        </div>
+      )}
+      <IconChevron up={expanded} />
+      </div>
       </div>
 
-      {/* ── Expandible 1: botones de acción ────────────────────────────────── */}
-      <div style={{
-        display: 'grid',
-        gridTemplateRows: expanded ? '1fr' : '0fr',
-        transition: 'grid-template-rows 0.22s ease',
-        overflow: 'hidden',
-      }}>
-        <div style={{ overflow: 'hidden' }}>
-          <div style={{ padding: '0.5rem 0.75rem 0.5rem', borderTop: '1px solid var(--border-light)',
-            display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+      <div style={{ fontSize: '0.82rem', marginTop: '0.15rem', overflow: 'hidden',
+        textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <strong>{isOTW ? (order.customer_name || 'Cliente') : order.restaurant_name}</strong>
+        </div>
 
-            {/* Acciones principales */}
-            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-              <button
+        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '0.1rem',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {isOTW
+            ? (order.customer_address || order.delivery_address || '')
+            : (order.restaurant_address || '')}
+            </div>
+
+            {/* Pago */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: '0.2rem',
+              fontSize: '0.72rem' }}>
+              {isCash
+                ? <><IconCash /><span style={{ fontWeight: 700, color: 'var(--brand)' }}>
+                {isOTW ? `Cobrar ${fmt(total)}` : `Pagar ${fmt(order.total_cents || 0)}`}
+                </span></>
+                : <><IconCard /><span style={{ color: 'var(--text-tertiary)' }}>
+                {order.payment_method === 'card' ? 'Tarjeta — no cobrar' : 'SPEI — no cobrar'}
+                </span></>
+              }
+              </div>
+              </div>
+              </div>
+
+              {/* ── Expandible 1: botones de acción ────────────────────────────────── */}
+              <div style={{
+                display: 'grid',
+                gridTemplateRows: expanded ? '1fr' : '0fr',
+                transition: 'grid-template-rows 0.22s ease',
+                overflow: 'hidden',
+              }}>
+              <div style={{ overflow: 'hidden' }}>
+              <div style={{ padding: '0.5rem 0.75rem 0.5rem', borderTop: '1px solid var(--border-light)',
+                display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+
+                {/* Acciones principales */}
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                <button
                 style={{
                   flex: 1, padding: '0.55rem 0', borderRadius: 8, fontWeight: 700,
                   fontSize: '0.82rem', border: 'none', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                   background: canOTW ? 'var(--brand)' : 'var(--bg-raised)',
-                  color: canOTW ? '#fff' : 'var(--text-tertiary)',
-                  opacity: !canOTW ? 0.5 : 1,
+          color: canOTW ? '#fff' : 'var(--text-tertiary)',
+          opacity: !canOTW ? 0.5 : 1,
                 }}
                 disabled={loadingStatus === 'on_the_way' || !canOTW}
                 onClick={() => onChangeStatus(order.id, 'on_the_way')}>
                 <IconOTW /> En camino
-              </button>
-              <button
+                </button>
+                <button
                 style={{
                   flex: 1, padding: '0.55rem 0', borderRadius: 8, fontWeight: 700,
                   fontSize: '0.82rem', border: 'none', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                   background: canDeliver ? 'var(--success)' : 'var(--bg-raised)',
-                  color: canDeliver ? '#fff' : 'var(--text-tertiary)',
-                  opacity: !canDeliver ? 0.5 : 1,
+          color: canDeliver ? '#fff' : 'var(--text-tertiary)',
+          opacity: !canDeliver ? 0.5 : 1,
                 }}
                 disabled={loadingStatus === 'delivered' || !canDeliver}
                 onClick={() => onChangeStatus(order.id, 'delivered')}>
                 <IconDelivered /> Entregado
-              </button>
-            </div>
+                </button>
+                </div>
 
-            {/* Opciones secundarias — expandible interno */}
-            {(canRelevo || canRelease) && !order.is_disputed && (
-              <details style={{ fontSize: '0.78rem' }}>
-                <summary style={{
-                  cursor: 'pointer', color: 'var(--text-tertiary)', fontWeight: 600,
-                  fontSize: '0.72rem', listStyle: 'none', display: 'flex',
-                  alignItems: 'center', gap: 4, padding: '0.15rem 0',
-                }}>
+                {/* Botón Cancelar disputa (visible solo cuando is_disputed = true) */}
+                {canCancelDispute && (
+                  <button
+                  style={{
+                    width: '100%', padding: '0.55rem 0', borderRadius: 8, fontWeight: 700,
+                    fontSize: '0.82rem', border: '1.5px solid #f59e0b', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    background: '#fffbeb', color: '#b45309',
+                  }}
+                  onClick={onCancelDispute}
+                  disabled={loadingStatus === 'cancel_dispute'}>
+                  <IconCancelDispute /> Cancelar disputa
+                  </button>
+                )}
+
+                {/* Opciones secundarias — expandible interno */}
+                {(canRelevo || canRelease) && !order.is_disputed && (
+                  <details style={{ fontSize: '0.78rem' }}>
+                  <summary style={{
+                    cursor: 'pointer', color: 'var(--text-tertiary)', fontWeight: 600,
+                                                                     fontSize: '0.72rem', listStyle: 'none', display: 'flex',
+                                                                     alignItems: 'center', gap: 4, padding: '0.15rem 0',
+                  }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                    <circle cx="12" cy="12" r="10"/>
-                    <line x1="12" y1="8" x2="12" y2="12"/>
-                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                  stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
                   </svg>
                   Más opciones
-                </summary>
-                <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
+                  </summary>
+                  <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
                   {canRelevo && (
                     <button style={{
                       flex: 1, padding: '0.45rem 0', borderRadius: 8, fontWeight: 700,
@@ -270,7 +296,7 @@ export default function ActiveOrderPanel({
                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                       color: '#854d0e', background: '#fef9c3',
                     }} onClick={onRebalance}>
-                      <IconRelevo /> Buscar relevo
+                    <IconRelevo /> Buscar relevo
                     </button>
                   )}
                   {canRelease && (
@@ -280,85 +306,85 @@ export default function ActiveOrderPanel({
                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                       background: '#fef2f2', color: '#dc2626',
                     }} onClick={onToggleRelease}>
-                      <IconRelease /> Liberar
+                    <IconRelease /> Liberar
                     </button>
                   )}
-                </div>
-              </details>
-            )}
+                  </div>
+                  </details>
+                )}
 
-            {order.is_disputed && (
-              <span style={{ fontSize: '0.72rem', color: '#854d0e', fontStyle: 'italic' }}>
-                En disputa — buscando conductor…
-              </span>
-            )}
+                {order.is_disputed && !canCancelDispute && (
+                  <span style={{ fontSize: '0.72rem', color: '#854d0e', fontStyle: 'italic' }}>
+                  En disputa — buscando conductor…
+                  </span>
+                )}
 
-            {/* Release form */}
-            {showRelease && (
-              <div style={{ marginTop: '0.25rem' }}>
-                <textarea value={releaseNote} onChange={e => onReleaseNoteChange(e.target.value)}
+                {/* Release form */}
+                {showRelease && (
+                  <div style={{ marginTop: '0.25rem' }}>
+                  <textarea value={releaseNote} onChange={e => onReleaseNoteChange(e.target.value)}
                   placeholder="Motivo (obligatorio, mín. 10 caracteres)" rows={2}
                   style={{ width: '100%', boxSizing: 'border-box',
                     marginBottom: '0.15rem', fontSize: '0.82rem' }} />
-                <div style={{ display: 'flex', justifyContent: 'space-between',
-                  alignItems: 'center', marginBottom: '0.3rem' }}>
-                  <span style={{
-                    fontSize: '0.68rem',
-                    color: releaseNote.trim().length < 10 ? '#dc2626' : 'var(--text-tertiary)',
-                  }}>
-                    {releaseNote.trim().length}/10 mín.
-                  </span>
-                </div>
-                <div style={{ display: 'flex', gap: '0.3rem' }}>
-                  <button className="btn-sm btn-danger"
-                    onClick={onConfirmRelease}
-                    disabled={releaseNote.trim().length < 10}
-                    style={{ opacity: releaseNote.trim().length < 10 ? 0.45 : 1,
-                      cursor: releaseNote.trim().length < 10 ? 'not-allowed' : 'pointer' }}>
-                    Confirmar
-                  </button>
-                  <button className="btn-sm"
-                    onClick={() => { onToggleRelease(); onReleaseNoteChange(''); }}>Cancelar</button>
-                </div>
-              </div>
-            )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between',
+                      alignItems: 'center', marginBottom: '0.3rem' }}>
+                      <span style={{
+                        fontSize: '0.68rem',
+                        color: releaseNote.trim().length < 10 ? '#dc2626' : 'var(--text-tertiary)',
+                      }}>
+                      {releaseNote.trim().length}/10 mín.
+                      </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.3rem' }}>
+                      <button className="btn-sm btn-danger"
+                      onClick={onConfirmRelease}
+                      disabled={releaseNote.trim().length < 10}
+                      style={{ opacity: releaseNote.trim().length < 10 ? 0.45 : 1,
+                        cursor: releaseNote.trim().length < 10 ? 'not-allowed' : 'pointer' }}>
+                        Confirmar
+                        </button>
+                        <button className="btn-sm"
+                        onClick={() => { onToggleRelease(); onReleaseNoteChange(''); }}>Cancelar</button>
+                        </div>
+                        </div>
+                )}
 
-            {/* ── Expandible 2: detalles del pedido ──────────────────────── */}
-            <details style={{ borderTop: '1px solid var(--border-light)', paddingTop: '0.35rem' }}>
-              <summary style={{
-                cursor: 'pointer', color: 'var(--text-tertiary)', fontWeight: 600,
-                fontSize: '0.72rem', listStyle: 'none', display: 'flex',
-                alignItems: 'center', gap: 4,
-              }}>
+                {/* ── Expandible 2: detalles del pedido ──────────────────────── */}
+                <details style={{ borderTop: '1px solid var(--border-light)', paddingTop: '0.35rem' }}>
+                <summary style={{
+                  cursor: 'pointer', color: 'var(--text-tertiary)', fontWeight: 600,
+          fontSize: '0.72rem', listStyle: 'none', display: 'flex',
+          alignItems: 'center', gap: 4,
+                }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/>
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
                 </svg>
                 Detalles del pedido
-              </summary>
-              <div style={{ marginTop: '0.35rem' }}>
+                </summary>
+                <div style={{ marginTop: '0.35rem' }}>
                 {(order.items || []).length > 0 && (
                   <ul style={{ fontSize: '0.78rem', margin: '0 0 0.3rem 1rem',
                     color: 'var(--text-primary)' }}>
                     {order.items.map(i => (
                       <li key={i.menuItemId}>{i.name} × {i.quantity}</li>
                     ))}
-                  </ul>
+                    </ul>
                 )}
                 <FeeBreakdown order={order} />
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)',
                   marginTop: '0.3rem' }}>
                   Ganancia estimada:{' '}
                   <strong style={{ color: 'var(--success)' }}>{fmt(earn)}</strong>
-                </div>
-              </div>
-            </details>
+                  </div>
+                  </div>
+                  </details>
 
-          </div>
-        </div>
-      </div>
-    </div>
+                  </div>
+                  </div>
+                  </div>
+                  </div>
   );
 }
 
@@ -1852,6 +1878,7 @@ export default function WayPicker({ map, mode = 'impassable', onConfirm, onCance
 //       • Editar (misma UI que al crear: tipo + vigencia)
 //   - Si la zona tiene una edición pendiente: botón "Un conductor sugirió un cambio"
 //     que muestra la edición y permite confirmar o regresar.
+// UPDATE: soporte para bottomOffset prop para posicionamiento dinámico
 
 import { useEffect, useRef, useState } from 'react';
 
@@ -1875,22 +1902,22 @@ const ZONE_LABELS = {
 
 const ZONE_TYPES = [
   { value: 'traffic',      emoji: '🚦', label: 'Tráfico pesado',       color: '#f97316' },
-  { value: 'construction', emoji: '🚧', label: 'Obra en construcción', color: '#eab308' },
-  { value: 'accident',     emoji: '🚨', label: 'Accidente',            color: '#ef4444' },
-  { value: 'flood',        emoji: '🌊', label: 'Inundación',           color: '#3b82f6' },
-  { value: 'blocked',      emoji: '⛔', label: 'Calle bloqueada',      color: '#8b5cf6' },
-  { value: 'other',        emoji: '⚠️', label: 'Otro problema',        color: '#6b7280' },
+{ value: 'construction', emoji: '🚧', label: 'Obra en construcción', color: '#eab308' },
+{ value: 'accident',     emoji: '🚨', label: 'Accidente',            color: '#ef4444' },
+{ value: 'flood',        emoji: '🌊', label: 'Inundación',           color: '#3b82f6' },
+{ value: 'blocked',      emoji: '⛔', label: 'Calle bloqueada',      color: '#8b5cf6' },
+{ value: 'other',        emoji: '⚠️', label: 'Otro problema',        color: '#6b7280' },
 ];
 
 const HOURS_OPTS = [
   { value: 1,  label: '~1 hora'  },
-  { value: 2,  label: '~2 horas' },
-  { value: 4,  label: '~4 horas' },
-  { value: 8,  label: 'Medio día' },
-  { value: 12, label: '12 horas' },
-  { value: 24, label: '1 día'    },
-  { value: 48, label: '2 días'   },
-  { value: 72, label: '3 días'   },
+{ value: 2,  label: '~2 horas' },
+{ value: 4,  label: '~4 horas' },
+{ value: 8,  label: 'Medio día' },
+{ value: 12, label: '12 horas' },
+{ value: 24, label: '1 día'    },
+{ value: 48, label: '2 días'   },
+{ value: 72, label: '3 días'   },
 ];
 
 // ── helpers ────────────────────────────────────────────────────────────────────
@@ -1911,17 +1938,17 @@ function buildGeoJson(zones) {
     type: 'FeatureCollection',
     features: zones.map(z => ({
       ...circlePolygon(z.lat, z.lng, z.radius_m),
-      properties: {
-        id:    z.id,
-        type:  z.type,
-        color: ZONE_COLORS[z.type] || ZONE_COLORS.other,
-      },
+                              properties: {
+                                id:    z.id,
+                                type:  z.type,
+                                color: ZONE_COLORS[z.type] || ZONE_COLORS.other,
+                              },
     })),
   };
 }
 
 // ── ZoneInfoCard — cuadro flotante sobre el mapa ───────────────────────────────
-function ZoneInfoCard({ zone, onSuggest, onClose, onVote, userId, votedIds = new Set(), voting = false }) {
+function ZoneInfoCard({ zone, onSuggest, onClose, onVote, userId, votedIds = new Set(), voting = false, bottomOffset = 80 }) {
   const color = ZONE_COLORS[zone.type] || ZONE_COLORS.other;
   const label = ZONE_LABELS[zone.type]  || '⚠️ Zona de alerta';
   const hasPending   = Boolean(zone.pending_edit);
@@ -1932,99 +1959,99 @@ function ZoneInfoCard({ zone, onSuggest, onClose, onVote, userId, votedIds = new
   return (
     <div style={{
       position: 'absolute',
-      bottom: 80, left: '50%', transform: 'translateX(-50%)',
-      background: '#fff', borderRadius: 14,
-      boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
-      padding: '0.75rem 1rem',
-      minWidth: 220, maxWidth: 'calc(100vw - 2rem)',
-      zIndex: 50,
-      borderTop: `4px solid ${color}`,
-      pointerEvents: 'auto',
+      bottom: bottomOffset,
+      left: '50%', transform: 'translateX(-50%)',
+          background: '#fff', borderRadius: 14,
+          boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
+          padding: '0.75rem 1rem',
+          minWidth: 220, maxWidth: 'calc(100vw - 2rem)',
+          zIndex: 50,
+          borderTop: `4px solid ${color}`,
+          pointerEvents: 'auto',
     }}>
-      {/* Cerrar */}
-      <button onClick={onClose} style={{
-        position: 'absolute', top: 6, right: 8,
-        background: 'none', border: 'none', cursor: 'pointer',
-        fontSize: '0.9rem', color: '#9ca3af', lineHeight: 1,
-      }}>✕</button>
+    {/* Cerrar */}
+    <button onClick={onClose} style={{
+      position: 'absolute', top: 6, right: 8,
+      background: 'none', border: 'none', cursor: 'pointer',
+      fontSize: '0.9rem', color: '#9ca3af', lineHeight: 1,
+    }}>✕</button>
 
-      {/* Tipo */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '0.5rem' }}>
-        <span style={{
-          background: color + '18', color, border: `1.5px solid ${color}`,
-          borderRadius: 20, padding: '0.22rem 0.65rem',
-          fontSize: '0.8rem', fontWeight: 700,
-        }}>{label}</span>
+    {/* Tipo */}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '0.5rem' }}>
+    <span style={{
+      background: color + '18', color, border: `1.5px solid ${color}`,
+      borderRadius: 20, padding: '0.22rem 0.65rem',
+      fontSize: '0.8rem', fontWeight: 700,
+    }}>{label}</span>
+    </div>
+
+    {/* Votos de confirmación */}
+    {zone.confirm_count != null && (
+      <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: '0.4rem' }}>
+      {zone.confirm_count}/3 conductores confirmaron · {zone.dismiss_count ?? 0} finalizaron
       </div>
+    )}
 
-      {/* Votos de confirmación */}
-      {zone.confirm_count != null && (
-        <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: '0.4rem' }}>
-          {zone.confirm_count}/3 conductores confirmaron · {zone.dismiss_count ?? 0} finalizaron
-        </div>
-      )}
-
-      {/* Edición pendiente de otro conductor */}
-      {hasPending && (
-        <button onClick={() => onSuggest('review_edit')} style={{
-          width: '100%', marginBottom: '0.45rem',
-          padding: '0.42rem 0.75rem', borderRadius: 9,
-          background: '#fffbeb', border: '1.5px solid #fbbf24',
-          color: '#92400e', fontSize: '0.76rem', fontWeight: 700,
-          cursor: 'pointer', textAlign: 'left',
-          display: 'flex', alignItems: 'center', gap: 6,
-        }}>
-          <span style={{ fontSize: '1rem' }}>✏️</span>
-          Un conductor sugirió un cambio
-        </button>
-      )}
-
-      {/* Votos — Confirmar / Ya no está */}
-      {(showConfirm || !alreadyVoted) && (
-        <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.45rem' }}>
-          {showConfirm && (
-            <button onClick={() => onVote?.('confirm')} disabled={voting} style={{
-              flex: 1, padding: '0.45rem 0', borderRadius: 9, fontWeight: 700,
-              fontSize: '0.76rem', cursor: voting ? 'wait' : 'pointer',
-              background: '#f0fdf4', color: '#15803d',
-              border: '1.5px solid #86efac',
-              opacity: voting ? 0.6 : 1,
-            }}>✓ Confirmar</button>
-          )}
-          {!alreadyVoted && (
-            <button onClick={() => onVote?.('dismiss')} disabled={voting} style={{
-              flex: 1, padding: '0.45rem 0', borderRadius: 9, fontWeight: 700,
-              fontSize: '0.76rem', cursor: voting ? 'wait' : 'pointer',
-              background: '#fef2f2', color: '#dc2626',
-              border: '1.5px solid #fca5a5',
-              opacity: voting ? 0.6 : 1,
-            }}>✗ Ya no está · {zone.dismiss_count ?? 0}/3</button>
-          )}
-        </div>
-      )}
-      {alreadyVoted && (
-        <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: '0.45rem', textAlign: 'center' }}>
-          Ya votaste en esta zona
-        </div>
-      )}
-
-      {/* Sugerir cambio */}
-      <button onClick={() => onSuggest('menu')} style={{
-        width: '100%', padding: '0.5rem 0', borderRadius: 9,
-        background: color, color: '#fff', border: 'none',
-        fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer',
+    {/* Edición pendiente de otro conductor */}
+    {hasPending && (
+      <button onClick={() => onSuggest('review_edit')} style={{
+        width: '100%', marginBottom: '0.45rem',
+        padding: '0.42rem 0.75rem', borderRadius: 9,
+        background: '#fffbeb', border: '1.5px solid #fbbf24',
+        color: '#92400e', fontSize: '0.76rem', fontWeight: 700,
+        cursor: 'pointer', textAlign: 'left',
+        display: 'flex', alignItems: 'center', gap: 6,
       }}>
-        Sugerir cambio
+      <span style={{ fontSize: '1rem' }}>✏️</span>
+      Un conductor sugirió un cambio
       </button>
+    )}
+
+    {/* Votos — Confirmar / Ya no está */}
+    {(showConfirm || !alreadyVoted) && (
+      <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.45rem' }}>
+      {showConfirm && (
+        <button onClick={() => onVote?.('confirm')} disabled={voting} style={{
+          flex: 1, padding: '0.45rem 0', borderRadius: 9, fontWeight: 700,
+          fontSize: '0.76rem', cursor: voting ? 'wait' : 'pointer',
+          background: '#f0fdf4', color: '#15803d',
+          border: '1.5px solid #86efac',
+          opacity: voting ? 0.6 : 1,
+        }}>✓ Confirmar</button>
+      )}
+      {!alreadyVoted && (
+        <button onClick={() => onVote?.('dismiss')} disabled={voting} style={{
+          flex: 1, padding: '0.45rem 0', borderRadius: 9, fontWeight: 700,
+          fontSize: '0.76rem', cursor: voting ? 'wait' : 'pointer',
+          background: '#fef2f2', color: '#dc2626',
+          border: '1.5px solid #fca5a5',
+          opacity: voting ? 0.6 : 1,
+        }}>✗ Ya no está · {zone.dismiss_count ?? 0}/3</button>
+      )}
+      </div>
+    )}
+    {alreadyVoted && (
+      <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: '0.45rem', textAlign: 'center' }}>
+      Ya votaste en esta zona
+      </div>
+    )}
+
+    {/* Sugerir cambio */}
+    <button onClick={() => onSuggest('menu')} style={{
+      width: '100%', padding: '0.5rem 0', borderRadius: 9,
+      background: color, color: '#fff', border: 'none',
+      fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer',
+    }}>
+    Sugerir cambio
+    </button>
     </div>
   );
 }
 
 // ── SuggestModal — modal de sugerencia de cambio ──────────────────────────────
 function SuggestModal({ zone, mode, onClose, onDone, token }) {
-  // mode: 'menu' | 'edit' | 'review_edit'
-  const [view,      setView]      = useState(mode); // 'menu'|'edit'|'review_edit'
-  const [editStep,  setEditStep]  = useState('type'); // 'type'|'hours'
+  const [view,      setView]      = useState(mode);
+  const [editStep,  setEditStep]  = useState('type');
   const [newType,   setNewType]   = useState(zone.type);
   const [newHours,  setNewHours]  = useState(zone.estimated_hours ?? 2);
   const [saving,    setSaving]    = useState(false);
@@ -2039,7 +2066,7 @@ function SuggestModal({ zone, mode, onClose, onDone, token }) {
       headers: {
         'Content-Type': 'application/json',
         ...(tok ? { Authorization: `Bearer ${tok}` } : {}),
-        ...(opts.headers || {}),
+                             ...(opts.headers || {}),
       },
     });
     const data = await res.json().catch(() => ({}));
@@ -2095,157 +2122,153 @@ function SuggestModal({ zone, mode, onClose, onDone, token }) {
     boxShadow: '0 -4px 32px rgba(0,0,0,0.18)',
   };
 
-  // ── MENU ──────────────────────────────────────────────────────────────────
   if (view === 'menu') return (
     <div style={overlay} onClick={onClose}>
-      <div style={sheet} onClick={e => e.stopPropagation()}>
-        <div style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: '0.75rem' }}>
-          Sugerir cambio
-        </div>
-        {errMsg && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginBottom: '0.4rem' }}>{errMsg}</div>}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-          <button onClick={() => sendVote('dismiss')} disabled={saving} style={{
-            padding: '0.65rem', borderRadius: 10, cursor: saving ? 'wait' : 'pointer',
-            background: '#f3f4f6', border: '1.5px solid #e5e7eb',
-            fontSize: '0.85rem', fontWeight: 600, color: '#374151',
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}>
-            <span style={{ fontSize: '1.1rem' }}>✅</span>
-            Alerta finalizada
-          </button>
-          <button onClick={() => { setView('edit'); setEditStep('type'); }} disabled={saving} style={{
-            padding: '0.65rem', borderRadius: 10, cursor: saving ? 'wait' : 'pointer',
-            background: '#f3f4f6', border: '1.5px solid #e5e7eb',
-            fontSize: '0.85rem', fontWeight: 600, color: '#374151',
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}>
-            <span style={{ fontSize: '1.1rem' }}>✏️</span>
-            Editar zona
-          </button>
-          <button onClick={onClose} style={{
-            padding: '0.52rem', borderRadius: 10, cursor: 'pointer',
-            background: 'none', border: '1px solid #e5e7eb',
-            fontSize: '0.8rem', color: '#6b7280',
-          }}>Cancelar</button>
-        </div>
-      </div>
+    <div style={sheet} onClick={e => e.stopPropagation()}>
+    <div style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: '0.75rem' }}>
+    Sugerir cambio
+    </div>
+    {errMsg && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginBottom: '0.4rem' }}>{errMsg}</div>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+    <button onClick={() => sendVote('dismiss')} disabled={saving} style={{
+      padding: '0.65rem', borderRadius: 10, cursor: saving ? 'wait' : 'pointer',
+      background: '#f3f4f6', border: '1.5px solid #e5e7eb',
+      fontSize: '0.85rem', fontWeight: 600, color: '#374151',
+      display: 'flex', alignItems: 'center', gap: 8,
+    }}>
+    <span style={{ fontSize: '1.1rem' }}>✅</span>
+    Alerta finalizada
+    </button>
+    <button onClick={() => { setView('edit'); setEditStep('type'); }} disabled={saving} style={{
+      padding: '0.65rem', borderRadius: 10, cursor: saving ? 'wait' : 'pointer',
+      background: '#f3f4f6', border: '1.5px solid #e5e7eb',
+      fontSize: '0.85rem', fontWeight: 600, color: '#374151',
+      display: 'flex', alignItems: 'center', gap: 8,
+    }}>
+    <span style={{ fontSize: '1.1rem' }}>✏️</span>
+    Editar zona
+    </button>
+    <button onClick={onClose} style={{
+      padding: '0.52rem', borderRadius: 10, cursor: 'pointer',
+      background: 'none', border: '1px solid #e5e7eb',
+      fontSize: '0.8rem', color: '#6b7280',
+    }}>Cancelar</button>
+    </div>
+    </div>
     </div>
   );
 
-  // ── EDITAR — step tipo ─────────────────────────────────────────────────────
   if (view === 'edit' && editStep === 'type') return (
     <div style={overlay} onClick={onClose}>
-      <div style={sheet} onClick={e => e.stopPropagation()}>
-        <div style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: '0.65rem' }}>
-          ¿Qué tipo de problema?
-        </div>
-        {errMsg && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginBottom: '0.4rem' }}>{errMsg}</div>}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', marginBottom: '0.6rem' }}>
-          {ZONE_TYPES.map(t => {
-            const active = t.value === newType;
-            return (
-              <button key={t.value} onClick={() => { setNewType(t.value); setEditStep('hours'); }} style={{
-                padding: '0.6rem 0.2rem', borderRadius: 10, cursor: 'pointer',
-                background: active ? t.color + '20' : '#f9fafb',
-                border: `2px solid ${active ? t.color : '#e5e7eb'}`,
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-              }}>
-                <span style={{ fontSize: '1.4rem', lineHeight: 1 }}>{t.emoji}</span>
-                <span style={{ fontSize: '0.64rem', fontWeight: 700, color: t.color, textAlign: 'center', lineHeight: 1.2 }}>
-                  {t.label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        <button onClick={() => setView('menu')} style={{
-          width: '100%', padding: '0.5rem', borderRadius: 8, cursor: 'pointer',
-          background: '#f3f4f6', border: '1px solid #e5e7eb',
-          fontSize: '0.8rem', color: '#6b7280', fontWeight: 600,
-        }}>← Volver</button>
-      </div>
+    <div style={sheet} onClick={e => e.stopPropagation()}>
+    <div style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: '0.65rem' }}>
+    ¿Qué tipo de problema?
+    </div>
+    {errMsg && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginBottom: '0.4rem' }}>{errMsg}</div>}
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', marginBottom: '0.6rem' }}>
+    {ZONE_TYPES.map(t => {
+      const active = t.value === newType;
+      return (
+        <button key={t.value} onClick={() => { setNewType(t.value); setEditStep('hours'); }} style={{
+          padding: '0.6rem 0.2rem', borderRadius: 10, cursor: 'pointer',
+          background: active ? t.color + '20' : '#f9fafb',
+          border: `2px solid ${active ? t.color : '#e5e7eb'}`,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+        }}>
+        <span style={{ fontSize: '1.4rem', lineHeight: 1 }}>{t.emoji}</span>
+        <span style={{ fontSize: '0.64rem', fontWeight: 700, color: t.color, textAlign: 'center', lineHeight: 1.2 }}>
+        {t.label}
+        </span>
+        </button>
+      );
+    })}
+    </div>
+    <button onClick={() => setView('menu')} style={{
+      width: '100%', padding: '0.5rem', borderRadius: 8, cursor: 'pointer',
+      background: '#f3f4f6', border: '1px solid #e5e7eb',
+      fontSize: '0.8rem', color: '#6b7280', fontWeight: 600,
+    }}>← Volver</button>
+    </div>
     </div>
   );
 
-  // ── EDITAR — step horas ────────────────────────────────────────────────────
   if (view === 'edit' && editStep === 'hours') {
     const sel = ZONE_TYPES.find(t => t.value === newType) || ZONE_TYPES[0];
     return (
       <div style={overlay} onClick={onClose}>
-        <div style={sheet} onClick={e => e.stopPropagation()}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '0.65rem' }}>
-            <span style={{ fontSize: '1.3rem' }}>{sel.emoji}</span>
-            <span style={{ fontWeight: 700, fontSize: '0.88rem', color: sel.color }}>{sel.label}</span>
-            <span style={{ fontSize: '0.72rem', color: '#9ca3af', marginLeft: 'auto' }}>¿Cuánto durará?</span>
-          </div>
-          {errMsg && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginBottom: '0.4rem' }}>{errMsg}</div>}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.38rem', marginBottom: '0.6rem' }}>
-            {HOURS_OPTS.map(o => (
-              <button key={o.value} onClick={() => setNewHours(o.value)} disabled={saving} style={{
-                padding: '0.55rem 0.2rem', borderRadius: 9, cursor: saving ? 'wait' : 'pointer',
-                background: newHours === o.value ? sel.color + '18' : '#f9fafb',
-                border: `1.5px solid ${newHours === o.value ? sel.color : '#e5e7eb'}`,
-                fontSize: '0.8rem', fontWeight: newHours === o.value ? 700 : 400,
-                color: newHours === o.value ? sel.color : '#374151',
-              }}>{o.label}</button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: '0.4rem' }}>
-            <button onClick={sendEdit} disabled={saving} style={{
-              flex: 1, padding: '0.6rem', borderRadius: 9, cursor: saving ? 'wait' : 'pointer',
-              background: sel.color, color: '#fff', border: 'none',
-              fontSize: '0.85rem', fontWeight: 700, opacity: saving ? 0.7 : 1,
-            }}>{saving ? 'Enviando…' : 'Sugerir cambio'}</button>
-            <button onClick={() => setEditStep('type')} style={{
-              flex: 1, padding: '0.6rem', borderRadius: 9, cursor: 'pointer',
-              background: '#f3f4f6', border: '1px solid #e5e7eb',
-              fontSize: '0.8rem', color: '#6b7280', fontWeight: 600,
-            }}>← Tipo</button>
-          </div>
-        </div>
+      <div style={sheet} onClick={e => e.stopPropagation()}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '0.65rem' }}>
+      <span style={{ fontSize: '1.3rem' }}>{sel.emoji}</span>
+      <span style={{ fontWeight: 700, fontSize: '0.88rem', color: sel.color }}>{sel.label}</span>
+      <span style={{ fontSize: '0.72rem', color: '#9ca3af', marginLeft: 'auto' }}>¿Cuánto durará?</span>
+      </div>
+      {errMsg && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginBottom: '0.4rem' }}>{errMsg}</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.38rem', marginBottom: '0.6rem' }}>
+      {HOURS_OPTS.map(o => (
+        <button key={o.value} onClick={() => setNewHours(o.value)} disabled={saving} style={{
+          padding: '0.55rem 0.2rem', borderRadius: 9, cursor: saving ? 'wait' : 'pointer',
+          background: newHours === o.value ? sel.color + '18' : '#f9fafb',
+          border: `1.5px solid ${newHours === o.value ? sel.color : '#e5e7eb'}`,
+          fontSize: '0.8rem', fontWeight: newHours === o.value ? 700 : 400,
+          color: newHours === o.value ? sel.color : '#374151',
+        }}>{o.label}</button>
+      ))}
+      </div>
+      <div style={{ display: 'flex', gap: '0.4rem' }}>
+      <button onClick={sendEdit} disabled={saving} style={{
+        flex: 1, padding: '0.6rem', borderRadius: 9, cursor: saving ? 'wait' : 'pointer',
+        background: sel.color, color: '#fff', border: 'none',
+        fontSize: '0.85rem', fontWeight: 700, opacity: saving ? 0.7 : 1,
+      }}>{saving ? 'Enviando…' : 'Sugerir cambio'}</button>
+      <button onClick={() => setEditStep('type')} style={{
+        flex: 1, padding: '0.6rem', borderRadius: 9, cursor: 'pointer',
+        background: '#f3f4f6', border: '1px solid #e5e7eb',
+        fontSize: '0.8rem', color: '#6b7280', fontWeight: 600,
+      }}>← Tipo</button>
+      </div>
+      </div>
       </div>
     );
   }
 
-  // ── REVISAR EDICIÓN DE OTRO CONDUCTOR ─────────────────────────────────────
   if (view === 'review_edit') {
     const edit      = zone.pending_edit || {};
     const editColor = ZONE_COLORS[edit.type] || ZONE_COLORS.other;
     const editLabel = ZONE_LABELS[edit.type]  || '⚠️ Zona';
     return (
       <div style={overlay} onClick={onClose}>
-        <div style={sheet} onClick={e => e.stopPropagation()}>
-          <div style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: '0.55rem' }}>
-            ✏️ Cambio sugerido por un conductor
-          </div>
-          <div style={{ background: '#f9fafb', borderRadius: 10, padding: '0.65rem', marginBottom: '0.65rem' }}>
-            <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: '0.25rem' }}>Propuesta</div>
-            <div style={{
-              display: 'inline-block', background: editColor + '18',
-              color: editColor, border: `1.5px solid ${editColor}`,
-              borderRadius: 20, padding: '0.22rem 0.65rem',
-              fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.3rem',
-            }}>{editLabel}</div>
-            {edit.estimated_hours && (
-              <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                Vigencia: {HOURS_OPTS.find(o => o.value === edit.estimated_hours)?.label ?? `${edit.estimated_hours}h`}
-              </div>
-            )}
-          </div>
-          {errMsg && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginBottom: '0.4rem' }}>{errMsg}</div>}
-          <div style={{ display: 'flex', gap: '0.4rem' }}>
-            <button onClick={confirmEdit} disabled={saving} style={{
-              flex: 1, padding: '0.6rem', borderRadius: 9, cursor: saving ? 'wait' : 'pointer',
-              background: editColor, color: '#fff', border: 'none',
-              fontSize: '0.85rem', fontWeight: 700, opacity: saving ? 0.7 : 1,
-            }}>{saving ? 'Confirmando…' : 'Confirmar'}</button>
-            <button onClick={onClose} style={{
-              flex: 1, padding: '0.6rem', borderRadius: 9, cursor: 'pointer',
-              background: '#f3f4f6', border: '1px solid #e5e7eb',
-              fontSize: '0.8rem', color: '#6b7280', fontWeight: 600,
-            }}>Regresar</button>
-          </div>
+      <div style={sheet} onClick={e => e.stopPropagation()}>
+      <div style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: '0.55rem' }}>
+      ✏️ Cambio sugerido por un conductor
+      </div>
+      <div style={{ background: '#f9fafb', borderRadius: 10, padding: '0.65rem', marginBottom: '0.65rem' }}>
+      <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: '0.25rem' }}>Propuesta</div>
+      <div style={{
+        display: 'inline-block', background: editColor + '18',
+        color: editColor, border: `1.5px solid ${editColor}`,
+        borderRadius: 20, padding: '0.22rem 0.65rem',
+        fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.3rem',
+      }}>{editLabel}</div>
+      {edit.estimated_hours && (
+        <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+        Vigencia: {HOURS_OPTS.find(o => o.value === edit.estimated_hours)?.label ?? `${edit.estimated_hours}h`}
         </div>
+      )}
+      </div>
+      {errMsg && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginBottom: '0.4rem' }}>{errMsg}</div>}
+      <div style={{ display: 'flex', gap: '0.4rem' }}>
+      <button onClick={confirmEdit} disabled={saving} style={{
+        flex: 1, padding: '0.6rem', borderRadius: 9, cursor: saving ? 'wait' : 'pointer',
+        background: editColor, color: '#fff', border: 'none',
+        fontSize: '0.85rem', fontWeight: 700, opacity: saving ? 0.7 : 1,
+      }}>{saving ? 'Confirmando…' : 'Confirmar'}</button>
+      <button onClick={onClose} style={{
+        flex: 1, padding: '0.6rem', borderRadius: 9, cursor: 'pointer',
+        background: '#f3f4f6', border: '1px solid #e5e7eb',
+        fontSize: '0.8rem', color: '#6b7280', fontWeight: 600,
+      }}>Regresar</button>
+      </div>
+      </div>
       </div>
     );
   }
@@ -2254,13 +2277,12 @@ function SuggestModal({ zone, mode, onClose, onDone, token }) {
 }
 
 // ── ZoneLayer ─────────────────────────────────────────────────────────────────
-export default function ZoneLayer({ map, zones = [], onZoneClick, token, userId }) {
+export default function ZoneLayer({ map, zones = [], onZoneClick, token, userId, bottomOffset = 80 }) {
   const zonesRef          = useRef(zones);
-  const [selected, setSelected] = useState(null);    // zona tocada
-  const [suggestMode, setSuggestMode] = useState(null); // 'menu'|'review_edit'
+  const [selected, setSelected] = useState(null);
+  const [suggestMode, setSuggestMode] = useState(null);
   const [voting, setVoting] = useState(false);
 
-  // IDs de zonas votadas — persistidos en localStorage
   const [votedIds, setVotedIds] = useState(() => {
     try {
       const stored = localStorage.getItem('zone_voted_ids');
@@ -2306,37 +2328,37 @@ export default function ZoneLayer({ map, zones = [], onZoneClick, token, userId 
     const FILL = 'nav-zones-fill';
     const LINE = 'nav-zones-line';
 
-    function addLayers() {
-      if (!map.getSource(SRC)) {
-        map.addSource(SRC, { type: 'geojson', data: buildGeoJson(zones) });
-      } else {
-        map.getSource(SRC).setData(buildGeoJson(zones));
-        return;
-      }
-      map.addLayer({ id: FILL, type: 'fill', source: SRC,
-        paint: { 'fill-color': ['get','color'], 'fill-opacity': 0.13 } });
-      map.addLayer({ id: LINE, type: 'line', source: SRC,
-        paint: { 'line-color': ['get','color'], 'line-width': 2, 'line-opacity': 0.65 } });
-
-      map.on('click', FILL, (e) => {
-        const props = e.features?.[0]?.properties;
-        if (!props) return;
-        const zone = zonesRef.current.find(z => z.id === props.id);
-        if (zone) { setSelected(zone); setSuggestMode(null); }
-        onZoneClick?.(zone);
-      });
-      map.on('mouseenter', FILL, () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', FILL, () => { map.getCanvas().style.cursor = ''; });
+  function addLayers() {
+    if (!map.getSource(SRC)) {
+      map.addSource(SRC, { type: 'geojson', data: buildGeoJson(zones) });
+    } else {
+      map.getSource(SRC).setData(buildGeoJson(zones));
+      return;
     }
+    map.addLayer({ id: FILL, type: 'fill', source: SRC,
+      paint: { 'fill-color': ['get','color'], 'fill-opacity': 0.13 } });
+    map.addLayer({ id: LINE, type: 'line', source: SRC,
+      paint: { 'line-color': ['get','color'], 'line-width': 2, 'line-opacity': 0.65 } });
 
-    if (map.isStyleLoaded()) addLayers(); else map.once('load', addLayers);
-    return () => {
-      try {
-        if (map.getLayer(LINE)) map.removeLayer(LINE);
-        if (map.getLayer(FILL)) map.removeLayer(FILL);
-        if (map.getSource(SRC)) map.removeSource(SRC);
-      } catch (_) {}
-    };
+    map.on('click', FILL, (e) => {
+      const props = e.features?.[0]?.properties;
+      if (!props) return;
+      const zone = zonesRef.current.find(z => z.id === props.id);
+      if (zone) { setSelected(zone); setSuggestMode(null); }
+      onZoneClick?.(zone);
+    });
+    map.on('mouseenter', FILL, () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', FILL, () => { map.getCanvas().style.cursor = ''; });
+  }
+
+  if (map.isStyleLoaded()) addLayers(); else map.once('load', addLayers);
+  return () => {
+    try {
+      if (map.getLayer(LINE)) map.removeLayer(LINE);
+      if (map.getLayer(FILL)) map.removeLayer(FILL);
+      if (map.getSource(SRC)) map.removeSource(SRC);
+    } catch (_) {}
+  };
   }, [map]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Actualizar datos
@@ -2346,26 +2368,27 @@ export default function ZoneLayer({ map, zones = [], onZoneClick, token, userId 
 
   return (
     <>
-      {selected && !suggestMode && (
-        <ZoneInfoCard
-          zone={selected}
-          onClose={() => setSelected(null)}
-          onSuggest={(m) => setSuggestMode(m)}
-          onVote={handleVote}
-          userId={userId}
-          votedIds={votedIds}
-          voting={voting}
-        />
-      )}
-      {selected && suggestMode && (
-        <SuggestModal
-          zone={selected}
-          mode={suggestMode}
-          token={token}
-          onClose={() => { setSuggestMode(null); setSelected(null); }}
-          onDone={() => { setSuggestMode(null); setSelected(null); }}
-        />
-      )}
+    {selected && !suggestMode && (
+      <ZoneInfoCard
+      zone={selected}
+      onClose={() => setSelected(null)}
+      onSuggest={(m) => setSuggestMode(m)}
+      onVote={handleVote}
+      userId={userId}
+      votedIds={votedIds}
+      voting={voting}
+      bottomOffset={bottomOffset}
+      />
+    )}
+    {selected && suggestMode && (
+      <SuggestModal
+      zone={selected}
+      mode={suggestMode}
+      token={token}
+      onClose={() => { setSuggestMode(null); setSelected(null); }}
+      onDone={() => { setSuggestMode(null); setSelected(null); }}
+      />
+    )}
     </>
   );
 }
@@ -2377,12 +2400,10 @@ import { apiFetch } from '../../../api/client';
 export async function fetchAllZones(token) {
   const [active, mine] = await Promise.all([
     apiFetch('/nav/zones/active'),
-    token ? apiFetch('/nav/zones/mine', {}, token) : Promise.resolve({ zones: [] }),
+                                           token ? apiFetch('/nav/zones/mine', {}, token) : Promise.resolve({ zones: [] }),
   ]);
-  // Merge: mine overrides active for same id (has ownership info)
   const mineMap = new Map((mine.zones || []).map(z => [z.id, { ...z, is_mine: true }]));
   const merged = (active.zones || []).map(z => mineMap.has(z.id) ? mineMap.get(z.id) : z);
-  // Add mine zones not in active (expired but still owned)
   for (const [id, z] of mineMap) {
     if (!merged.find(m => m.id === id)) merged.push(z);
   }
@@ -2392,7 +2413,7 @@ export async function fetchAllZones(token) {
 export async function fetchAllImpassable(token) {
   const [all, mine] = await Promise.all([
     apiFetch('/nav/road-prefs/impassable'),
-    token ? apiFetch('/nav/road-prefs/impassable/mine', {}, token) : Promise.resolve({ reports: [] }),
+                                        token ? apiFetch('/nav/road-prefs/impassable/mine', {}, token) : Promise.resolve({ reports: [] }),
   ]);
   const mineMap = new Map((mine.reports || []).map(r => [r.way_id, { ...r, is_mine: true }]));
   const merged = (all.reports || []).map(r => mineMap.has(r.way_id) ? mineMap.get(r.way_id) : r);
@@ -2417,7 +2438,7 @@ export async function deleteZone(id, token) {
 
 export async function confirmImpassable(way_id, estimated_duration, token) {
   return apiFetch(`/nav/road-prefs/impassable/${way_id}/confirm`,
-    { method: 'POST', body: JSON.stringify({ estimated_duration }) }, token);
+                  { method: 'POST', body: JSON.stringify({ estimated_duration }) }, token);
 }
 
 export async function deleteImpassable(way_id, token) {
@@ -2426,22 +2447,36 @@ export async function deleteImpassable(way_id, token) {
 
 export async function updatePreference(way_id, preference, token) {
   return apiFetch(`/nav/road-prefs/preference/${way_id}`,
-    { method: 'PUT', body: JSON.stringify({ preference }) }, token);
+                  { method: 'PUT', body: JSON.stringify({ preference }) }, token);
 }
 
 export async function deletePreference(way_id, token) {
   return apiFetch(`/nav/road-prefs/preference/${way_id}`, { method: 'DELETE' }, token);
 }
 
+// ── Bag capacity ───────────────────────────────────────────────────────────────
+export async function updateBagCapacity(liters, token) {
+  return apiFetch('/drivers/me/bag-capacity',
+                  { method: 'PATCH', body: JSON.stringify({ bag_capacity_liters: liters }) }, token);
+}
+
+export async function fetchBagCapacity(token) {
+  const data = await apiFetch('/drivers/me', {}, token);
+  return data?.profile?.bag_capacity_liters ?? 25;
+}
+
 === FILE: frontend/src/features/driver/home/DriverHomeMapSection.jsx ===
+// components/DriverHomeMapSection.jsx
 import DriverMap from '../../../components/DriverMap';
 import NavFABs from '../../../components/NavFABs';
 import WayPicker from '../../../components/WayPicker';
 import ZoneLayer from '../../../components/ZoneLayer';
 import ZonePlacer from '../../../components/ZonePlacer';
+import RoadPrefsLayer from '../../../components/RoadPrefsLayer';
 import { ZONE_LABELS } from '../../../utils/format';
 
 import { useEffect, useRef } from 'react';
+
 export default function DriverHomeMapSection({
   availability,
   hasActiveOrder,
@@ -2462,6 +2497,8 @@ export default function DriverHomeMapSection({
   setMapInstance,
   mapInstance,
   activeZones,
+  activeImpassable,     // nueva prop
+  myPreferences,        // nueva prop
   token,
   userId,
   centerMode,
@@ -2481,84 +2518,191 @@ export default function DriverHomeMapSection({
 }) {
   return (
     <div style={{ flex:1, minHeight:0, position:'relative', overflow:'hidden', zIndex:0 }}>
-      {!customPin && !hasActiveOrder && availability && (
-        <div style={{ position:'absolute', top:8, left:'50%', transform:'translateX(-50%)', background:'rgba(0,0,0,0.55)', color:'#fff', borderRadius:20, padding:'0.25rem 0.75rem', fontSize:'0.72rem', zIndex:5, pointerEvents:'none', whiteSpace:'nowrap' }}>
-          📍 Toca el mapa para marcar tu posición
-        </div>
-      )}
+    {!customPin && !hasActiveOrder && availability && (
+      <div style={{ position:'absolute', top:8, left:'50%', transform:'translateX(-50%)', background:'rgba(0,0,0,0.55)', color:'#fff', borderRadius:20, padding:'0.25rem 0.75rem', fontSize:'0.72rem', zIndex:5, pointerEvents:'none', whiteSpace:'nowrap' }}>
+      📍 Toca el mapa para marcar tu posición
+      </div>
+    )}
 
-      <DriverMap
-        driverPos={myPosition}
-        customPin={customPin}
-        onCustomPin={setCustomPin}
-        hasActiveOrder={hasActiveOrder}
-        pickupPos={activeOrder?.restaurant_lat ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) } : null}
-        deliveryPos={activeOrder?.customer_lat ? { lat: Number(activeOrder.customer_lat), lng: Number(activeOrder.customer_lng) } : null}
-        pickupLabel={activeOrder?.restaurant_name || 'Tienda'}
-        deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
-        routeGeometry={routeGeometry}
-        allStops={allStops}
-        routeActive={routeActive}
-        onRouteError={setMsg}
-        centerMode={centerMode}
-        navHeadingDeg={navHeadingDeg}
-        onHeadingChange={onHeadingChange}
-        centerSignal={centerSignal}
-        onCenterDone={onCenterDone}
-        onMapReady={setMapInstance}
-        bottomOffset={bottomOffset}
-        pinAddress={pinAddress}
-        loadingPin={loadingPin}
-        onClearPin={() => setCustomPin(null)}
-        onRouteToPin={onRouteToPin}
+    <DriverMap
+    driverPos={myPosition}
+    customPin={customPin}
+    onCustomPin={setCustomPin}
+    hasActiveOrder={hasActiveOrder}
+    pickupPos={activeOrder?.restaurant_lat ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) } : null}
+    deliveryPos={activeOrder?.customer_lat ? { lat: Number(activeOrder.customer_lat), lng: Number(activeOrder.customer_lng) } : null}
+    pickupLabel={activeOrder?.restaurant_name || 'Tienda'}
+    deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
+    routeGeometry={routeGeometry}
+    allStops={allStops}
+    routeActive={routeActive}
+    onRouteError={setMsg}
+    centerMode={centerMode}
+    navHeadingDeg={navHeadingDeg}
+    onHeadingChange={onHeadingChange}
+    centerSignal={centerSignal}
+    onCenterDone={onCenterDone}
+    onMapReady={setMapInstance}
+    bottomOffset={bottomOffset}
+    pinAddress={pinAddress}
+    loadingPin={loadingPin}
+    onClearPin={() => setCustomPin(null)}
+    onRouteToPin={onRouteToPin}
+    // Props para layers de vialidad
+    impassableWays={activeImpassable}
+    roadPreferences={myPreferences}
+    />
+
+    {mapInstance && (
+      <>
+      <ZoneLayer
+      map={mapInstance}
+      zones={activeZones}
+      token={token}
+      userId={userId}
+      onZoneClick={(zone) => setMsg(`Zona: ${ZONE_LABELS[zone?.type] || zone?.type}`)}
+      bottomOffset={bottomOffset}
       />
-
-      {mapInstance && (
-        <ZoneLayer
-          map={mapInstance}
-          zones={activeZones}
-          token={token}
-          userId={userId}
-          onZoneClick={(zone) => setMsg(`Zona: ${ZONE_LABELS[zone?.type] || zone?.type}`)}
-        />
-      )}
-
-      {/* Popup de dirección ahora se muestra sobre el pin via MapLibre Popup — ver DriverMap */}
-      {/* El pin SVG se oculta automáticamente tras 5s o al tocar otro punto */}
-
-      <NavFABs
-        hasActiveOrder={hasActiveOrder}
-        routeGeometry={routeGeometry}
-        centerMode={centerMode}
-        voiceEnabled={voiceEnabled}
-        navMode={navMode}
-        onCenterCycle={onCenterCycle}
-        onVoiceToggle={onVoiceToggle}
-        onGoogleNav={onGoogleNav}
-        onNavMode={onNavMode}
-        bottomOffset={bottomOffset + 16}
-        myPosition={myPosition}
-        isDark={isDark}
-        onQuickReport={onQuickReport}
+      <RoadPrefsLayer
+      map={mapInstance}
+      impassableWays={activeImpassable}
+      roadPreferences={myPreferences}
       />
+      </>
+    )}
 
-      {navMode === 'zone' && mapInstance && (
-        <ZonePlacer map={mapInstance} onConfirm={onSubmitZone} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
-      )}
+    <NavFABs
+    hasActiveOrder={hasActiveOrder}
+    routeGeometry={routeGeometry}
+    centerMode={centerMode}
+    voiceEnabled={voiceEnabled}
+    navMode={navMode}
+    onCenterCycle={onCenterCycle}
+    onVoiceToggle={onVoiceToggle}
+    onGoogleNav={onGoogleNav}
+    onNavMode={onNavMode}
+    bottomOffset={bottomOffset + 16}
+    myPosition={myPosition}
+    isDark={isDark}
+    onQuickReport={onQuickReport}
+    />
 
-      {navMode === 'impassable' && mapInstance && (
-        <WayPicker map={mapInstance} mode="impassable" onConfirm={onSubmitImpassable} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
-      )}
+    {navMode === 'zone' && mapInstance && (
+      <ZonePlacer map={mapInstance} onConfirm={onSubmitZone} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
+    )}
 
-      {navMode === 'preference' && mapInstance && (
-        <WayPicker map={mapInstance} mode="preference" onConfirm={onSubmitPreference} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
-      )}
+    {navMode === 'impassable' && mapInstance && (
+      <WayPicker map={mapInstance} mode="impassable" onConfirm={onSubmitImpassable} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
+    )}
+
+    {navMode === 'preference' && mapInstance && (
+      <WayPicker map={mapInstance} mode="preference" onConfirm={onSubmitPreference} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
+    )}
     </div>
   );
 }
 
 === FILE: frontend/src/features/driver/home/DriverHomeStatusBar.jsx ===
 // components/DriverHomeStatusBar.jsx
+import { useState } from 'react';
+import { updateBagCapacity, fetchBagCapacity } from '../alerts/api';
+import { useAuth } from '../../../contexts/AuthContext';
+
+// Modal para editar capacidad de mochila
+function BagCapacityModal({ isOpen, onClose, currentLiters, onSave, token }) {
+  const [liters, setLiters] = useState(currentLiters);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  if (!isOpen) return null;
+
+  const handleSave = async () => {
+    const val = parseFloat(liters);
+    if (isNaN(val) || val < 1) {
+      setError('La capacidad debe ser al menos 1 litro');
+      return;
+    }
+    if (val > 200) {
+      setError('La capacidad no puede exceder 200 litros');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await updateBagCapacity(val, token);
+      onSave(val);
+      onClose();
+    } catch (e) {
+      setError(e.message || 'Error al guardar');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1000,
+      background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }} onClick={onClose}>
+    <div style={{
+      background: 'var(--bg-card)', borderRadius: 16,
+          padding: '1.25rem', width: '90%', maxWidth: 320,
+          boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
+    }} onClick={e => e.stopPropagation()}>
+    <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.5rem' }}>
+    🎒 Capacidad de mochila
+    </div>
+    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+    Define cuántos litros puedes cargar. Esto ayuda a calcular si un pedido cabe en tu ruta.
+    </div>
+    <input
+    type="number"
+    value={liters}
+    onChange={e => setLiters(e.target.value)}
+    step="1"
+    min="1"
+    max="200"
+    style={{
+      width: '100%', padding: '0.6rem', borderRadius: 10,
+      border: '1px solid var(--border)', background: 'var(--bg-input)',
+          fontSize: '1rem', marginBottom: '0.5rem',
+    }}
+    />
+    {error && (
+      <div style={{ fontSize: '0.7rem', color: '#dc2626', marginBottom: '0.75rem' }}>
+      {error}
+      </div>
+    )}
+    <div style={{ display: 'flex', gap: '0.5rem' }}>
+    <button
+    onClick={handleSave}
+    disabled={saving}
+    style={{
+      flex: 1, padding: '0.6rem', borderRadius: 10,
+      background: 'var(--brand)', color: '#fff', border: 'none',
+          fontWeight: 600, cursor: saving ? 'wait' : 'pointer',
+          opacity: saving ? 0.6 : 1,
+    }}
+    >
+    {saving ? 'Guardando…' : 'Guardar'}
+    </button>
+    <button
+    onClick={onClose}
+    style={{
+      flex: 1, padding: '0.6rem', borderRadius: 10,
+      background: 'var(--bg-raised)', border: '1px solid var(--border)',
+          cursor: 'pointer', fontWeight: 600,
+    }}
+    >
+    Cancelar
+    </button>
+    </div>
+    </div>
+    </div>
+  );
+}
+
 export default function DriverHomeStatusBar({
   availability,
   onToggleAvailability,
@@ -2566,98 +2710,157 @@ export default function DriverHomeStatusBar({
   onDismissMsg,
   transferBanner,
   onDismissTransferBanner,
-  counters,       // { session_deliveries, session_earnings_cents }
-  bagPct = null,  // pico de capacidad de mochila en ruta actual
+  counters,
+  bagPct = null,
 }) {
-  // Ganancias del día
+  const { auth, patchUser } = useAuth();
+  const [showBagModal, setShowBagModal] = useState(false);
+  const [currentBagCapacity, setCurrentBagCapacity] = useState(null);
+
   const earnings = counters?.session_earnings_cents
-    ? `$${(counters.session_earnings_cents / 100).toFixed(0)}`
-    : null;
+  ? `$${(counters.session_earnings_cents / 100).toFixed(0)}`
+  : null;
   const deliveries = counters?.session_deliveries ?? 0;
 
-  // bagPct viene de useOrderManager — calculado al aceptar la oferta
+  // Cargar capacidad actual al montar o al cambiar usuario
+  const loadBagCapacity = async () => {
+    if (!auth.token) return;
+    try {
+      const capacity = await fetchBagCapacity(auth.token);
+      setCurrentBagCapacity(capacity);
+    } catch (_) {}
+  };
+
+  // Cargar cuando el token esté disponible
+  if (auth.token && currentBagCapacity === null) {
+    loadBagCapacity();
+  }
+
+  const handleSaveBagCapacity = (newLiters) => {
+    setCurrentBagCapacity(newLiters);
+    // Actualizar perfil local si es necesario
+    patchUser?.({
+      driver: {
+        ...(auth.user?.driver || {}),
+                bag_capacity_liters: newLiters,
+      },
+    });
+  };
 
   return (
     <>
-      <div style={{
-        flexShrink: 0,
-        background: 'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)',
-        padding: '0.5rem 1rem',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 8,
-        zIndex: 10,
+    <div style={{
+      flexShrink: 0,
+      background: 'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)',
+          padding: '0.5rem 1rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 8,
+          zIndex: 10,
+    }}>
+    {/* Stats del día + mochila */}
+    <div style={{
+      display: 'flex', gap: '0.75rem', alignItems: 'center',
+      fontSize: '0.74rem', color: 'rgba(255,255,255,0.9)', minWidth: 0,
+    }}>
+    <span style={{ fontWeight: 600 }}>
+    <span style={{ opacity: 0.7, fontSize: '0.68rem' }}>Hoy </span>
+    {earnings ?? '$0'}
+    </span>
+    <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.85)"
+    strokeWidth="2.5" strokeLinecap="round">
+    <polyline points="20 6 9 17 4 12"/>
+    </svg>
+    {deliveries}
+    </span>
+
+    {/* Ícono de mochila con capacidad — click para editar */}
+    <button
+    onClick={() => setShowBagModal(true)}
+    style={{
+      display: 'flex', alignItems: 'center', gap: 3,
+      background: 'none', border: 'none', cursor: 'pointer',
+      padding: '0.2rem 0.3rem', borderRadius: 12,
+      transition: 'background 0.1s',
+      color: 'rgba(255,255,255,0.9)',
+    }}
+    title={`Capacidad: ${currentBagCapacity ?? '?'} litros`}
+    >
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round">
+    <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+    <line x1="3" y1="6" x2="21" y2="6"/>
+    <path d="M16 10a4 4 0 01-8 0"/>
+    </svg>
+    <span style={{ fontSize: '0.68rem', fontWeight: 500 }}>
+    {currentBagCapacity ?? '?'}L
+    </span>
+    </button>
+
+    {bagPct !== null && (
+      <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.85)"
+      strokeWidth="2" strokeLinecap="round">
+      <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+      <line x1="3" y1="6" x2="21" y2="6"/>
+      <path d="M16 10a4 4 0 01-8 0"/>
+      </svg>
+      {bagPct}%
+      </span>
+    )}
+    </div>
+
+    {/* Toggle */}
+    <button
+    onClick={onToggleAvailability}
+    className={availability ? 'btn-primary btn-sm' : 'btn-sm'}
+    style={{ flexShrink: 0 }}>
+    {availability ? 'Disponible' : 'No disponible'}
+    </button>
+    </div>
+
+    {/* Flash message */}
+    {msg && (
+      <div className="flash flash-error" style={{
+        flexShrink: 0, borderRadius: 0, margin: 0,
+        display: 'flex', justifyContent: 'space-between',
       }}>
-        {/* Stats del día — siempre visibles */}
-        <div style={{
-          display: 'flex', gap: '0.75rem', alignItems: 'center',
-          fontSize: '0.74rem', color: 'rgba(255,255,255,0.9)', minWidth: 0,
-        }}>
-          <span style={{ fontWeight: 600 }}>
-            <span style={{ opacity: 0.7, fontSize: '0.68rem' }}>Hoy </span>
-            {earnings ?? '$0'}
-          </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.85)"
-              strokeWidth="2.5" strokeLinecap="round">
-              <polyline points="20 6 9 17 4 12"/>
-            </svg>
-            {deliveries}
-          </span>
-          {bagPct !== null && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.85)"
-                strokeWidth="2" strokeLinecap="round">
-                <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
-                <line x1="3" y1="6" x2="21" y2="6"/>
-                <path d="M16 10a4 4 0 01-8 0"/>
-              </svg>
-              {bagPct}%
-            </span>
-          )}
-        </div>
-
-        {/* Toggle */}
-        <button
-          onClick={onToggleAvailability}
-          className={availability ? 'btn-primary btn-sm' : 'btn-sm'}
-          style={{ flexShrink: 0 }}>
-          {availability ? 'Disponible' : 'No disponible'}
-        </button>
+      <span style={{ fontSize: '0.83rem' }}>{msg}</span>
+      <button onClick={onDismissMsg}
+      style={{ border: 'none', background: 'none', cursor: 'pointer', fontWeight: 700 }}>✕</button>
       </div>
+    )}
 
-      {/* Flash message */}
-      {msg && (
-        <div className="flash flash-error" style={{
-          flexShrink: 0, borderRadius: 0, margin: 0,
-          display: 'flex', justifyContent: 'space-between',
-        }}>
-          <span style={{ fontSize: '0.83rem' }}>{msg}</span>
-          <button onClick={onDismissMsg}
-            style={{ border: 'none', background: 'none', cursor: 'pointer', fontWeight: 700 }}>✕</button>
-        </div>
-      )}
+    {/* Transfer banner */}
+    {transferBanner && (
+      <div style={{
+        flexShrink: 0, zIndex: 25,
+        background: transferBanner.type === 'order_transferred_in' ? 'var(--success-bg)' : 'var(--warn-bg)',
+                        borderBottom: `2px solid ${transferBanner.type === 'order_transferred_in' ? 'var(--success)' : 'var(--warn)'}`,
+                        padding: '0.6rem 1rem',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+      <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+      {transferBanner.type === 'order_transferred_in'
+        ? 'Se te asignó un pedido transferido'
+    : 'Un pedido fue reasignado a otro conductor'}
+    </span>
+    <button onClick={onDismissTransferBanner}
+    style={{ border: 'none', background: 'none', cursor: 'pointer',
+      color: 'var(--text-tertiary)', fontWeight: 700, minHeight: 'unset' }}>✕</button>
+      </div>
+    )}
 
-      {/* Transfer banner */}
-      {transferBanner && (
-        <div style={{
-          flexShrink: 0, zIndex: 25,
-          background: transferBanner.type === 'order_transferred_in' ? 'var(--success-bg)' : 'var(--warn-bg)',
-          borderBottom: `2px solid ${transferBanner.type === 'order_transferred_in' ? 'var(--success)' : 'var(--warn)'}`,
-          padding: '0.6rem 1rem',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        }}>
-          <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-            {transferBanner.type === 'order_transferred_in'
-              ? 'Se te asignó un pedido transferido'
-              : 'Un pedido fue reasignado a otro conductor'}
-          </span>
-          <button onClick={onDismissTransferBanner}
-            style={{ border: 'none', background: 'none', cursor: 'pointer',
-              color: 'var(--text-tertiary)', fontWeight: 700, minHeight: 'unset' }}>✕</button>
-        </div>
-      )}
+    {/* Modal de capacidad de mochila */}
+    <BagCapacityModal
+    isOpen={showBagModal}
+    onClose={() => setShowBagModal(false)}
+    currentLiters={currentBagCapacity ?? 25}
+    onSave={handleSaveBagCapacity}
+    token={auth.token}
+    />
     </>
   );
 }
@@ -3193,11 +3396,8 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
   const order = useOrderManager(auth.token, patchUser, auth.user?.driver);
 
   // Conectar useDriverOrders (panel lateral) al SSE de useOrderManager.
-  // useDriverOrders escribe sus handlers en registerRef.current.{onUpdate,onReconnect,onChat}.
-  // Aquí los pasamos a useOrderManager para que los invoque al recibir eventos SSE.
   useEffect(() => {
     if (!registerRef) return;
-    // Esperar a que DriverOrders haya montado y escrito sus handlers
     const wire = () => {
       if (registerRef.current.onUpdate)    order.registerOrdersUpdate(registerRef.current.onUpdate);
       if (registerRef.current.onReconnect) order.registerOrdersReconnect(registerRef.current.onReconnect);
@@ -3205,7 +3405,6 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
       registerRef.current.loadData = order.loadData;
     };
     wire();
-    // Re-intentar en el siguiente tick por si DriverOrders monta después
     const t = setTimeout(wire, 0);
     return () => clearTimeout(t);
   }, [registerRef, order.registerOrdersUpdate, order.registerOrdersReconnect, order.registerOrdersChat]);
@@ -3228,7 +3427,6 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
 
   const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, order.availability, order.hasActiveOrder);
 
-  // Mantener useOrderManager al tanto de la posición para calcular stop más próximo
   useEffect(() => { order.setMyPosition(myPosition); }, [myPosition]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const home = useDriverHomeRuntime({
@@ -3247,12 +3445,12 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     activeZones: home.activeZones,
     hasActiveOrder: order.hasActiveOrder,
     onVoice: (text) => setMsg(text),
-    onZoneAlert: (zone) => setMsg(`⚠️ Zona de alerta cerca: ${ZONE_LABELS[zone?.type] || zone?.type}`),
-    impassableWays: [],
-    routeGeometry: home.routeGeometry || [],
+                                                                           onZoneAlert: (zone) => setMsg(`⚠️ Zona de alerta cerca: ${ZONE_LABELS[zone?.type] || zone?.type}`),
+                                                                           impassableWays: home.activeImpassable || [],
+                                                                           routeGeometry: home.routeGeometry || [],
   });
 
-  // Exponer zonas e impassable via registerRef — DESPUÉS de home y myPosition
+  // Exponer zonas, impassable y preferencias via registerRef
   useEffect(() => {
     if (!registerRef) return;
     registerRef.current.activeZones      = home.activeZones;
@@ -3263,129 +3461,265 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     registerRef.current.availability     = order.availability;
     registerRef.current.token            = auth.token;
     registerRef.current.notifyAlertsUpdate?.();
-  }, [home.activeZones, home.activeImpassable, home.myPreferences]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [home.activeZones, home.activeImpassable, home.myPreferences, myPosition, order.availability, auth.token, registerRef]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden', position:'relative' }}>
-        <DriverHomeStatusBar
-          availability={order.availability}
-          counters={home.counters}
-          activeOrder={order.activeOrder}
-          bagPct={order.routeBagPct}
-          onToggleAvailability={() => order.toggleAvailability(setMsg)}
-          msg={msg}
-          onDismissMsg={() => setMsg('')}
-          transferBanner={order.transferBanner}
-          onDismissTransferBanner={() => order.setTransferBanner(null)}
-        />
+    <DriverHomeStatusBar
+    availability={order.availability}
+    counters={home.counters}
+    activeOrder={order.activeOrder}
+    bagPct={order.routeBagPct}
+    onToggleAvailability={() => order.toggleAvailability(setMsg)}
+    msg={msg}
+    onDismissMsg={() => setMsg('')}
+    transferBanner={order.transferBanner}
+    onDismissTransferBanner={() => order.setTransferBanner(null)}
+    />
 
-        <DriverHomeMapSection
-          availability={order.availability}
-          hasActiveOrder={order.hasActiveOrder}
-          customPin={home.customPin}
-          setCustomPin={home.setCustomPin}
-          pinAddress={home.pinAddress}
-          loadingPin={home.loadingPin}
-          routeGeometry={home.routeGeometry}
-          allStops={home.allStops}
-          routeActive={home.routeActive}
-          myPosition={myPosition}
-          activeOrder={order.activeOrder}
-          navHeadingDeg={home.navHeadingDeg}
-          onHeadingChange={home.setNavHeadingDeg}
-          centerSignal={home.centerSignal}
-          onCenterDone={() => home.setCenterSignal(null)}
-          onRouteToPin={home.onRouteToPin}
-          setMapInstance={home.setMapInstance}
-          mapInstance={home.mapInstance}
-          activeZones={home.activeZones}
-          token={auth.token}
-          userId={auth.user?.id}
-          centerMode={home.centerMode}
-          voiceEnabled={voiceEnabled}
-          navMode={home.navMode}
-          onCenterCycle={home.handleCenterCycle}
-          onVoiceToggle={() => setVoiceEnabled((value) => !value)}
-          onGoogleNav={home.openGoogleNavigation}
-          onNavMode={home.setNavMode}
-          setMsg={setMsg}
-          onSubmitZone={home.handleZoneConfirm}
-          onSubmitImpassable={home.handleImpassableConfirm}
-          onSubmitPreference={home.handlePreferenceConfirm}
-          bottomOffset={panelHeight + 8}
-          isDark={isDark}
-          onQuickReport={async (type, pos) => {
-            if (type === 'zone') {
-              home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'other', radius_m: 500, estimated_hours: 1 });
-            } else if (type === 'impassable') {
-              try {
-                const ways = await quickSelectWays(pos, 'impassable');
-                home.handleImpassableConfirm(ways);
-              } catch (_) {
-                setMsg('No se pudo detectar la calle. Intenta el modo normal.');
-              }
-            } else if (type === 'preference') {
-              try {
-                const ways = await quickSelectWays(pos, 'preference');
-                home.handlePreferenceConfirm(ways);
-              } catch (_) {
-                setMsg('No se pudo detectar la calle. Intenta el modo normal.');
-              }
-            }
-          }}
-        />
+    <DriverHomeMapSection
+    availability={order.availability}
+    hasActiveOrder={order.hasActiveOrder}
+    customPin={home.customPin}
+    setCustomPin={home.setCustomPin}
+    pinAddress={home.pinAddress}
+    loadingPin={home.loadingPin}
+    routeGeometry={home.routeGeometry}
+    allStops={home.allStops}
+    routeActive={home.routeActive}
+    myPosition={myPosition}
+    activeOrder={order.activeOrder}
+    navHeadingDeg={home.navHeadingDeg}
+    onHeadingChange={home.setNavHeadingDeg}
+    centerSignal={home.centerSignal}
+    onCenterDone={() => home.setCenterSignal(null)}
+    onRouteToPin={home.onRouteToPin}
+    setMapInstance={home.setMapInstance}
+    mapInstance={home.mapInstance}
+    activeZones={home.activeZones}
+    activeImpassable={home.activeImpassable}
+    myPreferences={home.myPreferences}
+    token={auth.token}
+    userId={auth.user?.id}
+    centerMode={home.centerMode}
+    voiceEnabled={voiceEnabled}
+    navMode={home.navMode}
+    onCenterCycle={home.handleCenterCycle}
+    onVoiceToggle={() => setVoiceEnabled((value) => !value)}
+    onGoogleNav={home.openGoogleNavigation}
+    onNavMode={home.setNavMode}
+    setMsg={setMsg}
+    onSubmitZone={home.handleZoneConfirm}
+    onSubmitImpassable={home.handleImpassableConfirm}
+    onSubmitPreference={home.handlePreferenceConfirm}
+    bottomOffset={panelHeight + 8}
+    isDark={isDark}
+    onQuickReport={async (type, pos) => {
+      if (type === 'zone') {
+        home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'other', radius_m: 500, estimated_hours: 1 });
+      } else if (type === 'impassable') {
+        try {
+          const ways = await quickSelectWays(pos, 'impassable');
+          home.handleImpassableConfirm(ways);
+        } catch (_) {
+          setMsg('No se pudo detectar la calle. Intenta el modo normal.');
+        }
+      } else if (type === 'preference') {
+        try {
+          const ways = await quickSelectWays(pos, 'preference');
+          home.handlePreferenceConfirm(ways);
+        } catch (_) {
+          setMsg('No se pudo detectar la calle. Intenta el modo normal.');
+        }
+      }
+    }}
+    />
 
-        <OfferPanel
-          offer={order.pendingOffer}
-          minimized={order.offerMinimized}
-          loading={order.loadingOffer}
-          onAccept={() => order.acceptOffer(setMsg)}
-          onReject={() => order.rejectOffer(setMsg)}
-          onToggleMinimize={() => order.setOfferMinimized((value) => !value)}
-          onExpired={() => {
-            const warning = order.handleOfferExpired();
-            if (warning) setMsg(warning);
-          }}
-          panelRef={!order.hasActiveOrder ? activePanelRef : undefined}
-        />
+    <OfferPanel
+    offer={order.pendingOffer}
+    minimized={order.offerMinimized}
+    loading={order.loadingOffer}
+    onAccept={() => order.acceptOffer(setMsg)}
+    onReject={() => order.rejectOffer(setMsg)}
+    onToggleMinimize={() => order.setOfferMinimized((value) => !value)}
+    onExpired={() => {
+      const warning = order.handleOfferExpired();
+      if (warning) setMsg(warning);
+    }}
+    panelRef={!order.hasActiveOrder ? activePanelRef : undefined}
+    />
 
-        <ActiveOrderPanel
-          order={order.hasActiveOrder ? order.activeOrder : null}
-          expanded={order.orderExpanded}
-          loadingStatus={order.loadingStatus}
-          showRelease={order.showRelease}
-          releaseNote={order.releaseNote}
-          onToggleExpand={() => order.setOrderExpanded((expanded) => !expanded)}
-          onChangeStatus={(id, status) => order.changeStatus(id, status, setMsg)}
-          onToggleRelease={() => order.setShowRelease((show) => !show)}
-          onReleaseNoteChange={order.setReleaseNote}
-          onConfirmRelease={() => order.doRelease(setMsg)}
-          onRebalance={() => order.doRebalance(setMsg)}
-          onRoute={home.handleToggleRoute}
-          routeActive={home.routeActive}
-          panelRef={activePanelRef}
-        />
+    <ActiveOrderPanel
+    order={order.hasActiveOrder ? order.activeOrder : null}
+    expanded={order.orderExpanded}
+    loadingStatus={order.loadingStatus}
+    showRelease={order.showRelease}
+    releaseNote={order.releaseNote}
+    onToggleExpand={() => order.setOrderExpanded((expanded) => !expanded)}
+    onChangeStatus={(id, status) => order.changeStatus(id, status, setMsg)}
+    onToggleRelease={() => order.setShowRelease((show) => !show)}
+    onReleaseNoteChange={order.setReleaseNote}
+    onConfirmRelease={() => order.doRelease(setMsg)}
+    onRebalance={() => order.doRebalance(setMsg)}
+    onCancelDispute={() => order.doCancelDispute(setMsg)}
+    onRoute={home.handleToggleRoute}
+    routeActive={home.routeActive}
+    panelRef={activePanelRef}
+    />
     </div>
   );
 }
 
 === FILE: frontend/src/pages/Profile.jsx ===
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { AccountManagementSection, PersonalInfoSection, ProfileHeaderCard, ProfileSecuritySection, ProfileSettingsSection } from '../features/profile/sections';
 import { useProfilePersonalInfo } from '../features/profile/useProfilePersonalInfo';
 import { useProfileSecurity } from '../features/profile/useProfileSecurity';
 import { useProfileSettings } from '../features/profile/useProfileSettings';
+import { updateBagCapacity, fetchBagCapacity } from '../features/driver/alerts/api';
+
+// Componente para sección Driver (capacidad de mochila)
+function DriverSection({ token, bagCapacity, onBagCapacityChange }) {
+  const [editing, setEditing] = useState(false);
+  const [liters, setLiters] = useState(bagCapacity);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSave = async () => {
+    const val = parseFloat(liters);
+    if (isNaN(val) || val < 1) {
+      setError('La capacidad debe ser al menos 1 litro');
+      return;
+    }
+    if (val > 200) {
+      setError('La capacidad no puede exceder 200 litros');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await updateBagCapacity(val, token);
+      onBagCapacityChange(val);
+      setEditing(false);
+    } catch (e) {
+      setError(e.message || 'Error al guardar');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{
+      background: 'var(--bg-card)',
+          borderRadius: 12,
+          padding: '1rem',
+          marginBottom: '1rem',
+          border: '1px solid var(--border-light)',
+    }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <span style={{ fontSize: '1.2rem' }}>🎒</span>
+    <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Capacidad de mochila</span>
+    </div>
+    {!editing && (
+      <button
+      onClick={() => setEditing(true)}
+      style={{
+        background: 'none', border: 'none', cursor: 'pointer',
+        color: 'var(--brand)', fontSize: '0.7rem', fontWeight: 600,
+      }}
+      >
+      Editar
+      </button>
+    )}
+    </div>
+
+    {editing ? (
+      <div>
+      <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+      Define cuántos litros puedes cargar. Esto ayuda a calcular si un pedido cabe en tu ruta.
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+      <input
+      type="number"
+      value={liters}
+      onChange={e => setLiters(e.target.value)}
+      step="1"
+      min="1"
+      max="200"
+      style={{
+        width: '100px', padding: '0.4rem', borderRadius: 8,
+        border: '1px solid var(--border)', background: 'var(--bg-input)',
+                fontSize: '0.9rem',
+      }}
+      />
+      <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>litros</span>
+      <button
+      onClick={handleSave}
+      disabled={saving}
+      style={{
+        padding: '0.4rem 0.8rem', borderRadius: 8,
+        background: 'var(--brand)', color: '#fff', border: 'none',
+                fontSize: '0.75rem', fontWeight: 600, cursor: saving ? 'wait' : 'pointer',
+                opacity: saving ? 0.6 : 1,
+      }}
+      >
+      {saving ? '…' : 'Guardar'}
+      </button>
+      <button
+      onClick={() => { setEditing(false); setLiters(bagCapacity); setError(''); }}
+      style={{
+        padding: '0.4rem 0.8rem', borderRadius: 8,
+        background: 'var(--bg-raised)', border: '1px solid var(--border)',
+                fontSize: '0.75rem', cursor: 'pointer',
+      }}
+      >
+      Cancelar
+      </button>
+      </div>
+      {error && (
+        <div style={{ fontSize: '0.7rem', color: '#dc2626', marginTop: '0.5rem' }}>
+        {error}
+        </div>
+      )}
+      </div>
+    ) : (
+      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+      {bagCapacity ?? '?'} litros
+      </div>
+    )}
+    </div>
+  );
+}
 
 export default function ProfilePage() {
   const { auth, patchUser, logout } = useAuth();
   const user = auth.user;
+  const [bagCapacity, setBagCapacity] = useState(null);
 
   const personal = useProfilePersonalInfo({ token: auth.token, user, patchUser });
   const settings = useProfileSettings(auth.token, user?.role);
   const security = useProfileSecurity({ token: auth.token, user, patchUser });
 
   const avatarLetter = (personal.alias[0] || '?').toUpperCase();
+  const isDriver = user?.role === 'driver';
+
+  // Cargar capacidad de mochila si es driver
+  useEffect(() => {
+    if (!isDriver || !auth.token) return;
+    fetchBagCapacity(auth.token).then(cap => setBagCapacity(cap)).catch(() => {});
+  }, [isDriver, auth.token]);
+
+  const handleBagCapacityChange = (newCapacity) => {
+    setBagCapacity(newCapacity);
+    patchUser({
+      driver: {
+        ...(user?.driver || {}),
+              bag_capacity_liters: newCapacity,
+      },
+    });
+  };
 
   useEffect(() => {
     if (import.meta.env.PROD) return;
@@ -3397,7 +3731,7 @@ export default function ProfilePage() {
           for (const entry of list.getEntries()) {
             console.warn(
               `[perf] Long task ${Math.round(entry.duration)}ms`,
-              entry.attribution?.[0]?.name || 'unknown'
+                         entry.attribution?.[0]?.name || 'unknown'
             );
           }
         });
@@ -3425,103 +3759,112 @@ export default function ProfilePage() {
 
   return (
     <div>
-      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem' }}>Mi perfil</h2>
+    <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem' }}>Mi perfil</h2>
 
-      <ProfileHeaderCard alias={personal.alias} avatarLetter={avatarLetter} role={user?.role} />
+    <ProfileHeaderCard alias={personal.alias} avatarLetter={avatarLetter} role={user?.role} />
 
-      <PersonalInfoSection
-        authToken={auth.token}
-        alias={personal.alias}
-        setAlias={personal.setAlias}
-        homeLat={personal.homeLat}
-        homeLng={personal.homeLng}
-        onSelectAddress={({ lat, lng, estado: nextEstado, ciudad: nextCiudad, colonia: nextColonia, postalCode: cp, colonias }) => {
-          if (lat != null) personal.setHomeLat(lat);
-          if (lng != null) personal.setHomeLng(lng);
-          if (nextEstado != null) personal.setEstado(nextEstado);
-          if (nextCiudad != null) personal.setCiudad(nextCiudad);
-          if (nextColonia != null && nextColonia !== '') personal.setColonia(nextColonia);
-          if (cp != null) personal.setPostalCode(cp);
-          if (colonias?.length) personal.setColoniasList(colonias);
-        }}
-        estado={personal.estado}
-        setEstado={personal.setEstado}
-        ciudad={personal.ciudad}
-        setCiudad={personal.setCiudad}
-        colonia={personal.colonia}
-        setColonia={personal.setColonia}
-        coloniasList={personal.coloniasList}
-        calle={personal.calle}
-        setCalle={personal.setCalle}
-        numero={personal.numero}
-        setNumero={personal.setNumero}
-        onClearHomePin={() => { personal.setHomeLat(null); personal.setHomeLng(null); }}
-        onSave={personal.saveProfile}
-        message={personal.profileMsg}
-        isError={personal.profileErr}
+    <PersonalInfoSection
+    authToken={auth.token}
+    alias={personal.alias}
+    setAlias={personal.setAlias}
+    homeLat={personal.homeLat}
+    homeLng={personal.homeLng}
+    onSelectAddress={({ lat, lng, estado: nextEstado, ciudad: nextCiudad, colonia: nextColonia, postalCode: cp, colonias }) => {
+      if (lat != null) personal.setHomeLat(lat);
+      if (lng != null) personal.setHomeLng(lng);
+      if (nextEstado != null) personal.setEstado(nextEstado);
+      if (nextCiudad != null) personal.setCiudad(nextCiudad);
+      if (nextColonia != null && nextColonia !== '') personal.setColonia(nextColonia);
+      if (cp != null) personal.setPostalCode(cp);
+      if (colonias?.length) personal.setColoniasList(colonias);
+    }}
+    estado={personal.estado}
+    setEstado={personal.setEstado}
+    ciudad={personal.ciudad}
+    setCiudad={personal.setCiudad}
+    colonia={personal.colonia}
+    setColonia={personal.setColonia}
+    coloniasList={personal.coloniasList}
+    calle={personal.calle}
+    setCalle={personal.setCalle}
+    numero={personal.numero}
+    setNumero={personal.setNumero}
+    onClearHomePin={() => { personal.setHomeLat(null); personal.setHomeLng(null); }}
+    onSave={personal.saveProfile}
+    message={personal.profileMsg}
+    isError={personal.profileErr}
+    />
+
+    {/* Sección Driver — solo visible para conductores */}
+    {isDriver && (
+      <DriverSection
+      token={auth.token}
+      bagCapacity={bagCapacity}
+      onBagCapacityChange={handleBagCapacityChange}
       />
+    )}
 
-      <ProfileSettingsSection
-        userRole={user?.role}
-        permStatus={settings.permStatus}
-        permLoading={settings.permLoading}
-        permMsg={settings.permMsg}
-        notifStatus={settings.notifStatus}
-        notifEnabled={settings.notifEnabled}
-        highPriorityNotifs={settings.highPriorityNotifs}
-        notifMsg={settings.notifMsg}
-        onToggleNotifEnabled={settings.toggleNotifEnabled}
-        onToggleHighPriority={settings.toggleHighPriorityNotifs}
-        onRequestWakeLock={settings.requestWakeLock}
-        onRequestAllPermissions={settings.requestAllPermissions}
-        theme={settings.theme}
-        onApplyTheme={settings.applyTheme}
-        reducedMotion={settings.reducedMotion}
-        onToggleReducedMotion={settings.toggleReducedMotion}
-        isInstalled={settings.isInstalled}
-        deferredInstall={settings.deferredInstall}
-        onTriggerInstallPrompt={settings.triggerInstallPrompt}
-        onRefreshOfflineCache={settings.refreshOfflineCache}
-        offlineCacheMsg={settings.offlineCacheMsg}
-      />
+    <ProfileSettingsSection
+    userRole={user?.role}
+    permStatus={settings.permStatus}
+    permLoading={settings.permLoading}
+    permMsg={settings.permMsg}
+    notifStatus={settings.notifStatus}
+    notifEnabled={settings.notifEnabled}
+    highPriorityNotifs={settings.highPriorityNotifs}
+    notifMsg={settings.notifMsg}
+    onToggleNotifEnabled={settings.toggleNotifEnabled}
+    onToggleHighPriority={settings.toggleHighPriorityNotifs}
+    onRequestWakeLock={settings.requestWakeLock}
+    onRequestAllPermissions={settings.requestAllPermissions}
+    theme={settings.theme}
+    onApplyTheme={settings.applyTheme}
+    reducedMotion={settings.reducedMotion}
+    onToggleReducedMotion={settings.toggleReducedMotion}
+    isInstalled={settings.isInstalled}
+    deferredInstall={settings.deferredInstall}
+    onTriggerInstallPrompt={settings.triggerInstallPrompt}
+    onRefreshOfflineCache={settings.refreshOfflineCache}
+    offlineCacheMsg={settings.offlineCacheMsg}
+    />
 
-      <ProfileSecuritySection
-        loginUsername={security.loginUsername}
-        onChangeUsername={security.handleUsernameChange}
-        usernameStatus={security.usernameStatus}
-        currentPassword={security.currentPassword}
-        setCurrentPassword={security.setCurrentPassword}
-        newPassword={security.newPassword}
-        setNewPassword={security.setNewPassword}
-        confirmPassword={security.confirmPassword}
-        setConfirmPassword={security.setConfirmPassword}
-        onSave={security.changePasswordAndLogin}
-        message={security.pwdMsg}
-        isError={security.pwdErr}
-      />
+    <ProfileSecuritySection
+    loginUsername={security.loginUsername}
+    onChangeUsername={security.handleUsernameChange}
+    usernameStatus={security.usernameStatus}
+    currentPassword={security.currentPassword}
+    setCurrentPassword={security.setCurrentPassword}
+    newPassword={security.newPassword}
+    setNewPassword={security.setNewPassword}
+    confirmPassword={security.confirmPassword}
+    setConfirmPassword={security.setConfirmPassword}
+    onSave={security.changePasswordAndLogin}
+    message={security.pwdMsg}
+    isError={security.pwdErr}
+    />
 
-      <AccountManagementSection
-        deleteConfirm={security.deleteConfirm}
-        onDeleteAccount={security.deleteAccount}
-        deletePwd={security.deletePwd}
-        setDeletePwd={security.setDeletePwd}
-        deleteLoading={security.deleteLoading}
-        onCancelDelete={security.resetDeleteState}
-        message={security.deleteMsg}
-        isError={security.deleteErr}
-      />
+    <AccountManagementSection
+    deleteConfirm={security.deleteConfirm}
+    onDeleteAccount={security.deleteAccount}
+    deletePwd={security.deletePwd}
+    setDeletePwd={security.setDeletePwd}
+    deleteLoading={security.deleteLoading}
+    onCancelDelete={security.resetDeleteState}
+    message={security.deleteMsg}
+    isError={security.deleteErr}
+    />
 
-      <button
-        onClick={logout}
-        className="btn-sm"
-        style={{
-          width:'100%', padding:'0.7rem',
-          marginTop:'0.25rem', marginBottom:'0.75rem',
-          fontWeight:700, fontSize:'0.9rem',
-        }}
-      >
-        Cerrar sesión
-      </button>
+    <button
+    onClick={logout}
+    className="btn-sm"
+    style={{
+      width:'100%', padding:'0.7rem',
+      marginTop:'0.25rem', marginBottom:'0.75rem',
+      fontWeight:700, fontSize:'0.9rem',
+    }}
+    >
+    Cerrar sesión
+    </button>
     </div>
   );
 }
