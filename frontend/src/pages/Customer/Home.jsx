@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { cancelPendingOrderExpiry, savePendingOrder, schedulePendingOrderExpiry, readPendingOrder } from '../../utils/pendingOrder';
+import { readSessionDelivery, saveSessionDelivery } from '../../utils/sessionDelivery';
 import { getErrorMessage } from '../../utils/errorMessage';
 import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
 import { IconPin, IconSearch } from '../../features/customer/home/icons.jsx';
@@ -12,7 +13,7 @@ import SuggestionBanner from '../../features/customer/home/SuggestionBanner.jsx'
 import { buildSuggestionDraft, buildSuggestionResponseBody } from '../../features/orders/drafts';
 import { fmt, haversineKm } from '../../features/customer/home/utils.js';
 
-export default function CustomerHome() {
+export default function CustomerHome({ onOrderUpdate } = {}) {
   const { auth } = useAuth();
   const navigate = useNavigate();
 
@@ -57,6 +58,7 @@ export default function CustomerHome() {
         order.suggestion_status === 'pending_customer' && (order.suggestion_items || []).length > 0
       );
       setPendingSugg(pending);
+      onOrderUpdate?.();
     } catch (_) {}
   }
 
@@ -173,9 +175,12 @@ export default function CustomerHome() {
   const ratingIcon = sortBy === 'rating_asc' ? '↑' : '↓';
   const distanceIcon = sortBy === 'distance_desc' ? '↑' : '↓';
   const draft = readPendingOrder();
+  const sessionPos = readSessionDelivery();
   const initialPos = draft?.delivery_lat
-  ? { lat: draft.delivery_lat, lng: draft.delivery_lng }
-  : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
+    ? { lat: draft.delivery_lat, lng: draft.delivery_lng }
+    : sessionPos
+    ? { lat: sessionPos.lat, lng: sessionPos.lng }
+    : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
 
   if (loading) {
     return <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)' }}>Cargando…</div>;
@@ -264,6 +269,7 @@ export default function CustomerHome() {
               setDeliveryPos(pos);
               if (pos?.lat && pos?.lng) {
                 savePendingOrder({ delivery_lat: pos.lat, delivery_lng: pos.lng, delivery_address: pos.label });
+                saveSessionDelivery(pos);
               }
             }}
           />
@@ -330,3 +336,4 @@ export default function CustomerHome() {
     </div>
   );
 }
+

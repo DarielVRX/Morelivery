@@ -9,6 +9,7 @@ import PullToRefresh from './components/PullToRefresh';
 import SplitLayout from './components/SplitLayout';
 import AlertsPanel from './components/AlertsPanel';
 import AuthPage from './pages/AuthPage';
+import CustomerOrders   from './pages/Customer/Orders';
 import CustomerCart     from './components/CustomerCart';
 import DriverOrders     from './pages/Driver/Orders';
 import RestaurantOrders from './pages/Restaurant/Orders';
@@ -249,18 +250,24 @@ function AuthScreen({ mode = 'login' }) {
 
 // ─── Layout wrappers por rol ──────────────────────────────────────────────────
 function CustomerLayout() {
+  // registerRef: bus entre CustomerOrders (SSE owner) y CustomerHome (consumer)
+  // CustomerOrders llama registerRef.current.onSuggUpdate?.() al recibir order_update
+  // CustomerHome recibe onOrderUpdate prop y recarga sugerencias
+  const registerRef = useRef({ onSuggUpdate: null });
+
   return (
     <ProtectedRole role="customer">
       <SplitLayout
         onRefresh={() => window.location.reload()}
-        ordersLabel="🛒 Carrito"
-        ordersContent={<CustomerCart />}
+        alertsLabel="🛒 Carrito"
+        ordersContent={<CustomerOrders registerRef={registerRef} />}
+        alertsContent={<CustomerCart />}
         homeContent={
           <Suspense fallback={<Spinner />}>
             <Routes>
               <Route path="pagos" element={<CustomerPayments />} />
               <Route path="r/:id" element={<RestaurantPage />} />
-              <Route index        element={<CustomerHome />} />
+              <Route index        element={<CustomerHome onOrderUpdate={() => registerRef.current.onSuggUpdate?.()} />} />
             </Routes>
           </Suspense>
         }
