@@ -7,7 +7,9 @@
 
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../hooks/useCart';
+import { useAuth } from '../contexts/AuthContext';
 import { savePendingOrder } from '../utils/pendingOrder';
+import { readSessionDelivery } from '../utils/sessionDelivery';
 
 const fmt = cents => `$${((cents ?? 0) / 100).toFixed(2)}`;
 
@@ -31,6 +33,7 @@ function EmptyState() {
 
 export default function CustomerCart() {
   const navigate = useNavigate();
+  const { auth } = useAuth();
   const { cart, adjustItem, clearCart } = useCart();
 
   if (!cart || cart.items.length === 0) {
@@ -45,7 +48,8 @@ export default function CustomerCart() {
   const total       = subtotal + serviceFee + deliveryFee + tipCents;
 
   function handleCheckout() {
-    // Construir el draft que espera Payments.jsx
+    // Inyectar coordenadas guardadas en sesión si existen
+    const savedPos = readSessionDelivery(auth.token);
     savePendingOrder({
       restaurantId:   cart.restaurantId,
       items:          cart.items.map(({ menuItemId, quantity }) => ({ menuItemId, quantity })),
@@ -54,7 +58,11 @@ export default function CustomerCart() {
       })),
       subtotal_cents: subtotal,
       tip_cents:      0,
-      // delivery_lat/lng/address se completan en Payments
+      ...(savedPos ? {
+        delivery_lat:     savedPos.lat,
+        delivery_lng:     savedPos.lng,
+        delivery_address: savedPos.label,
+      } : {}),
     });
     navigate('/customer/pagos');
   }

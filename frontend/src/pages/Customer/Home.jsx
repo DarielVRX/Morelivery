@@ -175,7 +175,7 @@ export default function CustomerHome({ onOrderUpdate } = {}) {
   const ratingIcon = sortBy === 'rating_asc' ? '↑' : '↓';
   const distanceIcon = sortBy === 'distance_desc' ? '↑' : '↓';
   const draft = readPendingOrder();
-  const sessionPos = readSessionDelivery();
+  const sessionPos = readSessionDelivery(auth.token);
   const initialPos = draft?.delivery_lat
     ? { lat: draft.delivery_lat, lng: draft.delivery_lng }
     : sessionPos
@@ -269,7 +269,7 @@ export default function CustomerHome({ onOrderUpdate } = {}) {
               setDeliveryPos(pos);
               if (pos?.lat && pos?.lng) {
                 savePendingOrder({ delivery_lat: pos.lat, delivery_lng: pos.lng, delivery_address: pos.label });
-                saveSessionDelivery(pos);
+                saveSessionDelivery(pos, auth.token);
               }
             }}
           />

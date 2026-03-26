@@ -79,7 +79,7 @@ export default function RestaurantPage() {
       return; // ya hay ubicación, no mostrar toast
     }
     // Fallback: posición guardada en sesión desde cualquier otra página del customer
-    const sessionPos = readSessionDelivery();
+    const sessionPos = readSessionDelivery(auth.token);
     if (sessionPos) {
       setSearchPos(sessionPos);
       return; // hay posición de sesión, evaluar discrepancia GPS en el siguiente efecto
@@ -332,7 +332,7 @@ export default function RestaurantPage() {
                 setToast(null);
                 if (pos?.lat && pos?.lng) {
                   savePendingOrder({ delivery_lat: pos.lat, delivery_lng: pos.lng, delivery_address: pos.label });
-                  saveSessionDelivery(pos);
+                  saveSessionDelivery(pos, auth.token);
                 }
               }}
             />
