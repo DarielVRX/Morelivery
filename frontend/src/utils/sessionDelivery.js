@@ -2,23 +2,24 @@
  * sessionDelivery.js
  * Persiste la dirección de entrega del cliente en localStorage.
  *
- * - Scoped por userId extraído del JWT: cada usuario tiene su propia clave.
- * - Usa localStorage → persiste mientras el token exista (no se borra al cerrar el tab).
- * - Se limpia automáticamente al llamar clearSessionDelivery (logout).
- * - NO reemplaza pendingOrder (que maneja el borrador temporal del pedido).
+ * - Scoped por userId del JWT. Si falla el decode, usa clave genérica.
+ * - localStorage → persiste mientras el token exista (no se borra al cerrar tab).
+ * - clearSessionDelivery() en logout para limpiar.
  *
  * @typedef {{ lat: number, lng: number, label: string }} DeliveryPos
  */
 
 const KEY_PREFIX = 'morelivery_delivery_pos';
 
-/** Extrae userId del JWT sin librería externa. Devuelve null si falla. */
 function userIdFromToken(token) {
   try {
-    if (!token) return null;
-    const payload = token.split('.')[1];
-    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
-    const decoded = JSON.parse(json);
+    if (!token || typeof token !== 'string') return null;
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    // Padding para base64
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded  = base64 + '=='.slice(0, (4 - base64.length % 4) % 4);
+    const decoded = JSON.parse(atob(padded));
     return decoded.userId || decoded.sub || null;
   } catch {
     return null;
@@ -31,7 +32,7 @@ function storageKey(token) {
 }
 
 /**
- * Lee la posición guardada para el token dado.
+ * Lee la posición guardada.
  * @param {string|null} token  JWT del usuario autenticado
  * @returns {DeliveryPos|null}
  */
@@ -40,24 +41,26 @@ export function readSessionDelivery(token) {
     const raw = localStorage.getItem(storageKey(token));
     if (!raw) return null;
     const p = JSON.parse(raw);
-    if (!Number.isFinite(p?.lat) || !Number.isFinite(p?.lng)) return null;
-    return { lat: p.lat, lng: p.lng, label: p.label || '' };
+    if (!Number.isFinite(Number(p?.lat)) || !Number.isFinite(Number(p?.lng))) return null;
+    return { lat: Number(p.lat), lng: Number(p.lng), label: p.label || '' };
   } catch {
     return null;
   }
 }
 
 /**
- * Guarda la posición para el token dado.
- * @param {DeliveryPos} pos
+ * Guarda la posición.
+ * @param {{ lat: number, lng: number, label?: string }} pos
  * @param {string|null} token
  */
 export function saveSessionDelivery(pos, token) {
   try {
-    if (!Number.isFinite(pos?.lat) || !Number.isFinite(pos?.lng)) return;
+    const lat = Number(pos?.lat);
+    const lng = Number(pos?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     localStorage.setItem(
       storageKey(token),
-      JSON.stringify({ lat: pos.lat, lng: pos.lng, label: pos.label || '' })
+      JSON.stringify({ lat, lng, label: pos.label || '' })
     );
   } catch {}
 }
@@ -68,6 +71,8 @@ export function saveSessionDelivery(pos, token) {
  */
 export function clearSessionDelivery(token) {
   try {
+    // Limpiar tanto la clave con userId como la genérica por si acaso
     localStorage.removeItem(storageKey(token));
+    localStorage.removeItem(KEY_PREFIX);
   } catch {}
 }
