@@ -59,7 +59,7 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
         })
         .catch(() => {});
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     if (!token || !availability) return;
@@ -105,7 +105,7 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
     autoCenterRef.current = setTimeout(() => {
       if (centerModeRef.current === 'nav') setCenterSignal('nav');
     }, 5000);
-  }, []);
+  }, [token]);
 
   const handleMapInteraction = useCallback(() => {
     lastInteractionRef.current = Date.now();
