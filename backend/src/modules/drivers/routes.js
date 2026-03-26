@@ -12,13 +12,12 @@ const router = Router();
 function isMissingColumnError(e)   { return e?.code === '42703'; }
 function isMissingRelationError(e) { return e?.code === '42P01'; }
 
-// POST /drivers/listener — mantenido por compatibilidad con clientes viejos,
-// pero ya no es necesario. El sistema es push puro desde el servidor.
+// POST /drivers/listener — deprecated
 router.post('/listener', authenticate, authorize(['driver']), async (_req, res) => {
   return res.json({ ok: true, deprecated: true });
 });
 
-/* ── PATCH /drivers/availability ────────────────────────────────────────────── */
+/* ── PATCH /drivers/availability ─────────────────────────────────────────── */
 router.patch('/availability', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const { isAvailable } = req.body;
@@ -33,23 +32,18 @@ router.patch('/availability', authenticate, authorize(['driver']), async (req, r
       try {
         await query(
           `UPDATE driver_profiles
-          SET session_rebalances = 0,
-          session_releases   = 0,
-          session_cancels    = 0,
-          session_expires    = 0,
-          session_started_at = NOW()
-          WHERE user_id = $1`,
+           SET session_rebalances = 0, session_releases = 0,
+               session_cancels = 0,   session_expires = 0,
+               session_started_at = NOW()
+           WHERE user_id = $1`,
           [driverId]
         );
       } catch (_) {}
 
       try {
         await query(
-          `UPDATE orders
-          SET reconnect_deadline = NULL, updated_at = NOW()
-          WHERE driver_id = $1
-          AND status = 'on_the_way'
-          AND reconnect_deadline IS NOT NULL`,
+          `UPDATE orders SET reconnect_deadline = NULL, updated_at = NOW()
+           WHERE driver_id = $1 AND status = 'on_the_way' AND reconnect_deadline IS NOT NULL`,
           [driverId]
         );
       } catch (_) {}
@@ -59,7 +53,7 @@ router.patch('/availability', authenticate, authorize(['driver']), async (req, r
         for (const ord of openOrders) {
           serializedOffer(ord.id, offerNextDrivers, offerCb);
         }
-        console.log(`[availability] driver=${driverId.slice(0,8)} disponible → ${openOrders.length} pedido(s) abierto(s) encolados`);
+        console.log(`[availability] driver=${driverId.slice(0,8)} disponible → ${openOrders.length} pedido(s) encolados`);
       } catch (e) {
         console.error('[availability] error encolando pedidos:', e.message);
       }
@@ -69,36 +63,41 @@ router.patch('/availability', authenticate, authorize(['driver']), async (req, r
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /drivers/me/bag-capacity ─────────────────────────────────────────── */
-router.patch('/me/bag-capacity', authenticate, authorize(['driver']), async (req, res, next) => {
+/* ── GET /drivers/me/bag-capacity ────────────────────────────────────────── */
+// IMPORTANTE: debe estar ANTES de GET /me para que Express no lo absorba
+router.get('/me/bag-capacity', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
-    const { bag_capacity_liters } = req.body;
-    const driverId = req.user.userId;
-
-    if (typeof bag_capacity_liters !== 'number' || bag_capacity_liters < 1 || bag_capacity_liters > 200) {
-      return next(new AppError(400, 'bag_capacity_liters debe ser un número entre 1 y 200'));
-    }
-
     const result = await query(
-      `UPDATE driver_profiles
-      SET bag_capacity_liters = $1, updated_at = NOW()
-      WHERE user_id = $2
-      RETURNING user_id, bag_capacity_liters`,
-      [bag_capacity_liters, driverId]
+      `SELECT bag_capacity_liters FROM driver_profiles WHERE user_id = $1`,
+      [req.user.userId]
     );
-
     if (result.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
-
-    return res.json({ profile: result.rows[0] });
+    return res.json({ bag_capacity_liters: Number(result.rows[0].bag_capacity_liters) });
   } catch (error) { return next(error); }
 });
 
-/* ── GET /drivers/me ───────────────────────────────────────────────────────── */
+/* ── PATCH /drivers/me/bag-capacity ─────────────────────────────────────── */
+router.patch('/me/bag-capacity', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const { bag_capacity_liters } = req.body || {};
+    const val = Number(bag_capacity_liters);
+    if (!Number.isFinite(val) || val < 1 || val > 200)
+      return next(new AppError(400, 'bag_capacity_liters debe ser un número entre 1 y 200'));
+    const result = await query(
+      `UPDATE driver_profiles SET bag_capacity_liters = $1 WHERE user_id = $2
+       RETURNING bag_capacity_liters`,
+      [val, req.user.userId]
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
+    return res.json({ ok: true, bag_capacity_liters: Number(result.rows[0].bag_capacity_liters) });
+  } catch (error) { return next(error); }
+});
+
+/* ── GET /drivers/me ─────────────────────────────────────────────────────── */
 router.get('/me', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const r = await query(
-      `SELECT user_id, is_available, vehicle_type, is_verified, driver_number, bag_capacity_liters
-      FROM driver_profiles WHERE user_id=$1 LIMIT 1`,
+      'SELECT user_id, is_available, vehicle_type, is_verified, driver_number FROM driver_profiles WHERE user_id=$1 LIMIT 1',
       [req.user.userId]
     );
     if (r.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
@@ -106,28 +105,44 @@ router.get('/me', authenticate, authorize(['driver']), async (req, res, next) =>
   } catch (error) { return next(error); }
 });
 
-/* ── GET /drivers/offers ── ofertas pendientes del driver ───────────────────── */
+/* ── GET /drivers/me/counters ────────────────────────────────────────────── */
+router.get('/me/counters', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const r = await query(
+      `SELECT
+         session_rebalances, session_releases, session_cancels, session_expires,
+         session_started_at,
+         total_rebalances,  total_releases,  total_cancels,  total_expires
+       FROM driver_profiles WHERE user_id = $1`,
+      [req.user.userId]
+    );
+    if (r.rowCount === 0) return next(new AppError(404, 'Perfil no encontrado'));
+    return res.json({ counters: r.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+/* ── GET /drivers/offers ─────────────────────────────────────────────────── */
 router.get('/offers', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     let result;
     try {
       result = await query(
         `SELECT o.id, o.total_cents, o.service_fee_cents, o.delivery_fee_cents,
-        o.tip_cents, o.payment_method, o.status,
-        r.name AS restaurant_name, COALESCE(ru.address, r.address) AS restaurant_address,
-                           COALESCE(ru.lat, r.lat) AS restaurant_lat, COALESCE(ru.lng, r.lng) AS restaurant_lng,
-                           COALESCE(o.delivery_address, c.address) AS customer_address,
-                           COALESCE(o.delivery_lat, c.lat) AS customer_lat,
-                           COALESCE(o.delivery_lng, c.lng) AS customer_lng,
-                           GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + (60::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
-                           FROM order_driver_offers od
-                           JOIN orders o ON o.id = od.order_id
-                           JOIN restaurants r ON r.id = o.restaurant_id
-                           LEFT JOIN users ru ON ru.id = r.owner_user_id
-                           JOIN users c       ON c.id = o.customer_id
-                           WHERE od.driver_id=$1 AND od.status='pending' AND o.driver_id IS NULL
-                           ORDER BY od.created_at ASC`,
-                           [req.user.userId]
+                o.tip_cents, o.payment_method, o.status,
+                r.name AS restaurant_name, COALESCE(ru.address, r.address) AS restaurant_address,
+                COALESCE(ru.lat, r.lat) AS restaurant_lat, COALESCE(ru.lng, r.lng) AS restaurant_lng,
+                COALESCE(o.delivery_address, c.address) AS customer_address,
+                COALESCE(o.delivery_lat, c.lat) AS customer_lat,
+                COALESCE(o.delivery_lng, c.lng) AS customer_lng,
+                GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + (60::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
+         FROM order_driver_offers od
+         JOIN orders o ON o.id = od.order_id
+         JOIN restaurants r ON r.id = o.restaurant_id
+         LEFT JOIN users ru ON ru.id = r.owner_user_id
+         JOIN users c ON c.id = o.customer_id
+         WHERE od.driver_id=$1 AND od.status='pending' AND o.driver_id IS NULL
+         ORDER BY od.created_at ASC`,
+        [req.user.userId]
       );
     } catch (e) {
       if (!isMissingColumnError(e) && !isMissingRelationError(e)) throw e;
@@ -140,10 +155,10 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
       try {
         const items = await query(
           `SELECT oi.order_id, oi.menu_item_id, oi.quantity,
-          COALESCE(mi.name,'Producto') AS name
-          FROM order_items oi LEFT JOIN menu_items mi ON mi.id=oi.menu_item_id
-          WHERE oi.order_id=ANY($1::uuid[])`,
-                                  [orderIds]
+                  COALESCE(mi.name,'Producto') AS name
+           FROM order_items oi LEFT JOIN menu_items mi ON mi.id=oi.menu_item_id
+           WHERE oi.order_id=ANY($1::uuid[])`,
+          [orderIds]
         );
         for (const row of items.rows) {
           if (!itemsByOrder.has(row.order_id)) itemsByOrder.set(row.order_id, []);
@@ -151,12 +166,16 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
         }
       } catch (_) {}
     }
-    const offers = result.rows.map(r => ({ ...r, seconds_left: Number(r.seconds_left ?? 60), items: itemsByOrder.get(r.id) || [] }));
+    const offers = result.rows.map(r => ({
+      ...r,
+      seconds_left: Number(r.seconds_left ?? 60),
+      items: itemsByOrder.get(r.id) || [],
+    }));
     return res.json({ offers });
   } catch (error) { return next(error); }
 });
 
-/* ── POST /drivers/offers/:orderId/accept ───────────────────────────────────── */
+/* ── POST /drivers/offers/:orderId/accept ────────────────────────────────── */
 router.post('/offers/:orderId/accept', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const offer = await query(
@@ -167,7 +186,7 @@ router.post('/offers/:orderId/accept', authenticate, authorize(['driver']), asyn
 
     const competitors = await query(
       `SELECT driver_id FROM order_driver_offers
-      WHERE order_id=$1 AND driver_id<>$2 AND status='pending'`,
+       WHERE order_id=$1 AND driver_id<>$2 AND status='pending'`,
       [req.params.orderId, req.user.userId]
     );
 
@@ -176,7 +195,7 @@ router.post('/offers/:orderId/accept', authenticate, authorize(['driver']), asyn
 
     const orderInfo = await query(
       `SELECT o.customer_id, r.owner_user_id AS restaurant_owner_id
-      FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
+       FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
       [req.params.orderId]
     );
     if (orderInfo.rowCount > 0) {
@@ -193,43 +212,40 @@ router.post('/offers/:orderId/accept', authenticate, authorize(['driver']), asyn
   } catch (error) { return next(error); }
 });
 
-/* ── POST /drivers/orders/:orderId/claim — aceptar pedido sin oferta previa ── */
+/* ── POST /drivers/orders/:orderId/claim ─────────────────────────────────── */
 router.post('/orders/:orderId/claim', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const driverId = req.user.userId;
     const orderId  = req.params.orderId;
 
     const orderCheck = await query(
-      `SELECT o.id FROM orders o
-      WHERE o.id=$1 AND o.driver_id IS NULL
-      AND o.status IN ('created','pending_driver')`,
-                                   [orderId]
+      `SELECT o.id FROM orders o WHERE o.id=$1 AND o.driver_id IS NULL AND o.status IN ('created','pending_driver')`,
+      [orderId]
     );
     if (orderCheck.rowCount === 0) return next(new AppError(409, 'Pedido no disponible'));
 
     const MAX_ACTIVE = 4;
     const activeCount = await query(
       `SELECT COUNT(*)::int AS n FROM orders
-      WHERE driver_id=$1 AND status IN ('assigned','accepted','preparing','ready','on_the_way')`,
-                                    [driverId]
+       WHERE driver_id=$1 AND status IN ('assigned','accepted','preparing','ready','on_the_way')`,
+      [driverId]
     );
-    if ((activeCount.rows[0]?.n || 0) >= MAX_ACTIVE) return next(new AppError(409, 'No tienes espacio para más pedidos'));
+    if ((activeCount.rows[0]?.n || 0) >= MAX_ACTIVE)
+      return next(new AppError(409, 'No tienes espacio para más pedidos'));
 
     await query(
       `INSERT INTO order_driver_offers (order_id, driver_id, status, created_at, updated_at)
-      VALUES ($1, $2, 'pending', NOW(), NOW())
-      ON CONFLICT (order_id, driver_id) DO UPDATE
-      SET status='pending', updated_at=NOW()`,
-                [orderId, driverId]
+       VALUES ($1, $2, 'pending', NOW(), NOW())
+       ON CONFLICT (order_id, driver_id) DO UPDATE SET status='pending', updated_at=NOW()`,
+      [orderId, driverId]
     );
     const assigned = await acceptOffer(orderId, driverId);
-
     if (!assigned) return next(new AppError(409, 'El pedido ya fue tomado por otro driver'));
 
     try {
       const orderInfo = await query(
         `SELECT o.customer_id, r.owner_user_id AS restaurant_owner_id
-        FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
+         FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
         [orderId]
       );
       if (orderInfo.rowCount > 0) {
@@ -245,7 +261,7 @@ router.post('/orders/:orderId/claim', authenticate, authorize(['driver']), async
   } catch (error) { return next(error); }
 });
 
-/* ── POST /drivers/offers/:orderId/reject ───────────────────────────────────── */
+/* ── POST /drivers/offers/:orderId/reject ────────────────────────────────── */
 router.post('/offers/:orderId/reject', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     await rejectOffer(req.params.orderId, req.user.userId, offerCb);
@@ -253,85 +269,62 @@ router.post('/offers/:orderId/reject', authenticate, authorize(['driver']), asyn
   } catch (error) { return next(error); }
 });
 
-/* ── POST /drivers/orders/:orderId/rebalance — rebalanceo manual ────────────── */
+/* ── POST /drivers/orders/:orderId/rebalance ─────────────────────────────── */
 router.post('/orders/:orderId/rebalance', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const { orderId } = req.params;
     const driverId    = req.user.userId;
-
     const result = await requestRebalance(orderId, driverId);
     if (!result.ok) return next(new AppError(409, result.reason));
-
     sseHub.sendToUser(driverId, 'order_update', {
-      orderId,
-      status:      'disputed',
-      isDisputed:  true,
-      message:     'Tu pedido está en disputa. Si nadie lo toma, sigue en tu ruta.',
+      orderId, status: 'disputed', isDisputed: true,
+      message: 'Tu pedido está en disputa. Si nadie lo toma, sigue en tu ruta.',
     });
-
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
 
-/* ── POST /drivers/orders/:orderId/cancel-dispute — cancelar disputa manual ── */
+/* ── POST /drivers/orders/:orderId/cancel-dispute ────────────────────────── */
 router.post('/orders/:orderId/cancel-dispute', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const { orderId } = req.params;
     const driverId    = req.user.userId;
-
     const r = await query(
       `UPDATE orders
-      SET is_disputed = false, disputed_until = NULL, disputed_by = NULL, updated_at = NOW()
-      WHERE id = $1 AND driver_id = $2 AND is_disputed = true
-      RETURNING id`,
+       SET is_disputed = false, disputed_until = NULL, disputed_by = NULL, updated_at = NOW()
+       WHERE id = $1 AND driver_id = $2 AND is_disputed = true
+       RETURNING id`,
       [orderId, driverId]
     );
-
     if (r.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado o no está en disputa'));
-
     sseHub.sendToUser(driverId, 'order_update', {
-      orderId,
-      isDisputed: false,
-      message:    'Disputa cancelada. El pedido sigue en tu ruta.',
+      orderId, isDisputed: false,
+      message: 'Disputa cancelada. El pedido sigue en tu ruta.',
     });
-
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
 
-/* ── GET /drivers/me/counters — contadores de sesión e histórico ────────────── */
-router.get('/me/counters', authenticate, authorize(['driver']), async (req, res, next) => {
-  try {
-    const r = await query(
-      `SELECT
-      session_rebalances, session_releases, session_cancels, session_expires,
-      session_started_at,
-      total_rebalances,  total_releases,  total_cancels,  total_expires
-      FROM driver_profiles WHERE user_id = $1`,
-      [req.user.userId]
-    );
-    if (r.rowCount === 0) return next(new AppError(404, 'Perfil no encontrado'));
-    return res.json({ counters: r.rows[0] });
-  } catch (error) { return next(error); }
-});
-
-/* ── POST /drivers/orders/:orderId/release ──────────────────────────────────── */
+/* ── POST /drivers/orders/:orderId/release ───────────────────────────────── */
 router.post('/orders/:orderId/release', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
-    const { note } = req.body || {};
+    const { note }    = req.body || {};
     const { orderId } = req.params;
-    const driverId = req.user.userId;
+    const driverId    = req.user.userId;
     if (note) {
-      try { await query(`UPDATE orders SET driver_note=$1, updated_at=NOW() WHERE id=$2 AND driver_id=$3`, [note, orderId, driverId]); }
-      catch (_) {}
+      try {
+        await query(
+          `UPDATE orders SET driver_note=$1, updated_at=NOW() WHERE id=$2 AND driver_id=$3`,
+          [note, orderId, driverId]
+        );
+      } catch (_) {}
     }
     await releaseOrder(orderId, driverId, offerCb);
     try {
       await query(
         `UPDATE driver_profiles
-        SET session_releases = session_releases + 1,
-        total_releases   = total_releases + 1
-        WHERE user_id = $1`,
+         SET session_releases = session_releases + 1, total_releases = total_releases + 1
+         WHERE user_id = $1`,
         [driverId]
       );
     } catch (_) {}
@@ -339,21 +332,22 @@ router.post('/orders/:orderId/release', authenticate, authorize(['driver']), asy
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /drivers/location ────────────────────────────────────────────────── */
+/* ── PATCH /drivers/location ─────────────────────────────────────────────── */
 router.patch('/location', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const { lat, lng } = req.body || {};
     if (typeof lat !== 'number' || typeof lng !== 'number')
       return next(new AppError(400, 'lat y lng son requeridos'));
 
-    try { await query('UPDATE driver_profiles SET last_lat=$1, last_lng=$2 WHERE user_id=$3', [lat, lng, req.user.userId]); }
-    catch (e) { if (!isMissingColumnError(e)) throw e; }
+    try {
+      await query('UPDATE driver_profiles SET last_lat=$1, last_lng=$2 WHERE user_id=$3', [lat, lng, req.user.userId]);
+    } catch (e) { if (!isMissingColumnError(e)) throw e; }
 
     const activeOrders = await query(
       `SELECT o.id, o.customer_id, r.owner_user_id AS restaurant_owner_id
-      FROM orders o JOIN restaurants r ON r.id=o.restaurant_id
-      WHERE o.driver_id=$1 AND o.status IN ('assigned','accepted','preparing','ready','on_the_way')`,
-                                     [req.user.userId]
+       FROM orders o JOIN restaurants r ON r.id=o.restaurant_id
+       WHERE o.driver_id=$1 AND o.status IN ('assigned','accepted','preparing','ready','on_the_way')`,
+      [req.user.userId]
     );
     for (const ord of activeOrders.rows) {
       const payload = { orderId: ord.id, driverId: req.user.userId, lat, lng };
@@ -364,7 +358,7 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
   } catch (error) { return next(error); }
 });
 
-/* ── GET /drivers/earnings — resumen de ganancias con filtro por días ──────── */
+/* ── GET /drivers/earnings ───────────────────────────────────────────────── */
 router.get('/earnings', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const days   = Math.min(Number(req.query.days)   || 30, 365);
@@ -372,34 +366,31 @@ router.get('/earnings', authenticate, authorize(['driver']), async (req, res, ne
     const offset = Math.max(Number(req.query.offset) || 0, 0);
 
     const rows = await query(
-      `SELECT
-      o.id, o.total_cents, o.delivery_fee_cents, o.service_fee_cents,
-      o.tip_cents, o.delivered_tip_cents, o.payment_method,
-      o.delivered_at, o.created_at,
-      r.name AS restaurant_name,
-      COALESCE(c.alias, c.full_name) AS customer_name
-      FROM orders o
-      JOIN restaurants r ON r.id = o.restaurant_id
-      JOIN users c ON c.id = o.customer_id
-      WHERE o.driver_id = $1
-      AND o.status = 'delivered'
-      AND o.delivered_at >= NOW() - INTERVAL '1 day' * $2
-      ORDER BY o.delivered_at DESC
-      LIMIT $3 OFFSET $4`,
+      `SELECT o.id, o.total_cents, o.delivery_fee_cents, o.service_fee_cents,
+              o.tip_cents, o.delivered_tip_cents, o.payment_method,
+              o.delivered_at, o.created_at,
+              r.name AS restaurant_name,
+              COALESCE(c.alias, c.full_name) AS customer_name
+       FROM orders o
+       JOIN restaurants r ON r.id = o.restaurant_id
+       JOIN users c ON c.id = o.customer_id
+       WHERE o.driver_id = $1 AND o.status = 'delivered'
+         AND o.delivered_at >= NOW() - INTERVAL '1 day' * $2
+       ORDER BY o.delivered_at DESC
+       LIMIT $3 OFFSET $4`,
       [req.user.userId, days, limit, offset]
     );
 
     const totals = await query(
       `SELECT
-      COUNT(*)::int                                                      AS deliveries,
-                               COALESCE(SUM(o.delivery_fee_cents), 0)::int                       AS total_delivery_fee,
-                               COALESCE(SUM(ROUND(o.service_fee_cents * 0.5)), 0)::int           AS total_service_share,
-                               COALESCE(SUM(o.tip_cents + COALESCE(o.delivered_tip_cents,0)), 0)::int AS total_tips
-                               FROM orders o
-                               WHERE o.driver_id = $1
-                               AND o.status = 'delivered'
-                               AND o.delivered_at >= NOW() - INTERVAL '1 day' * $2`,
-                               [req.user.userId, days]
+         COUNT(*)::int AS deliveries,
+         COALESCE(SUM(o.delivery_fee_cents), 0)::int AS total_delivery_fee,
+         COALESCE(SUM(ROUND(o.service_fee_cents * 0.5)), 0)::int AS total_service_share,
+         COALESCE(SUM(o.tip_cents + COALESCE(o.delivered_tip_cents,0)), 0)::int AS total_tips
+       FROM orders o
+       WHERE o.driver_id = $1 AND o.status = 'delivered'
+         AND o.delivered_at >= NOW() - INTERVAL '1 day' * $2`,
+      [req.user.userId, days]
     );
 
     const { deliveries, total_delivery_fee, total_service_share, total_tips } = totals.rows[0];
@@ -408,47 +399,15 @@ router.get('/earnings', authenticate, authorize(['driver']), async (req, res, ne
     return res.json({
       orders: rows.rows.map(r => ({
         ...r,
-        delivery_fee_cents:   Number(r.delivery_fee_cents   || 0),
-                                  service_fee_cents:    Number(r.service_fee_cents    || 0),
-                                  tip_cents:            Number(r.tip_cents            || 0),
-                                  delivered_tip_cents:  Number(r.delivered_tip_cents  || 0),
+        delivery_fee_cents:  Number(r.delivery_fee_cents  || 0),
+        service_fee_cents:   Number(r.service_fee_cents   || 0),
+        tip_cents:           Number(r.tip_cents           || 0),
+        delivered_tip_cents: Number(r.delivered_tip_cents || 0),
       })),
       summary: { deliveries, total_earnings: totalEarnings, total_tips, days },
       limit, offset,
     });
   } catch (error) { return next(error); }
 });
-
-router.patch('/me/bag-capacity', authenticate, authorize(['driver']), async (req, res, next) => {
-  try {
-    const { bag_capacity_liters } = req.body || {};
-    const val = Number(bag_capacity_liters);
-    if (!Number.isFinite(val) || val < 1 || val > 200) {
-      return next(new AppError(400, 'bag_capacity_liters debe ser un número entre 1 y 200'));
-    }
-    const result = await query(
-      `UPDATE driver_profiles
-      SET bag_capacity_liters = $1
-      WHERE user_id = $2
-      RETURNING bag_capacity_liters`,
-      [val, req.user.userId]
-    );
-    if (result.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
-    return res.json({ ok: true, bag_capacity_liters: Number(result.rows[0].bag_capacity_liters) });
-  } catch (error) { return next(error); }
-});
-
-// GET /drivers/me/bag-capacity — obtener capacidad actual
-router.get('/me/bag-capacity', authenticate, authorize(['driver']), async (req, res, next) => {
-  try {
-    const result = await query(
-      `SELECT bag_capacity_liters FROM driver_profiles WHERE user_id = $1`,
-      [req.user.userId]
-    );
-    if (result.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
-    return res.json({ bag_capacity_liters: Number(result.rows[0].bag_capacity_liters) });
-  } catch (error) { return next(error); }
-});
-
 
 export default router;
