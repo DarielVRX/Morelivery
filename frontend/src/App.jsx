@@ -250,10 +250,14 @@ function AuthScreen({ mode = 'login' }) {
 
 // ─── Layout wrappers por rol ──────────────────────────────────────────────────
 function CustomerLayout() {
-  // registerRef: bus entre CustomerOrders (SSE owner) y CustomerHome (consumer)
-  // CustomerOrders llama registerRef.current.onSuggUpdate?.() al recibir order_update
-  // CustomerHome recibe onOrderUpdate prop y recarga sugerencias
-  const registerRef = useRef({ onSuggUpdate: null });
+  // registerRef: bus SSE omnidireccional para customer
+  // CustomerOrders es el SSE owner — notifica a todos los consumidores
+  // Consumidores registran sus callbacks aquí via useEffect
+  const registerRef = useRef({
+    onSuggUpdate:    null,  // CustomerHome.loadSuggestions
+    onPaymentUpdate: null,  // Payments.reload (si está montado)
+    onCartUpdate:    null,  // CustomerCart (si necesita refrescar)
+  });
 
   return (
     <ProtectedRole role="customer">
@@ -261,13 +265,13 @@ function CustomerLayout() {
         onRefresh={() => window.location.reload()}
         alertsLabel="🛒 Carrito"
         ordersContent={<CustomerOrders registerRef={registerRef} />}
-        alertsContent={<CustomerCart />}
+        alertsContent={<CustomerCart onOrderUpdate={(fn) => { registerRef.current.onCartUpdate = fn; }} />}
         homeContent={
           <Suspense fallback={<Spinner />}>
             <Routes>
-              <Route path="pagos" element={<CustomerPayments />} />
+              <Route path="pagos" element={<CustomerPayments onOrderUpdate={(fn) => { registerRef.current.onPaymentUpdate = fn; }} />} />
               <Route path="r/:id" element={<RestaurantPage />} />
-              <Route index        element={<CustomerHome onOrderUpdate={() => registerRef.current.onSuggUpdate?.()} />} />
+              <Route index        element={<CustomerHome onOrderUpdate={(fn) => { registerRef.current.onSuggUpdate = fn; }} />} />
             </Routes>
           </Suspense>
         }

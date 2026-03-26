@@ -95,7 +95,8 @@ router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next
               COALESCE(u.address, r.address) AS address,
               r.manual_open_override, r.profile_photo,
               COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng,
-              r.max_cash_cents
+              r.max_cash_cents,
+              r.allow_frequent_customers
        FROM restaurants r
        LEFT JOIN users u ON u.id = r.owner_user_id
        WHERE r.owner_user_id=$1 LIMIT 1`,
@@ -407,6 +408,26 @@ router.patch('/my/prep-estimate', authenticate, authorize(['restaurant']), async
     }
 
     return res.json({ restaurant: r.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /my/frequent-customers — permitir clientes frecuentes ── */
+router.patch('/my/frequent-customers', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    const value = Boolean(req.body?.allow);
+    try {
+      await query(
+        'UPDATE restaurants SET allow_frequent_customers = $1 WHERE id = $2',
+        [value, restaurantId]
+      );
+    } catch (e) {
+      if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_allow_frequent_customers.sql primero'));
+      throw e;
+    }
+    return res.json({ ok: true, allow_frequent_customers: value });
   } catch (error) { return next(error); }
 });
 

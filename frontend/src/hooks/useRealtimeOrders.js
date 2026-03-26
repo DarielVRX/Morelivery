@@ -415,6 +415,16 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
       } catch (_) {}
     });
 
+    // Cuenta suspendida — forzar logout via evento global
+    es.addEventListener('account_suspended', (e) => {
+      try {
+        console.warn('[SSE] account_suspended recibido — forzando logout');
+        window.dispatchEvent(new CustomEvent('sse_account_suspended', {
+          detail: JSON.parse(e.data),
+        }));
+      } catch (_) {}
+    });
+
     es.addEventListener('connected', () => {
       retryCount.current = 0;
       console.log('📡 [SSE] conexión establecida');
@@ -464,3 +474,4 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
     };
   }, [connect]);
 }
+

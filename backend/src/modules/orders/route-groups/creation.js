@@ -70,6 +70,58 @@ export function registerCreationRoutes(router, deps) {
         return next(new AppError(409, `Esta tienda está fuera de cobertura (${distKm.toFixed(1)} km). Máximo permitido: 5 km.`));
       }
 
+      // ── Límite de 1 pedido activo por cliente ────────────────────────────────
+      // La restricción se elimina cuando el cliente cumple UNO de estos criterios:
+      //   a) 5+ pedidos en efectivo completados (delivered)
+      //   b) 10+ pedidos totales completados (delivered)
+      // Si el restaurante tiene allow_frequent_customers=true, también se elimina.
+      try {
+        const activeCheck = await query(
+          `SELECT COUNT(*) AS cnt FROM orders
+           WHERE customer_id = $1
+             AND status NOT IN ('delivered','cancelled')`,
+          [req.user.userId]
+        );
+        const activeCount = Number(activeCheck.rows[0]?.cnt || 0);
+
+        if (activeCount > 0) {
+          // Verificar si ya cumplió alguno de los criterios de exención
+          const historyCheck = await query(
+            `SELECT
+               COUNT(*) FILTER (WHERE status = 'delivered') AS total_delivered,
+               COUNT(*) FILTER (WHERE status = 'delivered' AND payment_method = 'cash') AS cash_delivered
+             FROM orders
+             WHERE customer_id = $1`,
+            [req.user.userId]
+          );
+          const totalDelivered = Number(historyCheck.rows[0]?.total_delivered || 0);
+          const cashDelivered  = Number(historyCheck.rows[0]?.cash_delivered  || 0);
+
+          const exemptByHistory = totalDelivered >= 10 || cashDelivered >= 5;
+
+          // Verificar si el restaurante permite frecuentes
+          let exemptByRestaurant = false;
+          if (!exemptByHistory) {
+            try {
+              const restCheck = await query(
+                'SELECT allow_frequent_customers FROM restaurants WHERE id = $1',
+                [restaurantId]
+              );
+              exemptByRestaurant = Boolean(restCheck.rows[0]?.allow_frequent_customers);
+            } catch (e) {
+              if (!isMissingColumnError(e)) throw e;
+            }
+          }
+
+          if (!exemptByHistory && !exemptByRestaurant) {
+            return next(new AppError(409, 'Ya tienes un pedido en curso. Espera a que sea entregado antes de hacer otro.'));
+          }
+        }
+      } catch (e) {
+        if (!isMissingColumnError(e) && !isMissingRelationError(e)) throw e;
+      }
+      // ─────────────────────────────────────────────────────────────────────────
+
       const menuIds = items.map(i => i.menuItemId);
       const priceRows = await query(
         `SELECT id, price_cents,
