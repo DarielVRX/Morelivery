@@ -11,7 +11,7 @@
  * }
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
 const STORAGE_KEY = 'morelivery_cart';
 
@@ -35,6 +35,8 @@ function writeStorage(cart) {
     } else {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(cart));
     }
+    // Notificar a otras instancias del hook en el mismo tab
+    window.dispatchEvent(new Event('morelivery_cart_updated'));
   } catch {
     // storage lleno o bloqueado — silencioso
   }
@@ -116,9 +118,22 @@ export function useCart() {
     commitCart(null);
   }, [commitCart]);
 
+  // Sincronizar con otras instancias del hook (ej: RestaurantPage → CustomerCart)
+  useEffect(() => {
+    function sync() {
+      setCartState(readStorage());
+    }
+    window.addEventListener('morelivery_cart_updated', sync);
+    window.addEventListener('storage', (e) => { if (e.key === STORAGE_KEY) sync(); });
+    return () => {
+      window.removeEventListener('morelivery_cart_updated', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+
   return {
     cart,        // { restaurantId, items, total_cents } | null
-    addItem,     // (restaurantId, { menuItemId, name, price_cents }) => void
+    addItem,     // (restaurantId, { menuItemId, name, price_cents, quantity? }) => void
     adjustItem,  // (menuItemId, delta) => void
     clearCart,   // () => void
   };
