@@ -5,6 +5,7 @@
 // OPT-6:  SVG del marcador vive en el DOM; solo se muta su style.transform para rotar
 // OPT-7:  hasActiveOrder se lee desde ref dentro del listener de click del mapa
 // OPT-12: livePos y liveHeading son refs, NO estado — sin re-render en cada tick GPS
+// UPDATE: soporte para impassableWays y roadPreferences como props
 
 import { useEffect, useRef, useState } from 'react';
 import { DriverMapOverlays } from '../features/driver/map/overlays';
@@ -31,6 +32,9 @@ export default function DriverMap({
   loadingPin,
   onClearPin,
   onRouteToPin,
+  // Nuevas props para layers de vialidad
+  impassableWays = [],
+  roadPreferences = [],
 }) {
   const { isDark }        = useTheme();
   const containerRef      = useRef(null);
@@ -55,13 +59,11 @@ export default function DriverMap({
   useEffect(() => { isDarkRef.current = isDark; }, [isDark]);
 
   function applyDarkFilter(dark) {
-    // Apply to the map container div — catches the canvas and all tile elements
-    // Using the container avoids querySelector timing issues (canvas created async)
     const el = containerRef.current;
     if (el) {
       el.style.filter = dark
-        ? 'invert(1) contrast(1.1) hue-rotate(180deg) brightness(0.85) saturate(1.5)'
-        : 'contrast(1.1) saturate(1.8) brightness(0.9) grayscale(0.1)';
+      ? 'invert(1) contrast(1.1) hue-rotate(180deg) brightness(0.85) saturate(1.5)'
+      : 'contrast(1.1) saturate(1.8) brightness(0.9) grayscale(0.1)';
     }
   }
 
@@ -85,8 +87,6 @@ export default function DriverMap({
         } catch (_) {}
       });
     } else {
-      // CSS filter fallback — canvas may not exist yet if map is still loading;
-      // applyDarkFilter is also called in map.once('load') below
       applyDarkFilter(isDark);
     }
   }, [isDark]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -120,14 +120,12 @@ export default function DriverMap({
           const h = getBearing(prev, next);
           liveHeadingRef.current = h;
           onHeadingRef.current?.(h);
-          // OPT-6: rotar SVG directamente — sin recrear ni setState
           const svg = markersRef.current.driverSvg;
           if (svg && routeActiveRef.current) svg.style.transform = `rotate(${h}deg)`;
         }
         prevWatchPosRef.current = next;
         livePosRef.current      = next;
         setHasGPS(true);
-        // Mover marcador sin setState — mutación DOM directa
         if (markersRef.current.driver && mapRef.current) {
           markersRef.current.driver.setLngLat([next.lng, next.lat]);
           const map  = mapRef.current;
@@ -139,13 +137,12 @@ export default function DriverMap({
               map.easeTo({
                 center: [next.lng, next.lat], bearing: h, pitch: 50, zoom: 17,
                 duration: 250, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
-                essential: true,
+                         essential: true,
               });
             }
           } else if (mode === 'free') {
             const prevPos = prevWatchPosRef.current;
             if (prevPos) {
-              // Distancia haversine simplificada en metros
               const R   = 6371000;
               const dLat = (next.lat - prevPos.lat) * Math.PI / 180;
               const dLng = (next.lng - prevPos.lng) * Math.PI / 180;
@@ -163,7 +160,7 @@ export default function DriverMap({
         }
       },
       () => {},
-      { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+                                                             { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
     );
     return () => {
       if (watchIdRef.current != null) {
@@ -174,11 +171,6 @@ export default function DriverMap({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Construir marcador del driver ────────────────────────────────────────────
-  // Modo nav  (centerMode='nav')  → flecha 60×60 px  (75% de 80px original)
-  // Modo libre (centerMode!='nav') → punto  20×20 px  (25% de 80px original)
-  //
-  // OPT-6: createElementNS para mantener referencia directa al SVG sin innerHTML.
-  //        Cuando cambia el heading se muta solo svg.style.transform.
   function _buildDriverMarker(ml, map) {
     if (markersRef.current.driver) {
       markersRef.current.driver.remove();
@@ -192,7 +184,6 @@ export default function DriverMap({
     const wrap    = document.createElement('div');
 
     if (isDrive) {
-      // ── Flecha de navegación ──────────────────────────────────────────────
       const arrowColor = isDarkRef.current ? '#c97f7f' : '#e3aaaa';
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.setAttribute('width',  '60');
@@ -211,9 +202,8 @@ export default function DriverMap({
 
       wrap.style.cssText = 'width:60px;height:60px';
       wrap.appendChild(svg);
-      markersRef.current.driverSvg = svg; // ref para mutar heading en OPT-6
+      markersRef.current.driverSvg = svg;
     } else {
-      // ── Punto simple ──────────────────────────────────────────────────────
       const dot = document.createElement('div');
       const dotColor = isDarkRef.current ? '#c97f7f' : '#e3aaaa';
       dot.style.cssText = [
@@ -224,11 +214,11 @@ export default function DriverMap({
       ].join(';');
       wrap.style.cssText = 'width:20px;height:20px';
       wrap.appendChild(dot);
-      markersRef.current.driverSvg = null; // punto no rota
+      markersRef.current.driverSvg = null;
     }
 
     markersRef.current.driver = new ml.Marker({ element: wrap, anchor: 'center' })
-      .setLngLat([pos.lng, pos.lat]).addTo(map);
+    .setLngLat([pos.lng, pos.lat]).addTo(map);
   }
 
   // ── Inicializar mapa UNA sola vez ────────────────────────────────────────────
@@ -236,37 +226,31 @@ export default function DriverMap({
     if (!containerRef.current || mapRef.current) return;
     ensureMapLibreCSS();
     ensureMapLibreJS().then((ml) => {
-      _ml = ml; // OPT-4: guardar singleton
+      _ml = ml;
       if (!containerRef.current || mapRef.current) return;
       const start = livePosRef.current || DEFAULT_POS;
 
       const map = new ml.Map({
         container: containerRef.current,
-        // "bright" — estilo más ligero de OpenFreeMap.
-        // Zoom-dependent nativo: z10-12 carreteras principales;
-        // z13-15 secundarias + colonias; z16+ calles completas + POIs.
-        // ~35% menos memoria de spritesheet vs. "liberty".
         style:   isDarkRef.current ? STYLE_DARK : STYLE_LIGHT,
         center:  [start.lng, start.lat],
         zoom:    14,
-        pitch:   0,       // sin inclinación — vista de planta para entregar
+        pitch:   0,
         bearing: 0,
-        minZoom: 10,      // no alejarse del área metropolitana
+        minZoom: 10,
         maxZoom: 20,
         maxBounds:            MORELIA_BOUNDS,
         attributionControl:   false,
-        antialias:            false,  // OPT-perf: reduce overdraw en gama media
+        antialias:            false,
         preserveDrawingBuffer: false,
-        dragRotate:      false,       // sin rotación manual — interfiere al conducir
+        dragRotate:      false,
         pitchWithRotate: false,
       });
 
-      // Desactivar pitch táctil (iOS/Android)
       if (map.touchPitch) map.touchPitch.disable();
 
       map.addControl(new ml.NavigationControl({ showCompass: false }), 'top-right');
 
-      // Ocultar controles de zoom — mostrar 3 s tras interacción
       const ctrl = containerRef.current.querySelector('.maplibregl-ctrl-top-right');
       if (ctrl) {
         zoomCtrlRef.current       = ctrl;
@@ -287,11 +271,9 @@ export default function DriverMap({
       };
       ['mousedown', 'touchstart', 'wheel', 'dragstart'].forEach(ev => map.on(ev, showZoom));
 
-      // Actualizar lastInteractionRef en cualquier interacción del mapa
       const onMapInteract = () => { lastInteractionRef.current = Date.now(); };
       ['mousedown', 'touchstart', 'wheel', 'dragstart', 'touchmove'].forEach(ev => map.on(ev, onMapInteract));
 
-      // OPT-7: leer hasActiveOrder desde ref, no closure estático
       map.on('click', (e) => {
         if (hasActiveOrderRef.current) return;
         onCustomPin?.({ lat: e.lngLat.lat, lng: e.lngLat.lng });
@@ -299,11 +281,10 @@ export default function DriverMap({
 
       map.once('load', () => {
         _buildDriverMarker(ml, map);
-        // Apply dark mode on load — container is guaranteed to exist here
         if (!STADIA_KEY && document.documentElement.getAttribute('data-theme') === 'dark') {
           if (containerRef.current) {
             containerRef.current.style.filter =
-              'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)';
+            'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)';
           }
         }
       });
@@ -318,7 +299,7 @@ export default function DriverMap({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // OPT-5: reconstruir marcador (dot↔arrow) y centrar al cambiar modo nav
+  // Reconstruir marcador al cambiar modo nav
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !_ml) return;
@@ -329,22 +310,21 @@ export default function DriverMap({
       const h = liveHeadingRef.current || navHeadingDeg || 0;
       map.easeTo({ center: [pos.lng, pos.lat], bearing: h, pitch: 50, zoom: 17,
         duration: 350, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
-        essential: true });
+                 essential: true });
     } else {
-      // Al salir de nav: restablecer pitch y bearing
       map.easeTo({ pitch: 0, bearing: 0, duration: 300, essential: true });
     }
   }, [centerMode, routeActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // OPT-5: efecto SOLO para heading — muta SVG, sin recrear marcador
+  // Heading — muta SVG
   useEffect(() => {
     const svg = markersRef.current.driverSvg;
     if (!svg) return;
     svg.style.transform = routeActive
-      ? `rotate(${navHeadingDeg}deg)` : 'rotate(0deg)';
+    ? `rotate(${navHeadingDeg}deg)` : 'rotate(0deg)';
   }, [navHeadingDeg, routeActive]);
 
-  // Pin personalizado — SVG pin + popup con dirección auto-ocultar 5s
+  // Pin personalizado
   const pinPopupRef   = useRef(null);
   const pinHideTimer  = useRef(null);
 
@@ -352,25 +332,23 @@ export default function DriverMap({
     const map = mapRef.current;
     if (!map || !_ml) return;
 
-    // Limpiar marcador y popup previos
     if (markersRef.current.custom) { markersRef.current.custom.remove(); markersRef.current.custom = null; }
     if (pinPopupRef.current)       { pinPopupRef.current.remove();       pinPopupRef.current = null; }
     clearTimeout(pinHideTimer.current);
 
     if (customPin && !hasActiveOrder) {
-      // SVG pin
       const el = document.createElement('div');
       el.style.cssText = 'cursor:pointer;width:32px;height:40px;';
-      el.innerHTML = `<svg width="32" height="40" viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M16 2C9.37 2 4 7.37 4 14c0 9 12 24 12 24s12-15 12-24c0-6.63-5.37-12-12-12z" fill="var(--brand)" stroke="#fff" stroke-width="1.5"/>
-        <circle cx="16" cy="14" r="5" fill="#fff" fill-opacity="0.9"/>
-      </svg>`;
-      markersRef.current.custom = new _ml.Marker({ element: el, anchor: 'bottom' })
-        .setLngLat([customPin.lng, customPin.lat]).addTo(map);
+  el.innerHTML = `<svg width="32" height="40" viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M16 2C9.37 2 4 7.37 4 14c0 9 12 24 12 24s12-15 12-24c0-6.63-5.37-12-12-12z" fill="var(--brand)" stroke="#fff" stroke-width="1.5"/>
+  <circle cx="16" cy="14" r="5" fill="#fff" fill-opacity="0.9"/>
+  </svg>`;
+  markersRef.current.custom = new _ml.Marker({ element: el, anchor: 'bottom' })
+  .setLngLat([customPin.lng, customPin.lat]).addTo(map);
     }
   }, [customPin?.lat, customPin?.lng, hasActiveOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Popup sobre el pin — aparece al colocar/tocar, auto-oculta tras 5s
+  // Popup sobre el pin
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !_ml || !customPin || hasActiveOrder) return;
@@ -382,38 +360,36 @@ export default function DriverMap({
     const bg  = isDarkMode ? '#1f2937' : '#fff';
     const txt = isDarkMode ? '#f3f4f6' : '#111827';
     const sub = isDarkMode ? '#9ca3af' : '#9e4f4f';
-    const html = `<div style="font-size:0.78rem;font-family:inherit;max-width:200px;background:${bg};color:${txt};border-radius:6px;padding:6px 8px;">
-      <div style="font-weight:600;margin-bottom:3px;line-height:1.3;">${pinAddress}</div>
-      <button onclick="this.dispatchEvent(new CustomEvent('routetopin',{bubbles:true}))"
-        style="font-size:0.7rem;color:${sub};background:none;border:none;cursor:pointer;padding:0;margin-top:2px;">
-        📍 Ruta hasta aquí
-      </button>
-    </div>`;
+  const html = `<div style="font-size:0.78rem;font-family:inherit;max-width:200px;background:${bg};color:${txt};border-radius:6px;padding:6px 8px;">
+  <div style="font-weight:600;margin-bottom:3px;line-height:1.3;">${pinAddress}</div>
+  <button onclick="this.dispatchEvent(new CustomEvent('routetopin',{bubbles:true}))"
+  style="font-size:0.7rem;color:${sub};background:none;border:none;cursor:pointer;padding:0;margin-top:2px;">
+  📍 Ruta hasta aquí
+  </button>
+  </div>`;
 
-    const popup = new _ml.Popup({ closeButton: false, offset: [0, -38], maxWidth: '220px' })
-      .setLngLat([customPin.lng, customPin.lat])
-      .setHTML(html)
-      .addTo(map);
+  const popup = new _ml.Popup({ closeButton: false, offset: [0, -38], maxWidth: '220px' })
+  .setLngLat([customPin.lng, customPin.lat])
+  .setHTML(html)
+  .addTo(map);
 
-    pinPopupRef.current = popup;
+  pinPopupRef.current = popup;
 
-    // Escuchar el evento del botón "Ruta al pin"
-    const el = popup.getElement();
-    el?.addEventListener('routetopin', () => {
-      onRouteToPin?.({ lat: customPin.lat, lng: customPin.lng });
-    });
+  const el = popup.getElement();
+  el?.addEventListener('routetopin', () => {
+    onRouteToPin?.({ lat: customPin.lat, lng: customPin.lng });
+  });
 
-    // Auto-ocultar popup Y pin tras 5s
-    pinHideTimer.current = setTimeout(() => {
-      popup.remove();
-      pinPopupRef.current = null;
-      onClearPin?.();
-    }, 5000);
+  pinHideTimer.current = setTimeout(() => {
+    popup.remove();
+    pinPopupRef.current = null;
+    onClearPin?.();
+  }, 5000);
 
-    return () => clearTimeout(pinHideTimer.current);
+  return () => clearTimeout(pinHideTimer.current);
   }, [pinAddress, loadingPin, customPin?.lat, customPin?.lng, hasActiveOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Ocultar popup al hacer click en otro punto del mapa
+  // Ocultar popup al hacer click en otro punto
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -424,7 +400,6 @@ export default function DriverMap({
     map.on('click', hide);
     return () => map.off('click', hide);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
 
   // Marcadores tienda / cliente
   useEffect(() => {
@@ -452,19 +427,14 @@ export default function DriverMap({
       }
     }
 
-    // Guard: wait for both map load AND style load
     if (map.isStyleLoaded()) {
       draw();
     } else {
-      // Use 'styledata' which fires when style is ready, including after tile changes
       map.once('styledata', draw);
     }
   }, [routeGeometry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Centrar — señal puntual del padre ────────────────────────────────────────
-  // 'follow'   → lock to driver, zoom 19, heading-aligned (nav activo)
-  // 'overview' → fit bounds to driver + pickup + delivery (ver toda la ruta)
-  // 'free'     → center on driver, zoom 15, north up (reset)
   useEffect(() => {
     if (!centerSignal || !mapRef.current) return;
     const map = mapRef.current;
@@ -478,7 +448,6 @@ export default function DriverMap({
         duration: 350, offset: [0, offsetY], essential: true });
 
     } else if (centerSignal === 'overview') {
-      // Collect all relevant points — usar allStops para vista multi-pedido
       const pts = [];
       if (pos) pts.push([pos.lng, pos.lat]);
       if (allStops?.length) {
@@ -492,7 +461,7 @@ export default function DriverMap({
         try {
           const bounds = pts.reduce(
             (b, pt) => b.extend(pt),
-            new _ml.LngLatBounds(pts[0], pts[0])
+                                    new _ml.LngLatBounds(pts[0], pts[0])
           );
           map.fitBounds(bounds, {
             padding: { top: 80, bottom: 160, left: 40, right: 60 },
@@ -501,7 +470,6 @@ export default function DriverMap({
             essential: true,
           });
         } catch (_) {
-          // Fallback to simple center
           if (pos) map.easeTo({ center: [pos.lng, pos.lat], zoom: 13, duration: 400 });
         }
       } else if (pos) {
@@ -510,7 +478,6 @@ export default function DriverMap({
       }
 
     } else {
-      // 'free' — north up, zoom 14 sin pitch
       if (!pos) { onCenterDone?.(); return; }
       map.easeTo({ center: [pos.lng, pos.lat], zoom: 14, pitch: 0, bearing: 0,
         duration: 350, essential: true });
@@ -521,9 +488,9 @@ export default function DriverMap({
 
   return (
     <div style={{ height: '100%', width: '100%', position: 'relative' }}>
-      <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
+    <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
 
-      <DriverMapOverlays hasGPS={hasGPS} showAttrib={showAttrib} onToggleAttrib={() => setShowAttrib(v => !v)} bottomOffset={bottomOffset} />
+    <DriverMapOverlays hasGPS={hasGPS} showAttrib={showAttrib} onToggleAttrib={() => setShowAttrib(v => !v)} bottomOffset={bottomOffset} />
     </div>
   );
 }

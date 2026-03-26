@@ -29,11 +29,8 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
   const order = useOrderManager(auth.token, patchUser, auth.user?.driver);
 
   // Conectar useDriverOrders (panel lateral) al SSE de useOrderManager.
-  // useDriverOrders escribe sus handlers en registerRef.current.{onUpdate,onReconnect,onChat}.
-  // Aquí los pasamos a useOrderManager para que los invoque al recibir eventos SSE.
   useEffect(() => {
     if (!registerRef) return;
-    // Esperar a que DriverOrders haya montado y escrito sus handlers
     const wire = () => {
       if (registerRef.current.onUpdate)    order.registerOrdersUpdate(registerRef.current.onUpdate);
       if (registerRef.current.onReconnect) order.registerOrdersReconnect(registerRef.current.onReconnect);
@@ -41,7 +38,6 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
       registerRef.current.loadData = order.loadData;
     };
     wire();
-    // Re-intentar en el siguiente tick por si DriverOrders monta después
     const t = setTimeout(wire, 0);
     return () => clearTimeout(t);
   }, [registerRef, order.registerOrdersUpdate, order.registerOrdersReconnect, order.registerOrdersChat]);
@@ -64,7 +60,6 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
 
   const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, order.availability, order.hasActiveOrder);
 
-  // Mantener useOrderManager al tanto de la posición para calcular stop más próximo
   useEffect(() => { order.setMyPosition(myPosition); }, [myPosition]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const home = useDriverHomeRuntime({
@@ -83,12 +78,12 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     activeZones: home.activeZones,
     hasActiveOrder: order.hasActiveOrder,
     onVoice: (text) => setMsg(text),
-    onZoneAlert: (zone) => setMsg(`⚠️ Zona de alerta cerca: ${ZONE_LABELS[zone?.type] || zone?.type}`),
-    impassableWays: [],
-    routeGeometry: home.routeGeometry || [],
+                                                                           onZoneAlert: (zone) => setMsg(`⚠️ Zona de alerta cerca: ${ZONE_LABELS[zone?.type] || zone?.type}`),
+                                                                           impassableWays: home.activeImpassable || [],
+                                                                           routeGeometry: home.routeGeometry || [],
   });
 
-  // Exponer zonas e impassable via registerRef — DESPUÉS de home y myPosition
+  // Exponer zonas, impassable y preferencias via registerRef
   useEffect(() => {
     if (!registerRef) return;
     registerRef.current.activeZones      = home.activeZones;
@@ -99,108 +94,111 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     registerRef.current.availability     = order.availability;
     registerRef.current.token            = auth.token;
     registerRef.current.notifyAlertsUpdate?.();
-  }, [home.activeZones, home.activeImpassable, home.myPreferences]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [home.activeZones, home.activeImpassable, home.myPreferences, myPosition, order.availability, auth.token, registerRef]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden', position:'relative' }}>
-        <DriverHomeStatusBar
-          availability={order.availability}
-          counters={home.counters}
-          activeOrder={order.activeOrder}
-          bagPct={order.routeBagPct}
-          onToggleAvailability={() => order.toggleAvailability(setMsg)}
-          msg={msg}
-          onDismissMsg={() => setMsg('')}
-          transferBanner={order.transferBanner}
-          onDismissTransferBanner={() => order.setTransferBanner(null)}
-        />
+    <DriverHomeStatusBar
+    availability={order.availability}
+    counters={home.counters}
+    activeOrder={order.activeOrder}
+    bagPct={order.routeBagPct}
+    onToggleAvailability={() => order.toggleAvailability(setMsg)}
+    msg={msg}
+    onDismissMsg={() => setMsg('')}
+    transferBanner={order.transferBanner}
+    onDismissTransferBanner={() => order.setTransferBanner(null)}
+    />
 
-        <DriverHomeMapSection
-          availability={order.availability}
-          hasActiveOrder={order.hasActiveOrder}
-          customPin={home.customPin}
-          setCustomPin={home.setCustomPin}
-          pinAddress={home.pinAddress}
-          loadingPin={home.loadingPin}
-          routeGeometry={home.routeGeometry}
-          allStops={home.allStops}
-          routeActive={home.routeActive}
-          myPosition={myPosition}
-          activeOrder={order.activeOrder}
-          navHeadingDeg={home.navHeadingDeg}
-          onHeadingChange={home.setNavHeadingDeg}
-          centerSignal={home.centerSignal}
-          onCenterDone={() => home.setCenterSignal(null)}
-          onRouteToPin={home.onRouteToPin}
-          setMapInstance={home.setMapInstance}
-          mapInstance={home.mapInstance}
-          activeZones={home.activeZones}
-          token={auth.token}
-          userId={auth.user?.id}
-          centerMode={home.centerMode}
-          voiceEnabled={voiceEnabled}
-          navMode={home.navMode}
-          onCenterCycle={home.handleCenterCycle}
-          onVoiceToggle={() => setVoiceEnabled((value) => !value)}
-          onGoogleNav={home.openGoogleNavigation}
-          onNavMode={home.setNavMode}
-          setMsg={setMsg}
-          onSubmitZone={home.handleZoneConfirm}
-          onSubmitImpassable={home.handleImpassableConfirm}
-          onSubmitPreference={home.handlePreferenceConfirm}
-          bottomOffset={panelHeight + 8}
-          isDark={isDark}
-          onQuickReport={async (type, pos) => {
-            if (type === 'zone') {
-              home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'other', radius_m: 500, estimated_hours: 1 });
-            } else if (type === 'impassable') {
-              try {
-                const ways = await quickSelectWays(pos, 'impassable');
-                home.handleImpassableConfirm(ways);
-              } catch (_) {
-                setMsg('No se pudo detectar la calle. Intenta el modo normal.');
-              }
-            } else if (type === 'preference') {
-              try {
-                const ways = await quickSelectWays(pos, 'preference');
-                home.handlePreferenceConfirm(ways);
-              } catch (_) {
-                setMsg('No se pudo detectar la calle. Intenta el modo normal.');
-              }
-            }
-          }}
-        />
+    <DriverHomeMapSection
+    availability={order.availability}
+    hasActiveOrder={order.hasActiveOrder}
+    customPin={home.customPin}
+    setCustomPin={home.setCustomPin}
+    pinAddress={home.pinAddress}
+    loadingPin={home.loadingPin}
+    routeGeometry={home.routeGeometry}
+    allStops={home.allStops}
+    routeActive={home.routeActive}
+    myPosition={myPosition}
+    activeOrder={order.activeOrder}
+    navHeadingDeg={home.navHeadingDeg}
+    onHeadingChange={home.setNavHeadingDeg}
+    centerSignal={home.centerSignal}
+    onCenterDone={() => home.setCenterSignal(null)}
+    onRouteToPin={home.onRouteToPin}
+    setMapInstance={home.setMapInstance}
+    mapInstance={home.mapInstance}
+    activeZones={home.activeZones}
+    activeImpassable={home.activeImpassable}
+    myPreferences={home.myPreferences}
+    token={auth.token}
+    userId={auth.user?.id}
+    centerMode={home.centerMode}
+    voiceEnabled={voiceEnabled}
+    navMode={home.navMode}
+    onCenterCycle={home.handleCenterCycle}
+    onVoiceToggle={() => setVoiceEnabled((value) => !value)}
+    onGoogleNav={home.openGoogleNavigation}
+    onNavMode={home.setNavMode}
+    setMsg={setMsg}
+    onSubmitZone={home.handleZoneConfirm}
+    onSubmitImpassable={home.handleImpassableConfirm}
+    onSubmitPreference={home.handlePreferenceConfirm}
+    bottomOffset={panelHeight + 8}
+    isDark={isDark}
+    onQuickReport={async (type, pos) => {
+      if (type === 'zone') {
+        home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'other', radius_m: 500, estimated_hours: 1 });
+      } else if (type === 'impassable') {
+        try {
+          const ways = await quickSelectWays(pos, 'impassable');
+          home.handleImpassableConfirm(ways);
+        } catch (_) {
+          setMsg('No se pudo detectar la calle. Intenta el modo normal.');
+        }
+      } else if (type === 'preference') {
+        try {
+          const ways = await quickSelectWays(pos, 'preference');
+          home.handlePreferenceConfirm(ways);
+        } catch (_) {
+          setMsg('No se pudo detectar la calle. Intenta el modo normal.');
+        }
+      }
+    }}
+    />
 
-        <OfferPanel
-          offer={order.pendingOffer}
-          minimized={order.offerMinimized}
-          loading={order.loadingOffer}
-          onAccept={() => order.acceptOffer(setMsg)}
-          onReject={() => order.rejectOffer(setMsg)}
-          onToggleMinimize={() => order.setOfferMinimized((value) => !value)}
-          onExpired={() => {
-            const warning = order.handleOfferExpired();
-            if (warning) setMsg(warning);
-          }}
-          panelRef={!order.hasActiveOrder ? activePanelRef : undefined}
-        />
+    <OfferPanel
+    offer={order.pendingOffer}
+    minimized={order.offerMinimized}
+    loading={order.loadingOffer}
+    onAccept={() => order.acceptOffer(setMsg)}
+    onReject={() => order.rejectOffer(setMsg)}
+    onToggleMinimize={() => order.setOfferMinimized((value) => !value)}
+    onExpired={() => {
+      const warning = order.handleOfferExpired();
+      if (warning) setMsg(warning);
+    }}
+    panelRef={!order.hasActiveOrder ? activePanelRef : undefined}
+    />
 
-        <ActiveOrderPanel
-          order={order.hasActiveOrder ? order.activeOrder : null}
-          expanded={order.orderExpanded}
-          loadingStatus={order.loadingStatus}
-          showRelease={order.showRelease}
-          releaseNote={order.releaseNote}
-          onToggleExpand={() => order.setOrderExpanded((expanded) => !expanded)}
-          onChangeStatus={(id, status) => order.changeStatus(id, status, setMsg)}
-          onToggleRelease={() => order.setShowRelease((show) => !show)}
-          onReleaseNoteChange={order.setReleaseNote}
-          onConfirmRelease={() => order.doRelease(setMsg)}
-          onRebalance={() => order.doRebalance(setMsg)}
-          onRoute={home.handleToggleRoute}
-          routeActive={home.routeActive}
-          panelRef={activePanelRef}
-        />
+    <ActiveOrderPanel
+    order={order.hasActiveOrder ? order.activeOrder : null}
+    expanded={order.orderExpanded}
+    loadingStatus={order.loadingStatus}
+    showRelease={order.showRelease}
+    releaseNote={order.releaseNote}
+    onToggleExpand={() => order.setOrderExpanded((expanded) => !expanded)}
+    onChangeStatus={(id, status) => order.changeStatus(id, status, setMsg)}
+    onToggleRelease={() => order.setShowRelease((show) => !show)}
+    onReleaseNoteChange={order.setReleaseNote}
+    onConfirmRelease={() => order.doRelease(setMsg)}
+    onRebalance={() => order.doRebalance(setMsg)}
+    onCancelDispute={() => order.doCancelDispute(setMsg)}
+    onRoute={home.handleToggleRoute}
+    routeActive={home.routeActive}
+    panelRef={activePanelRef}
+    />
     </div>
   );
 }
