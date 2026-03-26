@@ -201,7 +201,7 @@ async function playVoice(voiceName) {
 // existente (mismo tag) con un resumen actualizado en lugar de apilar.
 const notifCounts = {};  // { [group]: { count, lastBody, url } }
 
-async function showGroupedNotification({ group, title, body, url, priority, tag }) {
+async function showGroupedNotification({ group, title, body, url, priority, tag, vibrate }) {
   if (!notifCounts[group]) notifCounts[group] = { count: 0, lastBody: '', url };
   notifCounts[group].count++;
   notifCounts[group].lastBody = body;
@@ -210,27 +210,28 @@ async function showGroupedNotification({ group, title, body, url, priority, tag 
   const { count, lastBody } = notifCounts[group];
   const isHigh = priority === 'high';
 
-  // Si hay más de 1 notificación del mismo grupo, mostrar resumen
   const displayTitle = count > 1 ? `${title} (${count})` : title;
   const displayBody  = count > 1
     ? `${lastBody} — y ${count - 1} más`
     : lastBody;
 
-  // Cerrar notificación anterior del mismo grupo antes de mostrar la nueva
   const existing = await self.registration.getNotifications({ tag });
   existing.forEach(n => n.close());
 
+  // vibrate: usar el del payload si viene, si no el default por prioridad
+  const vibratePattern = vibrate || (isHigh ? [300, 100, 300, 100, 300] : [200, 100, 200]);
+
   await self.registration.showNotification(displayTitle, {
-    body:              displayBody,
-    tag,               // mismo tag = reemplaza la anterior del grupo
-    icon:              '/icon-192.png',
-    badge:             '/badge.svg',
+    body:               displayBody,
+    tag,
+    icon:               '/icon-192.png',
+    badge:              '/badge.svg',
     requireInteraction: isHigh,
-    renotify:          true,   // vibrar/sonar aunque el tag sea el mismo
-    timestamp:         Date.now(),
-    vibrate:           isHigh ? [300, 100, 300, 100, 300] : [200, 100, 200],
-    actions:           [{ action: 'open', title: 'Abrir' }],
-    data:              { url, group },
+    renotify:           true,
+    timestamp:          Date.now(),
+    vibrate:            vibratePattern,
+    actions:            [{ action: 'open', title: 'Abrir' }],
+    data:               { url, group },
   });
 }
 
@@ -310,14 +311,11 @@ self.addEventListener('push', (event) => {
     group = tag,
     url = '/',
     priority = 'normal',
-    voice,
+    vibrate,
   } = payload;
 
   event.waitUntil(
-    Promise.all([
-      showGroupedNotification({ group, title, body, url, priority, tag: group }),
-                voice ? playVoice(voice) : Promise.resolve(),
-    ])
+    showGroupedNotification({ group, title, body, url, priority, tag: group, vibrate })
   );
 });
 

@@ -1,0 +1,3528 @@
+=== FILE: frontend/src/components/ActiveOrderPanel.jsx ===
+// components/ActiveOrderPanel.jsx
+import { useState } from 'react';
+import { getDriverEarningCents, getOrderGrandTotalCents, isCashPayment } from '../features/driver/shared/orderUtils';
+import { fmt } from '../utils/format';
+import FeeBreakdown from './FeeBreakdown';
+
+const STATUS_LABEL = {
+  assigned:   'Ve a recoger',
+  on_the_way: 'En camino al cliente',
+  preparing:  'Esperando en tienda',
+  ready:      'Listo para retiro',
+  accepted:   'Aceptado',
+  created:    'Nuevo pedido',
+};
+
+// ── SVG icons ─────────────────────────────────────────────────────────────────
+function IconNavigateActive() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/>
+    </svg>
+  );
+}
+function IconRoute() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="6" cy="19" r="2"/>
+      <circle cx="18" cy="5" r="2"/>
+      <path d="M6 17V9a6 6 0 016-6h.5"/>
+      <path d="M18 7v8a6 6 0 01-6 6h-.5"/>
+    </svg>
+  );
+}
+function IconChevron({ up }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+      style={{ transform: up ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+      <polyline points="6 9 12 15 18 9"/>
+    </svg>
+  );
+}
+function IconOTW() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/>
+    </svg>
+  );
+}
+function IconDelivered() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>
+  );
+}
+function IconRelevo() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="17 1 21 5 17 9"/>
+      <path d="M3 11V9a4 4 0 014-4h14"/>
+      <polyline points="7 23 3 19 7 15"/>
+      <path d="M21 13v2a4 4 0 01-4 4H3"/>
+    </svg>
+  );
+}
+function IconRelease() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 6L6 18M6 6l12 12"/>
+    </svg>
+  );
+}
+function IconCard() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <rect x="1" y="4" width="22" height="16" rx="2"/>
+      <line x1="1" y1="10" x2="23" y2="10"/>
+    </svg>
+  );
+}
+function IconCash() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <rect x="2" y="6" width="20" height="12" rx="2"/>
+      <circle cx="12" cy="12" r="2"/>
+      <path d="M6 12h.01M18 12h.01"/>
+    </svg>
+  );
+}
+
+export default function ActiveOrderPanel({
+  order,
+  expanded,
+  loadingStatus,
+  showRelease,
+  releaseNote,
+  onToggleExpand,
+  onChangeStatus,
+  onToggleRelease,
+  onReleaseNoteChange,
+  onConfirmRelease,
+  onRebalance,
+  onRoute,
+  routeActive = false,
+  panelRef,  // ref para medir altura desde Home
+}) {
+  if (!order) return null;
+
+  const isOTW  = order.status === 'on_the_way';
+  const isCash = isCashPayment(order);
+  const total  = getOrderGrandTotalCents(order);
+  const earn   = getDriverEarningCents(order);
+
+  const canOTW      = order.status === 'ready';
+  const canDeliver  = order.status === 'on_the_way';
+  const canRelevo   = !['on_the_way','delivered','cancelled'].includes(order.status) && !order.picked_up_at && !order.is_disputed;
+  const canRelease  = !['on_the_way','delivered','cancelled'].includes(order.status);
+
+  return (
+    <div ref={panelRef} style={{
+      flexShrink: 0, background: 'var(--bg-card)',
+      borderTop: '2px solid var(--success)', zIndex: 10,
+      position: 'absolute', bottom: 0, left: 0, right: 0,
+      display: 'flex', flexDirection: 'column',
+    }}>
+      {/* ── Fila principal siempre visible ─────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 72 }}>
+
+        {/* Botón ruta — toggle: activo=navegar, inactivo=punto */}
+        <button onClick={onRoute} title={routeActive ? 'Desactivar ruta' : 'Calcular ruta'}
+          style={{
+            width: '20%', minWidth: 60, flexShrink: 0,
+            background: routeActive
+              ? 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)'
+              : 'linear-gradient(135deg, #c97b7b 0%, #9e4f4f 100%)',
+            border: 'none', cursor: 'pointer', borderRadius: 0,
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', gap: 4,
+            color: '#fff',
+            transition: 'background 0.2s',
+          }}>
+          {routeActive ? <IconNavigateActive /> : <IconRoute />}
+          <span style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.02em' }}>
+            {routeActive ? 'NAV' : 'RUTA'}
+          </span>
+        </button>
+
+        {/* Info + toggle expand */}
+        <div onClick={onToggleExpand} style={{
+          flex: 1, padding: '0.5rem 0.75rem 0.5rem 0.75rem',
+          cursor: 'pointer', userSelect: 'none', minWidth: 0,
+          display: 'flex', flexDirection: 'column', justifyContent: 'center',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase',
+              letterSpacing: '0.5px', color: 'var(--success)' }}>
+              {STATUS_LABEL[order.status] || order.status}
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {order.is_disputed && (
+                <span style={{ fontSize: '0.62rem', fontWeight: 700,
+                  background: '#fef9c3', color: '#854d0e',
+                  border: '1px solid #fde047', borderRadius: 6,
+                  padding: '0.1rem 0.4rem' }}>
+                  En disputa
+                </span>
+              )}
+              <IconChevron up={expanded} />
+            </div>
+          </div>
+
+          <div style={{ fontSize: '0.82rem', marginTop: '0.15rem', overflow: 'hidden',
+            textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <strong>{isOTW ? (order.customer_name || 'Cliente') : order.restaurant_name}</strong>
+          </div>
+
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '0.1rem',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {isOTW
+              ? (order.customer_address || order.delivery_address || '')
+              : (order.restaurant_address || '')}
+          </div>
+
+          {/* Pago */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: '0.2rem',
+            fontSize: '0.72rem' }}>
+            {isCash
+              ? <><IconCash /><span style={{ fontWeight: 700, color: 'var(--brand)' }}>
+                  {isOTW ? `Cobrar ${fmt(total)}` : `Pagar ${fmt(order.total_cents || 0)}`}
+                </span></>
+              : <><IconCard /><span style={{ color: 'var(--text-tertiary)' }}>
+                  {order.payment_method === 'card' ? 'Tarjeta — no cobrar' : 'SPEI — no cobrar'}
+                </span></>
+            }
+          </div>
+        </div>
+      </div>
+
+      {/* ── Expandible 1: botones de acción ────────────────────────────────── */}
+      <div style={{
+        display: 'grid',
+        gridTemplateRows: expanded ? '1fr' : '0fr',
+        transition: 'grid-template-rows 0.22s ease',
+        overflow: 'hidden',
+      }}>
+        <div style={{ overflow: 'hidden' }}>
+          <div style={{ padding: '0.5rem 0.75rem 0.5rem', borderTop: '1px solid var(--border-light)',
+            display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+
+            {/* Acciones principales */}
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <button
+                style={{
+                  flex: 1, padding: '0.55rem 0', borderRadius: 8, fontWeight: 700,
+                  fontSize: '0.82rem', border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  background: canOTW ? 'var(--brand)' : 'var(--bg-raised)',
+                  color: canOTW ? '#fff' : 'var(--text-tertiary)',
+                  opacity: !canOTW ? 0.5 : 1,
+                }}
+                disabled={loadingStatus === 'on_the_way' || !canOTW}
+                onClick={() => onChangeStatus(order.id, 'on_the_way')}>
+                <IconOTW /> En camino
+              </button>
+              <button
+                style={{
+                  flex: 1, padding: '0.55rem 0', borderRadius: 8, fontWeight: 700,
+                  fontSize: '0.82rem', border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  background: canDeliver ? 'var(--success)' : 'var(--bg-raised)',
+                  color: canDeliver ? '#fff' : 'var(--text-tertiary)',
+                  opacity: !canDeliver ? 0.5 : 1,
+                }}
+                disabled={loadingStatus === 'delivered' || !canDeliver}
+                onClick={() => onChangeStatus(order.id, 'delivered')}>
+                <IconDelivered /> Entregado
+              </button>
+            </div>
+
+            {/* Opciones secundarias — expandible interno */}
+            {(canRelevo || canRelease) && !order.is_disputed && (
+              <details style={{ fontSize: '0.78rem' }}>
+                <summary style={{
+                  cursor: 'pointer', color: 'var(--text-tertiary)', fontWeight: 600,
+                  fontSize: '0.72rem', listStyle: 'none', display: 'flex',
+                  alignItems: 'center', gap: 4, padding: '0.15rem 0',
+                }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                  </svg>
+                  Más opciones
+                </summary>
+                <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
+                  {canRelevo && (
+                    <button style={{
+                      flex: 1, padding: '0.45rem 0', borderRadius: 8, fontWeight: 700,
+                      fontSize: '0.78rem', border: '1.5px solid #fde047', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                      color: '#854d0e', background: '#fef9c3',
+                    }} onClick={onRebalance}>
+                      <IconRelevo /> Buscar relevo
+                    </button>
+                  )}
+                  {canRelease && (
+                    <button style={{
+                      flex: 1, padding: '0.45rem 0', borderRadius: 8, fontWeight: 700,
+                      fontSize: '0.78rem', border: '1.5px solid #dc2626', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                      background: '#fef2f2', color: '#dc2626',
+                    }} onClick={onToggleRelease}>
+                      <IconRelease /> Liberar
+                    </button>
+                  )}
+                </div>
+              </details>
+            )}
+
+            {order.is_disputed && (
+              <span style={{ fontSize: '0.72rem', color: '#854d0e', fontStyle: 'italic' }}>
+                En disputa — buscando conductor…
+              </span>
+            )}
+
+            {/* Release form */}
+            {showRelease && (
+              <div style={{ marginTop: '0.25rem' }}>
+                <textarea value={releaseNote} onChange={e => onReleaseNoteChange(e.target.value)}
+                  placeholder="Motivo (obligatorio, mín. 10 caracteres)" rows={2}
+                  style={{ width: '100%', boxSizing: 'border-box',
+                    marginBottom: '0.15rem', fontSize: '0.82rem' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between',
+                  alignItems: 'center', marginBottom: '0.3rem' }}>
+                  <span style={{
+                    fontSize: '0.68rem',
+                    color: releaseNote.trim().length < 10 ? '#dc2626' : 'var(--text-tertiary)',
+                  }}>
+                    {releaseNote.trim().length}/10 mín.
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: '0.3rem' }}>
+                  <button className="btn-sm btn-danger"
+                    onClick={onConfirmRelease}
+                    disabled={releaseNote.trim().length < 10}
+                    style={{ opacity: releaseNote.trim().length < 10 ? 0.45 : 1,
+                      cursor: releaseNote.trim().length < 10 ? 'not-allowed' : 'pointer' }}>
+                    Confirmar
+                  </button>
+                  <button className="btn-sm"
+                    onClick={() => { onToggleRelease(); onReleaseNoteChange(''); }}>Cancelar</button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Expandible 2: detalles del pedido ──────────────────────── */}
+            <details style={{ borderTop: '1px solid var(--border-light)', paddingTop: '0.35rem' }}>
+              <summary style={{
+                cursor: 'pointer', color: 'var(--text-tertiary)', fontWeight: 600,
+                fontSize: '0.72rem', listStyle: 'none', display: 'flex',
+                alignItems: 'center', gap: 4,
+              }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                Detalles del pedido
+              </summary>
+              <div style={{ marginTop: '0.35rem' }}>
+                {(order.items || []).length > 0 && (
+                  <ul style={{ fontSize: '0.78rem', margin: '0 0 0.3rem 1rem',
+                    color: 'var(--text-primary)' }}>
+                    {order.items.map(i => (
+                      <li key={i.menuItemId}>{i.name} × {i.quantity}</li>
+                    ))}
+                  </ul>
+                )}
+                <FeeBreakdown order={order} />
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)',
+                  marginTop: '0.3rem' }}>
+                  Ganancia estimada:{' '}
+                  <strong style={{ color: 'var(--success)' }}>{fmt(earn)}</strong>
+                </div>
+              </div>
+            </details>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+=== FILE: frontend/src/components/AlertsPanel.jsx ===
+// components/AlertsPanel.jsx
+// Panel completo de alertas — reemplaza la página /alertas
+// • Zonas: votar confirm/dismiss, ver pending_edit
+// • Vialidad: confirmar impassable (si ≤50m), eliminar propias
+// • Preferencias: editar, eliminar
+// • Multi-selección: tocar selecciona en mapa, "Ver todas" → fitBounds
+
+import { useCallback, useState } from 'react';
+import { haversineMeters } from '../utils/geo';
+import {
+  voteZone, confirmImpassable, deleteImpassable,
+  updatePreference, deletePreference,
+} from '../features/driver/alerts/api';
+
+const ZONE_COLORS = {
+  traffic: '#f97316', construction: '#eab308', accident: '#ef4444',
+  flood: '#3b82f6', blocked: '#8b5cf6', other: '#6b7280',
+};
+const ZONE_LABELS = {
+  traffic: '🚦 Tráfico', construction: '🚧 Obra', accident: '🚨 Accidente',
+  flood: '🌊 Inundación', blocked: '⛔ Bloqueada', other: '⚠️ Otro',
+};
+const ZONE_TYPES = ['traffic', 'construction', 'accident', 'flood', 'blocked', 'other'];
+const PREF_COLORS = { preferred: '#16a34a', difficult: '#f59e0b', avoid: '#ef4444' };
+const PREF_LABELS = { preferred: '⭐ Favorita', difficult: '⚠️ Difícil', avoid: '🚫 Evitar' };
+const DUR_LABELS  = { days: '~días', weeks: '~semanas', months: '~meses', permanent: 'Permanente' };
+
+function timeAgo(d) {
+  if (!d) return '';
+  const m = Math.floor((Date.now() - new Date(d)) / 60000);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
+function flyToOne(lat, lng) {
+  window.__map?.flyTo({ center: [lng, lat], zoom: 16, pitch: 0, bearing: 0, duration: 500, essential: true });
+}
+
+function fitBoundsMultiple(points) {
+  const map = window.__map;
+  if (!map || !points.length) return;
+  if (points.length === 1) { flyToOne(points[0][0], points[0][1]); return; }
+  const ml = window.__maplibregl;
+  if (!ml) { flyToOne(points[0][0], points[0][1]); return; }
+  try {
+    const lnglats = points.map(([lat, lng]) => [lng, lat]);
+    const b = lnglats.reduce((acc, pt) => acc.extend(pt), new ml.LngLatBounds(lnglats[0], lnglats[0]));
+    map.fitBounds(b, { padding: 80, maxZoom: 16, duration: 600, essential: true });
+  } catch { flyToOne(points[0][0], points[0][1]); }
+}
+
+function SectionHeader({ label, onSelectAll, allSelected }) {
+  return (
+    <div style={{
+      padding: '0.28rem 0.75rem', fontSize: '0.66rem', fontWeight: 700,
+      textTransform: 'uppercase', letterSpacing: '0.05em',
+      color: 'var(--text-tertiary)', background: 'var(--bg-raised)',
+      borderBottom: '1px solid var(--border-light)',
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    }}>
+      <span>{label}</span>
+      {onSelectAll && (
+        <button onClick={onSelectAll} style={{
+          fontSize: '0.62rem', fontWeight: 700, cursor: 'pointer',
+          background: 'none', border: 'none', padding: 0,
+          color: allSelected ? 'var(--brand)' : 'var(--text-tertiary)',
+          textDecoration: 'underline',
+        }}>{allSelected ? 'Deselec.' : 'Ver todas'}</button>
+      )}
+    </div>
+  );
+}
+
+function SelectDot({ selected, color }) {
+  return (
+    <div style={{
+      width: 18, height: 18, borderRadius: '50%', flexShrink: 0, marginTop: 2,
+      border: `2px solid ${selected ? color : 'var(--border)'}`,
+      background: selected ? color : 'transparent',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      transition: 'all 0.12s',
+    }}>
+      {selected && (
+        <svg width="10" height="10" viewBox="0 0 10 10">
+          <polyline points="1.5 5 4 7.5 8.5 2.5" stroke="#fff" strokeWidth="1.8" fill="none" strokeLinecap="round"/>
+        </svg>
+      )}
+    </div>
+  );
+}
+
+// ── ZonesTab ──────────────────────────────────────────────────────────────────
+function ZonesTab({ zones, token, onRefresh, myPosition, selected, onToggle, onSelectGroup }) {
+  const [typeFilters,    setTypeFilters]    = useState(new Set());
+  const [layerMine,      setLayerMine]      = useState(true);
+  const [layerPending,   setLayerPending]   = useState(true);
+  const [layerConfirmed, setLayerConfirmed] = useState(true);
+  const [voting,         setVoting]         = useState(null);
+
+  function toggleType(t) {
+    setTypeFilters(prev => { const n = new Set(prev); n.has(t) ? n.delete(t) : n.add(t); return n; });
+  }
+
+  async function vote(zone, v, e) {
+    e.stopPropagation();
+    setVoting(zone.id);
+    try { await voteZone(zone.id, v, token); onRefresh(); }
+    catch (_) {} finally { setVoting(null); }
+  }
+
+  const presentTypes = ZONE_TYPES.filter(t => zones.some(z => z.type === t));
+
+  const filtered = zones.filter(z => {
+    if (typeFilters.size > 0 && !typeFilters.has(z.type)) return false;
+    if (z.is_mine && !layerMine) return false;
+    if (!z.is_mine && z.confirmed  && !layerConfirmed) return false;
+    if (!z.is_mine && !z.confirmed && !layerPending)   return false;
+    return true;
+  });
+
+  const mine      = filtered.filter(z => z.is_mine);
+  const pending   = filtered.filter(z => !z.is_mine && !z.confirmed);
+  const confirmed = filtered.filter(z => !z.is_mine && z.confirmed);
+
+  const LayerBtn = ({ label, active, color, count, onClick }) => (
+    <button onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: 4,
+      padding: '0.2rem 0.55rem', borderRadius: 20, fontSize: '0.68rem',
+      fontWeight: active ? 700 : 500, cursor: 'pointer', minHeight: 'unset',
+      background: active ? color + '18' : 'var(--bg-raised)',
+      color: active ? color : 'var(--text-tertiary)',
+      border: `1.5px solid ${active ? color : 'var(--border)'}`,
+    }}>
+      {label}
+      {count > 0 && (
+        <span style={{ background: active ? color : 'var(--border)',
+          color: active ? '#fff' : 'var(--text-tertiary)',
+          borderRadius: 10, padding: '0 4px', fontSize: '0.6rem', fontWeight: 700 }}>
+          {count}
+        </span>
+      )}
+    </button>
+  );
+
+  function renderZone(z) {
+    const color = ZONE_COLORS[z.type] || ZONE_COLORS.other;
+    const isSel = selected.has(`z:${z.id}`);
+    return (
+      <div key={z.id} onClick={() => onToggle(`z:${z.id}`, z.lat, z.lng)} style={{
+        borderBottom: '1px solid var(--border-light)', cursor: 'pointer',
+        padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'flex-start', gap: 8,
+        background: isSel ? color + '0d' : 'none', transition: 'background 0.12s',
+      }}>
+        <SelectDot selected={isSel} color={color} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.76rem', fontWeight: 700, color }}>
+              {ZONE_LABELS[z.type] || '⚠️ Alerta'}
+              {z.is_mine && <span style={{ marginLeft: 5, fontSize: '0.62rem',
+                background: 'var(--brand-light)', color: 'var(--brand)',
+                borderRadius: 6, padding: '0.05rem 0.3rem' }}>Mía</span>}
+              {z.confirmed && <span style={{ marginLeft: 5, fontSize: '0.62rem',
+                background: '#f0fdf4', color: '#16a34a',
+                borderRadius: 6, padding: '0.05rem 0.3rem' }}>✓ Validada</span>}
+            </span>
+            <span style={{ fontSize: '0.64rem', color: 'var(--text-tertiary)' }}>{timeAgo(z.created_at)}</span>
+          </div>
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginTop: 1 }}>
+            r: {z.radius_m}m · {z.estimated_hours}h
+          </div>
+          <div style={{ display: 'flex', gap: 5, marginTop: 3, alignItems: 'center', flexWrap: 'wrap' }}
+               onClick={e => e.stopPropagation()}>
+            {!z.is_mine && (
+              <button onClick={e => vote(z, 'confirm', e)} disabled={voting === z.id} style={{
+                padding: '0.15rem 0.4rem', borderRadius: 5, fontSize: '0.66rem', fontWeight: 700,
+                background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac',
+                cursor: 'pointer', minHeight: 'unset',
+              }}>✓ {z.confirm_count || 0}/3</button>
+            )}
+            <button onClick={e => vote(z, 'dismiss', e)} disabled={voting === z.id} style={{
+              padding: '0.15rem 0.4rem', borderRadius: 5, fontSize: '0.66rem', fontWeight: 700,
+              background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca',
+              cursor: 'pointer', minHeight: 'unset',
+            }}>✗ {z.dismiss_count || 0}/3</button>
+            {z.pending_edit && (
+              <span style={{ fontSize: '0.62rem', color: '#92400e',
+                background: '#fffbeb', border: '1px solid #fbbf24',
+                borderRadius: 5, padding: '0.05rem 0.3rem' }}>
+                ✏️ {ZONE_LABELS[z.pending_edit.type] || z.pending_edit.type}
+                {z.pending_edit.estimated_hours ? ` · ${z.pending_edit.estimated_hours}h` : ''}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap',
+        padding: '0.4rem 0.75rem 0.25rem', borderBottom: '1px solid var(--border-light)' }}>
+        <LayerBtn label="Mías"       active={layerMine}      color="var(--brand)" count={zones.filter(z => z.is_mine).length}               onClick={() => setLayerMine(v => !v)} />
+        <LayerBtn label="Pendientes" active={layerPending}   color="#f59e0b"      count={zones.filter(z => !z.is_mine && !z.confirmed).length} onClick={() => setLayerPending(v => !v)} />
+        <LayerBtn label="Confirm."   active={layerConfirmed} color="#16a34a"      count={zones.filter(z => !z.is_mine && z.confirmed).length}  onClick={() => setLayerConfirmed(v => !v)} />
+      </div>
+      {presentTypes.length > 0 && (
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap',
+          padding: '0.25rem 0.75rem', borderBottom: '1px solid var(--border-light)' }}>
+          {presentTypes.map(t => {
+            const act = typeFilters.has(t); const col = ZONE_COLORS[t];
+            return (
+              <button key={t} onClick={() => toggleType(t)} style={{
+                padding: '0.15rem 0.5rem', borderRadius: 20, fontSize: '0.66rem', minHeight: 'unset',
+                fontWeight: act ? 700 : 500, cursor: 'pointer',
+                background: act ? col : col + '14', color: act ? '#fff' : col,
+                border: `1.5px solid ${col}`,
+              }}>{ZONE_LABELS[t]}</button>
+            );
+          })}
+        </div>
+      )}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {filtered.length === 0 && (
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>
+            Sin zonas con estos filtros
+          </div>
+        )}
+        {mine.length > 0 && (
+          <>
+            <SectionHeader label={`Mías · ${mine.length}`}
+              onSelectAll={() => onSelectGroup(mine.map(z => [`z:${z.id}`, z.lat, z.lng]))}
+              allSelected={mine.every(z => selected.has(`z:${z.id}`))} />
+            {mine.map(renderZone)}
+          </>
+        )}
+        {pending.length > 0 && (
+          <>
+            <SectionHeader label={`⏳ Pendientes · ${pending.length}`}
+              onSelectAll={() => onSelectGroup(pending.map(z => [`z:${z.id}`, z.lat, z.lng]))}
+              allSelected={pending.every(z => selected.has(`z:${z.id}`))} />
+            {pending.map(renderZone)}
+          </>
+        )}
+        {confirmed.length > 0 && (
+          <>
+            <SectionHeader label={`✓ Confirmadas · ${confirmed.length}`}
+              onSelectAll={() => onSelectGroup(confirmed.map(z => [`z:${z.id}`, z.lat, z.lng]))}
+              allSelected={confirmed.every(z => selected.has(`z:${z.id}`))} />
+            {confirmed.map(renderZone)}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── VialidadTab ───────────────────────────────────────────────────────────────
+function VialidadTab({ impassable, preferences, token, onRefresh, myPosition, selected, onToggle, onSelectGroup }) {
+  const [duration,  setDuration]  = useState('days');
+  const [confirming, setConfirming] = useState(null);
+  const [deleting,   setDeleting]   = useState(null);
+  const [editing,    setEditing]    = useState(null);
+  const [editPref,   setEditPref]   = useState('preferred');
+
+  async function doConfirm(way_id, e) {
+    e.stopPropagation();
+    setConfirming(way_id);
+    try { await confirmImpassable(way_id, duration, token); onRefresh(); }
+    catch (_) {} finally { setConfirming(null); }
+  }
+  async function doDeleteImp(way_id, e) {
+    e.stopPropagation();
+    setDeleting(way_id);
+    try { await deleteImpassable(way_id, token); onRefresh(); }
+    catch (_) {} finally { setDeleting(null); }
+  }
+  async function doSavePref(way_id, e) {
+    e.stopPropagation();
+    setDeleting(way_id + '_s');
+    try { await updatePreference(way_id, editPref, token); setEditing(null); onRefresh(); }
+    catch (_) {} finally { setDeleting(null); }
+  }
+  async function doDeletePref(way_id, e) {
+    e.stopPropagation();
+    setDeleting(way_id);
+    try { await deletePreference(way_id, token); onRefresh(); }
+    catch (_) {} finally { setDeleting(null); }
+  }
+
+  const pending   = impassable.filter(r => !r.confirmed);
+  const confirmed = impassable.filter(r => r.confirmed);
+
+  function renderImp(r) {
+    const isSel   = selected.has(`i:${r.way_id}`);
+    const color   = r.confirmed ? '#16a34a' : '#f97316';
+    const distM   = myPosition && r.lat && r.lng
+      ? haversineMeters(myPosition.lat, myPosition.lng, Number(r.lat), Number(r.lng))
+      : null;
+    const canConf = !r.is_mine && !r.confirmed && distM !== null && distM <= 50;
+    return (
+      <div key={r.way_id} onClick={() => onToggle(`i:${r.way_id}`, r.lat, r.lng)} style={{
+        borderBottom: '1px solid var(--border-light)', cursor: 'pointer',
+        padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'flex-start', gap: 8,
+        background: isSel ? color + '0d' : 'none',
+      }}>
+        <SelectDot selected={isSel} color={color} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.76rem', fontWeight: 700, color }}>
+              {r.confirmed ? '🔴 Confirmada' : '⏳ Pendiente'}
+              {r.is_mine && <span style={{ marginLeft: 5, fontSize: '0.62rem',
+                background: 'var(--brand-light)', color: 'var(--brand)',
+                borderRadius: 6, padding: '0.05rem 0.3rem' }}>Mía</span>}
+            </span>
+            <span style={{ fontSize: '0.64rem', color: 'var(--text-tertiary)' }}>{timeAgo(r.created_at)}</span>
+          </div>
+          {r.description && (
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: 1,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {r.description}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 5, marginTop: 3, alignItems: 'center', flexWrap: 'wrap' }}
+               onClick={e => e.stopPropagation()}>
+            <span style={{ fontSize: '0.64rem', color: 'var(--text-tertiary)' }}>
+              ✓ {r.confirmation_count ?? 0}
+              {r.estimated_duration ? ` · ${DUR_LABELS[r.estimated_duration] || r.estimated_duration}` : ''}
+            </span>
+            {canConf && (
+              <>
+                <select value={duration} onChange={e => setDuration(e.target.value)}
+                  style={{ fontSize: '0.64rem', borderRadius: 5, border: '1px solid var(--border)',
+                    padding: '0.1rem 0.25rem', background: 'var(--bg-card)' }}>
+                  {['days','weeks','months','permanent'].map(d =>
+                    <option key={d} value={d}>{DUR_LABELS[d]}</option>)}
+                </select>
+                <button onClick={e => doConfirm(r.way_id, e)} disabled={confirming === r.way_id} style={{
+                  padding: '0.15rem 0.4rem', borderRadius: 5, fontSize: '0.66rem', fontWeight: 700,
+                  background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac',
+                  cursor: 'pointer', minHeight: 'unset',
+                }}>{confirming === r.way_id ? '…' : '✓ Confirmar'}</button>
+              </>
+            )}
+            {!canConf && !r.confirmed && distM !== null && (
+              <span style={{ fontSize: '0.62rem', color: 'var(--text-tertiary)' }}>
+                {distM <= 50 ? '📍 Cerca' : `~${Math.round(distM)}m`}
+              </span>
+            )}
+            {r.is_mine && (
+              <button onClick={e => doDeleteImp(r.way_id, e)} disabled={deleting === r.way_id} style={{
+                padding: '0.15rem 0.35rem', borderRadius: 5, fontSize: '0.66rem',
+                background: 'var(--bg-raised)', color: 'var(--text-tertiary)',
+                border: '1px solid var(--border)', cursor: 'pointer', minHeight: 'unset',
+              }}>{deleting === r.way_id ? '…' : '🗑'}</button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderPref(p) {
+    const isSel  = selected.has(`p:${p.way_id}`);
+    const color  = PREF_COLORS[p.preference] || '#6b7280';
+    const isEdit = editing === p.way_id;
+    const isDel  = deleting === p.way_id;
+    return (
+      <div key={p.way_id} onClick={() => onToggle(`p:${p.way_id}`, p.lat, p.lng)} style={{
+        borderBottom: '1px solid var(--border-light)', cursor: 'pointer',
+        padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'flex-start', gap: 8,
+        background: isSel ? color + '0d' : 'none',
+      }}>
+        <SelectDot selected={isSel} color={color} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: '0.76rem', fontWeight: 700, color }}>
+            {PREF_LABELS[p.preference] || p.preference}
+          </div>
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)', marginTop: 1 }}>
+            {p.name || p.way_id}
+          </div>
+          {isEdit ? (
+            <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}
+                 onClick={e => e.stopPropagation()}>
+              {Object.entries(PREF_LABELS).map(([v, l]) => (
+                <button key={v} onClick={() => setEditPref(v)} style={{
+                  padding: '0.15rem 0.4rem', borderRadius: 5, fontSize: '0.64rem', fontWeight: 700,
+                  cursor: 'pointer', minHeight: 'unset',
+                  background: editPref === v ? PREF_COLORS[v] : 'var(--bg-raised)',
+                  color: editPref === v ? '#fff' : 'var(--text-secondary)',
+                  border: `1px solid ${editPref === v ? PREF_COLORS[v] : 'var(--border)'}`,
+                }}>{l}</button>
+              ))}
+              <button onClick={e => doSavePref(p.way_id, e)} style={{
+                padding: '0.15rem 0.4rem', borderRadius: 5, fontSize: '0.64rem', fontWeight: 700,
+                background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac',
+                cursor: 'pointer', minHeight: 'unset',
+              }}>✓</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 4, marginTop: 3 }} onClick={e => e.stopPropagation()}>
+              <button onClick={e => { e.stopPropagation(); setEditPref(p.preference); setEditing(p.way_id); }} style={{
+                padding: '0.15rem 0.35rem', borderRadius: 5, fontSize: '0.66rem',
+                background: 'var(--bg-raised)', color: 'var(--brand)',
+                border: '1px solid var(--border)', cursor: 'pointer', minHeight: 'unset',
+              }}>✎</button>
+              <button onClick={e => doDeletePref(p.way_id, e)} disabled={isDel} style={{
+                padding: '0.15rem 0.35rem', borderRadius: 5, fontSize: '0.66rem',
+                background: 'var(--bg-raised)', color: 'var(--text-tertiary)',
+                border: '1px solid var(--border)', cursor: 'pointer', minHeight: 'unset',
+              }}>{isDel ? '…' : '🗑'}</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {!impassable.length && !preferences.length && (
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>
+            Sin reportes de vialidad
+          </div>
+        )}
+        {pending.length > 0 && (
+          <>
+            <SectionHeader label={`⏳ Pendientes · ${pending.length}`}
+              onSelectAll={() => onSelectGroup(pending.map(r => [`i:${r.way_id}`, r.lat, r.lng]))}
+              allSelected={pending.every(r => selected.has(`i:${r.way_id}`))} />
+            {pending.map(renderImp)}
+          </>
+        )}
+        {confirmed.length > 0 && (
+          <>
+            <SectionHeader label={`🔴 Confirmadas · ${confirmed.length}`}
+              onSelectAll={() => onSelectGroup(confirmed.map(r => [`i:${r.way_id}`, r.lat, r.lng]))}
+              allSelected={confirmed.every(r => selected.has(`i:${r.way_id}`))} />
+            {confirmed.map(renderImp)}
+          </>
+        )}
+        {preferences.length > 0 && (
+          <>
+            <SectionHeader label={`⭐ Mis preferencias · ${preferences.length}`}
+              onSelectAll={() => onSelectGroup(preferences.map(p => [`p:${p.way_id}`, p.lat, p.lng]))}
+              allSelected={preferences.every(p => selected.has(`p:${p.way_id}`))} />
+            {preferences.map(renderPref)}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── AlertsPanel ───────────────────────────────────────────────────────────────
+export default function AlertsPanel({
+  zones = [], impassable = [], preferences = [],
+  myPosition = null, token, onRefresh,
+}) {
+  const [tab,      setTab]      = useState('zones');
+  const [selected, setSelected] = useState(new Set());
+
+  const coordMap = useCallback(() => {
+    const m = new Map();
+    zones.forEach(z       => m.set(`z:${z.id}`,      [Number(z.lat),   Number(z.lng)]));
+    impassable.forEach(r  => m.set(`i:${r.way_id}`,  [Number(r.lat),   Number(r.lng)]));
+    preferences.forEach(p => m.set(`p:${p.way_id}`,  [Number(p.lat),   Number(p.lng)]));
+    return m;
+  }, [zones, impassable, preferences]);
+
+  function onToggle(key, lat, lng) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      const pts = [...next].map(k => coordMap().get(k)).filter(p => p && p[0] && p[1]);
+      if (pts.length) fitBoundsMultiple(pts);
+      return next;
+    });
+  }
+
+  function onSelectGroup(items) {
+    const keys   = items.map(i => i[0]);
+    const allSel = keys.every(k => selected.has(k));
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (allSel) { keys.forEach(k => next.delete(k)); }
+      else        { keys.forEach(k => next.add(k)); }
+      const pts = [...next].map(k => coordMap().get(k)).filter(p => p && p[0] && p[1]);
+      if (pts.length) fitBoundsMultiple(pts);
+      return next;
+    });
+    if (!allSel) {
+      const pts = items.map(([, lat, lng]) => [Number(lat), Number(lng)]).filter(p => p[0] && p[1]);
+      fitBoundsMultiple(pts);
+    }
+  }
+
+  function selectAll() {
+    const cm  = coordMap();
+    setSelected(new Set(cm.keys()));
+    const pts = [...cm.values()].filter(p => p && p[0] && p[1]);
+    fitBoundsMultiple(pts);
+  }
+
+  const totalAll = zones.length + impassable.length + preferences.length;
+
+  const tabStyle = (active) => ({
+    flex: 1, padding: '0.5rem 0', fontSize: '0.76rem', fontWeight: 700,
+    cursor: 'pointer', border: 'none', background: 'none',
+    borderBottom: active ? '2px solid var(--brand)' : '2px solid transparent',
+    color: active ? 'var(--brand)' : 'var(--text-secondary)',
+  });
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {/* Tabs */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border-light)', flexShrink: 0 }}>
+        <button style={tabStyle(tab === 'zones')} onClick={() => setTab('zones')}>
+          🚦 Zonas
+          {zones.length > 0 && (
+            <span style={{ marginLeft: 4, fontSize: '0.62rem',
+              background: 'var(--brand)', color: '#fff', borderRadius: 10, padding: '0 5px' }}>
+              {zones.length}
+            </span>
+          )}
+        </button>
+        <button style={tabStyle(tab === 'vialidad')} onClick={() => setTab('vialidad')}>
+          🛣 Vialidad
+          {(impassable.length + preferences.length) > 0 && (
+            <span style={{ marginLeft: 4, fontSize: '0.62rem',
+              background: '#ef4444', color: '#fff', borderRadius: 10, padding: '0 5px' }}>
+              {impassable.length + preferences.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Barra de selección */}
+      {totalAll > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0.28rem 0.75rem', background: 'var(--bg-raised)',
+          borderBottom: '1px solid var(--border-light)', flexShrink: 0, fontSize: '0.68rem',
+        }}>
+          <span style={{ color: 'var(--text-tertiary)' }}>
+            {selected.size > 0 ? `${selected.size} en mapa` : 'Toca para ver en mapa'}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {selected.size > 0 && (
+              <button onClick={() => setSelected(new Set())} style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--text-tertiary)', fontSize: '0.68rem', fontWeight: 600,
+              }}>✕ Limpiar</button>
+            )}
+            <button onClick={selectAll} style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--brand)', fontSize: '0.68rem', fontWeight: 700,
+            }}>Ver todas</button>
+          </div>
+        </div>
+      )}
+
+      {tab === 'zones' && (
+        <ZonesTab zones={zones} token={token} onRefresh={onRefresh}
+          myPosition={myPosition} selected={selected}
+          onToggle={onToggle} onSelectGroup={onSelectGroup} />
+      )}
+      {tab === 'vialidad' && (
+        <VialidadTab impassable={impassable} preferences={preferences}
+          token={token} onRefresh={onRefresh} myPosition={myPosition}
+          selected={selected} onToggle={onToggle} onSelectGroup={onSelectGroup} />
+      )}
+    </div>
+  );
+}
+
+=== FILE: frontend/src/components/NavFABs.jsx ===
+// components/NavFABs.jsx
+
+var NAV_REPORT_MODES = ['zone', 'impassable', 'preference'];
+
+// Ciclo del FAB de reporte: null → normal → rapido → null
+// En modo normal abre ZonePlacer / WayPicker según submodo
+// En modo rápido envía directo sin pasos intermedios
+
+function IconCenter({ mode }) {
+  const color = mode === 'free' ? 'var(--text-secondary)' : '#fff';
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+      stroke={color} strokeWidth="2.2" strokeLinecap="round">
+      <circle cx="12" cy="12" r="3.5" fill={mode !== 'free' ? color : 'none'}/>
+      <line x1="12" y1="2"  x2="12" y2="7"/>
+      <line x1="12" y1="17" x2="12" y2="22"/>
+      <line x1="2"  y1="12" x2="7"  y2="12"/>
+      <line x1="17" y1="12" x2="22" y2="12"/>
+    </svg>
+  );
+}
+function IconVolume({ on }) {
+  return on
+    ? <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+    : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>;
+}
+function IconNavigate() {
+  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/></svg>;
+}
+function IconMore() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+      <circle cx="12" cy="5"  r="1" fill="currentColor"/>
+      <circle cx="12" cy="12" r="1" fill="currentColor"/>
+      <circle cx="12" cy="19" r="1" fill="currentColor"/>
+    </svg>
+  );
+}
+function IconReport({ reportMode }) {
+  if (reportMode === 'quick') {
+    return <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>;
+  }
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+      <line x1="4" y1="22" x2="4" y2="15"/>
+    </svg>
+  );
+}
+
+// Pills de reporte — igual en normal y rápido
+const REPORT_PILLS = [
+  { mode: 'zone',       label: 'Zona de alerta',   icon: '🚦', color: '#f97316' },
+  { mode: 'impassable', label: 'Calle no viable',   icon: '⛔', color: '#ef4444' },
+  { mode: 'preference', label: 'Preferencias',     icon: '⭐', color: '#16a34a' },
+];
+
+export default function NavFABs({
+  hasActiveOrder,
+  routeGeometry,
+  centerMode,
+  bottomOffset = 16,
+  voiceEnabled,
+  navMode,
+  myPosition,
+  onCenterCycle,
+  onVoiceToggle,
+  onGoogleNav,
+  onNavMode,
+  onQuickReport,  // (type, position) → envío directo sin pasos
+  isDark = false,
+}) {
+  const withRoute   = hasActiveOrder && (routeGeometry?.length > 0);
+  const safeBot     = 'env(safe-area-inset-bottom, 0px)';
+  const BASE        = bottomOffset;
+  const GAP         = 12;
+  const SZ_P        = 60;  // primary
+  const SZ_S        = 52;  // secondary
+
+  // reportMode: null | 'normal' | 'quick'
+  const isReportNormal = navMode === 'menu';
+  const isReportQuick  = navMode === 'menu-quick';
+  const isReportOpen   = isReportNormal || isReportQuick;
+
+  const centerBottom    = `calc(${BASE}px + ${safeBot})`;
+  const secondaryBottom = `calc(${BASE + SZ_P + GAP}px + ${safeBot})`;
+  const reportBottom    = withRoute
+    ? `calc(${BASE + SZ_P + GAP + SZ_S + GAP}px + ${safeBot})`
+    : secondaryBottom;
+  const menuBottom      = withRoute
+    ? `calc(${BASE + SZ_P + GAP + SZ_S + GAP + SZ_S + GAP}px + ${safeBot})`
+    : `calc(${BASE + SZ_P + GAP + SZ_S + GAP}px + ${safeBot})`;
+
+  const centerBg =
+    centerMode === 'nav'      ? 'var(--brand)' :
+    centerMode === 'overview' ? '#4f46e5'      : '#fff';
+
+  // Colores del FAB de reporte según estado
+  const reportFabBg    = isReportQuick
+    ? (isDark ? '#4c1d95' : '#7c3aed')
+    : isReportNormal ? 'var(--brand)' : '#fff';
+  const reportFabColor = isReportOpen ? '#fff' : 'var(--text-secondary)';
+  const reportFabBorder = isReportOpen ? 'none' : '1.5px solid var(--border)';
+
+  // Resplandor modo rápido
+  const quickGlow = isDark
+    ? '0 0 0 3px rgba(250,204,21,0.35), 0 2px 8px rgba(0,0,0,0.3)'
+    : '0 0 0 3px rgba(124,58,237,0.25), 0 2px 8px rgba(0,0,0,0.15)';
+
+  const fabBase = {
+    position: 'absolute', right: 14, zIndex: 402,
+    borderRadius: '50%', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    border: 'none', transition: 'background 0.15s, box-shadow 0.15s',
+  };
+
+  function cycleReport() {
+    if (!isReportOpen)      return onNavMode('menu');
+    if (isReportNormal)     return onNavMode('menu-quick');
+    return onNavMode(null);
+  }
+
+  function handlePill(type) {
+    if (isReportQuick) {
+      // Modo rápido: envío directo
+      if (!myPosition) return;
+      onQuickReport?.(type, myPosition);
+      onNavMode(null);
+    } else {
+      // Modo normal: abre el placer/picker
+      onNavMode(type);
+    }
+  }
+
+  const showReport = navMode !== 'zone' && navMode !== 'impassable' && navMode !== 'preference';
+  const showMore   = withRoute && navMode !== 'zone' && navMode !== 'impassable' && navMode !== 'preference' && !isReportOpen;
+
+  return (
+    <>
+      {/* ── Centrar ─────────────────────────────────────────────────── */}
+      <button onClick={onCenterCycle} title={
+        centerMode === 'nav'      ? 'Navegación activa' :
+        centerMode === 'overview' ? 'Vista de ruta' : 'Centrar en mi posición'}
+        aria-label="Centrar mapa" className="dh-fab"
+        style={{
+          ...fabBase, bottom: centerBottom,
+          width: SZ_P, height: SZ_P, background: centerBg,
+          border: centerMode === 'free' ? '1.5px solid var(--border)' : 'none',
+          boxShadow: centerMode !== 'free' ? '0 4px 16px rgba(0,0,0,0.28)' : '0 2px 10px rgba(0,0,0,0.16)',
+          color: centerMode !== 'free' ? '#fff' : 'var(--text-secondary)',
+        }}>
+        <IconCenter mode={centerMode} />
+      </button>
+
+      {/* ── Más (con ruta) ──────────────────────────────────────────── */}
+      {showMore && (
+        <button onClick={() => onNavMode(navMode === 'more' ? null : 'more')}
+          title="Más opciones" aria-label="Más" className="dh-fab"
+          style={{
+            ...fabBase, bottom: secondaryBottom,
+            width: SZ_S, height: SZ_S,
+            background: navMode === 'more' ? 'var(--brand)' : '#fff',
+            border: '1.5px solid var(--border)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            color: navMode === 'more' ? '#fff' : 'var(--text-secondary)',
+          }}>
+          <IconMore />
+        </button>
+      )}
+
+      {/* ── Menú Más expandido ──────────────────────────────────────── */}
+      {withRoute && navMode === 'more' && (
+        <div style={{
+          position: 'absolute',
+          bottom: `calc(${BASE + SZ_P + GAP + SZ_S + GAP}px + ${safeBot})`,
+          right: 14, zIndex: 403,
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
+        }}>
+          <button onClick={() => { onVoiceToggle(); onNavMode(null); }} style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '0.55rem 1rem', borderRadius: 20,
+            fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+            background: voiceEnabled ? '#f0fdf4' : '#f9fafb',
+            color: voiceEnabled ? '#15803d' : '#6b7280',
+            border: `1.5px solid ${voiceEnabled ? '#86efac' : 'var(--border)'}`,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.12)', minHeight: 'unset',
+          }}>
+            <IconVolume on={voiceEnabled} />
+            {voiceEnabled ? 'Voz activa' : 'Voz inactiva'}
+          </button>
+          <button onClick={() => { onGoogleNav(); onNavMode(null); }} style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '0.55rem 1rem', borderRadius: 20,
+            fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+            background: 'var(--brand)', color: '#fff', border: 'none',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)', minHeight: 'unset',
+          }}>
+            <IconNavigate /> Abrir en Maps
+          </button>
+        </div>
+      )}
+
+      {/* ── FAB Reportar ────────────────────────────────────────────── */}
+      {showReport && (
+        <button onClick={cycleReport}
+          aria-label={isReportQuick ? 'Reporte rápido' : isReportNormal ? 'Cerrar reporte' : 'Reportar'}
+          title={isReportQuick ? 'Modo rápido — toca para cerrar' : 'Reportar incidencia'}
+          className="dh-fab"
+          style={{
+            ...fabBase,
+            bottom: reportBottom,
+            width: SZ_S, height: SZ_S,
+            background: reportFabBg,
+            border: reportFabBorder,
+            boxShadow: isReportQuick ? quickGlow : '0 2px 8px rgba(0,0,0,0.15)',
+            color: reportFabColor,
+          }}>
+          <IconReport reportMode={isReportQuick ? 'quick' : 'normal'} />
+        </button>
+      )}
+
+      {/* ── Menú de reporte (normal o rápido) ──────────────────────── */}
+      {isReportOpen && (
+        <div style={{
+          position: 'absolute',
+          bottom: menuBottom,
+          right: 14, zIndex: 403,
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6,
+        }}>
+          {/* Etiqueta modo rápido */}
+          {isReportQuick && (
+            <div style={{
+              padding: '0.18rem 0.6rem', borderRadius: 20,
+              fontSize: '0.68rem', fontWeight: 700,
+              background: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.92)',
+              color: isDark ? '#fff' : '#111',
+              border: `1.5px solid ${isDark ? 'rgba(251,191,36,0.5)' : 'rgba(124,58,237,0.35)'}`,
+              boxShadow: isDark
+                ? '0 0 8px rgba(251,191,36,0.25)'
+                : '0 0 8px rgba(124,58,237,0.18)',
+              whiteSpace: 'nowrap',
+            }}>
+              ⚡ Modo rápido
+            </div>
+          )}
+
+          {REPORT_PILLS.map(pill => (
+            <button key={pill.mode}
+              onClick={() => handlePill(pill.mode)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 7,
+                padding: '0.55rem 1rem', borderRadius: 20,
+                fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                background: pill.color,
+                color: '#fff',
+                border: isReportQuick
+                  ? `2px solid ${isDark ? '#fbbf24' : '#7c3aed'}`
+                  : 'none',
+                boxShadow: isReportQuick
+                  ? (isDark
+                      ? `0 0 0 3px rgba(251,191,36,0.25), 0 2px 8px rgba(0,0,0,0.22)`
+                      : `0 0 0 3px rgba(124,58,237,0.2), 0 2px 8px rgba(0,0,0,0.22)`)
+                  : '0 2px 8px rgba(0,0,0,0.22)',
+                minHeight: 'unset',
+              }}>
+              <span>{pill.icon}</span>
+              {pill.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+=== FILE: frontend/src/components/OfferPanel.jsx ===
+// components/OfferPanel.jsx — panel de oferta entrante (minimizable)
+import { getDriverEarningCents } from '../features/driver/shared/orderUtils';
+import OfferCountdown from './OfferCountdown';
+import { fmt } from '../utils/format';
+
+export default function OfferPanel({
+  offer,
+  minimized,
+  loading,
+  consecutiveTimeouts,
+  onAccept,
+  onReject,
+  onToggleMinimize,
+  onExpired,
+  panelRef,
+}) {
+  if (!offer) return null;
+
+  const earn = getDriverEarningCents(offer) || offer.driverEarning || 0;
+
+  const bagOverflow = offer.bagOverflowPct ?? 0;
+  const showBagWarning = bagOverflow > 100;
+
+  return (
+    <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:30,
+      pointerEvents: minimized ? 'none' : 'auto' }}>
+      <div className="dh-offer-panel" style={{
+        transform:  minimized ? 'translateY(100%)' : 'translateY(0)',
+        transition: 'transform 0.22s ease',
+      }}>
+        <button onClick={onToggleMinimize}
+          style={{ position:'absolute', top:-43, left:'50%', transform:'translateX(-50%)',
+            width:74, height:15, background:'#f3e8ed', color:'var(--brand)',
+            border:'1px solid #e8c8d4', borderRadius:'6px 6px 0 0',
+            padding:0, cursor:'pointer', fontSize:'0.62rem', fontWeight:700,
+            boxShadow:'0 -2px 6px rgba(0,0,0,0.06)', zIndex:31,
+            whiteSpace:'nowrap', display:'flex', alignItems:'center',
+            gap:3, justifyContent:'center', pointerEvents:'auto' }}
+          aria-label={minimized ? 'Expandir oferta' : 'Minimizar oferta'}>
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <polyline points={minimized ? '6 15 12 9 18 15' : '18 9 12 15 6 9'} />
+          </svg>
+          Oferta
+        </button>
+
+        <div ref={panelRef} style={{ background:'var(--bg-card)', borderTop:'1px solid var(--border)',
+          boxShadow:'0 -4px 20px rgba(0,0,0,0.14)', overflow:'hidden', pointerEvents:'auto' }}>
+          <div style={{ padding:'0.6rem 1rem 0.75rem', overflowY:'auto' }}>
+
+            <div style={{ fontSize:'0.82rem', color:'var(--text-primary)', marginBottom:'0.3rem' }}>
+              {(offer.restaurant_name || offer.restaurantAddress) && (
+                <div style={{ marginBottom:'0.1rem' }}>
+                  <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>Tienda: </span>
+                  <strong>{offer.restaurant_name || offer.restaurantAddress}</strong>
+                </div>
+              )}
+              {(offer.restaurant_address || offer.restaurantAddress) && (
+                <div style={{ marginBottom:'0.1rem' }}>
+                  <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>Dir. tienda: </span>
+                  <strong>{offer.restaurant_address || offer.restaurantAddress}</strong>
+                </div>
+              )}
+              {(offer.customer_address || offer.customerAddress || offer.delivery_address) && (
+                <div style={{ marginBottom:'0.1rem' }}>
+                  <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>Entrega: </span>
+                  <strong>{offer.customer_address || offer.customerAddress || offer.delivery_address}</strong>
+                </div>
+              )}
+            </div>
+
+            {earn > 0 && (
+              <div style={{ fontSize:'0.9rem', fontWeight:800, color:'var(--success)', marginBottom:'0.35rem' }}>
+                Tu ganancia: {fmt(earn)}
+              </div>
+            )}
+
+            {showBagWarning && (
+              <div style={{
+                background:'var(--warn-bg)', border:'1.5px solid var(--warn-border)',
+                borderRadius:8, padding:'0.5rem 0.75rem',
+                marginBottom:'0.4rem', display:'flex', alignItems:'flex-start', gap:'0.5rem',
+              }}>
+                <span style={{ fontSize:'1.2rem', lineHeight:1 }}>🎒</span>
+                <div style={{ fontSize:'0.78rem', color:'var(--warn)', lineHeight:1.4 }}>
+                  <strong>Mochila al {bagOverflow}%</strong> — con este pedido tu capacidad
+                  se excede en algún punto de la ruta. Puedes aceptarlo igual.
+                </div>
+              </div>
+            )}
+
+            <OfferCountdown
+              key={offer.id}
+              secondsLeft={offer.seconds_left ?? offer.secondsLeft ?? 60}
+              onExpired={onExpired}
+            />
+
+            <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.5rem' }}>
+              <button className="btn-primary"
+                style={{ flex:1, padding:'0.65rem 0', fontSize:'0.95rem', fontWeight:700, borderRadius:10 }}
+                disabled={loading} onClick={onAccept}>
+                {loading ? 'Aceptando…' : '✓ Aceptar'}
+              </button>
+              <button
+                style={{ flex:1, padding:'0.65rem 0', fontSize:'0.95rem', fontWeight:700, borderRadius:10,
+                  background:'var(--bg-raised)', color:'var(--text-primary)',
+                  border:'1px solid var(--border)', cursor:'pointer' }}
+                disabled={loading} onClick={onReject}>
+                ✕ Rechazar
+              </button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+=== FILE: frontend/src/components/WayPicker.jsx ===
+// frontend/src/components/WayPicker.jsx
+//
+// mode='impassable' — Calle no viable
+//   • Al abrir, toma 2 lecturas GPS con ~2s de diferencia para calcular heading
+//   • Selecciona automáticamente el tramo más cercano cuya dirección coincide con el heading
+//   • Agrega los 2 tramos adyacentes de la misma calle
+//   • Duración predeterminada: 'days'
+//   • Confirmación: toast translúcido 1s, sin interacción extra
+//
+// mode='preference' — Preferencias
+//   • Misma detección de heading para identificar la vialidad correcta
+//   • Toma todos los segmentos de la misma calle (nombre/ref)
+//   • Panel con selector de tipo: preferida / difícil / evitar
+//   • Leyenda "Podrás editar después"
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+// ── Overpass ──────────────────────────────────────────────────────────────────
+async function queryNearbyWays(lat, lng, radiusM = 60) {
+  const q = `[out:json][timeout:8];
+way(around:${radiusM},${lat},${lng})["highway"];
+(._;>;);
+out geom qt;`;
+  const r = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `data=${encodeURIComponent(q)}`,
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!r.ok) throw new Error('Overpass no disponible');
+  const data = await r.json();
+  const nodeMap = {};
+  for (const el of data.elements) {
+    if (el.type === 'node') nodeMap[el.id] = [el.lon, el.lat];
+  }
+  return data.elements
+    .filter(el => el.type === 'way' && el.tags?.highway)
+    .map(way => {
+      let coords = [];
+      if (Array.isArray(way.geometry)) {
+        coords = way.geometry.map(n => [n.lon, n.lat]);
+      } else if (Array.isArray(way.nodes)) {
+        coords = way.nodes.map(id => nodeMap[id]).filter(Boolean);
+      }
+      return {
+        way_id:  String(way.id),
+        name:    way.tags?.name || way.tags?.ref || hwLabel(way.tags?.highway),
+        highway: way.tags?.highway,
+        coords,
+      };
+    })
+    .filter(w => w.coords.length >= 2);
+}
+
+// ── Geo helpers ───────────────────────────────────────────────────────────────
+function distancePt(a, b) {
+  const R = 6371000;
+  const dLat = (b[1] - a[1]) * Math.PI / 180;
+  const dLng = (b[0] - a[0]) * Math.PI / 180;
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const c = sinLat * sinLat + Math.cos(a[1] * Math.PI / 180) * Math.cos(b[1] * Math.PI / 180) * sinLng * sinLng;
+  return R * 2 * Math.atan2(Math.sqrt(c), Math.sqrt(1 - c));
+}
+
+function distToWay(pt, coords) {
+  let min = Infinity;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const d = distPointToSegment(pt, coords[i], coords[i + 1]);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
+function distPointToSegment(pt, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  if (dx === 0 && dy === 0) return distancePt(pt, a);
+  const t = Math.max(0, Math.min(1, ((pt[0]-a[0])*dx + (pt[1]-a[1])*dy) / (dx*dx + dy*dy)));
+  return distancePt(pt, [a[0] + t*dx, a[1] + t*dy]);
+}
+
+// Bearing en grados entre dos puntos [lng,lat]
+function bearingBetween(a, b) {
+  const lat1 = a[1] * Math.PI / 180;
+  const lat2 = b[1] * Math.PI / 180;
+  const dLng = (b[0] - a[0]) * Math.PI / 180;
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+// Bearing principal de un way (primer → último nodo)
+function wayBearing(coords) {
+  return bearingBetween(coords[0], coords[coords.length - 1]);
+}
+
+// Diferencia angular mínima entre dos bearings (0–180)
+function bearingDiff(a, b) {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+function hwLabel(type) {
+  return {
+    residential:'Calle residencial', primary:'Vía primaria',
+    secondary:'Vía secundaria', tertiary:'Calle terciaria',
+    service:'Servicio', unclassified:'Sin clasificar',
+    trunk:'Vía rápida', motorway:'Autopista',
+    footway:'Andador', cycleway:'Carril bici', path:'Camino',
+    living_street:'Zona habitacional', track:'Terracería',
+  }[type] || type || 'Calle';
+}
+
+// ── GPS heading ───────────────────────────────────────────────────────────────
+// Toma 2 lecturas con ~2.5s de diferencia y calcula el bearing de movimiento
+function getMovementHeading() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) { resolve(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos1) => {
+        const p1 = [pos1.coords.longitude, pos1.coords.latitude];
+        setTimeout(() => {
+          navigator.geolocation.getCurrentPosition(
+            (pos2) => {
+              const p2 = [pos2.coords.longitude, pos2.coords.latitude];
+              const d = distancePt(p1, p2);
+              // Si se movió menos de 3m las lecturas son ruido — no confiable
+              if (d < 3) { resolve(null); return; }
+              resolve(bearingBetween(p1, p2));
+            },
+            () => resolve(null),
+            { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+          );
+        }, 2500);
+      },
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+    );
+  });
+}
+
+// ── Layer ids ─────────────────────────────────────────────────────────────────
+const SRC_S = 'wp-selected-src';
+const LYR_S = 'wp-selected-lyr';
+
+function toGeoJSON(ways) {
+  return {
+    type: 'FeatureCollection',
+    features: ways.map(w => ({
+      type: 'Feature',
+      properties: { way_id: w.way_id },
+      geometry: { type: 'LineString', coordinates: w.coords },
+    })),
+  };
+}
+
+const MODE_COLOR = { impassable: '#ef4444', preference: '#16a34a' };
+
+const PREF_OPTS = [
+  { value: 'preferred', label: 'Favorita',   color: '#16a34a' },
+  { value: 'difficult', label: 'Difícil',    color: '#f59e0b' },
+  { value: 'avoid',     label: 'Evitar',     color: '#ef4444' },
+];
+
+const DESELECT_RADIUS = 25;
+
+// ── Standalone helpers (también usados por quickSelectWays) ─────────────────
+
+// Prioridad de tipo de vía — menor = más prioritario
+const HIGHWAY_PRIORITY = {
+  motorway: 1, trunk: 2, primary: 3, secondary: 4,
+  tertiary: 5, residential: 6, living_street: 7,
+  unclassified: 8, service: 9, track: 10,
+  footway: 11, cycleway: 11, path: 11,
+};
+function hwPriority(w) { return HIGHWAY_PRIORITY[w.highway] ?? 9; }
+
+export function pickByHeading(ways, tapped, heading) {
+  // Ordenar por distancia al punto tocado, luego por prioridad de vía
+  const sorted = [...ways].sort((a, b) => {
+    const dA = distToWay(tapped, a.coords);
+    const dB = distToWay(tapped, b.coords);
+    // Si la diferencia de distancia es menor a 15m, priorizar por tipo de vía
+    if (Math.abs(dA - dB) < 15) return hwPriority(a) - hwPriority(b);
+    return dA - dB;
+  });
+  if (heading === null || heading === undefined) return sorted[0];
+  const aligned = sorted.filter(w => {
+    const wb = wayBearing(w.coords);
+    return bearingDiff(wb, heading) < 45 || bearingDiff(wb, (heading + 180) % 360) < 45;
+  });
+  return aligned.length > 0 ? aligned[0] : sorted[0];
+}
+
+export function expandAdjacentSegments(primary, allWays) {
+  if (!primary.name || primary.name === 'Sin clasificar') return [primary];
+  const same = allWays.filter(w => w.way_id !== primary.way_id && w.name === primary.name);
+  const primaryEnds = [primary.coords[0], primary.coords[primary.coords.length - 1]];
+  const adjacent = same.filter(w => {
+    const wEnds = [w.coords[0], w.coords[w.coords.length - 1]];
+    return wEnds.some(e => primaryEnds.some(pe => distancePt(e, pe) < 5));
+  });
+  return [primary, ...adjacent.slice(0, 2)];
+}
+
+export async function expandFullRoad(primary, tapped) {
+  try {
+    const allWays = await queryNearbyWays(tapped[1], tapped[0], 200);
+    if (!primary.name || primary.name === 'Sin clasificar') return [primary];
+    const sameName = allWays.filter(w => w.name === primary.name);
+    return sameName.length > 0 ? sameName : [primary];
+  } catch (_) {
+    return [primary];
+  }
+}
+
+/**
+ * Selecciona tramos OSM desde una posición GPS para reporte rápido.
+ * Reutiliza heading detection + lógica de expansión según mode.
+ *
+ * @param {{ lat: number, lng: number }} pos
+ * @param {'impassable' | 'preference'} mode
+ * @returns {Promise<Array>} ways listos para enviar al backend
+ */
+export async function quickSelectWays(pos, mode) {
+  const tapped = [pos.lng, pos.lat];
+
+  // Obtener heading de movimiento
+  const heading = await getMovementHeading();
+
+  // Consultar Overpass
+  const ways = await queryNearbyWays(pos.lat, pos.lng, 80);
+  if (!ways.length) throw new Error('No se encontró calle en esta posición');
+
+  const primary = pickByHeading(ways, tapped, heading);
+
+  let result;
+  if (mode === 'impassable') {
+    result = expandAdjacentSegments(primary, ways);
+  } else {
+    result = await expandFullRoad(primary, tapped);
+  }
+
+  return result.map(w => ({
+    way_id: w.way_id,
+    name:   w.name,
+    coords: w.coords,
+    ...(mode === 'impassable' ? { estimated_duration: 'days' }    : {}),
+    ...(mode === 'preference' ? { preference: 'preferred' }        : {}),
+  }));
+}
+
+export default function WayPicker({ map, mode = 'impassable', onConfirm, onCancel, bottomOffset = 0 }) {
+  const [selected,   setSelected]   = useState([]);
+  const [loading,    setLoading]    = useState(false);
+  const [detecting,  setDetecting]  = useState(false); // obteniendo heading GPS
+  const [errMsg,     setErrMsg]     = useState('');
+  const [preference, setPreference] = useState('preferred');
+  const [saving,     setSaving]     = useState(false);
+  const [toast,      setToast]      = useState(null); // mensaje toast 1s
+
+  const headingRef   = useRef(null); // bearing de movimiento GPS
+  const selectedRef  = useRef(selected);
+  const accentColor  = MODE_COLOR[mode] || '#6b7280';
+
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
+
+  // ── Obtener heading al montar ─────────────────────────────────────────────
+  useEffect(() => {
+    setDetecting(true);
+    getMovementHeading()
+      .then(h => { headingRef.current = h; })
+      .finally(() => setDetecting(false));
+  }, []);
+
+  // ── Capas MapLibre ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!map) return;
+    function addLayers() {
+      if (!map.getSource(SRC_S)) {
+        map.addSource(SRC_S, { type: 'geojson', data: toGeoJSON([]) });
+        map.addLayer({ id: SRC_S + '-border', type: 'line', source: SRC_S,
+          paint: { 'line-color': '#fff', 'line-width': 11, 'line-opacity': 0.7 },
+          layout: { 'line-cap': 'round', 'line-join': 'round' } });
+        map.addLayer({ id: LYR_S, type: 'line', source: SRC_S,
+          paint: { 'line-color': accentColor, 'line-width': 7, 'line-opacity': 1 },
+          layout: { 'line-cap': 'round', 'line-join': 'round' } });
+      }
+    }
+    if (map.isStyleLoaded()) addLayers(); else map.once('load', addLayers);
+    return () => {
+      try {
+        [LYR_S, SRC_S + '-border'].forEach(l => { if (map.getLayer(l)) map.removeLayer(l); });
+        if (map.getSource(SRC_S)) map.removeSource(SRC_S);
+      } catch (_) {}
+    };
+  }, [map]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    map?.getSource(SRC_S)?.setData(toGeoJSON(selected));
+  }, [map, selected]);
+
+  // pickByHeading, expandAdjacentSegments, expandFullRoad
+  // son funciones standalone exportadas — ver debajo del componente
+
+  // ── Click en el mapa ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!map) return;
+    const prev = map.getCanvas().style.cursor;
+    map.getCanvas().style.cursor = 'crosshair';
+
+    const handler = async (e) => {
+      if (loading || detecting) return;
+      const tapped = [e.lngLat.lng, e.lngLat.lat];
+
+      // Deseleccionar si toca cerca de un way seleccionado
+      const nearSelected = selectedRef.current.find(w => distToWay(tapped, w.coords) < DESELECT_RADIUS);
+      if (nearSelected) {
+        setSelected(prev => prev.filter(w => w.way_id !== nearSelected.way_id));
+        return;
+      }
+
+      setLoading(true);
+      setErrMsg('');
+      try {
+        const ways = await queryNearbyWays(e.lngLat.lat, e.lngLat.lng);
+        if (!ways.length) {
+          setErrMsg('No se encontró calle aquí. Toca más cerca de la calzada.');
+          return;
+        }
+        const currentIds = new Set(selectedRef.current.map(w => w.way_id));
+        const fresh = ways.filter(w => !currentIds.has(w.way_id));
+        if (!fresh.length) return;
+
+        const primary = pickByHeading(fresh, tapped, headingRef.current);
+
+        let toAdd = [primary];
+        if (mode === 'impassable') {
+          toAdd = await expandAdjacentSegments(primary, ways);
+        } else if (mode === 'preference') {
+          toAdd = await expandFullRoad(primary, tapped);
+        }
+
+        // Deduplicar contra ya seleccionados
+        const newWays = toAdd.filter(w => !currentIds.has(w.way_id));
+        setSelected(prev => [...prev, ...newWays]);
+      } catch (_) {
+        setErrMsg('Sin conexión a Overpass. Intenta de nuevo.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    map.on('click', handler);
+    return () => {
+      map.off('click', handler);
+      map.getCanvas().style.cursor = prev;
+    };
+  }, [map, loading, detecting, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Confirmar ─────────────────────────────────────────────────────────────
+  function handleConfirm() {
+    if (!selected.length || saving) return;
+    setSaving(true);
+
+    const payload = selected.map(w => ({
+      way_id: w.way_id,
+      name:   w.name,
+      coords: w.coords,
+      ...(mode === 'preference' ? { preference }               : {}),
+      ...(mode === 'impassable' ? { estimated_duration: 'days' } : {}),
+    }));
+
+    if (mode === 'impassable') {
+      // Toast 1s y confirmar directo
+      setToast(`${selected.length} tramo${selected.length > 1 ? 's' : ''} reportado${selected.length > 1 ? 's' : ''} ✓`);
+      setTimeout(() => {
+        setToast(null);
+        onConfirm(payload);
+      }, 1000);
+    } else {
+      onConfirm(payload);
+    }
+  }
+
+  const canConfirm = selected.length > 0 && !saving && !loading;
+  const isPreference = mode === 'preference';
+  const title = isPreference ? 'Preferencias' : 'Calle no viable';
+
+  return (
+    <>
+      {/* Toast 1s para impassable */}
+      {toast && (
+        <div style={{
+          position: 'absolute', top: '50%', left: '50%',
+          transform: 'translate(-50%,-50%)',
+          background: 'rgba(0,0,0,0.65)', color: '#fff',
+          borderRadius: 14, padding: '0.6rem 1.2rem',
+          fontSize: '0.88rem', fontWeight: 600,
+          zIndex: 30, pointerEvents: 'none', whiteSpace: 'nowrap',
+        }}>{toast}</div>
+      )}
+
+      {/* Hint superior */}
+      <div style={{
+        position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
+        background: 'rgba(0,0,0,0.62)', color: '#fff',
+        borderRadius: 20, padding: '0.22rem 0.85rem',
+        fontSize: '0.7rem', fontWeight: 500,
+        zIndex: 21, pointerEvents: 'none', whiteSpace: 'nowrap',
+      }}>
+        {detecting ? '📍 Detectando dirección…'
+          : loading ? '🔍 Buscando…'
+          : selected.length
+            ? `${selected.length} tramo(s) · toca de nuevo para deseleccionar`
+            : '👆 Toca la calle para marcarla'}
+      </div>
+
+      {/* Error */}
+      {errMsg && (
+        <div style={{
+          position: 'absolute', top: 40, left: '50%', transform: 'translateX(-50%)',
+          background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626',
+          borderRadius: 10, padding: '0.3rem 0.75rem',
+          fontSize: '0.72rem', zIndex: 22, pointerEvents: 'none',
+          whiteSpace: 'nowrap', boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+        }}>{errMsg}</div>
+      )}
+
+      {/* Panel inferior */}
+      <div style={{
+        position: 'absolute', bottom: bottomOffset, left: 0, right: 0, zIndex: 20,
+        background: '#fff', borderTop: `3px solid ${accentColor}`,
+        padding: `0.65rem 1rem calc(0.7rem + env(safe-area-inset-bottom,0px))`,
+        boxShadow: '0 -4px 20px rgba(0,0,0,0.14)',
+      }}>
+        <div style={{ fontWeight: 700, fontSize: '0.84rem', marginBottom: '0.45rem',
+          display: 'flex', alignItems: 'center', gap: 6 }}>
+          {isPreference ? '⭐' : '⛔'} {title}
+          {loading && <span style={{ fontSize:'0.68rem', fontWeight:400, color:'#9ca3af' }}>buscando…</span>}
+          {selected.length > 0 && (
+            <span style={{ marginLeft:'auto', fontSize:'0.7rem', fontWeight:400,
+              background: accentColor+'18', color: accentColor,
+              borderRadius:10, padding:'0.1rem 0.45rem' }}>
+              {selected.length} seleccionada{selected.length > 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+
+        {/* Selector de tipo (preference) */}
+        {isPreference && (
+          <>
+            <div style={{ display:'flex', gap:'0.35rem', marginBottom:'0.4rem' }}>
+              {PREF_OPTS.map(o => {
+                const active = o.value === preference;
+                return (
+                  <button key={o.value} onClick={() => setPreference(o.value)} style={{
+                    flex: 1, padding:'0.35rem 0', borderRadius:8, fontSize:'0.75rem',
+                    fontWeight: active ? 700 : 500, cursor:'pointer',
+                    background: active ? o.color : '#f3f4f6',
+                    color: active ? '#fff' : '#374151',
+                    border:`1.5px solid ${active ? o.color : '#e5e7eb'}`,
+                    transition:'all 0.12s',
+                  }}>{o.label}</button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize:'0.68rem', color:'#9ca3af', marginBottom:'0.4rem' }}>
+              Podrás editar después
+            </div>
+          </>
+        )}
+
+        <div style={{ display:'flex', gap:'0.5rem' }}>
+          <button onClick={handleConfirm} disabled={!canConfirm} style={{
+            flex:1, padding:'0.62rem 0', borderRadius:9, fontSize:'0.88rem',
+            fontWeight:700, cursor: canConfirm ? 'pointer' : 'not-allowed',
+            background: canConfirm ? accentColor : '#d1d5db',
+            color:'#fff', border:'none',
+            opacity: saving ? 0.7 : 1,
+          }}>
+            {saving ? 'Enviando…'
+              : isPreference
+                ? `Guardar${selected.length ? ` (${selected.length})` : ''}`
+                : `Reportar${selected.length ? ` (${selected.length})` : ''}`}
+          </button>
+          <button onClick={onCancel} style={{
+            flex:1, padding:'0.62rem 0', borderRadius:9, fontSize:'0.88rem',
+            fontWeight:600, cursor:'pointer',
+            background:'#f3f4f6', color:'#374151', border:'1px solid #e5e7eb',
+          }}>Cancelar</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+=== FILE: frontend/src/components/ZoneLayer.jsx ===
+// frontend/src/components/ZoneLayer.jsx
+//
+// Renderiza zonas de alerta sobre el mapa MapLibre.
+// Al tocar una zona muestra un cuadro flotante con:
+//   - tipo de zona (etiqueta + color)
+//   - botón "Sugerir cambio" → abre modal con opciones:
+//       • Alerta finalizada (cuenta como voto de eliminación)
+//       • Editar (misma UI que al crear: tipo + vigencia)
+//   - Si la zona tiene una edición pendiente: botón "Un conductor sugirió un cambio"
+//     que muestra la edición y permite confirmar o regresar.
+
+import { useEffect, useRef, useState } from 'react';
+
+const ZONE_COLORS = {
+  traffic:      '#f97316',
+  construction: '#eab308',
+  accident:     '#ef4444',
+  flood:        '#3b82f6',
+  blocked:      '#8b5cf6',
+  other:        '#6b7280',
+};
+
+const ZONE_LABELS = {
+  traffic:      '🚦 Tráfico pesado',
+  construction: '🚧 Obra en construcción',
+  accident:     '🚨 Accidente',
+  flood:        '🌊 Inundación',
+  blocked:      '⛔ Calle bloqueada',
+  other:        '⚠️ Otro problema',
+};
+
+const ZONE_TYPES = [
+  { value: 'traffic',      emoji: '🚦', label: 'Tráfico pesado',       color: '#f97316' },
+  { value: 'construction', emoji: '🚧', label: 'Obra en construcción', color: '#eab308' },
+  { value: 'accident',     emoji: '🚨', label: 'Accidente',            color: '#ef4444' },
+  { value: 'flood',        emoji: '🌊', label: 'Inundación',           color: '#3b82f6' },
+  { value: 'blocked',      emoji: '⛔', label: 'Calle bloqueada',      color: '#8b5cf6' },
+  { value: 'other',        emoji: '⚠️', label: 'Otro problema',        color: '#6b7280' },
+];
+
+const HOURS_OPTS = [
+  { value: 1,  label: '~1 hora'  },
+  { value: 2,  label: '~2 horas' },
+  { value: 4,  label: '~4 horas' },
+  { value: 8,  label: 'Medio día' },
+  { value: 12, label: '12 horas' },
+  { value: 24, label: '1 día'    },
+  { value: 48, label: '2 días'   },
+  { value: 72, label: '3 días'   },
+];
+
+// ── helpers ────────────────────────────────────────────────────────────────────
+function circlePolygon(lat, lng, radius_m, steps = 32) {
+  const latDeg = radius_m / 111320;
+  const lngDeg = radius_m / (111320 * Math.cos((lat * Math.PI) / 180));
+  const coords = [];
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * 2 * Math.PI;
+    coords.push([lng + lngDeg * Math.cos(a), lat + latDeg * Math.sin(a)]);
+  }
+  coords.push(coords[0]);
+  return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] } };
+}
+
+function buildGeoJson(zones) {
+  return {
+    type: 'FeatureCollection',
+    features: zones.map(z => ({
+      ...circlePolygon(z.lat, z.lng, z.radius_m),
+      properties: {
+        id:    z.id,
+        type:  z.type,
+        color: ZONE_COLORS[z.type] || ZONE_COLORS.other,
+      },
+    })),
+  };
+}
+
+// ── ZoneInfoCard — cuadro flotante sobre el mapa ───────────────────────────────
+function ZoneInfoCard({ zone, onSuggest, onClose, onVote, userId, votedIds = new Set(), voting = false }) {
+  const color = ZONE_COLORS[zone.type] || ZONE_COLORS.other;
+  const label = ZONE_LABELS[zone.type]  || '⚠️ Zona de alerta';
+  const hasPending   = Boolean(zone.pending_edit);
+  const isOwner      = userId && zone.created_by && String(zone.created_by) === String(userId);
+  const alreadyVoted = votedIds.has(String(zone.id));
+  const showConfirm  = !isOwner && !alreadyVoted;
+
+  return (
+    <div style={{
+      position: 'absolute',
+      bottom: 80, left: '50%', transform: 'translateX(-50%)',
+      background: '#fff', borderRadius: 14,
+      boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
+      padding: '0.75rem 1rem',
+      minWidth: 220, maxWidth: 'calc(100vw - 2rem)',
+      zIndex: 50,
+      borderTop: `4px solid ${color}`,
+      pointerEvents: 'auto',
+    }}>
+      {/* Cerrar */}
+      <button onClick={onClose} style={{
+        position: 'absolute', top: 6, right: 8,
+        background: 'none', border: 'none', cursor: 'pointer',
+        fontSize: '0.9rem', color: '#9ca3af', lineHeight: 1,
+      }}>✕</button>
+
+      {/* Tipo */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '0.5rem' }}>
+        <span style={{
+          background: color + '18', color, border: `1.5px solid ${color}`,
+          borderRadius: 20, padding: '0.22rem 0.65rem',
+          fontSize: '0.8rem', fontWeight: 700,
+        }}>{label}</span>
+      </div>
+
+      {/* Votos de confirmación */}
+      {zone.confirm_count != null && (
+        <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: '0.4rem' }}>
+          {zone.confirm_count}/3 conductores confirmaron · {zone.dismiss_count ?? 0} finalizaron
+        </div>
+      )}
+
+      {/* Edición pendiente de otro conductor */}
+      {hasPending && (
+        <button onClick={() => onSuggest('review_edit')} style={{
+          width: '100%', marginBottom: '0.45rem',
+          padding: '0.42rem 0.75rem', borderRadius: 9,
+          background: '#fffbeb', border: '1.5px solid #fbbf24',
+          color: '#92400e', fontSize: '0.76rem', fontWeight: 700,
+          cursor: 'pointer', textAlign: 'left',
+          display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          <span style={{ fontSize: '1rem' }}>✏️</span>
+          Un conductor sugirió un cambio
+        </button>
+      )}
+
+      {/* Votos — Confirmar / Ya no está */}
+      {(showConfirm || !alreadyVoted) && (
+        <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.45rem' }}>
+          {showConfirm && (
+            <button onClick={() => onVote?.('confirm')} disabled={voting} style={{
+              flex: 1, padding: '0.45rem 0', borderRadius: 9, fontWeight: 700,
+              fontSize: '0.76rem', cursor: voting ? 'wait' : 'pointer',
+              background: '#f0fdf4', color: '#15803d',
+              border: '1.5px solid #86efac',
+              opacity: voting ? 0.6 : 1,
+            }}>✓ Confirmar</button>
+          )}
+          {!alreadyVoted && (
+            <button onClick={() => onVote?.('dismiss')} disabled={voting} style={{
+              flex: 1, padding: '0.45rem 0', borderRadius: 9, fontWeight: 700,
+              fontSize: '0.76rem', cursor: voting ? 'wait' : 'pointer',
+              background: '#fef2f2', color: '#dc2626',
+              border: '1.5px solid #fca5a5',
+              opacity: voting ? 0.6 : 1,
+            }}>✗ Ya no está · {zone.dismiss_count ?? 0}/3</button>
+          )}
+        </div>
+      )}
+      {alreadyVoted && (
+        <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: '0.45rem', textAlign: 'center' }}>
+          Ya votaste en esta zona
+        </div>
+      )}
+
+      {/* Sugerir cambio */}
+      <button onClick={() => onSuggest('menu')} style={{
+        width: '100%', padding: '0.5rem 0', borderRadius: 9,
+        background: color, color: '#fff', border: 'none',
+        fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer',
+      }}>
+        Sugerir cambio
+      </button>
+    </div>
+  );
+}
+
+// ── SuggestModal — modal de sugerencia de cambio ──────────────────────────────
+function SuggestModal({ zone, mode, onClose, onDone, token }) {
+  // mode: 'menu' | 'edit' | 'review_edit'
+  const [view,      setView]      = useState(mode); // 'menu'|'edit'|'review_edit'
+  const [editStep,  setEditStep]  = useState('type'); // 'type'|'hours'
+  const [newType,   setNewType]   = useState(zone.type);
+  const [newHours,  setNewHours]  = useState(zone.estimated_hours ?? 2);
+  const [saving,    setSaving]    = useState(false);
+  const [errMsg,    setErrMsg]    = useState('');
+
+  const color = ZONE_COLORS[newType] || ZONE_COLORS.other;
+
+  async function apiFetch(url, opts = {}, tok) {
+    const base = import.meta.env?.VITE_API_URL || '';
+    const res  = await fetch(`${base}${url}`, {
+      ...opts,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(tok ? { Authorization: `Bearer ${tok}` } : {}),
+        ...(opts.headers || {}),
+      },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Error');
+    return data;
+  }
+
+  async function sendVote(voteType) {
+    setSaving(true); setErrMsg('');
+    try {
+      await apiFetch(`/nav/zones/${zone.id}/vote`, {
+        method: 'POST',
+        body: JSON.stringify({ vote: voteType }),
+      }, token);
+      onDone?.();
+    } catch (e) { setErrMsg(e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function sendEdit() {
+    setSaving(true); setErrMsg('');
+    try {
+      await apiFetch(`/nav/zones/${zone.id}/suggest`, {
+        method: 'POST',
+        body: JSON.stringify({ type: newType, estimated_hours: newHours }),
+      }, token);
+      onDone?.();
+    } catch (e) { setErrMsg(e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function confirmEdit() {
+    setSaving(true); setErrMsg('');
+    try {
+      await apiFetch(`/nav/zones/${zone.id}/suggest/confirm`, {
+        method: 'POST',
+      }, token);
+      onDone?.();
+    } catch (e) { setErrMsg(e.message); }
+    finally { setSaving(false); }
+  }
+
+  const overlay = {
+    position: 'fixed', inset: 0, zIndex: 200,
+    background: 'rgba(0,0,0,0.45)',
+    display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+  };
+
+  const sheet = {
+    background: '#fff', borderRadius: '16px 16px 0 0',
+    padding: '1rem 1rem calc(1rem + env(safe-area-inset-bottom,0px))',
+    width: '100%', maxWidth: 480,
+    boxShadow: '0 -4px 32px rgba(0,0,0,0.18)',
+  };
+
+  // ── MENU ──────────────────────────────────────────────────────────────────
+  if (view === 'menu') return (
+    <div style={overlay} onClick={onClose}>
+      <div style={sheet} onClick={e => e.stopPropagation()}>
+        <div style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: '0.75rem' }}>
+          Sugerir cambio
+        </div>
+        {errMsg && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginBottom: '0.4rem' }}>{errMsg}</div>}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+          <button onClick={() => sendVote('dismiss')} disabled={saving} style={{
+            padding: '0.65rem', borderRadius: 10, cursor: saving ? 'wait' : 'pointer',
+            background: '#f3f4f6', border: '1.5px solid #e5e7eb',
+            fontSize: '0.85rem', fontWeight: 600, color: '#374151',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{ fontSize: '1.1rem' }}>✅</span>
+            Alerta finalizada
+          </button>
+          <button onClick={() => { setView('edit'); setEditStep('type'); }} disabled={saving} style={{
+            padding: '0.65rem', borderRadius: 10, cursor: saving ? 'wait' : 'pointer',
+            background: '#f3f4f6', border: '1.5px solid #e5e7eb',
+            fontSize: '0.85rem', fontWeight: 600, color: '#374151',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{ fontSize: '1.1rem' }}>✏️</span>
+            Editar zona
+          </button>
+          <button onClick={onClose} style={{
+            padding: '0.52rem', borderRadius: 10, cursor: 'pointer',
+            background: 'none', border: '1px solid #e5e7eb',
+            fontSize: '0.8rem', color: '#6b7280',
+          }}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── EDITAR — step tipo ─────────────────────────────────────────────────────
+  if (view === 'edit' && editStep === 'type') return (
+    <div style={overlay} onClick={onClose}>
+      <div style={sheet} onClick={e => e.stopPropagation()}>
+        <div style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: '0.65rem' }}>
+          ¿Qué tipo de problema?
+        </div>
+        {errMsg && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginBottom: '0.4rem' }}>{errMsg}</div>}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', marginBottom: '0.6rem' }}>
+          {ZONE_TYPES.map(t => {
+            const active = t.value === newType;
+            return (
+              <button key={t.value} onClick={() => { setNewType(t.value); setEditStep('hours'); }} style={{
+                padding: '0.6rem 0.2rem', borderRadius: 10, cursor: 'pointer',
+                background: active ? t.color + '20' : '#f9fafb',
+                border: `2px solid ${active ? t.color : '#e5e7eb'}`,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+              }}>
+                <span style={{ fontSize: '1.4rem', lineHeight: 1 }}>{t.emoji}</span>
+                <span style={{ fontSize: '0.64rem', fontWeight: 700, color: t.color, textAlign: 'center', lineHeight: 1.2 }}>
+                  {t.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <button onClick={() => setView('menu')} style={{
+          width: '100%', padding: '0.5rem', borderRadius: 8, cursor: 'pointer',
+          background: '#f3f4f6', border: '1px solid #e5e7eb',
+          fontSize: '0.8rem', color: '#6b7280', fontWeight: 600,
+        }}>← Volver</button>
+      </div>
+    </div>
+  );
+
+  // ── EDITAR — step horas ────────────────────────────────────────────────────
+  if (view === 'edit' && editStep === 'hours') {
+    const sel = ZONE_TYPES.find(t => t.value === newType) || ZONE_TYPES[0];
+    return (
+      <div style={overlay} onClick={onClose}>
+        <div style={sheet} onClick={e => e.stopPropagation()}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '0.65rem' }}>
+            <span style={{ fontSize: '1.3rem' }}>{sel.emoji}</span>
+            <span style={{ fontWeight: 700, fontSize: '0.88rem', color: sel.color }}>{sel.label}</span>
+            <span style={{ fontSize: '0.72rem', color: '#9ca3af', marginLeft: 'auto' }}>¿Cuánto durará?</span>
+          </div>
+          {errMsg && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginBottom: '0.4rem' }}>{errMsg}</div>}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.38rem', marginBottom: '0.6rem' }}>
+            {HOURS_OPTS.map(o => (
+              <button key={o.value} onClick={() => setNewHours(o.value)} disabled={saving} style={{
+                padding: '0.55rem 0.2rem', borderRadius: 9, cursor: saving ? 'wait' : 'pointer',
+                background: newHours === o.value ? sel.color + '18' : '#f9fafb',
+                border: `1.5px solid ${newHours === o.value ? sel.color : '#e5e7eb'}`,
+                fontSize: '0.8rem', fontWeight: newHours === o.value ? 700 : 400,
+                color: newHours === o.value ? sel.color : '#374151',
+              }}>{o.label}</button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: '0.4rem' }}>
+            <button onClick={sendEdit} disabled={saving} style={{
+              flex: 1, padding: '0.6rem', borderRadius: 9, cursor: saving ? 'wait' : 'pointer',
+              background: sel.color, color: '#fff', border: 'none',
+              fontSize: '0.85rem', fontWeight: 700, opacity: saving ? 0.7 : 1,
+            }}>{saving ? 'Enviando…' : 'Sugerir cambio'}</button>
+            <button onClick={() => setEditStep('type')} style={{
+              flex: 1, padding: '0.6rem', borderRadius: 9, cursor: 'pointer',
+              background: '#f3f4f6', border: '1px solid #e5e7eb',
+              fontSize: '0.8rem', color: '#6b7280', fontWeight: 600,
+            }}>← Tipo</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── REVISAR EDICIÓN DE OTRO CONDUCTOR ─────────────────────────────────────
+  if (view === 'review_edit') {
+    const edit      = zone.pending_edit || {};
+    const editColor = ZONE_COLORS[edit.type] || ZONE_COLORS.other;
+    const editLabel = ZONE_LABELS[edit.type]  || '⚠️ Zona';
+    return (
+      <div style={overlay} onClick={onClose}>
+        <div style={sheet} onClick={e => e.stopPropagation()}>
+          <div style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: '0.55rem' }}>
+            ✏️ Cambio sugerido por un conductor
+          </div>
+          <div style={{ background: '#f9fafb', borderRadius: 10, padding: '0.65rem', marginBottom: '0.65rem' }}>
+            <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: '0.25rem' }}>Propuesta</div>
+            <div style={{
+              display: 'inline-block', background: editColor + '18',
+              color: editColor, border: `1.5px solid ${editColor}`,
+              borderRadius: 20, padding: '0.22rem 0.65rem',
+              fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.3rem',
+            }}>{editLabel}</div>
+            {edit.estimated_hours && (
+              <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                Vigencia: {HOURS_OPTS.find(o => o.value === edit.estimated_hours)?.label ?? `${edit.estimated_hours}h`}
+              </div>
+            )}
+          </div>
+          {errMsg && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginBottom: '0.4rem' }}>{errMsg}</div>}
+          <div style={{ display: 'flex', gap: '0.4rem' }}>
+            <button onClick={confirmEdit} disabled={saving} style={{
+              flex: 1, padding: '0.6rem', borderRadius: 9, cursor: saving ? 'wait' : 'pointer',
+              background: editColor, color: '#fff', border: 'none',
+              fontSize: '0.85rem', fontWeight: 700, opacity: saving ? 0.7 : 1,
+            }}>{saving ? 'Confirmando…' : 'Confirmar'}</button>
+            <button onClick={onClose} style={{
+              flex: 1, padding: '0.6rem', borderRadius: 9, cursor: 'pointer',
+              background: '#f3f4f6', border: '1px solid #e5e7eb',
+              fontSize: '0.8rem', color: '#6b7280', fontWeight: 600,
+            }}>Regresar</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// ── ZoneLayer ─────────────────────────────────────────────────────────────────
+export default function ZoneLayer({ map, zones = [], onZoneClick, token, userId }) {
+  const zonesRef          = useRef(zones);
+  const [selected, setSelected] = useState(null);    // zona tocada
+  const [suggestMode, setSuggestMode] = useState(null); // 'menu'|'review_edit'
+  const [voting, setVoting] = useState(false);
+
+  // IDs de zonas votadas — persistidos en localStorage
+  const [votedIds, setVotedIds] = useState(() => {
+    try {
+      const stored = localStorage.getItem('zone_voted_ids');
+      return new Set(stored ? JSON.parse(stored) : []);
+    } catch { return new Set(); }
+  });
+
+  function markVoted(zoneId) {
+    setVotedIds(prev => {
+      const next = new Set(prev);
+      next.add(String(zoneId));
+      try { localStorage.setItem('zone_voted_ids', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }
+
+  async function handleVote(voteType) {
+    if (!selected || !token) return;
+    setVoting(true);
+    try {
+      const base = import.meta.env?.VITE_API_URL || '';
+      const res  = await fetch(`${base}/nav/zones/${selected.id}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ vote: voteType }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.message || 'Error'); }
+      markVoted(selected.id);
+      setSelected(null);
+    } catch (e) {
+      console.warn('[ZoneLayer] vote error:', e.message);
+    } finally {
+      setVoting(false);
+    }
+  }
+
+  zonesRef.current = zones;
+
+  // ── Capas MapLibre ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!map) return;
+    const SRC  = 'nav-zones-source';
+    const FILL = 'nav-zones-fill';
+    const LINE = 'nav-zones-line';
+
+    function addLayers() {
+      if (!map.getSource(SRC)) {
+        map.addSource(SRC, { type: 'geojson', data: buildGeoJson(zones) });
+      } else {
+        map.getSource(SRC).setData(buildGeoJson(zones));
+        return;
+      }
+      map.addLayer({ id: FILL, type: 'fill', source: SRC,
+        paint: { 'fill-color': ['get','color'], 'fill-opacity': 0.13 } });
+      map.addLayer({ id: LINE, type: 'line', source: SRC,
+        paint: { 'line-color': ['get','color'], 'line-width': 2, 'line-opacity': 0.65 } });
+
+      map.on('click', FILL, (e) => {
+        const props = e.features?.[0]?.properties;
+        if (!props) return;
+        const zone = zonesRef.current.find(z => z.id === props.id);
+        if (zone) { setSelected(zone); setSuggestMode(null); }
+        onZoneClick?.(zone);
+      });
+      map.on('mouseenter', FILL, () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', FILL, () => { map.getCanvas().style.cursor = ''; });
+    }
+
+    if (map.isStyleLoaded()) addLayers(); else map.once('load', addLayers);
+    return () => {
+      try {
+        if (map.getLayer(LINE)) map.removeLayer(LINE);
+        if (map.getLayer(FILL)) map.removeLayer(FILL);
+        if (map.getSource(SRC)) map.removeSource(SRC);
+      } catch (_) {}
+    };
+  }, [map]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Actualizar datos
+  useEffect(() => {
+    map?.getSource('nav-zones-source')?.setData(buildGeoJson(zones));
+  }, [map, zones]);
+
+  return (
+    <>
+      {selected && !suggestMode && (
+        <ZoneInfoCard
+          zone={selected}
+          onClose={() => setSelected(null)}
+          onSuggest={(m) => setSuggestMode(m)}
+          onVote={handleVote}
+          userId={userId}
+          votedIds={votedIds}
+          voting={voting}
+        />
+      )}
+      {selected && suggestMode && (
+        <SuggestModal
+          zone={selected}
+          mode={suggestMode}
+          token={token}
+          onClose={() => { setSuggestMode(null); setSelected(null); }}
+          onDone={() => { setSuggestMode(null); setSelected(null); }}
+        />
+      )}
+    </>
+  );
+}
+
+=== FILE: frontend/src/features/driver/alerts/api.js ===
+// frontend/src/features/driver/alerts/api.js
+import { apiFetch } from '../../../api/client';
+
+export async function fetchAllZones(token) {
+  const [active, mine] = await Promise.all([
+    apiFetch('/nav/zones/active'),
+    token ? apiFetch('/nav/zones/mine', {}, token) : Promise.resolve({ zones: [] }),
+  ]);
+  // Merge: mine overrides active for same id (has ownership info)
+  const mineMap = new Map((mine.zones || []).map(z => [z.id, { ...z, is_mine: true }]));
+  const merged = (active.zones || []).map(z => mineMap.has(z.id) ? mineMap.get(z.id) : z);
+  // Add mine zones not in active (expired but still owned)
+  for (const [id, z] of mineMap) {
+    if (!merged.find(m => m.id === id)) merged.push(z);
+  }
+  return merged;
+}
+
+export async function fetchAllImpassable(token) {
+  const [all, mine] = await Promise.all([
+    apiFetch('/nav/road-prefs/impassable'),
+    token ? apiFetch('/nav/road-prefs/impassable/mine', {}, token) : Promise.resolve({ reports: [] }),
+  ]);
+  const mineMap = new Map((mine.reports || []).map(r => [r.way_id, { ...r, is_mine: true }]));
+  const merged = (all.reports || []).map(r => mineMap.has(r.way_id) ? mineMap.get(r.way_id) : r);
+  for (const [wid, r] of mineMap) {
+    if (!merged.find(m => m.way_id === wid)) merged.push(r);
+  }
+  return merged;
+}
+
+export async function fetchMyPreferences(token) {
+  const data = await apiFetch('/nav/road-prefs/preferences', {}, token);
+  return (data.preferences || []).map(p => ({ ...p, is_mine: true }));
+}
+
+export async function voteZone(id, vote, token) {
+  return apiFetch(`/nav/zones/${id}/vote`, { method: 'POST', body: JSON.stringify({ vote }) }, token);
+}
+
+export async function deleteZone(id, token) {
+  return apiFetch(`/nav/zones/${id}`, { method: 'DELETE' }, token);
+}
+
+export async function confirmImpassable(way_id, estimated_duration, token) {
+  return apiFetch(`/nav/road-prefs/impassable/${way_id}/confirm`,
+    { method: 'POST', body: JSON.stringify({ estimated_duration }) }, token);
+}
+
+export async function deleteImpassable(way_id, token) {
+  return apiFetch(`/nav/road-prefs/impassable/${way_id}`, { method: 'DELETE' }, token);
+}
+
+export async function updatePreference(way_id, preference, token) {
+  return apiFetch(`/nav/road-prefs/preference/${way_id}`,
+    { method: 'PUT', body: JSON.stringify({ preference }) }, token);
+}
+
+export async function deletePreference(way_id, token) {
+  return apiFetch(`/nav/road-prefs/preference/${way_id}`, { method: 'DELETE' }, token);
+}
+
+=== FILE: frontend/src/features/driver/home/DriverHomeMapSection.jsx ===
+import DriverMap from '../../../components/DriverMap';
+import NavFABs from '../../../components/NavFABs';
+import WayPicker from '../../../components/WayPicker';
+import ZoneLayer from '../../../components/ZoneLayer';
+import ZonePlacer from '../../../components/ZonePlacer';
+import { ZONE_LABELS } from '../../../utils/format';
+
+import { useEffect, useRef } from 'react';
+export default function DriverHomeMapSection({
+  availability,
+  hasActiveOrder,
+  customPin,
+  setCustomPin,
+  pinAddress,
+  loadingPin,
+  routeGeometry,
+  allStops,
+  routeActive,
+  myPosition,
+  activeOrder,
+  navHeadingDeg,
+  onHeadingChange,
+  centerSignal,
+  onCenterDone,
+  onRouteToPin,
+  setMapInstance,
+  mapInstance,
+  activeZones,
+  token,
+  userId,
+  centerMode,
+  voiceEnabled,
+  navMode,
+  onCenterCycle,
+  onVoiceToggle,
+  onGoogleNav,
+  onNavMode,
+  setMsg,
+  onSubmitZone,
+  onSubmitImpassable,
+  onSubmitPreference,
+  bottomOffset,
+  onQuickReport,
+  isDark = false,
+}) {
+  return (
+    <div style={{ flex:1, minHeight:0, position:'relative', overflow:'hidden', zIndex:0 }}>
+      {!customPin && !hasActiveOrder && availability && (
+        <div style={{ position:'absolute', top:8, left:'50%', transform:'translateX(-50%)', background:'rgba(0,0,0,0.55)', color:'#fff', borderRadius:20, padding:'0.25rem 0.75rem', fontSize:'0.72rem', zIndex:5, pointerEvents:'none', whiteSpace:'nowrap' }}>
+          📍 Toca el mapa para marcar tu posición
+        </div>
+      )}
+
+      <DriverMap
+        driverPos={myPosition}
+        customPin={customPin}
+        onCustomPin={setCustomPin}
+        hasActiveOrder={hasActiveOrder}
+        pickupPos={activeOrder?.restaurant_lat ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) } : null}
+        deliveryPos={activeOrder?.customer_lat ? { lat: Number(activeOrder.customer_lat), lng: Number(activeOrder.customer_lng) } : null}
+        pickupLabel={activeOrder?.restaurant_name || 'Tienda'}
+        deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
+        routeGeometry={routeGeometry}
+        allStops={allStops}
+        routeActive={routeActive}
+        onRouteError={setMsg}
+        centerMode={centerMode}
+        navHeadingDeg={navHeadingDeg}
+        onHeadingChange={onHeadingChange}
+        centerSignal={centerSignal}
+        onCenterDone={onCenterDone}
+        onMapReady={setMapInstance}
+        bottomOffset={bottomOffset}
+        pinAddress={pinAddress}
+        loadingPin={loadingPin}
+        onClearPin={() => setCustomPin(null)}
+        onRouteToPin={onRouteToPin}
+      />
+
+      {mapInstance && (
+        <ZoneLayer
+          map={mapInstance}
+          zones={activeZones}
+          token={token}
+          userId={userId}
+          onZoneClick={(zone) => setMsg(`Zona: ${ZONE_LABELS[zone?.type] || zone?.type}`)}
+        />
+      )}
+
+      {/* Popup de dirección ahora se muestra sobre el pin via MapLibre Popup — ver DriverMap */}
+      {/* El pin SVG se oculta automáticamente tras 5s o al tocar otro punto */}
+
+      <NavFABs
+        hasActiveOrder={hasActiveOrder}
+        routeGeometry={routeGeometry}
+        centerMode={centerMode}
+        voiceEnabled={voiceEnabled}
+        navMode={navMode}
+        onCenterCycle={onCenterCycle}
+        onVoiceToggle={onVoiceToggle}
+        onGoogleNav={onGoogleNav}
+        onNavMode={onNavMode}
+        bottomOffset={bottomOffset + 16}
+        myPosition={myPosition}
+        isDark={isDark}
+        onQuickReport={onQuickReport}
+      />
+
+      {navMode === 'zone' && mapInstance && (
+        <ZonePlacer map={mapInstance} onConfirm={onSubmitZone} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
+      )}
+
+      {navMode === 'impassable' && mapInstance && (
+        <WayPicker map={mapInstance} mode="impassable" onConfirm={onSubmitImpassable} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
+      )}
+
+      {navMode === 'preference' && mapInstance && (
+        <WayPicker map={mapInstance} mode="preference" onConfirm={onSubmitPreference} onCancel={() => onNavMode(null)} bottomOffset={bottomOffset} />
+      )}
+    </div>
+  );
+}
+
+=== FILE: frontend/src/features/driver/home/DriverHomeStatusBar.jsx ===
+// components/DriverHomeStatusBar.jsx
+export default function DriverHomeStatusBar({
+  availability,
+  onToggleAvailability,
+  msg,
+  onDismissMsg,
+  transferBanner,
+  onDismissTransferBanner,
+  counters,       // { session_deliveries, session_earnings_cents }
+  bagPct = null,  // pico de capacidad de mochila en ruta actual
+}) {
+  // Ganancias del día
+  const earnings = counters?.session_earnings_cents
+    ? `$${(counters.session_earnings_cents / 100).toFixed(0)}`
+    : null;
+  const deliveries = counters?.session_deliveries ?? 0;
+
+  // bagPct viene de useOrderManager — calculado al aceptar la oferta
+
+  return (
+    <>
+      <div style={{
+        flexShrink: 0,
+        background: 'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)',
+        padding: '0.5rem 1rem',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: 8,
+        zIndex: 10,
+      }}>
+        {/* Stats del día — siempre visibles */}
+        <div style={{
+          display: 'flex', gap: '0.75rem', alignItems: 'center',
+          fontSize: '0.74rem', color: 'rgba(255,255,255,0.9)', minWidth: 0,
+        }}>
+          <span style={{ fontWeight: 600 }}>
+            <span style={{ opacity: 0.7, fontSize: '0.68rem' }}>Hoy </span>
+            {earnings ?? '$0'}
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.85)"
+              strokeWidth="2.5" strokeLinecap="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            {deliveries}
+          </span>
+          {bagPct !== null && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.85)"
+                strokeWidth="2" strokeLinecap="round">
+                <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <path d="M16 10a4 4 0 01-8 0"/>
+              </svg>
+              {bagPct}%
+            </span>
+          )}
+        </div>
+
+        {/* Toggle */}
+        <button
+          onClick={onToggleAvailability}
+          className={availability ? 'btn-primary btn-sm' : 'btn-sm'}
+          style={{ flexShrink: 0 }}>
+          {availability ? 'Disponible' : 'No disponible'}
+        </button>
+      </div>
+
+      {/* Flash message */}
+      {msg && (
+        <div className="flash flash-error" style={{
+          flexShrink: 0, borderRadius: 0, margin: 0,
+          display: 'flex', justifyContent: 'space-between',
+        }}>
+          <span style={{ fontSize: '0.83rem' }}>{msg}</span>
+          <button onClick={onDismissMsg}
+            style={{ border: 'none', background: 'none', cursor: 'pointer', fontWeight: 700 }}>✕</button>
+        </div>
+      )}
+
+      {/* Transfer banner */}
+      {transferBanner && (
+        <div style={{
+          flexShrink: 0, zIndex: 25,
+          background: transferBanner.type === 'order_transferred_in' ? 'var(--success-bg)' : 'var(--warn-bg)',
+          borderBottom: `2px solid ${transferBanner.type === 'order_transferred_in' ? 'var(--success)' : 'var(--warn)'}`,
+          padding: '0.6rem 1rem',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+            {transferBanner.type === 'order_transferred_in'
+              ? 'Se te asignó un pedido transferido'
+              : 'Un pedido fue reasignado a otro conductor'}
+          </span>
+          <button onClick={onDismissTransferBanner}
+            style={{ border: 'none', background: 'none', cursor: 'pointer',
+              color: 'var(--text-tertiary)', fontWeight: 700, minHeight: 'unset' }}>✕</button>
+        </div>
+      )}
+    </>
+  );
+}
+
+=== FILE: frontend/src/features/driver/home/useDriverHomeRuntime.js ===
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import { reverseGeocode } from '../../../utils/geo';
+import { getErrorMessage } from '../../../utils/errorMessage';
+import {
+  createZoneReport,
+  fetchActiveZones,
+  fetchDriverCounters,
+  fetchRouteModel,
+  submitImpassableRoads,
+  submitRoadPreferences,
+} from './api';
+import { fetchAllImpassable, fetchMyPreferences } from '../alerts/api';
+import {
+  buildGoogleMapsAppUrl,
+  buildGoogleMapsWebUrl,
+  buildGoogleNavigationUrl,
+  formatRouteSummary,
+  getDriverRouteStops,
+  getGoogleNavigationTarget,
+} from './navigation';
+
+export function useDriverHomeRuntime({ token, availability, activeOrder, activeOrders, hasActiveOrder, myPosition, onMessage }) {
+  const [counters, setCounters] = useState(null);
+  const [customPin, setCustomPin] = useState(null);
+  const [pinAddress, setPinAddress] = useState(null);
+  const [loadingPin, setLoadingPin] = useState(false);
+  const [routeGeometry, setRouteGeometry] = useState(null);
+  const [routeSteps, setRouteSteps] = useState([]);
+  const [navHeadingDeg, setNavHeadingDeg] = useState(0);
+  const [centerSignal, setCenterSignal] = useState(null);
+  const [centerMode, setCenterMode] = useState('nav');
+  const [routeActive, setRouteActive] = useState(false);
+  const [activeZones, setActiveZones] = useState([]);
+  const [activeImpassable, setActiveImpassable] = useState([]);
+  const [myPreferences,    setMyPreferences]    = useState([]);
+  const [navMode, setNavMode] = useState(null);
+  const [mapInstance, setMapInstance] = useState(null);
+
+  const centerModeRef     = useRef('nav');
+  const autoCenterRef     = useRef(null);
+  const lastInteractionRef = useRef(Date.now());
+
+  const refreshZones = useCallback(() => {
+    fetchActiveZones()
+      .then((data) => {
+        if (Array.isArray(data?.zones)) setActiveZones(data.zones);
+      })
+      .catch(() => {});
+    fetchAllImpassable(token)
+      .then((reports) => {
+        if (Array.isArray(reports)) setActiveImpassable(reports);
+      })
+      .catch(() => {});
+    if (token) {
+      fetchMyPreferences(token)
+        .then((prefs) => {
+          if (Array.isArray(prefs)) setMyPreferences(prefs);
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!token || !availability) return;
+    fetchDriverCounters(token)
+      .then((data) => setCounters(data.counters))
+      .catch(() => {});
+  }, [availability, token]);
+
+  useEffect(() => {
+    if (hasActiveOrder) {
+      setCustomPin(null);
+      setPinAddress(null);
+    }
+  }, [hasActiveOrder]);
+
+  useEffect(() => {
+    if (!customPin) {
+      setPinAddress(null);
+      return;
+    }
+
+    setLoadingPin(true);
+    reverseGeocode(customPin.lat, customPin.lng)
+      .then((address) => setPinAddress(address || `${customPin.lat.toFixed(5)}, ${customPin.lng.toFixed(5)}`))
+      .finally(() => setLoadingPin(false));
+  }, [customPin]);
+
+  useEffect(() => {
+    if (!activeOrder) {
+      setRouteGeometry(null);
+      setRouteSteps([]);
+      setRouteActive(false);
+    }
+  }, [activeOrder]);
+
+  useEffect(() => {
+    refreshZones();
+  }, [refreshZones]);
+
+  const scheduleAutoCenter = useCallback(() => {
+    if (autoCenterRef.current) clearTimeout(autoCenterRef.current);
+    if (centerModeRef.current !== 'nav') return;
+    autoCenterRef.current = setTimeout(() => {
+      if (centerModeRef.current === 'nav') setCenterSignal('nav');
+    }, 5000);
+  }, []);
+
+  const handleMapInteraction = useCallback(() => {
+    lastInteractionRef.current = Date.now();
+    scheduleAutoCenter();
+  }, [scheduleAutoCenter]);
+
+  useEffect(() => {
+    const events = ['touchstart', 'touchmove', 'pointerdown', 'wheel'];
+    events.forEach((ev) => document.addEventListener(ev, handleMapInteraction, { passive: true }));
+    return () => events.forEach((ev) => document.removeEventListener(ev, handleMapInteraction));
+  }, [handleMapInteraction]);
+
+  const handleCenterCycle = useCallback(() => {
+    // Con ruta activa: nav(pitch50,z17) → overview → nav
+    // Sin ruta activa: siempre 'free' (pitch0, z14)
+    if (!routeActive || !routeGeometry?.length) {
+      setCenterMode('nav');
+      centerModeRef.current = 'nav';
+      clearTimeout(autoCenterRef.current);
+      setCenterSignal('free');
+      return;
+    }
+    // Con ruta: ciclo nav ↔ overview
+    const next = centerModeRef.current === 'nav' ? 'overview' : 'nav';
+    setCenterMode(next);
+    centerModeRef.current = next;
+    clearTimeout(autoCenterRef.current);
+    if (next === 'nav') {
+      setCenterSignal('nav');
+      scheduleAutoCenter();
+    } else {
+      setCenterSignal('overview');
+    }
+  }, [routeActive, routeGeometry, scheduleAutoCenter]);
+
+  const onRouteToPin = useCallback((pinPos) => {
+    if (!pinPos) return;
+    const origin = myPosition || pinPos;
+    fetchRouteModel({ origin, pickup: null, delivery: pinPos, token })
+      .then((data) => {
+        if (!data?.geometry?.length) throw new Error('Ruta vacía');
+        setRouteGeometry(data.geometry);
+        setRouteSteps(Array.isArray(data?.steps) ? data.steps : []);
+        onMessage(formatRouteSummary(data));
+      })
+      .catch(() => onMessage('No se pudo calcular la ruta al pin'));
+  }, [myPosition, onMessage, token]);
+
+  const openRoadRouteApi = useCallback(() => {
+    if (!activeOrder) return;
+
+    // Construir lista de stops encadenados desde todos los pedidos activos
+    // Orden: por cada pedido (sorted by accepted_at), agregar pickup si no recogido, luego delivery
+    const orders = (activeOrders?.length ? activeOrders : [activeOrder])
+      .filter(o => !['delivered', 'cancelled'].includes(o.status))
+      .sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at));
+
+    // Construir waypoints: [pickup?, delivery] por pedido
+    const waypoints = [];
+    for (const o of orders) {
+      const { pickup, delivery } = getDriverRouteStops(o);
+      // Solo incluir pickup si el pedido aún no fue recogido
+      if (pickup && !o.picked_up_at) waypoints.push(pickup);
+      if (delivery) waypoints.push(delivery);
+    }
+
+    if (waypoints.length === 0) {
+      onMessage('Faltan coordenadas del pedido para trazar la ruta');
+      return;
+    }
+
+    const buildRoute = (origin) => {
+      // Para rutas multi-stop: llamadas encadenadas tramo a tramo y combinar geometrías
+      const segments = [origin, ...waypoints];
+      const fetches = [];
+      for (let i = 0; i < segments.length - 1; i++) {
+        fetches.push(
+          fetchRouteModel({ origin: segments[i], pickup: null, delivery: segments[i + 1], token })
+        );
+      }
+      Promise.all(fetches)
+        .then((results) => {
+          const combined = results.flatMap(d => d?.geometry || []);
+          if (!combined.length) throw new Error('Ruta vacía');
+          const steps = results.flatMap(d => Array.isArray(d?.steps) ? d.steps : []);
+          setRouteGeometry(combined);
+          setRouteSteps(steps);
+          setRouteActive(true);
+          // Resumen del primer tramo
+          const first = results[0];
+          if (first) onMessage(formatRouteSummary(first));
+          // Activar overview para ver toda la ruta
+          setCenterSignal('overview');
+        })
+        .catch((error) => {
+          setRouteGeometry(null);
+          setRouteSteps([]);
+          onMessage(error.message?.includes('502') ? 'Motor de rutas no disponible' : 'No se pudo calcular la ruta');
+        });
+    };
+
+    if (myPosition) { buildRoute(myPosition); return; }
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => buildRoute({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => buildRoute(waypoints[0]),
+        { timeout: 4000, maximumAge: 15000 }
+      );
+      return;
+    }
+
+    buildRoute(waypoints[0]);
+  }, [activeOrder, activeOrders, myPosition, onMessage, token]);
+
+  const handleToggleRoute = useCallback(() => {
+    if (routeActive) {
+      // Desactivar: limpiar ruta y volver a modo nav libre
+      setRouteActive(false);
+      setRouteGeometry(null);
+      setRouteSteps([]);
+      setCenterMode('nav');
+      centerModeRef.current = 'nav';
+      setCenterSignal('nav');
+      return;
+    }
+    // Activar: calcular ruta
+    openRoadRouteApi();
+  }, [routeActive, openRoadRouteApi]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openGoogleNavigation = useCallback(() => {
+    const target = getGoogleNavigationTarget(activeOrder);
+    if (!target) {
+      onMessage('Faltan coordenadas para navegar');
+      return;
+    }
+
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    if (isIOS) {
+      const anchor = document.createElement('a');
+      anchor.href = buildGoogleMapsAppUrl(target);
+      anchor.click();
+      setTimeout(() => window.open(buildGoogleMapsWebUrl(target), '_blank', 'noopener'), 500);
+      return;
+    }
+
+    window.location.href = buildGoogleNavigationUrl(target);
+  }, [activeOrder, onMessage]);
+
+  const handleZoneConfirm = useCallback((params) => {
+    createZoneReport(params, token)
+      .then(() => {
+        setNavMode(null);
+        refreshZones();
+        onMessage('Zona reportada ✓');
+      })
+      .catch((error) => onMessage(getErrorMessage(error, 'No se pudo reportar la zona')));
+  }, [onMessage, refreshZones, token]);
+
+  const handleImpassableConfirm = useCallback((ways) => {
+    const pos = myPosition || { lat: 0, lng: 0 };
+    submitImpassableRoads({ position: pos, ways, token })
+      .then(() => {
+        setNavMode(null);
+        onMessage(`${ways.length} calle(s) reportada(s) ✓`);
+      })
+      .catch((error) => onMessage(getErrorMessage(error, 'No se pudieron reportar las calles')));
+  }, [myPosition, onMessage, token]);
+
+  const handlePreferenceConfirm = useCallback((ways) => {
+    submitRoadPreferences({ ways, token })
+      .then(() => {
+        setNavMode(null);
+        onMessage(`${ways.length} preferencia(s) guardada(s) ✓`);
+      })
+      .catch((error) => onMessage(getErrorMessage(error, 'No se pudieron guardar las preferencias')));
+  }, [onMessage, token]);
+
+  // Todos los stops de pedidos activos — para fitBounds del overview multi-stop
+  const allStops = (activeOrders?.length ? activeOrders : (activeOrder ? [activeOrder] : []))
+    .filter(o => !['delivered', 'cancelled'].includes(o.status))
+    .flatMap(o => {
+      const pts = [];
+      if (o.restaurant_lat && o.restaurant_lng && !o.picked_up_at)
+        pts.push({ lat: Number(o.restaurant_lat), lng: Number(o.restaurant_lng) });
+      if (o.customer_lat && o.customer_lng)
+        pts.push({ lat: Number(o.customer_lat), lng: Number(o.customer_lng) });
+      return pts;
+    });
+
+  return {
+    counters,
+    customPin,
+    setCustomPin,
+    pinAddress,
+    loadingPin,
+    routeGeometry,
+    routeSteps,
+    navHeadingDeg,
+    setNavHeadingDeg,
+    centerSignal,
+    setCenterSignal,
+    centerMode,
+    activeZones,
+    activeImpassable,
+    myPreferences,
+    navMode,
+    setNavMode,
+    mapInstance,
+    setMapInstance,
+    lastInteractionRef,
+    routeActive,
+    handleToggleRoute,
+    onRouteToPin,
+    allStops,
+    refreshZones,
+    handleCenterCycle,
+    openRoadRouteApi,
+    openGoogleNavigation,
+    handleZoneConfirm,
+    handleImpassableConfirm,
+    handlePreferenceConfirm,
+  };
+}
+
+=== FILE: frontend/src/hooks/useNavFeatures.js ===
+// frontend/src/hooks/useNavFeatures.js
+import { useEffect, useRef, useState } from 'react';
+
+const ZONE_LABELS = {
+  traffic:      'tráfico pesado',
+  construction: 'obra en construcción',
+  accident:     'accidente',
+  flood:        'zona de inundación',
+  blocked:      'calle bloqueada',
+  other:        'problema en la vía',
+};
+
+function euclideanMeters(lat1, lng1, lat2, lng2) {
+  const dlat = (lat2 - lat1) * 111320;
+  const dlng = (lng2 - lng1) * 111320 * Math.cos((lat1 * Math.PI) / 180);
+  return Math.sqrt(dlat * dlat + dlng * dlng);
+}
+
+// routeUsesWay eliminado — la alerta de calles ahora usa distancia al polyline directamente
+
+export function useNavFeatures({
+  steps         = [],
+  currentPos,
+  activeZones   = [],
+  impassableWays = [],
+  routeGeometry  = [],
+  hasActiveOrder = false,
+  onVoice,
+  onZoneAlert,
+}) {
+  const [voiceEnabled,   setVoiceEnabled]   = useState(true);
+  const [wakeLockActive, setWakeLockActive] = useState(false);
+
+  const wakeLockRef      = useRef(null);
+  const announcedSteps   = useRef(new Set());
+  const zoneAlertedMap   = useRef(new Map());
+  const wayAlertedMap    = useRef(new Map());
+
+  // ── Wake Lock — solo activo con pedido activo Y ruta calculada ─────────────
+  useEffect(() => {
+    const shouldLock = hasActiveOrder && routeGeometry?.length > 0;
+
+    async function acquire() {
+      try {
+        if (!('wakeLock' in navigator)) return;
+        if (wakeLockRef.current) return; // ya activo
+        const lock = await navigator.wakeLock.request('screen');
+        wakeLockRef.current = lock;
+        setWakeLockActive(true);
+        lock.addEventListener('release', () => {
+          wakeLockRef.current = null;
+          setWakeLockActive(false);
+        });
+      } catch (_) {}
+    }
+
+    function release() {
+      try {
+        wakeLockRef.current?.release();
+        wakeLockRef.current = null;
+        setWakeLockActive(false);
+      } catch (_) {}
+    }
+
+    if (shouldLock) {
+      acquire();
+      // Re-adquirir al volver de background (iOS/Android liberan el lock al minimizar)
+      const onVis = () => { if (!document.hidden && shouldLock) acquire(); };
+      document.addEventListener('visibilitychange', onVis);
+      return () => {
+        document.removeEventListener('visibilitychange', onVis);
+        release();
+      };
+    } else {
+      release();
+    }
+  }, [hasActiveOrder, routeGeometry?.length]);
+
+  // Limpiar steps al cambiar la ruta
+  useEffect(() => { announcedSteps.current = new Set(); }, [steps]);
+
+  // ── Voz turn-by-turn ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!voiceEnabled || !currentPos || !steps.length) return;
+    if (!window.speechSynthesis) return;
+    steps.forEach((step, idx) => {
+      if (announcedSteps.current.has(idx) || !step.location) return;
+      const dist = euclideanMeters(
+        currentPos.lat, currentPos.lng,
+        step.location.lat, step.location.lng
+      );
+      if (dist < 80) {
+        announcedSteps.current.add(idx);
+        const text = step.instruction || 'Continúa';
+        try { window.speechSynthesis.speak(new SpeechSynthesisUtterance(text)); } catch (_) {}
+        onVoice?.(text);
+      }
+    });
+  }, [currentPos?.lat, currentPos?.lng, steps, voiceEnabled, onVoice]);
+
+  // ── Alertas de zonas (500 m) ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!currentPos || !activeZones.length) return;
+    const now       = Date.now();
+    const COOLDOWN  = 120_000; // 2 min entre alertas de la misma zona
+    const ALERT_M   = 500;
+
+    for (const zone of activeZones) {
+      const dist = euclideanMeters(currentPos.lat, currentPos.lng, zone.lat, zone.lng);
+      if (dist > ALERT_M) continue;
+
+      const last = zoneAlertedMap.current.get(zone.id) || 0;
+      if (now - last < COOLDOWN) continue;
+      zoneAlertedMap.current.set(zone.id, now);
+
+      const msg = 'Se reportó una zona de alerta cerca, revisa el mapa';
+      if (voiceEnabled) {
+        try {
+          window.speechSynthesis?.speak(new SpeechSynthesisUtterance(msg));
+        } catch (_) {}
+      }
+      onVoice?.(msg);
+      onZoneAlert?.(zone);
+    }
+  }, [currentPos?.lat, currentPos?.lng, activeZones, voiceEnabled, onVoice, onZoneAlert]);
+
+  // ── Alertas de calles no viables ────────────────────────────────────────────
+  // Alerta cuando el conductor está a menos de 50m de CUALQUIER nodo del way
+  // (no solo del primer nodo), independientemente de si la ruta pasa por ahí
+  useEffect(() => {
+    if (!currentPos || !impassableWays.length) return;
+    const now      = Date.now();
+    const COOLDOWN = 180_000;
+    const ALERT_DIST = 50; // metros desde cualquier nodo del tramo
+
+    for (const way of impassableWays) {
+      if (!way.coords?.length) continue;
+
+      // Distancia mínima al polyline completo (todos los nodos)
+      let minDist = Infinity;
+      for (const coord of way.coords) {
+        // coords pueden ser [lng, lat] o {lat, lng}
+        const cLat = Array.isArray(coord) ? coord[1] : coord.lat;
+        const cLng = Array.isArray(coord) ? coord[0] : coord.lng;
+        const d = euclideanMeters(currentPos.lat, currentPos.lng, cLat, cLng);
+        if (d < minDist) minDist = d;
+      }
+      if (minDist > ALERT_DIST) continue;
+
+      const last = wayAlertedMap.current.get(way.way_id) || 0;
+      if (now - last < COOLDOWN) continue;
+      wayAlertedMap.current.set(way.way_id, now);
+
+      const msg = `⚠️ Calle no viable cerca: ${way.name || 'tramo adelante'}`;
+      if (voiceEnabled) {
+        try { window.speechSynthesis?.speak(new SpeechSynthesisUtterance(msg)); } catch (_) {}
+      }
+      onVoice?.(msg);
+    }
+  }, [currentPos?.lat, currentPos?.lng, impassableWays, voiceEnabled, onVoice]);
+
+  return { voiceEnabled, setVoiceEnabled, wakeLockActive };
+}
+
+=== FILE: frontend/src/pages/Driver/Home.jsx ===
+// pages/Driver/Home.jsx — orquestador puro
+// Toda la lógica de negocio está en useOrderManager
+// Toda la lógica de mapa está en DriverMap
+// Los componentes de UI son independientes y reciben solo props
+
+import { useEffect, useRef, useState } from 'react';
+
+import ActiveOrderPanel from '../../components/ActiveOrderPanel';
+import OfferPanel from '../../components/OfferPanel';
+import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
+import { ensureDriverHomeAnimations } from '../../features/driver/home/animations';
+import DriverHomeMapSection from '../../features/driver/home/DriverHomeMapSection.jsx';
+import { quickSelectWays } from '../../components/WayPicker';
+import { buildGoogleMapsAppUrl, buildGoogleMapsWebUrl, buildGoogleNavigationUrl, formatRouteSummary, getDriverRouteStops, getGoogleNavigationTarget } from '../../features/driver/home/navigation';
+import DriverHomeStatusBar from '../../features/driver/home/DriverHomeStatusBar.jsx';
+import { useDriverHomeRuntime } from '../../features/driver/home/useDriverHomeRuntime';
+import { useAppBadge } from '../../hooks/useAppBadge';
+import { useDriverLocation } from '../../hooks/useDriverLocation';
+import { useNavFeatures } from '../../hooks/useNavFeatures';
+import { useOrderManager } from '../../hooks/useOrderManager';
+import { ZONE_LABELS } from '../../utils/format';
+
+ensureDriverHomeAnimations();
+
+export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
+  const { auth, patchUser } = useAuth();
+  const { isDark } = useTheme();
+  const order = useOrderManager(auth.token, patchUser, auth.user?.driver);
+
+  // Conectar useDriverOrders (panel lateral) al SSE de useOrderManager.
+  // useDriverOrders escribe sus handlers en registerRef.current.{onUpdate,onReconnect,onChat}.
+  // Aquí los pasamos a useOrderManager para que los invoque al recibir eventos SSE.
+  useEffect(() => {
+    if (!registerRef) return;
+    // Esperar a que DriverOrders haya montado y escrito sus handlers
+    const wire = () => {
+      if (registerRef.current.onUpdate)    order.registerOrdersUpdate(registerRef.current.onUpdate);
+      if (registerRef.current.onReconnect) order.registerOrdersReconnect(registerRef.current.onReconnect);
+      if (registerRef.current.onChat)      order.registerOrdersChat(registerRef.current.onChat);
+      registerRef.current.loadData = order.loadData;
+    };
+    wire();
+    // Re-intentar en el siguiente tick por si DriverOrders monta después
+    const t = setTimeout(wire, 0);
+    return () => clearTimeout(t);
+  }, [registerRef, order.registerOrdersUpdate, order.registerOrdersReconnect, order.registerOrdersChat]);
+
+  const badgeCount = order.pendingOffer ? 1 : (order.hasActiveOrder ? 1 : 0);
+  useAppBadge(badgeCount);
+
+  const [msg, setMsg] = useState('');
+  const [panelHeight, setPanelHeight] = useState(0);
+  const activePanelRef = useRef(null);
+
+  // Medir altura del panel activo para subir FABs y atribución
+  useEffect(() => {
+    const el = activePanelRef.current;
+    if (!el) { setPanelHeight(0); return; }
+    const ro = new ResizeObserver(([entry]) => setPanelHeight(entry.contentRect.height));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [order.hasActiveOrder, order.pendingOffer]);
+
+  const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, order.availability, order.hasActiveOrder);
+
+  // Mantener useOrderManager al tanto de la posición para calcular stop más próximo
+  useEffect(() => { order.setMyPosition(myPosition); }, [myPosition]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const home = useDriverHomeRuntime({
+    token: auth.token,
+    availability: order.availability,
+    activeOrder: order.activeOrder,
+    activeOrders: order.activeOrders,
+    hasActiveOrder: order.hasActiveOrder,
+    myPosition,
+    onMessage: setMsg,
+  });
+
+  const { voiceEnabled, setVoiceEnabled, wakeLockActive } = useNavFeatures({
+    steps: home.routeSteps,
+    currentPos: myPosition,
+    activeZones: home.activeZones,
+    hasActiveOrder: order.hasActiveOrder,
+    onVoice: (text) => setMsg(text),
+    onZoneAlert: (zone) => setMsg(`⚠️ Zona de alerta cerca: ${ZONE_LABELS[zone?.type] || zone?.type}`),
+    impassableWays: [],
+    routeGeometry: home.routeGeometry || [],
+  });
+
+  // Exponer zonas e impassable via registerRef — DESPUÉS de home y myPosition
+  useEffect(() => {
+    if (!registerRef) return;
+    registerRef.current.activeZones      = home.activeZones;
+    registerRef.current.activeImpassable = home.activeImpassable;
+    registerRef.current.myPreferences    = home.myPreferences;
+    registerRef.current.myPosition       = myPosition;
+    registerRef.current.refreshZones     = home.refreshZones;
+    registerRef.current.availability     = order.availability;
+    registerRef.current.token            = auth.token;
+    registerRef.current.notifyAlertsUpdate?.();
+  }, [home.activeZones, home.activeImpassable, home.myPreferences]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden', position:'relative' }}>
+        <DriverHomeStatusBar
+          availability={order.availability}
+          counters={home.counters}
+          activeOrder={order.activeOrder}
+          bagPct={order.routeBagPct}
+          onToggleAvailability={() => order.toggleAvailability(setMsg)}
+          msg={msg}
+          onDismissMsg={() => setMsg('')}
+          transferBanner={order.transferBanner}
+          onDismissTransferBanner={() => order.setTransferBanner(null)}
+        />
+
+        <DriverHomeMapSection
+          availability={order.availability}
+          hasActiveOrder={order.hasActiveOrder}
+          customPin={home.customPin}
+          setCustomPin={home.setCustomPin}
+          pinAddress={home.pinAddress}
+          loadingPin={home.loadingPin}
+          routeGeometry={home.routeGeometry}
+          allStops={home.allStops}
+          routeActive={home.routeActive}
+          myPosition={myPosition}
+          activeOrder={order.activeOrder}
+          navHeadingDeg={home.navHeadingDeg}
+          onHeadingChange={home.setNavHeadingDeg}
+          centerSignal={home.centerSignal}
+          onCenterDone={() => home.setCenterSignal(null)}
+          onRouteToPin={home.onRouteToPin}
+          setMapInstance={home.setMapInstance}
+          mapInstance={home.mapInstance}
+          activeZones={home.activeZones}
+          token={auth.token}
+          userId={auth.user?.id}
+          centerMode={home.centerMode}
+          voiceEnabled={voiceEnabled}
+          navMode={home.navMode}
+          onCenterCycle={home.handleCenterCycle}
+          onVoiceToggle={() => setVoiceEnabled((value) => !value)}
+          onGoogleNav={home.openGoogleNavigation}
+          onNavMode={home.setNavMode}
+          setMsg={setMsg}
+          onSubmitZone={home.handleZoneConfirm}
+          onSubmitImpassable={home.handleImpassableConfirm}
+          onSubmitPreference={home.handlePreferenceConfirm}
+          bottomOffset={panelHeight + 8}
+          isDark={isDark}
+          onQuickReport={async (type, pos) => {
+            if (type === 'zone') {
+              home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'other', radius_m: 500, estimated_hours: 1 });
+            } else if (type === 'impassable') {
+              try {
+                const ways = await quickSelectWays(pos, 'impassable');
+                home.handleImpassableConfirm(ways);
+              } catch (_) {
+                setMsg('No se pudo detectar la calle. Intenta el modo normal.');
+              }
+            } else if (type === 'preference') {
+              try {
+                const ways = await quickSelectWays(pos, 'preference');
+                home.handlePreferenceConfirm(ways);
+              } catch (_) {
+                setMsg('No se pudo detectar la calle. Intenta el modo normal.');
+              }
+            }
+          }}
+        />
+
+        <OfferPanel
+          offer={order.pendingOffer}
+          minimized={order.offerMinimized}
+          loading={order.loadingOffer}
+          onAccept={() => order.acceptOffer(setMsg)}
+          onReject={() => order.rejectOffer(setMsg)}
+          onToggleMinimize={() => order.setOfferMinimized((value) => !value)}
+          onExpired={() => {
+            const warning = order.handleOfferExpired();
+            if (warning) setMsg(warning);
+          }}
+          panelRef={!order.hasActiveOrder ? activePanelRef : undefined}
+        />
+
+        <ActiveOrderPanel
+          order={order.hasActiveOrder ? order.activeOrder : null}
+          expanded={order.orderExpanded}
+          loadingStatus={order.loadingStatus}
+          showRelease={order.showRelease}
+          releaseNote={order.releaseNote}
+          onToggleExpand={() => order.setOrderExpanded((expanded) => !expanded)}
+          onChangeStatus={(id, status) => order.changeStatus(id, status, setMsg)}
+          onToggleRelease={() => order.setShowRelease((show) => !show)}
+          onReleaseNoteChange={order.setReleaseNote}
+          onConfirmRelease={() => order.doRelease(setMsg)}
+          onRebalance={() => order.doRebalance(setMsg)}
+          onRoute={home.handleToggleRoute}
+          routeActive={home.routeActive}
+          panelRef={activePanelRef}
+        />
+    </div>
+  );
+}
+
+=== FILE: frontend/src/pages/Profile.jsx ===
+import { useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import { AccountManagementSection, PersonalInfoSection, ProfileHeaderCard, ProfileSecuritySection, ProfileSettingsSection } from '../features/profile/sections';
+import { useProfilePersonalInfo } from '../features/profile/useProfilePersonalInfo';
+import { useProfileSecurity } from '../features/profile/useProfileSecurity';
+import { useProfileSettings } from '../features/profile/useProfileSettings';
+
+export default function ProfilePage() {
+  const { auth, patchUser, logout } = useAuth();
+  const user = auth.user;
+
+  const personal = useProfilePersonalInfo({ token: auth.token, user, patchUser });
+  const settings = useProfileSettings(auth.token, user?.role);
+  const security = useProfileSecurity({ token: auth.token, user, patchUser });
+
+  const avatarLetter = (personal.alias[0] || '?').toUpperCase();
+
+  useEffect(() => {
+    if (import.meta.env.PROD) return;
+
+    let observer;
+    if ('PerformanceObserver' in window) {
+      try {
+        observer = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            console.warn(
+              `[perf] Long task ${Math.round(entry.duration)}ms`,
+              entry.attribution?.[0]?.name || 'unknown'
+            );
+          }
+        });
+        observer.observe({ type: 'longtask', buffered: true });
+      } catch (_) {}
+    }
+
+    let lastFrame = performance.now();
+    let rafId;
+    function checkFrame(now) {
+      const delta = now - lastFrame;
+      if (delta > 33) {
+        console.warn(`[perf] Frame drop: ${Math.round(delta)}ms (${Math.round(1000 / delta)}fps)`);
+      }
+      lastFrame = now;
+      rafId = requestAnimationFrame(checkFrame);
+    }
+    rafId = requestAnimationFrame(checkFrame);
+
+    return () => {
+      observer?.disconnect();
+      cancelAnimationFrame(rafId);
+    };
+  }, []);
+
+  return (
+    <div>
+      <h2 style={{ fontSize:'1.1rem', fontWeight:800, marginBottom:'1.25rem' }}>Mi perfil</h2>
+
+      <ProfileHeaderCard alias={personal.alias} avatarLetter={avatarLetter} role={user?.role} />
+
+      <PersonalInfoSection
+        authToken={auth.token}
+        alias={personal.alias}
+        setAlias={personal.setAlias}
+        homeLat={personal.homeLat}
+        homeLng={personal.homeLng}
+        onSelectAddress={({ lat, lng, estado: nextEstado, ciudad: nextCiudad, colonia: nextColonia, postalCode: cp, colonias }) => {
+          if (lat != null) personal.setHomeLat(lat);
+          if (lng != null) personal.setHomeLng(lng);
+          if (nextEstado != null) personal.setEstado(nextEstado);
+          if (nextCiudad != null) personal.setCiudad(nextCiudad);
+          if (nextColonia != null && nextColonia !== '') personal.setColonia(nextColonia);
+          if (cp != null) personal.setPostalCode(cp);
+          if (colonias?.length) personal.setColoniasList(colonias);
+        }}
+        estado={personal.estado}
+        setEstado={personal.setEstado}
+        ciudad={personal.ciudad}
+        setCiudad={personal.setCiudad}
+        colonia={personal.colonia}
+        setColonia={personal.setColonia}
+        coloniasList={personal.coloniasList}
+        calle={personal.calle}
+        setCalle={personal.setCalle}
+        numero={personal.numero}
+        setNumero={personal.setNumero}
+        onClearHomePin={() => { personal.setHomeLat(null); personal.setHomeLng(null); }}
+        onSave={personal.saveProfile}
+        message={personal.profileMsg}
+        isError={personal.profileErr}
+      />
+
+      <ProfileSettingsSection
+        userRole={user?.role}
+        permStatus={settings.permStatus}
+        permLoading={settings.permLoading}
+        permMsg={settings.permMsg}
+        notifStatus={settings.notifStatus}
+        notifEnabled={settings.notifEnabled}
+        highPriorityNotifs={settings.highPriorityNotifs}
+        notifMsg={settings.notifMsg}
+        onToggleNotifEnabled={settings.toggleNotifEnabled}
+        onToggleHighPriority={settings.toggleHighPriorityNotifs}
+        onRequestWakeLock={settings.requestWakeLock}
+        onRequestAllPermissions={settings.requestAllPermissions}
+        theme={settings.theme}
+        onApplyTheme={settings.applyTheme}
+        reducedMotion={settings.reducedMotion}
+        onToggleReducedMotion={settings.toggleReducedMotion}
+        isInstalled={settings.isInstalled}
+        deferredInstall={settings.deferredInstall}
+        onTriggerInstallPrompt={settings.triggerInstallPrompt}
+        onRefreshOfflineCache={settings.refreshOfflineCache}
+        offlineCacheMsg={settings.offlineCacheMsg}
+      />
+
+      <ProfileSecuritySection
+        loginUsername={security.loginUsername}
+        onChangeUsername={security.handleUsernameChange}
+        usernameStatus={security.usernameStatus}
+        currentPassword={security.currentPassword}
+        setCurrentPassword={security.setCurrentPassword}
+        newPassword={security.newPassword}
+        setNewPassword={security.setNewPassword}
+        confirmPassword={security.confirmPassword}
+        setConfirmPassword={security.setConfirmPassword}
+        onSave={security.changePasswordAndLogin}
+        message={security.pwdMsg}
+        isError={security.pwdErr}
+      />
+
+      <AccountManagementSection
+        deleteConfirm={security.deleteConfirm}
+        onDeleteAccount={security.deleteAccount}
+        deletePwd={security.deletePwd}
+        setDeletePwd={security.setDeletePwd}
+        deleteLoading={security.deleteLoading}
+        onCancelDelete={security.resetDeleteState}
+        message={security.deleteMsg}
+        isError={security.deleteErr}
+      />
+
+      <button
+        onClick={logout}
+        className="btn-sm"
+        style={{
+          width:'100%', padding:'0.7rem',
+          marginTop:'0.25rem', marginBottom:'0.75rem',
+          fontWeight:700, fontSize:'0.9rem',
+        }}
+      >
+        Cerrar sesión
+      </button>
+    </div>
+  );
+}
+
