@@ -9,6 +9,37 @@ const router = Router();
 const VALID_PREFERENCES = ['preferred', 'difficult', 'avoid'];
 const VALID_DURATIONS   = ['days', 'weeks', 'months', 'permanent'];
 
+// ── Helpers de conteo de votos ────────────────────────────────────────────────
+async function getVoteCounts(way_id) {
+  const r = await query(
+    `SELECT
+       COUNT(*) FILTER (WHERE vote='confirm') AS confirms,
+       COUNT(*) FILTER (WHERE vote='dismiss') AS dismisses
+     FROM impassable_votes WHERE way_id = $1`,
+    [way_id]
+  );
+  return {
+    confirm_count: Number(r.rows[0]?.confirms  ?? 0),
+    dismiss_count: Number(r.rows[0]?.dismisses ?? 0),
+  };
+}
+
+// ── Query base para GET de reportes (incluye conteos de votos) ────────────────
+const IMPASSABLE_SELECT = `
+  SELECT ir.*,
+         COALESCE(cv.confirm_count, 0)::int AS confirm_count,
+         COALESCE(dv.dismiss_count, 0)::int AS dismiss_count
+  FROM impassable_reports ir
+  LEFT JOIN (
+    SELECT way_id, COUNT(*) AS confirm_count
+    FROM impassable_votes WHERE vote = 'confirm' GROUP BY way_id
+  ) cv ON cv.way_id = ir.way_id
+  LEFT JOIN (
+    SELECT way_id, COUNT(*) AS dismiss_count
+    FROM impassable_votes WHERE vote = 'dismiss' GROUP BY way_id
+  ) dv ON dv.way_id = ir.way_id
+`;
+
 // ── POST /preference ──────────────────────────────────────────────────────────
 router.post('/preference', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
@@ -54,9 +85,6 @@ router.get('/preferences', authenticate, authorize(['driver']), async (req, res,
 });
 
 // ── POST /impassable ──────────────────────────────────────────────────────────
-// Guarda múltiples ways como UN SOLO registro (agrupado por calle).
-// { lat, lng, ways: [{ way_id, name, coords, estimated_duration, description? }] }
-// o forma simple: { way_id, lat, lng, name, coords, estimated_duration }
 router.post('/impassable', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const body    = req.body || {};
@@ -96,11 +124,10 @@ router.post('/impassable', authenticate, authorize(['driver']), async (req, res,
         throw new AppError(400, 'description no puede superar 500 caracteres');
     }
 
-    // Agrupar: un registro por reporte, con todos los way_ids del grupo
-    const primary    = rawWays[0];
-    const allWayIds  = rawWays.map(w => w.way_id);
-    const groupName  = rawWays.find(w => w.name && w.name !== w.way_id)?.name || primary.name || null;
-    const groupCoords = primary.coords; // geometría del segmento principal
+    const primary     = rawWays[0];
+    const allWayIds   = rawWays.map(w => w.way_id);
+    const groupName   = rawWays.find(w => w.name && w.name !== w.way_id)?.name || primary.name || null;
+    const groupCoords = primary.coords;
 
     let savedReport = null;
     try {
@@ -120,9 +147,7 @@ router.post('/impassable', authenticate, authorize(['driver']), async (req, res,
            reported_by        = EXCLUDED.reported_by
          RETURNING *`,
         [
-          primary.way_id,
-          primary.lat,
-          primary.lng,
+          primary.way_id, primary.lat, primary.lng,
           groupName,
           groupCoords ? JSON.stringify(groupCoords) : null,
           allWayIds,
@@ -134,10 +159,74 @@ router.post('/impassable', authenticate, authorize(['driver']), async (req, res,
       savedReport = result.rows[0] || null;
     } catch (e) {
       if (e?.code !== '23505') throw e;
-      // 23505 = el way_id ya tiene un reporte confirmed — ignorar silenciosamente
     }
 
     return res.status(201).json({ ok: true, report: savedReport });
+  } catch (error) { return next(error); }
+});
+
+// ── POST /impassable/:way_id/vote ─────────────────────────────────────────────
+// confirm × 3 → confirmed = true (se usa en rutas)
+// dismiss × 3 → eliminar reporte
+// Un voto por driver, puede cambiar (upsert)
+// El reporter no puede votar su propio reporte
+router.post('/impassable/:way_id/vote', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const { way_id } = req.params;
+    const { vote }   = req.body || {};
+
+    if (!['confirm', 'dismiss'].includes(vote))
+      throw new AppError(400, 'vote debe ser confirm o dismiss');
+
+    // Verificar que el reporte existe
+    const reportRes = await query(
+      `SELECT id, reported_by FROM impassable_reports WHERE way_id = $1 LIMIT 1`,
+      [way_id]
+    );
+    if (reportRes.rowCount === 0) throw new AppError(404, 'Reporte no encontrado');
+
+    // El reporter no puede votar su propio reporte
+    if (reportRes.rows[0].reported_by === req.user.userId)
+      throw new AppError(403, 'No puedes votar tu propio reporte');
+
+    // Upsert voto
+    await query(
+      `INSERT INTO impassable_votes (way_id, driver_id, vote)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (way_id, driver_id)
+       DO UPDATE SET vote = $3, voted_at = NOW()`,
+      [way_id, req.user.userId, vote]
+    );
+
+    // Contar votos
+    const counts = await query(
+      `SELECT
+         COUNT(*) FILTER (WHERE vote='confirm') AS confirms,
+         COUNT(*) FILTER (WHERE vote='dismiss') AS dismisses
+       FROM impassable_votes WHERE way_id = $1`,
+      [way_id]
+    );
+    const confirms  = Number(counts.rows[0]?.confirms  ?? 0);
+    const dismisses = Number(counts.rows[0]?.dismisses ?? 0);
+
+    // 3+ dismiss → eliminar reporte
+    if (dismisses >= 3) {
+      await query(`DELETE FROM impassable_reports WHERE way_id = $1`, [way_id]);
+      try { sseHub.sendToRole('driver', 'impassable_dismissed', { way_id }); } catch (_) {}
+      return res.json({ ok: true, action: 'dismissed', confirms, dismisses });
+    }
+
+    // 3+ confirm → marcar como confirmado (se usa en rutas)
+    if (confirms >= 3) {
+      await query(
+        `UPDATE impassable_reports SET confirmed = true WHERE way_id = $1`,
+        [way_id]
+      );
+      try { sseHub.sendToRole('driver', 'impassable_confirmed', { way_id }); } catch (_) {}
+      return res.json({ ok: true, action: 'confirmed', confirms, dismisses });
+    }
+
+    return res.json({ ok: true, action: 'voted', confirms, dismisses });
   } catch (error) { return next(error); }
 });
 
@@ -154,21 +243,15 @@ router.patch('/impassable/:way_id', authenticate, authorize(['driver']), async (
 
     const setParts = [];
     const params   = [];
-    if (estimated_duration) {
-      params.push(estimated_duration);
-      setParts.push(`estimated_duration = $${params.length}`);
-    }
-    if (description !== undefined) {
-      params.push(description || null);
-      setParts.push(`description = $${params.length}`);
-    }
+    if (estimated_duration) { params.push(estimated_duration); setParts.push(`estimated_duration = $${params.length}`); }
+    if (description !== undefined) { params.push(description || null); setParts.push(`description = $${params.length}`); }
     if (!setParts.length) throw new AppError(400, 'Nada que actualizar');
 
     params.push(way_id, req.user.userId);
     const result = await query(
       `UPDATE impassable_reports
        SET ${setParts.join(', ')}
-       WHERE way_id     = $${params.length - 1}
+       WHERE way_id      = $${params.length - 1}
          AND reported_by = $${params.length}
          AND confirmed   = false
        RETURNING *`,
@@ -185,13 +268,8 @@ router.patch('/impassable/:way_id', authenticate, authorize(['driver']), async (
 router.get('/impassable/mine', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const result = await query(
-      `SELECT ir.*,
-              COUNT(ic.id)::int AS confirmation_count,
-              CASE WHEN ir.confirmed THEN 'confirmed' ELSE 'pending' END AS status
-       FROM impassable_reports ir
-       LEFT JOIN impassable_confirmations ic ON ic.way_id = ir.way_id
+      `${IMPASSABLE_SELECT}
        WHERE ir.reported_by = $1
-       GROUP BY ir.id
        ORDER BY ir.created_at DESC`,
       [req.user.userId]
     );
@@ -202,76 +280,13 @@ router.get('/impassable/mine', authenticate, authorize(['driver']), async (req, 
   }
 });
 
-// ── POST /impassable/:way_id/confirm ──────────────────────────────────────────
-router.post('/impassable/:way_id/confirm', authenticate, authorize(['driver']), async (req, res, next) => {
-  try {
-    const { way_id } = req.params;
-    const { estimated_duration } = req.body || {};
-
-    if (!VALID_DURATIONS.includes(estimated_duration))
-      throw new AppError(400, `estimated_duration debe ser uno de: ${VALID_DURATIONS.join(', ')}`);
-
-    const reportRes = await query(
-      `SELECT id FROM impassable_reports WHERE way_id = $1 LIMIT 1`, [way_id]
-    );
-    if (reportRes.rowCount === 0) throw new AppError(404, 'No existe reporte para este way_id');
-
-    const already = await query(
-      `SELECT id FROM impassable_confirmations WHERE way_id = $1 AND confirmed_by = $2`,
-      [way_id, req.user.userId]
-    );
-    if (already.rowCount > 0) throw new AppError(409, 'Ya confirmaste este reporte');
-
-    await query(
-      `INSERT INTO impassable_confirmations (way_id, confirmed_by, estimated_duration) VALUES ($1, $2, $3)`,
-      [way_id, req.user.userId, estimated_duration]
-    );
-
-    const confirmationsRes = await query(
-      `SELECT estimated_duration FROM impassable_confirmations WHERE way_id = $1`, [way_id]
-    );
-    const count     = confirmationsRes.rowCount;
-    const threshold = estimated_duration === 'permanent' ? 5 : 3;
-
-    if (count >= threshold) {
-      const freq = {};
-      for (const row of confirmationsRes.rows)
-        freq[row.estimated_duration] = (freq[row.estimated_duration] || 0) + 1;
-      const orig = await query(
-        `SELECT estimated_duration FROM impassable_reports WHERE way_id = $1 LIMIT 1`, [way_id]
-      );
-      if (orig.rowCount > 0) {
-        const od = orig.rows[0].estimated_duration;
-        freq[od] = (freq[od] || 0) + 1;
-      }
-      const consensus = Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];
-      await query(
-        `UPDATE impassable_reports SET confirmed = true, consensus_duration = $1 WHERE way_id = $2`,
-        [consensus, way_id]
-      );
-      try { sseHub.sendToRole('driver', 'impassable_confirmed', { way_id, consensus_duration: consensus }); } catch (_) {}
-    }
-
-    return res.json({ ok: true, confirmation_count: count });
-  } catch (error) { return next(error); }
-});
-
 // ── GET /impassable ───────────────────────────────────────────────────────────
 router.get('/impassable', async (req, res, next) => {
   try {
     const filter = req.query.confirmed;
-    const where  = filter === 'true' ? 'WHERE ir.confirmed = true'
+    const where  = filter === 'true'  ? 'WHERE ir.confirmed = true'
                  : filter === 'false' ? 'WHERE ir.confirmed = false' : '';
-    const result = await query(
-      `SELECT ir.*,
-              COUNT(ic.id)::int AS confirmation_count,
-              CASE WHEN ir.confirmed THEN 'confirmed' ELSE 'pending' END AS status
-       FROM impassable_reports ir
-       LEFT JOIN impassable_confirmations ic ON ic.way_id = ir.way_id
-       ${where}
-       GROUP BY ir.id
-       ORDER BY ir.created_at DESC`
-    );
+    const result = await query(`${IMPASSABLE_SELECT} ${where} ORDER BY ir.created_at DESC`);
     return res.json({ reports: result.rows });
   } catch (error) {
     if (error?.code === '42P01') return res.json({ reports: [] });
@@ -288,13 +303,8 @@ router.get('/impassable/near', async (req, res, next) => {
     if (!Number.isFinite(lat) || !Number.isFinite(lng))
       throw new AppError(400, 'lat y lng son requeridos');
     const result = await query(
-      `SELECT ir.*,
-              COUNT(ic.id)::int AS confirmation_count,
-              CASE WHEN ir.confirmed THEN 'confirmed' ELSE 'pending' END AS status
-       FROM impassable_reports ir
-       LEFT JOIN impassable_confirmations ic ON ic.way_id = ir.way_id
+      `${IMPASSABLE_SELECT}
        WHERE SQRT(POW((ir.lat - $1) * 111320, 2) + POW((ir.lng - $2) * 111320 * COS(RADIANS($1)), 2)) <= $3
-       GROUP BY ir.id
        ORDER BY ir.created_at DESC`,
       [lat, lng, radius_m]
     );

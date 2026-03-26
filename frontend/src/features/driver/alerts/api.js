@@ -40,12 +40,12 @@ export async function deleteZone(id, token) {
   return apiFetch(`/nav/zones/${id}`, { method: 'DELETE' }, token);
 }
 
-export async function confirmImpassable(way_id, estimated_duration, token) {
-  return apiFetch(`/nav/road-prefs/impassable/${way_id}/confirm`,
-    { method: 'POST', body: JSON.stringify({ estimated_duration }) }, token);
+// Votar un reporte impassable: confirm (×3 → activo en rutas) o dismiss (×3 → eliminar)
+export async function voteImpassable(way_id, vote, token) {
+  return apiFetch(`/nav/road-prefs/impassable/${way_id}/vote`,
+    { method: 'POST', body: JSON.stringify({ vote }) }, token);
 }
 
-// Editar reporte propio (solo si no está confirmado)
 export async function updateImpassable(way_id, { estimated_duration, description }, token) {
   return apiFetch(`/nav/road-prefs/impassable/${way_id}`,
     { method: 'PATCH', body: JSON.stringify({ estimated_duration, description }) }, token);
