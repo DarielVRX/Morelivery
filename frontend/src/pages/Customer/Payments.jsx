@@ -111,7 +111,7 @@ export default function CustomerPayments() {
       setFromGps(!!d.delivery_from_gps);
       setTipCents(d.tip_cents || 0);
     }
-  }, [auth.token]); // rehidratar cuando el token esté disponible
+  }, [auth.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     apiFetch('/payments/methods', {}, auth.token)
@@ -159,14 +159,36 @@ export default function CustomerPayments() {
     }
     setSending(true);
     try {
+      // Resolver coords: estado React → pendingOrder → sessionDelivery (en ese orden)
+      let finalLat = deliveryLat;
+      let finalLng = deliveryLng;
+      let finalAddr = deliveryAddress;
+
+      if (!finalLat || !finalLng) {
+        const po = readPendingOrder();
+        if (po?.delivery_lat && po?.delivery_lng) {
+          finalLat  = po.delivery_lat;
+          finalLng  = po.delivery_lng;
+          finalAddr = finalAddr || po.delivery_address || '';
+        }
+      }
+      if (!finalLat || !finalLng) {
+        const sp = readSessionDelivery(auth.token);
+        if (sp?.lat && sp?.lng) {
+          finalLat  = sp.lat;
+          finalLng  = sp.lng;
+          finalAddr = finalAddr || sp.label || '';
+        }
+      }
+
       const body = {
         restaurantId:   draft.restaurantId,
         items:          draft.items || [],
         payment_method: method,
         tip_cents:      tipCents,
-        ...(deliveryAddress?.trim() ? { delivery_address: deliveryAddress } : {}),
-        ...(deliveryLat  != null    ? { delivery_lat:     deliveryLat }     : {}),
-        ...(deliveryLng  != null    ? { delivery_lng:     deliveryLng }     : {}),
+        ...(finalAddr?.trim() ? { delivery_address: finalAddr } : {}),
+        ...(finalLat  != null ? { delivery_lat:     finalLat }  : {}),
+        ...(finalLng  != null ? { delivery_lng:     finalLng }  : {}),
         ...(method === 'card' ? { card_name: name, card_last4: cardNum.replace(/\s/g,'').slice(-4) } : {}),
       };
       await apiFetch('/orders', { method: 'POST', body: JSON.stringify(body) }, auth.token);

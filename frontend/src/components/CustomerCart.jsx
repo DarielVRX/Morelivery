@@ -19,6 +19,7 @@ function EmptyState() {
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       justifyContent: 'center', height: '100%', padding: '2rem 1.5rem',
       textAlign: 'center', color: 'var(--text-tertiary)',
+      background: 'var(--bg-base)',
     }}>
       <span style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🛒</span>
       <p style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
@@ -73,7 +74,8 @@ export default function CustomerCart() {
       {/* Header */}
       <div style={{
         padding: '0.75rem 1rem 0.6rem',
-        borderBottom: '1px solid var(--border-light)',
+        borderBottom: '1px solid var(--border)',
+        background: 'var(--bg-card)',
         flexShrink: 0,
       }}>
         <p style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-tertiary)',
@@ -83,13 +85,13 @@ export default function CustomerCart() {
       </div>
 
       {/* Lista de items — scrollable */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem 0.75rem' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem 0.75rem', background: 'var(--bg-base)' }}>
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {cart.items.map(item => (
             <li key={item.menuItemId} style={{
               display: 'flex', alignItems: 'center', gap: '0.5rem',
               padding: '0.5rem 0',
-              borderBottom: '1px solid var(--border-light)',
+              borderBottom: '1px solid var(--border)',
             }}>
               {/* Nombre + precio unitario */}
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -109,7 +111,7 @@ export default function CustomerCart() {
                   onClick={() => adjustItem(item.menuItemId, -1)}
                   style={{
                     width: 26, height: 26, borderRadius: '50%', border: '1.5px solid var(--border)',
-                    background: 'var(--bg-card)', cursor: 'pointer', fontSize: '1rem',
+                    background: 'var(--bg-raised)', cursor: 'pointer', fontSize: '1rem',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color: 'var(--text-primary)', minHeight: 'unset', padding: 0,
                     fontWeight: 700, lineHeight: 1,
@@ -126,7 +128,7 @@ export default function CustomerCart() {
                     width: 26, height: 26, borderRadius: '50%', border: '1.5px solid var(--brand)',
                     background: 'var(--brand)', cursor: 'pointer', fontSize: '1rem',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: '#fff', minHeight: 'unset', padding: 0,
+                    color: 'var(--brand-contrast, #fff)', minHeight: 'unset', padding: 0,
                     fontWeight: 700, lineHeight: 1,
                   }}>
                   +
@@ -149,6 +151,7 @@ export default function CustomerCart() {
         borderTop: '1px solid var(--border)',
         background: 'var(--bg-card)',
         flexShrink: 0,
+        color: 'var(--text-primary)',
       }}>
         {/* Desglose */}
         <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.6rem' }}>
@@ -190,7 +193,7 @@ export default function CustomerCart() {
         <button
           onClick={clearCart}
           style={{
-            width: '100%', marginTop: '0.4rem', background: 'none', border: 'none',
+            width: '100%', marginTop: '0.4rem', background: 'transparent', border: 'none',
             cursor: 'pointer', fontSize: '0.75rem', color: 'var(--text-tertiary)',
             padding: '0.2rem', minHeight: 'unset',
           }}>
