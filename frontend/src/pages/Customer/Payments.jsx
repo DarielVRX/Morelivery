@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { readPendingOrder, clearPendingOrder, savePendingOrder } from '../../utils/pendingOrder';
+import { useCart } from '../../hooks/useCart';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
@@ -31,6 +32,7 @@ function formatExpiry(v) { return v.replace(/\D/g,'').slice(0,4).replace(/(\d{2}
 export default function CustomerPayments() {
   const { auth }  = useAuth();
   const navigate  = useNavigate();
+  const { cart, clearCart } = useCart();
 
   const [draft,    setDraft]    = useState(null);
   const [sending,  setSending]  = useState(false);
@@ -68,9 +70,21 @@ export default function CustomerPayments() {
     );
   }, []);
 
-  // Leer draft de pedido pendiente
+  // Leer draft de pedido pendiente; si no hay, intentar desde el carrito
   useEffect(() => {
-    const d = readPendingOrder();
+    let d = readPendingOrder();
+    if (!d && cart && cart.items.length > 0) {
+      // Construir draft mínimo desde el carrito para que Payments funcione
+      d = {
+        restaurantId:   cart.restaurantId,
+        items:          cart.items.map(({ menuItemId, quantity }) => ({ menuItemId, quantity })),
+        items_detail:   cart.items.map(({ menuItemId, quantity, name, price_cents }) => ({
+          menuItemId, quantity, name, price_cents,
+        })),
+        subtotal_cents: cart.total_cents,
+        tip_cents:      0,
+      };
+    }
     if (d) {
       setDraft(d);
       setDeliveryAddress(d.delivery_address || '');
@@ -79,7 +93,7 @@ export default function CustomerPayments() {
       setFromGps(!!d.delivery_from_gps);
       setTipCents(d.tip_cents || 0);
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     apiFetch('/payments/methods', {}, auth.token)
@@ -138,6 +152,7 @@ export default function CustomerPayments() {
       };
       await apiFetch('/orders', { method: 'POST', body: JSON.stringify(body) }, auth.token);
       clearPendingOrder();
+      clearCart();
       flash('¡Pedido confirmado! Puedes seguirlo en Mis Pedidos.');
       setTimeout(() => navigate('/customer'), 1800);
     } catch (e) {
@@ -369,3 +384,4 @@ export default function CustomerPayments() {
   </div>
   );
 }
+

@@ -10,6 +10,7 @@ import SplitLayout from './components/SplitLayout';
 import AlertsPanel from './components/AlertsPanel';
 import AuthPage from './pages/AuthPage';
 import CustomerOrders   from './pages/Customer/Orders';
+import CustomerCart     from './components/CustomerCart';
 import DriverOrders     from './pages/Driver/Orders';
 import RestaurantOrders from './pages/Restaurant/Orders';
 import { usePermissions } from './hooks/usePermissions';
@@ -253,7 +254,7 @@ function CustomerLayout() {
     <ProtectedRole role="customer">
       <SplitLayout
         onRefresh={() => window.location.reload()}
-        ordersContent={<CustomerOrders />}
+        ordersContent={<CustomerCart />}
         homeContent={
           <Suspense fallback={<Spinner />}>
             <Routes>

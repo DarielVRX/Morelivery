@@ -94,7 +94,8 @@ router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next
       `SELECT r.id, r.name, r.category, r.is_open,
               COALESCE(u.address, r.address) AS address,
               r.manual_open_override, r.profile_photo,
-              COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
+              COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng,
+              r.max_cash_cents
        FROM restaurants r
        LEFT JOIN users u ON u.id = r.owner_user_id
        WHERE r.owner_user_id=$1 LIMIT 1`,
@@ -103,7 +104,27 @@ router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next
     if (result.rowCount === 0) return res.json({ restaurant: null });
     const rest = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
     return res.json({ restaurant: rest });
-  } catch (error) { return next(error); }
+  } catch (error) {
+    // Si max_cash_cents no existe aún, reintentar sin esa columna
+    if (isMissingColumn(error)) {
+      try {
+        const result = await query(
+          `SELECT r.id, r.name, r.category, r.is_open,
+                  COALESCE(u.address, r.address) AS address,
+                  r.manual_open_override, r.profile_photo,
+                  COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
+           FROM restaurants r
+           LEFT JOIN users u ON u.id = r.owner_user_id
+           WHERE r.owner_user_id=$1 LIMIT 1`,
+          [req.user.userId]
+        );
+        if (result.rowCount === 0) return res.json({ restaurant: null });
+        const rest = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
+        return res.json({ restaurant: rest });
+      } catch (e2) { return next(e2); }
+    }
+    return next(error);
+  }
 });
 
 /* ── GET /my/menu ── */
@@ -389,4 +410,37 @@ router.patch('/my/prep-estimate', authenticate, authorize(['restaurant']), async
   } catch (error) { return next(error); }
 });
 
+/* ── PATCH /my/cash-limit — configurar límite de pago en efectivo ── */
+router.patch('/my/cash-limit', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    const raw = req.body?.max_cash_cents;
+    // Acepta null o 0 para quitar el límite; de lo contrario entero positivo en centavos
+    let value;
+    if (raw === null || raw === 0 || raw === '0') {
+      value = 0;
+    } else {
+      value = Math.round(Number(raw));
+      if (!Number.isFinite(value) || value < 0) {
+        return next(new AppError(400, 'El límite debe ser un monto positivo en centavos o 0 para desactivar'));
+      }
+    }
+
+    try {
+      await query(
+        'UPDATE restaurants SET max_cash_cents = $1 WHERE id = $2',
+        [value, restaurantId]
+      );
+    } catch (e) {
+      if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_maxcashcents_and_disputes.sql primero'));
+      throw e;
+    }
+
+    return res.json({ ok: true, max_cash_cents: value });
+  } catch (error) { return next(error); }
+});
+
 export default router;
+

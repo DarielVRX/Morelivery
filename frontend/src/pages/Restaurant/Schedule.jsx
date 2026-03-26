@@ -93,15 +93,24 @@ export default function RestaurantSchedule() {
   const [prepSaving, setPrepSaving] = useState(false);
   const [prepSaved,  setPrepSaved]  = useState(false);
 
+  // Límite de efectivo
+  const [cashLimit,       setCashLimit]       = useState('');
+  const [cashLimitSaving, setCashLimitSaving] = useState(false);
+  const [cashLimitMsg,    setCashLimitMsg]    = useState('');
+
   useEffect(() => {
     if (!auth.token) return;
     apiFetch('/restaurants/my', {}, auth.token)
       .then(d => {
         if (d.restaurant) {
           setIsOpen(d.restaurant.is_open);
-          // Cargar el estimado guardado si existe
           if (d.restaurant.prep_time_estimate_s) {
             setPrepMins(Math.round(d.restaurant.prep_time_estimate_s / 60));
+          }
+          // Cargar límite de efectivo si está configurado
+          const maxCash = d.restaurant.max_cash_cents;
+          if (maxCash && maxCash > 0) {
+            setCashLimit(String(maxCash / 100));
           }
         }
       })
@@ -118,6 +127,24 @@ export default function RestaurantSchedule() {
       setTimeout(() => setPrepSaved(false), 2500);
     } catch (_) {}
     finally { setPrepSaving(false); }
+  }
+
+  async function saveCashLimit() {
+    setCashLimitSaving(true);
+    setCashLimitMsg('');
+    try {
+      const pesos = parseFloat(cashLimit);
+      const cents = (!cashLimit.trim() || isNaN(pesos) || pesos <= 0) ? 0 : Math.round(pesos * 100);
+      await apiFetch('/restaurants/my/cash-limit',
+        { method: 'PATCH', body: JSON.stringify({ max_cash_cents: cents }) },
+        auth.token);
+      setCashLimitMsg(cents === 0 ? 'Límite eliminado.' : `Guardado: $${(cents / 100).toFixed(2)}`);
+      setTimeout(() => setCashLimitMsg(''), 3000);
+    } catch (e) {
+      setCashLimitMsg(e.message || 'Error al guardar');
+    } finally {
+      setCashLimitSaving(false);
+    }
   }
 
   return (
@@ -159,6 +186,62 @@ export default function RestaurantSchedule() {
         isOpen={isOpen}
         onIsOpenChange={setIsOpen}
       />
+
+      {/* ── Límite de pago en efectivo ──────────────────────────────── */}
+      <div style={{
+        marginTop: '1.25rem',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+        borderRadius: 10,
+        padding: '0.875rem 1rem',
+      }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', marginBottom:'0.5rem' }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display:'block', flexShrink:0 }}>
+            <rect x="2" y="6" width="20" height="12" rx="2"/>
+            <circle cx="12" cy="12" r="2"/>
+            <path d="M6 12h.01M18 12h.01"/>
+          </svg>
+          <span style={{ fontWeight:700, fontSize:'0.88rem', color:'var(--text-primary)' }}>
+            Límite de pago en efectivo
+          </span>
+        </div>
+        <p style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginBottom:'0.65rem', lineHeight:1.4 }}>
+          Pedidos en efectivo que superen este monto serán rechazados. Deja vacío o en 0 para no tener límite.
+        </p>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
+          <div style={{ position:'relative', flex:1 }}>
+            <span style={{
+              position:'absolute', left:'0.65rem', top:'50%', transform:'translateY(-50%)',
+              fontSize:'0.9rem', color:'var(--text-secondary)', pointerEvents:'none', userSelect:'none',
+            }}>$</span>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={cashLimit}
+              onChange={e => setCashLimit(e.target.value)}
+              placeholder="0 = sin límite"
+              style={{ width:'100%', paddingLeft:'1.5rem', boxSizing:'border-box' }}
+            />
+          </div>
+          <button
+            className="btn-primary btn-sm"
+            style={{ flexShrink:0, opacity: cashLimitSaving ? 0.65 : 1 }}
+            disabled={cashLimitSaving}
+            onClick={saveCashLimit}>
+            {cashLimitSaving ? 'Guardando…' : 'Guardar'}
+          </button>
+        </div>
+        {cashLimitMsg && (
+          <p style={{
+            fontSize:'0.78rem', marginTop:'0.4rem',
+            color: cashLimitMsg.startsWith('Error') ? 'var(--error)' : 'var(--success)',
+          }}>
+            {cashLimitMsg.startsWith('Error') ? '' : '✓ '}{cashLimitMsg}
+          </p>
+        )}
+      </div>
+
     </div>
   );
 }
