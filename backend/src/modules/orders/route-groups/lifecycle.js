@@ -157,27 +157,31 @@ export function registerLifecycleRoutes(router, deps) {
         } catch (_) {}
       }
 
-      // Bloqueo permanente por cancelación tardía (>5min desde creación)
+      // Bloqueo de pedidos por cancelación tardía (>5min desde creación)
+      // Solo bloquea la creación de nuevos pedidos, NO el acceso a la app
       if (isLateCancel) {
         try {
           await query(
-            `UPDATE users SET status='suspended' WHERE id=$1 AND status='active'`,
-            [req.user.userId]
+            `UPDATE users SET orders_blocked = true, orders_blocked_reason = $2 WHERE id = $1`,
+            [req.user.userId, 'late_cancellation']
           );
           console.log(`🚫 [bloqueo.cancelacion_tardia] userId=${req.user.userId.slice(0,8)} orderId=${req.params.id.slice(0,8)} elapsed=${Math.round(elapsedMs/1000)}s`);
-          // Notificar al cliente via SSE para que haga logout automático
-          sseHub.sendToUser(req.user.userId, 'account_suspended', {
+          // Notificar al cliente via SSE para mostrar aviso inmediato
+          sseHub.sendToUser(req.user.userId, 'orders_blocked', {
             reason: 'late_cancellation',
-            message: 'Tu cuenta ha sido suspendida por cancelar un pedido tarde. Contacta soporte para reactivarla.',
+            message: 'Tu acceso a nuevos pedidos ha sido restringido. Por favor contacta a soporte si crees que esto fue un error.',
           });
-        } catch (suspendErr) {
-          console.error('[bloqueo.cancelacion_tardia] error al suspender:', suspendErr.message);
+        } catch (blockErr) {
+          // Si la columna no existe aún, ignorar silenciosamente
+          if (blockErr?.code !== '42703') {
+            console.error('[bloqueo.cancelacion_tardia] error al bloquear:', blockErr.message);
+          }
         }
       }
 
       return res.json({
         order: result.rows[0],
-        ...(isLateCancel ? { suspended: true, suspension_reason: 'late_cancellation' } : {}),
+        ...(isLateCancel ? { orders_blocked: true, block_reason: 'late_cancellation' } : {}),
       });
     } catch (error) { return next(error); }
   });

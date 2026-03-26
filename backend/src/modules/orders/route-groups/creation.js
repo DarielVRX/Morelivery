@@ -30,6 +30,22 @@ export function registerCreationRoutes(router, deps) {
     const { restaurantId, items, payment_method, tip_cents, delivery_lat, delivery_lng, delivery_address } = req.validatedBody;
     console.log(`📦 [pedido.nuevo] cliente=${req.user?.userId?.slice(0,8)} pago=${payment_method} propina=${tip_cents} productos=${items?.length}`);
     try {
+      // Verificar si el cliente está bloqueado para hacer pedidos
+      try {
+        const blockCheck = await query(
+          'SELECT orders_blocked, orders_blocked_reason FROM users WHERE id = $1',
+          [req.user.userId]
+        );
+        if (blockCheck.rows[0]?.orders_blocked) {
+          return next(new AppError(403,
+            'Tu acceso a nuevos pedidos está restringido. Disculpa los inconvenientes — ' +
+            'si crees que esto es un error, por favor contacta a soporte para resolverlo.'
+          ));
+        }
+      } catch (e) {
+        if (e?.code !== '42703') throw e; // ignorar si columna no existe aún
+      }
+
       let deliveryAddress = 'address-pending';
       try {
         const c = await query('SELECT address FROM users WHERE id=$1', [req.user.userId]);

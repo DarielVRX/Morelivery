@@ -1,5 +1,5 @@
 // frontend/src/App.jsx
-import { lazy, Suspense, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useRef, useState } from 'react';
 import { Link, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
@@ -259,19 +259,24 @@ function CustomerLayout() {
     onCartUpdate:    null,  // CustomerCart (si necesita refrescar)
   });
 
+  // Setters estables — no se recrean en cada render, evitan re-registros en loop
+  const setHomeCallback    = useCallback((fn) => { registerRef.current.onSuggUpdate    = fn; }, []);
+  const setPaymentCallback = useCallback((fn) => { registerRef.current.onPaymentUpdate = fn; }, []);
+  const setCartCallback    = useCallback((fn) => { registerRef.current.onCartUpdate    = fn; }, []);
+
   return (
     <ProtectedRole role="customer">
       <SplitLayout
         onRefresh={() => window.location.reload()}
         alertsLabel="🛒 Carrito"
         ordersContent={<CustomerOrders registerRef={registerRef} />}
-        alertsContent={<CustomerCart onOrderUpdate={(fn) => { registerRef.current.onCartUpdate = fn; }} />}
+        alertsContent={<CustomerCart onOrderUpdate={setCartCallback} />}
         homeContent={
           <Suspense fallback={<Spinner />}>
             <Routes>
-              <Route path="pagos" element={<CustomerPayments onOrderUpdate={(fn) => { registerRef.current.onPaymentUpdate = fn; }} />} />
+              <Route path="pagos" element={<CustomerPayments onOrderUpdate={setPaymentCallback} />} />
               <Route path="r/:id" element={<RestaurantPage />} />
-              <Route index        element={<CustomerHome onOrderUpdate={(fn) => { registerRef.current.onSuggUpdate = fn; }} />} />
+              <Route index        element={<CustomerHome onOrderUpdate={setHomeCallback} />} />
             </Routes>
           </Suspense>
         }

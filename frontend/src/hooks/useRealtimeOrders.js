@@ -415,13 +415,12 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
       } catch (_) {}
     });
 
-    // Cuenta suspendida — forzar logout via evento global
-    es.addEventListener('account_suspended', (e) => {
+    // Pedidos bloqueados — notificar via evento global (sin logout)
+    es.addEventListener('orders_blocked', (e) => {
       try {
-        console.warn('[SSE] account_suspended recibido — forzando logout');
-        window.dispatchEvent(new CustomEvent('sse_account_suspended', {
-          detail: JSON.parse(e.data),
-        }));
+        const data = JSON.parse(e.data);
+        console.warn('[SSE] orders_blocked recibido:', data.reason);
+        window.dispatchEvent(new CustomEvent('sse_orders_blocked', { detail: data }));
       } catch (_) {}
     });
 
