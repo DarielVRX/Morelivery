@@ -9,7 +9,7 @@ import {
 import {
   registerUser, loginUser, updateProfileAddress, changePassword,
   deleteAccount, updateLoginUsername,
-  googleLogin, forgotPassword, resetPassword, verifyEmail,
+  googleLogin, forgotPassword, resetPassword, verifyEmail, resendVerificationEmail,
 } from './service.js';
 import { AppError } from '../../utils/errors.js';
 import { authRateLimit } from '../../middlewares/rateLimit.js';
@@ -78,6 +78,16 @@ router.get('/verify-email', async (req, res, next) => {
     await verifyEmail(String(req.query.token || ''));
     const frontUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     return res.redirect(`${frontUrl}/login?verified=1`);
+  } catch (error) { return next(error); }
+});
+
+// POST /auth/resend-verification
+router.post('/resend-verification', async (req, res, next) => {
+  try {
+    const { email } = req.body || {};
+    if (!email) return next(new AppError(400, 'El correo es requerido'));
+    await resendVerificationEmail(email.trim().toLowerCase());
+    return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
 
