@@ -12,7 +12,7 @@ const STATUS_COLOR = {
 };
 
 
-export default function CustomerOrders() {
+export default function CustomerOrders({ registerRef } = {}) {
   const { auth } = useAuth();
   const [activeOrders,  setActiveOrders]  = useState([]);
   const [pastOrders,    setPastOrders]    = useState([]);
@@ -142,13 +142,15 @@ export default function CustomerOrders() {
         auth.token,
         (data) => {
           loadDataRef.current?.();
+          // Notificar a CustomerHome para recargar sugerencias
+          registerRef?.current?.onSuggUpdate?.();
           if (data?.action === 'suggestion_received') loadDataRef.current?.();
         },
         ({ orderId, lat, lng }) => setDriverPos(p => ({ ...p, [orderId]: { lat, lng } })),
-                        undefined,
-                        (data) => {
-                          if (data.orderId === chatOpen) setChatTick(t => t + 1);
-                        },
+        undefined,
+        (data) => {
+          if (data.orderId === chatOpen) setChatTick(t => t + 1);
+        },
       );
 
       const pendingSuggestions = useMemo(
@@ -607,3 +609,4 @@ export default function CustomerOrders() {
         </div>
       );
 }
+

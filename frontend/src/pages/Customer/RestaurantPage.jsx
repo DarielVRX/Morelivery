@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { readPendingOrder, savePendingOrder, schedulePendingOrderExpiry, cancelPendingOrderExpiry } from '../../utils/pendingOrder';
+import { readSessionDelivery, saveSessionDelivery } from '../../utils/sessionDelivery';
 import { useCart } from '../../hooks/useCart';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
@@ -77,6 +78,12 @@ export default function RestaurantPage() {
       setSearchPos({ lat: draft.delivery_lat, lng: draft.delivery_lng, label: draft.delivery_address || '' });
       return; // ya hay ubicación, no mostrar toast
     }
+    // Fallback: posición guardada en sesión desde cualquier otra página del customer
+    const sessionPos = readSessionDelivery();
+    if (sessionPos) {
+      setSearchPos(sessionPos);
+      return; // hay posición de sesión, evaluar discrepancia GPS en el siguiente efecto
+    }
     // Sin draft — mostrar toast apropiado después de cargar GPS
     const timer = setTimeout(() => {
       const homeLatNum = Number(auth.user?.home_lat);
@@ -93,6 +100,15 @@ export default function RestaurantPage() {
     }, 800);
     return () => clearTimeout(timer);
   }, [gpsPos]);
+
+  // Alerta cuando GPS discrepa de la posición guardada en sesión
+  useEffect(() => {
+    if (!gpsPos || !searchPos) return;
+    const dist = haversineKm(gpsPos.lat, gpsPos.lng, searchPos.lat, searchPos.lng);
+    if (dist > 0.5) {
+      setToast({ msg: `Tu GPS está a ${dist < 1 ? Math.round(dist * 1000) + 'm' : dist.toFixed(1) + 'km'} de la dirección guardada. ¿Es correcta?`, type: 'warn' });
+    }
+  }, [gpsPos]); // solo cuando llega el GPS por primera vez
 
   // TTL del draft al salir
   useEffect(() => {
@@ -314,7 +330,10 @@ export default function RestaurantPage() {
             onSelectPos={pos => {
                 setSearchPos(pos);
                 setToast(null);
-                if (pos?.lat && pos?.lng) savePendingOrder({ delivery_lat: pos.lat, delivery_lng: pos.lng, delivery_address: pos.label });
+                if (pos?.lat && pos?.lng) {
+                  savePendingOrder({ delivery_lat: pos.lat, delivery_lng: pos.lng, delivery_address: pos.label });
+                  saveSessionDelivery(pos);
+                }
               }}
             />
           </div>

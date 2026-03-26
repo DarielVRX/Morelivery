@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { readPendingOrder, clearPendingOrder, savePendingOrder } from '../../utils/pendingOrder';
 import { useCart } from '../../hooks/useCart';
+import { readSessionDelivery, saveSessionDelivery } from '../../utils/sessionDelivery';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
@@ -87,9 +88,26 @@ export default function CustomerPayments() {
     }
     if (d) {
       setDraft(d);
-      setDeliveryAddress(d.delivery_address || '');
-      setDeliveryLat(d.delivery_lat ?? null);
-      setDeliveryLng(d.delivery_lng ?? null);
+      // Si el draft no tiene dirección, intentar desde sesión
+      const addr = d.delivery_address || '';
+      const lat  = d.delivery_lat ?? null;
+      const lng  = d.delivery_lng ?? null;
+      if (!lat || !lng) {
+        const sessionPos = readSessionDelivery();
+        if (sessionPos) {
+          setDeliveryAddress(sessionPos.label || '');
+          setDeliveryLat(sessionPos.lat);
+          setDeliveryLng(sessionPos.lng);
+        } else {
+          setDeliveryAddress(addr);
+          setDeliveryLat(lat);
+          setDeliveryLng(lng);
+        }
+      } else {
+        setDeliveryAddress(addr);
+        setDeliveryLat(lat);
+        setDeliveryLng(lng);
+      }
       setFromGps(!!d.delivery_from_gps);
       setTipCents(d.tip_cents || 0);
     }
@@ -123,6 +141,7 @@ export default function CustomerPayments() {
     setDeliveryLat(lat);
     setDeliveryLng(lng);
     setFromGps(false);
+    if (lat && lng) saveSessionDelivery({ lat, lng, label });
     savePendingOrder({
       ...draft,
       delivery_address:  label,
@@ -141,13 +160,13 @@ export default function CustomerPayments() {
     setSending(true);
     try {
       const body = {
-        restaurantId:     draft.restaurantId,
-        items:            draft.items || [],
-        payment_method:   method,
-        tip_cents:        tipCents,
-        delivery_address: deliveryAddress,
-        delivery_lat:     deliveryLat,
-        delivery_lng:     deliveryLng,
+        restaurantId:   draft.restaurantId,
+        items:          draft.items || [],
+        payment_method: method,
+        tip_cents:      tipCents,
+        ...(deliveryAddress?.trim() ? { delivery_address: deliveryAddress } : {}),
+        ...(deliveryLat  != null    ? { delivery_lat:     deliveryLat }     : {}),
+        ...(deliveryLng  != null    ? { delivery_lng:     deliveryLng }     : {}),
         ...(method === 'card' ? { card_name: name, card_last4: cardNum.replace(/\s/g,'').slice(-4) } : {}),
       };
       await apiFetch('/orders', { method: 'POST', body: JSON.stringify(body) }, auth.token);
