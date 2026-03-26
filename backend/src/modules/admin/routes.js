@@ -508,12 +508,11 @@ router.post('/schedule-voice-reminders', authenticate, authorize(['admin']), asy
     setTimeout(async () => {
       const payload30s = JSON.stringify({
         title: '🔔 Recordatorio de prueba (30s)',
-                                        body: 'Han pasado 30 segundos. Esto es una prueba de notificación push con voz.',
-                                        voice: 'recordatorio-30s',
-                                        priority: 'high',
-                                        tag: 'test-reminder-30s',
-                                        url: '/admin',
-                                        vibrate: [300, 100, 300],
+        body: 'Han pasado 30 segundos.',
+        priority: 'high',
+        tag: 'test-reminder-30s',
+        url: '/admin',
+        vibrate: [500, 150, 500, 150, 500, 300, 100, 100, 150, 100, 150, 100, 100],
       });
       try {
         await webpush.sendNotification(subscription, payload30s);
@@ -523,25 +522,24 @@ router.post('/schedule-voice-reminders', authenticate, authorize(['admin']), asy
       }
     }, 30000);
 
-    // Programar segunda notificación (3 minutos = 180000 ms)
+    // Programar segunda notificación (5 minutos)
     setTimeout(async () => {
-      const payload3min = JSON.stringify({
-        title: '⏰ Recordatorio de prueba (3 min)',
-                                         body: 'Han pasado 3 minutos. Segunda notificación de prueba con voz.',
-                                         voice: 'recordatorio-3min',
-                                         priority: 'high',
-                                         tag: 'test-reminder-3min',
-                                         url: '/admin',
-                                         vibrate: [300, 100, 300, 100, 300],
-                                         requireInteraction: true,
+      const payload5min = JSON.stringify({
+        title: '⏰ Recordatorio de prueba (5 min)',
+        body: 'Han pasado 5 minutos.',
+        priority: 'high',
+        tag: 'test-reminder-5min',
+        url: '/admin',
+        vibrate: [500, 150, 500, 150, 500, 300, 100, 100, 150, 100, 150, 100, 100],
+        requireInteraction: true,
       });
       try {
-        await webpush.sendNotification(subscription, payload3min);
-        console.log('[admin] Push 3min enviado');
+        await webpush.sendNotification(subscription, payload5min);
+        console.log('[admin] Push 5min enviado');
       } catch (e) {
-        console.error('Error en push 3min:', e);
+        console.error('Error en push 5min:', e);
       }
-    }, 180000);
+    }, 300000);
 
     res.json({ ok: true, message: 'Recordatorios programados' });
   } catch (error) {
@@ -551,3 +549,4 @@ router.post('/schedule-voice-reminders', authenticate, authorize(['admin']), asy
 });
 
 export default router;
+
