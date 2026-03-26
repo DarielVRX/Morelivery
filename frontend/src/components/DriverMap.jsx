@@ -133,12 +133,28 @@ export default function DriverMap({
           if (mode === 'nav') {
             const sinceInteraction = Date.now() - lastInteractionRef.current;
             if (sinceInteraction > 5000) {
-              const h = liveHeadingRef.current;
-              map.easeTo({
-                center: [next.lng, next.lat], bearing: h, pitch: 50, zoom: 17,
-                duration: 250, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
-                         essential: true,
-              });
+              // Pausar auto-centrado si el driver no se está moviendo
+              // Detectar movimiento: comparar con posición previa
+              const prevPos = prevWatchPosRef.current;
+              const R = 6371000;
+              let isMoving = true;
+              if (prevPos) {
+                const dLat = (next.lat - prevPos.lat) * Math.PI / 180;
+                const dLng = (next.lng - prevPos.lng) * Math.PI / 180;
+                const a = Math.sin(dLat/2)**2 + Math.cos(prevPos.lat*Math.PI/180)*Math.cos(next.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+                const distM = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                isMoving = distM > 3; // > 3m entre ticks = en movimiento
+              }
+              if (isMoving) {
+                const h = liveHeadingRef.current;
+                map.easeTo({
+                  center: [next.lng, next.lat], bearing: h, pitch: 50, zoom: 17,
+                  duration: 250, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
+                           essential: true,
+                });
+                // Conservar último heading aunque se pause el centrado
+              }
+              // Si no está en movimiento: NO actualizar bearing ni centrar — mantener última vista
             }
           } else if (mode === 'free') {
             const prevPos = prevWatchPosRef.current;
@@ -151,7 +167,10 @@ export default function DriverMap({
               const currentZoom = map.getZoom();
               if (dist > 200 && currentZoom > 10) {
                 map.easeTo({
-                  center: [next.lng, next.lat], pitch: 0, bearing: 0, zoom: 14,
+                  center: [next.lng, next.lat],
+                  pitch: 0,   // pitch siempre 0 en modo libre
+                  bearing: 0,
+                  zoom: 14,
                   duration: 400, essential: true,
                 });
               }
@@ -299,21 +318,12 @@ export default function DriverMap({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reconstruir marcador al cambiar modo nav
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !_ml) return;
     _buildDriverMarker(_ml, map);
-    if (centerMode === 'nav') {
-      const pos = livePosRef.current;
-      if (!pos) return;
-      const h = liveHeadingRef.current || navHeadingDeg || 0;
-      map.easeTo({ center: [pos.lng, pos.lat], bearing: h, pitch: 50, zoom: 17,
-        duration: 350, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
-                 essential: true });
-    } else {
-      map.easeTo({ pitch: 0, bearing: 0, duration: 300, essential: true });
-    }
+    // Pitch 0 en todos los modos excepto nav (gestionado por centerSignal 'nav')
+    map.easeTo({ pitch: 0, bearing: 0, duration: 300, essential: true });
   }, [centerMode, routeActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Heading — muta SVG
@@ -441,20 +451,51 @@ export default function DriverMap({
     const pos = livePosRef.current || driverPos;
 
     if (centerSignal === 'nav') {
+      // El único momento con pitch 50
       if (!pos) { onCenterDone?.(); return; }
       const h       = liveHeadingRef.current || navHeadingDeg || 0;
       const offsetY = Math.round(map.getContainer().clientHeight * 0.18);
-      map.easeTo({ center: [pos.lng, pos.lat], zoom: 17, pitch: 50, bearing: h,
-        duration: 350, offset: [0, offsetY], essential: true });
+      map.easeTo({
+        center: [pos.lng, pos.lat], zoom: 17, pitch: 50, bearing: h,
+        duration: 350, offset: [0, offsetY], essential: true,
+      });
+
+    } else if (centerSignal === 'nextStop') {
+      // Vista del próximo stop sin pitch
+      const pts = [];
+      if (pos) pts.push([pos.lng, pos.lat]);
+      // Usar allStops[0] como próximo stop
+      if (allStops?.length > 0) pts.push([allStops[0].lng, allStops[0].lat]);
+      else if (pickupPos)  pts.push([pickupPos.lng,  pickupPos.lat]);
+
+      if (pts.length >= 2 && _ml) {
+        try {
+          const bounds = pts.reduce(
+            (b, pt) => b.extend(pt),
+                                    new _ml.LngLatBounds(pts[0], pts[0])
+          );
+          map.fitBounds(bounds, {
+            padding: { top: 80, bottom: 160, left: 60, right: 60 },
+            maxZoom: 17,
+            pitch: 0, bearing: 0,
+            duration: 450, essential: true,
+          });
+        } catch (_) {
+          if (pos) map.easeTo({ center: [pos.lng, pos.lat], zoom: 15, pitch: 0, bearing: 0, duration: 400 });
+        }
+      } else if (pos) {
+        map.easeTo({ center: [pos.lng, pos.lat], zoom: 15, pitch: 0, bearing: 0, duration: 400 });
+      }
 
     } else if (centerSignal === 'overview') {
+      // Vista completa de todos los stops sin pitch
       const pts = [];
       if (pos) pts.push([pos.lng, pos.lat]);
       if (allStops?.length) {
         allStops.forEach(s => pts.push([s.lng, s.lat]));
       } else {
-        if (pickupPos)   pts.push([pickupPos.lng, pickupPos.lat]);
-        if (deliveryPos) pts.push([deliveryPos.lng, deliveryPos.lat]);
+        if (pickupPos)   pts.push([pickupPos.lng,   pickupPos.lat]);
+        if (deliveryPos) pts.push([deliveryPos.lng,  deliveryPos.lat]);
       }
 
       if (pts.length >= 2 && _ml) {
@@ -466,21 +507,23 @@ export default function DriverMap({
           map.fitBounds(bounds, {
             padding: { top: 80, bottom: 160, left: 40, right: 60 },
             maxZoom: 16,
-            duration: 500,
-            essential: true,
+            pitch: 0, bearing: 0,
+            duration: 500, essential: true,
           });
         } catch (_) {
-          if (pos) map.easeTo({ center: [pos.lng, pos.lat], zoom: 13, duration: 400 });
+          if (pos) map.easeTo({ center: [pos.lng, pos.lat], zoom: 13, pitch: 0, bearing: 0, duration: 400 });
         }
       } else if (pos) {
-        map.easeTo({ center: [pos.lng, pos.lat], zoom: 13, pitch: 0, bearing: 0,
-          duration: 400, essential: true });
+        map.easeTo({ center: [pos.lng, pos.lat], zoom: 13, pitch: 0, bearing: 0, duration: 400 });
       }
 
     } else {
+      // 'free' u otros: centrar sin pitch
       if (!pos) { onCenterDone?.(); return; }
-      map.easeTo({ center: [pos.lng, pos.lat], zoom: 14, pitch: 0, bearing: 0,
-        duration: 350, essential: true });
+      map.easeTo({
+        center: [pos.lng, pos.lat], zoom: 14, pitch: 0, bearing: 0,
+        duration: 350, essential: true,
+      });
     }
 
     onCenterDone?.();

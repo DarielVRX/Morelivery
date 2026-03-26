@@ -1,23 +1,21 @@
-// ── Precache del shell de la app ──────────────────────────────────────────────
-// Lista de assets que se cachean en install. Los archivos con hash (generados
-// por Vite) se agregan en runtime via fetch; aquí solo el shell estático.
-const SHELL_VERSION = 'v4'; // v4: Stadia Maps tile caching
+// frontend/public/sw.js
+// ─────────────────────────────────────────────────────────────────────────────
+// Service Worker de Morelivery
+// Cambios v5:
+// - Evento new_order dedicado para restaurante (con repetición cada 3 min)
+// - Llamada simulada: notificación estilo llamada con Speech al abrir
+// - Grupos estandarizados: orders, driver, kitchen, customer, support
+// - Patrones de vibración diferenciados por grupo
+// - Botones de acción en notificaciones de oferta y nuevo pedido
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SHELL_VERSION = 'v5';
 const SHELL_CACHE   = `morelivery-shell-${SHELL_VERSION}`;
 const SHELL_ASSETS  = [
-  '/',
-  '/index.html',
-  '/manifest.webmanifest',
-  '/icon-192.png',
-  '/icon-512.png',
-  '/badge.svg',
-  '/logo.svg',
+  '/', '/index.html', '/manifest.webmanifest',
+  '/icon-192.png', '/icon-512.png', '/badge.svg', '/logo.svg',
 ];
 
-// ── Background Sync — cola de peticiones offline ──────────────────────────────
-// Cuando el conductor pulsa "Entregado" sin señal, la app envía ENQUEUE_REQUEST
-// al SW. El SW guarda la petición en Cache Storage y registra el tag de sync.
-// En cuanto el dispositivo recupera red, el navegador dispara el evento 'sync'
-// y el SW reintenta todas las peticiones encoladas.
 const SYNC_QUEUE_KEY = 'morelivery-sync-queue';
 const SYNC_TAG       = 'morelivery-status-sync';
 const VOICE_CACHE    = 'morelivery-voices-v1';
@@ -26,6 +24,22 @@ const VOICE_ASSETS   = [
   '/voices/recordatorio-3min.mp3',
 ];
 
+// ── Timers de repetición para pedidos de restaurante ─────────────────────────
+const orderRepeatTimers = new Map(); // orderId → intervalId
+
+// ── Patrones de vibración por tipo ───────────────────────────────────────────
+const VIBRATE = {
+  offer:     [300, 100, 300, 100, 300, 100, 300],  // driver nueva oferta
+  new_order: [500, 150, 500, 150, 500],             // restaurante pedido nuevo
+  call:      [500,300,500,300,500,300,500,300,500], // llamada simulada
+  cancel:    [200, 100, 200],                        // cancelación / reasignación
+  eta:       [150, 80, 150],                         // driver cerca
+  arrived:   [300, 100, 100, 100, 300],             // driver arrived
+  support:   [200, 100, 200],                        // soporte
+  normal:    [200, 100, 200],
+};
+
+// ── Queue ─────────────────────────────────────────────────────────────────────
 async function readQueue() {
   try {
     const cache = await caches.open(SYNC_QUEUE_KEY);
@@ -46,56 +60,47 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
     Promise.all([
-      caches.open(SHELL_CACHE).then(cache =>
-        cache.addAll(SHELL_ASSETS).catch(() => {})
-      ),
-      caches.open(VOICE_CACHE).then(cache =>
-        cache.addAll(VOICE_ASSETS).catch(() => {})
-      ),
+      caches.open(SHELL_CACHE).then(cache => cache.addAll(SHELL_ASSETS).catch(() => {})),
+      caches.open(VOICE_CACHE).then(cache => cache.addAll(VOICE_ASSETS).catch(() => {})),
     ])
   );
 });
 
-// ── Activate: limpiar caches viejos ──────────────────────────────────────────
+// ── Activate ──────────────────────────────────────────────────────────────────
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     Promise.all([
       self.clients.claim(),
       caches.keys().then(keys =>
         Promise.all(
-          keys
-            .filter(k => k.startsWith('morelivery-shell-') && k !== SHELL_CACHE)
-            .map(k => caches.delete(k))
+          keys.filter(k => k.startsWith('morelivery-shell-') && k !== SHELL_CACHE)
+              .map(k => caches.delete(k))
         )
       ),
     ])
   );
 });
 
-// ── Tile cache (stale-while-revalidate) ───────────────────────────────────────
+// ── Tile cache ────────────────────────────────────────────────────────────────
 const TILES_CACHE   = 'morelivery-tiles-v2';
 const TILES_DOMAINS = [
-  'tiles.openfreemap.org',
-  'tile.openfreemap.org',
-  'tiles.stadiamaps.com',
-  'tile.stadiamaps.com',
+  'tiles.openfreemap.org', 'tile.openfreemap.org',
+  'tiles.stadiamaps.com',  'tile.stadiamaps.com',
 ];
 
 // ── Fetch ─────────────────────────────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
-
   const API_PREFIXES = ['/nav/', '/orders/', '/drivers/', '/auth/', '/restaurants/', '/users/', '/admin/', '/events', '/api/'];
   if (API_PREFIXES.some(p => url.pathname.startsWith(p))) return;
-
   if (request.method !== 'GET') return;
 
   const isTile = TILES_DOMAINS.some(d => url.hostname.includes(d));
   if (isTile) {
     event.respondWith(
       caches.open(TILES_CACHE).then(async cache => {
-        const cached = await cache.match(request);
+        const cached      = await cache.match(request);
         const fetchPromise = fetch(request).then(res => {
           if (res.ok) cache.put(request, res.clone());
           return res;
@@ -122,66 +127,49 @@ self.addEventListener('fetch', (event) => {
 // ── Background Sync ───────────────────────────────────────────────────────────
 self.addEventListener('sync', (event) => {
   if (event.tag !== SYNC_TAG) return;
-
-  event.waitUntil(
-    (async () => {
-      const queue = await readQueue();
-      if (!queue.length) return;
-
-      const remaining = [];
-      for (const item of queue) {
-        try {
-          const headers = { 'Content-Type': 'application/json' };
-          if (item.token) headers['Authorization'] = `Bearer ${item.token}`;
-
-          const res = await fetch(item.url, {
-            method:  item.method || 'PATCH',
-            headers,
-            body:    item.body ?? undefined,
-          });
-
-          // 409 = el pedido ya fue procesado → descartar
-          // 2xx = éxito → descartar
-          // 5xx / red → reintentar
-          if (!res.ok && res.status !== 409) {
-            remaining.push(item);
-          }
-        } catch {
-          remaining.push(item);
-        }
-      }
-
-      await writeQueue(remaining);
-
-      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      const synced  = queue.length - remaining.length;
-      if (synced > 0) clients.forEach(c => c.postMessage({ type: 'SYNC_COMPLETE', synced }));
-    })()
-  );
+  event.waitUntil((async () => {
+    const queue     = await readQueue();
+    if (!queue.length) return;
+    const remaining = [];
+    for (const item of queue) {
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (item.token) headers['Authorization'] = `Bearer ${item.token}`;
+        const res = await fetch(item.url, { method: item.method || 'PATCH', headers, body: item.body ?? undefined });
+        if (!res.ok && res.status !== 409) remaining.push(item);
+      } catch { remaining.push(item); }
+    }
+    await writeQueue(remaining);
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const synced  = queue.length - remaining.length;
+    if (synced > 0) clients.forEach(c => c.postMessage({ type: 'SYNC_COMPLETE', synced }));
+  })());
 });
 
-// ── Voice playback (desde cache) ──────────────────────────────────────────────
+// ── Voice ─────────────────────────────────────────────────────────────────────
 async function playVoice(voiceName) {
   try {
     const cache    = await caches.open(VOICE_CACHE);
     const response = await cache.match(`/voices/${voiceName}.mp3`);
-    if (!response) { console.warn(`Voz no encontrada: ${voiceName}`); return; }
-    const blob = await response.blob();
-    const url  = URL.createObjectURL(blob);
+    if (!response) return;
+    const blob  = await response.blob();
+    const url   = URL.createObjectURL(blob);
     const audio = new Audio(url);
     audio.play();
     audio.onended = () => URL.revokeObjectURL(url);
-  } catch (e) { console.warn('Voice play error:', e); }
+  } catch (_) {}
 }
 
 // ── Notificaciones agrupadas ──────────────────────────────────────────────────
 const notifCounts = {};
 
-async function showGroupedNotification({ group, title, body, url, priority, tag, vibrate }) {
+async function showGroupedNotification({
+  group, title, body, url, priority, tag, vibrate, actions,
+}) {
   if (!notifCounts[group]) notifCounts[group] = { count: 0, lastBody: '', url };
   notifCounts[group].count++;
   notifCounts[group].lastBody = body;
-  notifCounts[group].url = url;
+  notifCounts[group].url      = url;
 
   const { count, lastBody } = notifCounts[group];
   const isHigh = priority === 'high';
@@ -192,7 +180,7 @@ async function showGroupedNotification({ group, title, body, url, priority, tag,
   const existing = await self.registration.getNotifications({ tag });
   existing.forEach(n => n.close());
 
-  const vibratePattern = vibrate || (isHigh ? [300, 100, 300, 100, 300] : [200, 100, 200]);
+  const vibratePattern = vibrate || (isHigh ? VIBRATE.normal : [180, 80, 180]);
 
   await self.registration.showNotification(displayTitle, {
     body:               displayBody,
@@ -203,16 +191,33 @@ async function showGroupedNotification({ group, title, body, url, priority, tag,
     renotify:           true,
     timestamp:          Date.now(),
     vibrate:            vibratePattern,
-    actions:            [{ action: 'open', title: 'Abrir' }],
+    actions:            actions || [],
     data:               { url, group },
+  });
+}
+
+// ── Notificación tipo llamada ─────────────────────────────────────────────────
+async function showCallNotification({ orderId, driverName, url }) {
+  const existing = await self.registration.getNotifications({ tag: `call_${orderId}` });
+  existing.forEach(n => n.close());
+
+  await self.registration.showNotification('📞 Llamada entrante', {
+    body:               `${driverName || 'Tu repartidor'} está intentando localizarte`,
+    tag:                `call_${orderId}`,
+    icon:               '/icon-192.png',
+    badge:              '/badge.svg',
+    requireInteraction: true,
+    renotify:           true,
+    timestamp:          Date.now(),
+    vibrate:            VIBRATE.call,
+    silent:             false,
+    data:               { url: url || '/', group: 'calls', isCall: true, driverName },
   });
 }
 
 // ── Mensajes desde la app (postMessage) ───────────────────────────────────────
 self.addEventListener('message', (event) => {
   const type = event.data?.type;
-
-  // ── Existentes ──────────────────────────────────────────────────────────────
 
   if (type === 'TEST_NOTIFICATION') {
     const { title = 'Morelivery', body = 'Notificación de prueba ✓', tag = 'test' } = event.data;
@@ -222,14 +227,14 @@ self.addEventListener('message', (event) => {
   }
 
   if (type === 'SHOW_NOTIFICATION') {
-    const { title, body, tag, group, url = '/', priority = 'normal', data } = event.data;
+    const { title, body, tag, group, url = '/', priority = 'normal', vibrate, actions, data } = event.data;
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
       const anyFocused = clients.some(c => c.focused);
       if (anyFocused) return;
       const resolvedGroup = group || tag || 'general';
       showGroupedNotification({
         group: resolvedGroup, title, body,
-        url: data?.url || url, priority, tag: resolvedGroup,
+        url: data?.url || url, priority, tag: resolvedGroup, vibrate, actions,
       }).then(() => {
         if ('setAppBadge' in self) {
           const total = Object.values(notifCounts).reduce((s, v) => s + v.count, 0);
@@ -240,13 +245,26 @@ self.addEventListener('message', (event) => {
     return;
   }
 
+  if (type === 'SHOW_CALL_NOTIFICATION') {
+    const { orderId, driverName, url } = event.data;
+    showCallNotification({ orderId, driverName, url });
+    return;
+  }
+
+  if (type === 'CANCEL_ORDER_REPEAT') {
+    const { orderId } = event.data;
+    const timer = orderRepeatTimers.get(orderId);
+    if (timer) { clearInterval(timer); orderRepeatTimers.delete(orderId); }
+    return;
+  }
+
   if (type === 'ENQUEUE_REQUEST') {
     const { url, method, body, token } = event.data;
     (async () => {
       const queue = await readQueue();
       queue.push({ url, method, body, token, ts: Date.now() });
       await writeQueue(queue);
-      try { await self.registration.sync.register(SYNC_TAG); } catch { /* API no disponible */ }
+      try { await self.registration.sync.register(SYNC_TAG); } catch {}
     })();
     return;
   }
@@ -254,21 +272,14 @@ self.addEventListener('message', (event) => {
   if (type === 'APP_FOCUSED') {
     Object.keys(notifCounts).forEach(k => { notifCounts[k].count = 0; });
     if ('clearAppBadge' in self) self.clearAppBadge().catch(() => {});
+    // Cancelar todos los timers de repetición (usuario ya vio la app)
+    for (const [id, timer] of orderRepeatTimers) {
+      clearInterval(timer);
+      orderRepeatTimers.delete(id);
+    }
     return;
   }
 
-  // ── Nuevos ──────────────────────────────────────────────────────────────────
-
-  // VIBRATE: la app puede pedir vibración desde background via postMessage
-  // Útil cuando el SW recibe un push y quiere patrones más complejos que el
-  // campo `vibrate` de showNotification (ej. pulsos encadenados con delay).
-  //
-  // Uso: reg.active.postMessage({ type: 'VIBRATE', pattern: [300, 100, 300] })
-  //
-  // Nota: navigator.vibrate() solo funciona en el contexto de window, no en SW.
-  // Este handler reenvía el mensaje a todas las ventanas abiertas para que
-  // ejecuten la vibración. Si la app está en background, la vibración viene
-  // del campo `vibrate` de la notificación push directamente.
   if (type === 'VIBRATE') {
     const { pattern = [200] } = event.data;
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
@@ -277,51 +288,31 @@ self.addEventListener('message', (event) => {
     return;
   }
 
-  // SYNC_STATUS_UPDATE: variante tipada de ENQUEUE_REQUEST para actualizaciones
-  // de estado de pedido. Separa semánticamente el tipo de cola para que el
-  // backend pueda diferenciar qué endpoint llamar al reenviar.
-  //
-  // Campos: orderId, status, token, extra (objeto libre)
-  // El SW construye la URL y el body antes de encolar.
   if (type === 'SYNC_STATUS_UPDATE') {
     const { orderId, status, token, extra = {} } = event.data;
     (async () => {
       const queue = await readQueue();
       queue.push({
-        url:    `/api/orders/${orderId}/status`,
-        method: 'PATCH',
-        body:   JSON.stringify({ status, ...extra }),
-        token,
-        ts:     Date.now(),
-        kind:   'status_update',  // para logging/analytics en el backend
+        url: `/api/orders/${orderId}/status`, method: 'PATCH',
+        body: JSON.stringify({ status, ...extra }), token, ts: Date.now(), kind: 'status_update',
       });
       await writeQueue(queue);
-      try { await self.registration.sync.register(SYNC_TAG); } catch { /* ok */ }
+      try { await self.registration.sync.register(SYNC_TAG); } catch {}
     })();
     return;
   }
 
-  // SYNC_LOCATION_BATCH: encola un lote de pings de GPS acumulados offline.
-  // La app va guardando posiciones en localStorage mientras no hay red,
-  // y las manda todas en un solo mensaje cuando detecta que volvió la señal
-  // o cuando el SW se despierta por sync.
-  //
-  // Campos: driverId, positions (array de { lat, lng, ts }), token
   if (type === 'SYNC_LOCATION_BATCH') {
     const { driverId, positions, token } = event.data;
     if (!positions?.length) return;
     (async () => {
       const queue = await readQueue();
       queue.push({
-        url:    `/api/drivers/${driverId}/location-batch`,
-        method: 'POST',
-        body:   JSON.stringify({ positions }),
-        token,
-        ts:     Date.now(),
-        kind:   'location_batch',
+        url: `/api/drivers/${driverId}/location-batch`, method: 'POST',
+        body: JSON.stringify({ positions }), token, ts: Date.now(), kind: 'location_batch',
       });
       await writeQueue(queue);
-      try { await self.registration.sync.register(SYNC_TAG); } catch { /* ok */ }
+      try { await self.registration.sync.register(SYNC_TAG); } catch {}
     })();
     return;
   }
@@ -331,7 +322,8 @@ self.addEventListener('message', (event) => {
 self.addEventListener('push', (event) => {
   if (!event.data) return;
   let payload;
-  try { payload = event.data.json(); } catch { payload = { title: 'Morelivery', body: event.data.text() }; }
+  try { payload = event.data.json(); }
+  catch { payload = { title: 'Morelivery', body: event.data.text() }; }
 
   const {
     title    = 'Morelivery',
@@ -341,25 +333,152 @@ self.addEventListener('push', (event) => {
     url      = '/',
     priority = 'normal',
     vibrate,
+    actions,
+    type: pushType,
+    orderId,
+    driverName,
   } = payload;
 
-  event.waitUntil(
-    showGroupedNotification({ group, title, body, url, priority, tag: group, vibrate })
-  );
+  event.waitUntil((async () => {
+    // Llamada simulada — notificación especial
+    if (pushType === 'simulated_call') {
+      await showCallNotification({ orderId, driverName, url });
+      return;
+    }
+
+    // Pedido nuevo para restaurante — con repetición cada 3 min
+    if (pushType === 'new_order' && orderId) {
+      await showGroupedNotification({
+        group: 'kitchen', title, body, url, priority: 'high',
+        tag: `new_order_${orderId}`, vibrate: VIBRATE.new_order,
+        actions: [{ action: 'confirm', title: '✓ Confirmar' }],
+      });
+
+      // Cancelar timer previo si existe
+      const existing = orderRepeatTimers.get(orderId);
+      if (existing) clearInterval(existing);
+
+      // Repetir cada 3 min si no se confirma
+      const timer = setInterval(async () => {
+        const notifs = await self.registration.getNotifications({ tag: `new_order_${orderId}` });
+        if (notifs.length === 0) {
+          // Ya fue confirmado / cerrado
+          clearInterval(timer);
+          orderRepeatTimers.delete(orderId);
+          return;
+        }
+        await showGroupedNotification({
+          group: 'kitchen', title: '⚠️ Pedido sin confirmar', body,
+          url, priority: 'high', tag: `new_order_${orderId}`,
+          vibrate: VIBRATE.new_order,
+          actions: [{ action: 'confirm', title: '✓ Confirmar' }],
+        });
+      }, 3 * 60 * 1000);
+
+      orderRepeatTimers.set(orderId, timer);
+      return;
+    }
+
+    // Oferta al driver
+    if (group === 'driver' || pushType === 'new_offer') {
+      await showGroupedNotification({
+        group: 'driver', title, body, url, priority: 'high',
+        tag: group, vibrate: VIBRATE.offer,
+        actions: [
+          { action: 'accept', title: '✓ Aceptar' },
+          { action: 'reject', title: '✕ Rechazar' },
+        ],
+      });
+      return;
+    }
+
+    // Cancelación / reasignación
+    if (pushType === 'cancelled' || pushType === 'reassigned') {
+      await showGroupedNotification({
+        group: 'driver', title, body, url, priority: 'high',
+        tag: `cancel_${orderId || Date.now()}`, vibrate: VIBRATE.cancel,
+      });
+      return;
+    }
+
+    // ETA alert
+    if (pushType === 'driver_eta_alert') {
+      await showGroupedNotification({
+        group: 'customer', title, body, url, priority: 'normal',
+        tag: `eta_${orderId}`, vibrate: VIBRATE.eta,
+        actions: [{ action: 'message', title: '💬 Enviar mensaje' }],
+      });
+      return;
+    }
+
+    // Driver arrived
+    if (pushType === 'driver_arrived') {
+      await showGroupedNotification({
+        group: 'customer', title, body, url, priority: 'high',
+        tag: `arrived_${orderId}`, vibrate: VIBRATE.arrived,
+        actions: [{ action: 'message', title: '💬 Enviar mensaje' }],
+      });
+      return;
+    }
+
+    // Default
+    await showGroupedNotification({ group, title, body, url, priority, tag: group, vibrate, actions });
+  })());
 });
 
 // ── Click en notificación ─────────────────────────────────────────────────────
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const group = event.notification.data?.group;
-  if (group && notifCounts[group]) notifCounts[group].count = 0;
+  const group   = event.notification.data?.group;
+  const isCall  = event.notification.data?.isCall;
+  const action  = event.action;
 
+  if (group && notifCounts[group]) notifCounts[group].count = 0;
   if ('clearAppBadge' in self) self.clearAppBadge().catch(() => {});
 
+  // Acciones de botones — solo manejar sin abrir app salvo que esté definido
+  if (action === 'accept' || action === 'reject' || action === 'confirm') {
+    // Reenviar a la app para que maneje la acción
+    event.waitUntil(
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+        const existing = clients.find(c => c.url.includes(self.location.origin));
+        if (existing) {
+          existing.postMessage({ type: 'NOTIFICATION_ACTION', action, data: event.notification.data });
+          return existing.focus();
+        }
+        // Si la app no está abierta, abrir y enviar la acción
+        return self.clients.openWindow(event.notification.data?.url || '/').then(client => {
+          if (client) {
+            setTimeout(() => client.postMessage({ type: 'NOTIFICATION_ACTION', action, data: event.notification.data }), 1000);
+          }
+        });
+      })
+    );
+    return;
+  }
+
+  // Toque en la notificación (no en un botón) — abrir la app
   const targetUrl = event.notification?.data?.url || '/';
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      // Si es llamada simulada, hablar al abrir
+      if (isCall) {
+        const driverName = event.notification.data?.driverName || 'Tu repartidor';
+        const client = clients.find(c => c.url.includes(self.location.origin));
+        if (client) {
+          client.postMessage({ type: 'SPEAK', text: `${driverName} está intentando localizarte` });
+          return client.navigate(targetUrl).then(() => client.focus());
+        }
+        return self.clients.openWindow(targetUrl).then(newClient => {
+          if (newClient) {
+            setTimeout(() => newClient.postMessage({
+              type: 'SPEAK', text: `${driverName} está intentando localizarte`,
+            }), 800);
+          }
+        });
+      }
+
       const existing = clients.find(c => c.url.includes(self.location.origin));
       if (existing) return existing.navigate(targetUrl).then(() => existing.focus());
       return self.clients.openWindow(targetUrl);

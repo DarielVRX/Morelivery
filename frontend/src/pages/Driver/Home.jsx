@@ -1,14 +1,18 @@
 // frontend/src/pages/Driver/Home.jsx — orquestador puro
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import ActiveOrderPanel from '../../components/ActiveOrderPanel';
 import OfferPanel from '../../components/OfferPanel';
+import SupportChat from '../../features/support/SupportChat';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { ensureDriverHomeAnimations } from '../../features/driver/home/animations';
 import DriverHomeMapSection from '../../features/driver/home/DriverHomeMapSection.jsx';
 import { quickSelectWays } from '../../components/WayPicker';
-import { buildGoogleMapsAppUrl, buildGoogleMapsWebUrl, buildGoogleNavigationUrl, formatRouteSummary, getDriverRouteStops, getGoogleNavigationTarget } from '../../features/driver/home/navigation';
+import {
+  buildGoogleMapsAppUrl, buildGoogleMapsWebUrl, buildGoogleNavigationUrl,
+  formatRouteSummary, getDriverRouteStops, getGoogleNavigationTarget,
+} from '../../features/driver/home/navigation';
 import DriverHomeStatusBar from '../../features/driver/home/DriverHomeStatusBar.jsx';
 import { useDriverHomeRuntime } from '../../features/driver/home/useDriverHomeRuntime';
 import { useAppBadge } from '../../hooks/useAppBadge';
@@ -19,10 +23,27 @@ import { ZONE_LABELS } from '../../utils/format';
 
 ensureDriverHomeAnimations();
 
+const HAND_MODE_KEY = 'morelivery_hand_mode';
+
 export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
   const { auth, patchUser } = useAuth();
   const { isDark } = useTheme();
   const order = useOrderManager(auth.token, patchUser, auth.user?.driver);
+
+  // ── Modo de mano ──────────────────────────────────────────────────────────
+  const [handMode, setHandMode] = useState(() => {
+    try { return localStorage.getItem(HAND_MODE_KEY) || 'left'; } catch { return 'left'; }
+  });
+  const toggleHandMode = useCallback(() => {
+    setHandMode(prev => {
+      const next = prev === 'left' ? 'right' : 'left';
+      try { localStorage.setItem(HAND_MODE_KEY, next); } catch {}
+      return next;
+    });
+  }, []);
+
+  // ── Panel de soporte flotante ─────────────────────────────────────────────
+  const [showSupport, setShowSupport] = useState(false);
 
   useEffect(() => {
     if (!registerRef) return;
@@ -44,7 +65,6 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
   const [panelHeight, setPanelHeight] = useState(0);
   const activePanelRef = useRef(null);
 
-  // Medir altura del panel activo para subir FABs y atribución
   useEffect(() => {
     const el = activePanelRef.current;
     if (!el) { setPanelHeight(0); return; }
@@ -53,7 +73,12 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     return () => ro.disconnect();
   }, [order.hasActiveOrder, order.pendingOffer]);
 
-  const { position: myPosition, error: gpsError } = useDriverLocation(auth.token, order.availability, order.hasActiveOrder);
+  const { position: myPosition, matchedPosition, error: gpsError } = useDriverLocation(
+    auth.token, order.availability, order.hasActiveOrder
+  );
+
+  // Usar posición matcheada para el mapa si está disponible, raw para lógica interna
+  const displayPosition = matchedPosition || myPosition;
 
   useEffect(() => { order.setMyPosition(myPosition); }, [myPosition]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -62,23 +87,23 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     availability: order.availability,
     activeOrder: order.activeOrder,
     activeOrders: order.activeOrders,
+    confirmedOrders: order.confirmedOrders,
     hasActiveOrder: order.hasActiveOrder,
-    myPosition,
+    myPosition: displayPosition,
     onMessage: setMsg,
   });
 
   const { voiceEnabled, setVoiceEnabled, wakeLockActive } = useNavFeatures({
     steps: home.routeSteps,
-    currentPos: myPosition,
+    currentPos: displayPosition,
     activeZones: home.activeZones,
     hasActiveOrder: order.hasActiveOrder,
-    onVoice: (text) => setMsg(text),
-    onZoneAlert: (zone) => setMsg(`⚠️ Zona de alerta cerca: ${ZONE_LABELS[zone?.type] || zone?.type}`),
-    impassableWays: home.activeImpassable,  // ← fix: era []
+    onVoice: () => {}, // sin toast — la voz ya habla directamente
+    onZoneAlert: (zone) => {}, // sin toast
+    impassableWays: home.activeImpassable,
     routeGeometry: home.routeGeometry || [],
   });
 
-  // Exponer zonas e impassable via registerRef
   useEffect(() => {
     if (!registerRef) return;
     registerRef.current.activeZones      = home.activeZones;
@@ -91,8 +116,28 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     registerRef.current.notifyAlertsUpdate?.();
   }, [home.activeZones, home.activeImpassable, home.myPreferences]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // FAB de soporte — posicionado según handMode
+  const supportFabStyle = {
+    position: 'absolute',
+    bottom: panelHeight + 80,
+    [handMode === 'right' ? 'left' : 'right']: 14,
+    zIndex: 401,
+    width: 48, height: 48,
+    borderRadius: '50%',
+    background: showSupport ? 'var(--brand)' : '#fff',
+    border: '1.5px solid var(--border)',
+    boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
+    cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: '1.2rem',
+    color: showSupport ? '#fff' : 'var(--text-secondary)',
+    transition: 'all 0.15s',
+  };
+
   return (
-    <div className="driver-map-root" style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden', position:'relative' }}>
+    <div className="driver-map-root" style={{ display:'flex', flexDirection:'column',
+      height:'100%', overflow:'hidden', position:'relative' }}>
+
       <DriverHomeStatusBar
         availability={order.availability}
         counters={home.counters}
@@ -103,6 +148,9 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         onDismissMsg={() => setMsg('')}
         transferBanner={order.transferBanner}
         onDismissTransferBanner={() => order.setTransferBanner(null)}
+        handMode={handMode}
+        onToggleHandMode={toggleHandMode}
+        gpsError={gpsError}
       />
 
       <DriverHomeMapSection
@@ -115,7 +163,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         routeGeometry={home.routeGeometry}
         allStops={home.allStops}
         routeActive={home.routeActive}
-        myPosition={myPosition}
+        myPosition={displayPosition}
         activeOrder={order.activeOrder}
         navHeadingDeg={home.navHeadingDeg}
         onHeadingChange={home.setNavHeadingDeg}
@@ -133,7 +181,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         voiceEnabled={voiceEnabled}
         navMode={home.navMode}
         onCenterCycle={home.handleCenterCycle}
-        onVoiceToggle={() => setVoiceEnabled((value) => !value)}
+        onVoiceToggle={() => setVoiceEnabled((v) => !v)}
         onGoogleNav={home.openGoogleNavigation}
         onNavMode={home.setNavMode}
         setMsg={setMsg}
@@ -142,6 +190,9 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         onSubmitPreference={home.handlePreferenceConfirm}
         bottomOffset={panelHeight + 8}
         isDark={isDark}
+        handMode={handMode}
+        // Ruta de oferta en mapa
+        offerRouteGeometry={home.offerRouteGeometry}
         onQuickReport={async (type, pos) => {
           if (type === 'zone') {
             home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'other', radius_m: 500, estimated_hours: 1 });
@@ -149,19 +200,40 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
             try {
               const ways = await quickSelectWays(pos, 'impassable');
               home.handleImpassableConfirm(ways);
-            } catch (_) {
-              setMsg('No se pudo detectar la calle. Intenta el modo normal.');
-            }
+            } catch (_) { setMsg('No se pudo detectar la calle.'); }
           } else if (type === 'preference') {
             try {
               const ways = await quickSelectWays(pos, 'preference');
               home.handlePreferenceConfirm(ways);
-            } catch (_) {
-              setMsg('No se pudo detectar la calle. Intenta el modo normal.');
-            }
+            } catch (_) { setMsg('No se pudo detectar la calle.'); }
           }
         }}
       />
+
+      {/* FAB de soporte */}
+      <button style={supportFabStyle} onClick={() => setShowSupport(v => !v)}
+        title="Soporte">
+        🛟
+      </button>
+
+      {/* Panel de soporte */}
+      {showSupport && (
+        <div style={{
+          position: 'absolute',
+          bottom: panelHeight + 136,
+          [handMode === 'right' ? 'left' : 'right']: 14,
+          width: 320, height: 480,
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border)',
+          borderRadius: 16,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+          zIndex: 402,
+          overflow: 'hidden',
+          display: 'flex', flexDirection: 'column',
+        }}>
+          <SupportChat />
+        </div>
+      )}
 
       <OfferPanel
         offer={order.pendingOffer}
@@ -169,12 +241,18 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         loading={order.loadingOffer}
         onAccept={() => order.acceptOffer(setMsg)}
         onReject={() => order.rejectOffer(setMsg)}
-        onToggleMinimize={() => order.setOfferMinimized((value) => !value)}
+        onToggleMinimize={() => order.setOfferMinimized((v) => !v)}
         onExpired={() => {
           const warning = order.handleOfferExpired();
           if (warning) setMsg(warning);
         }}
         panelRef={!order.hasActiveOrder ? activePanelRef : undefined}
+        handMode={handMode}
+        offerRouteGeometry={home.offerRouteGeometry}
+        offerRouteLoading={home.offerRouteLoading}
+        onRequestOfferRoute={home.openOfferRoutePreview}
+        onShowFullOfferRoute={home.openFullOfferRoute}
+        showFullOfferRoute={home.showFullOfferRoute}
       />
 
       <ActiveOrderPanel
@@ -183,15 +261,17 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         loadingStatus={order.loadingStatus}
         showRelease={order.showRelease}
         releaseNote={order.releaseNote}
-        onToggleExpand={() => order.setOrderExpanded((expanded) => !expanded)}
+        onToggleExpand={() => order.setOrderExpanded((e) => !e)}
         onChangeStatus={(id, status) => order.changeStatus(id, status, setMsg)}
-        onToggleRelease={() => order.setShowRelease((show) => !show)}
+        onToggleRelease={() => order.setShowRelease((s) => !s)}
         onReleaseNoteChange={order.setReleaseNote}
         onConfirmRelease={() => order.doRelease(setMsg)}
         onRebalance={() => order.doRebalance(setMsg)}
         onCancelDispute={() => order.doCancelDispute(setMsg)}
         onRoute={home.handleToggleRoute}
+        onSimulatedCall={(target) => order.doSimulatedCall(target, setMsg)}
         routeActive={home.routeActive}
+        handMode={handMode}
         panelRef={activePanelRef}
       />
     </div>

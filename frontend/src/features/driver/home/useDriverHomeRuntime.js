@@ -1,7 +1,9 @@
+// frontend/src/features/driver/home/useDriverHomeRuntime.js
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { reverseGeocode } from '../../../utils/geo';
 import { getErrorMessage } from '../../../utils/errorMessage';
+import { haversineMeters } from '../../../utils/geo';
 import {
   createZoneReport,
   fetchActiveZones,
@@ -20,43 +22,62 @@ import {
   getGoogleNavigationTarget,
 } from './navigation';
 
-export function useDriverHomeRuntime({ token, availability, activeOrder, activeOrders, hasActiveOrder, myPosition, onMessage }) {
-  const [counters, setCounters] = useState(null);
-  const [customPin, setCustomPin] = useState(null);
-  const [pinAddress, setPinAddress] = useState(null);
-  const [loadingPin, setLoadingPin] = useState(false);
-  const [routeGeometry, setRouteGeometry] = useState(null);
-  const [routeSteps, setRouteSteps] = useState([]);
-  const [navHeadingDeg, setNavHeadingDeg] = useState(0);
-  const [centerSignal, setCenterSignal] = useState(null);
-  const [centerMode, setCenterMode] = useState('nav');
-  const [routeActive, setRouteActive] = useState(false);
-  const [activeZones, setActiveZones] = useState([]);
-  const [activeImpassable, setActiveImpassable] = useState([]);
-  const [myPreferences,    setMyPreferences]    = useState([]);
-  const [navMode, setNavMode] = useState(null);
-  const [mapInstance, setMapInstance] = useState(null);
+// ── Caché de rutas de oferta ──────────────────────────────────────────────────
+// Key: `${restaurantLat},${restaurantLng}-${customerLat},${customerLng}`
+// Value: { geometry, steps, summary, ts }
+const OFFER_ROUTE_CACHE_MS = 5 * 60 * 1000; // 5 minutos
+const offerRouteCache = new Map();
 
-  const centerModeRef     = useRef('nav');
-  const autoCenterRef     = useRef(null);
+function getOfferRouteCacheKey(offer) {
+  return `${offer.restaurantLat},${offer.restaurantLng}-${offer.customerLat},${offer.customerLng}`;
+}
+
+export function useDriverHomeRuntime({
+  token, availability, activeOrder, activeOrders,
+  confirmedOrders, // solo los confirmados por restaurante
+  hasActiveOrder, myPosition, onMessage,
+}) {
+  const [counters,       setCounters]       = useState(null);
+  const [customPin,      setCustomPin]      = useState(null);
+  const [pinAddress,     setPinAddress]     = useState(null);
+  const [loadingPin,     setLoadingPin]     = useState(false);
+  const [routeGeometry,  setRouteGeometry]  = useState(null);
+  const [routeSteps,     setRouteSteps]     = useState([]);
+  const [navHeadingDeg,  setNavHeadingDeg]  = useState(0);
+  const [centerSignal,   setCenterSignal]   = useState(null);
+  const [centerMode,     setCenterMode]     = useState('nav');
+  const [routeActive,    setRouteActive]    = useState(false);
+  const [activeZones,    setActiveZones]    = useState([]);
+  const [activeImpassable, setActiveImpassable] = useState([]);
+  const [myPreferences,  setMyPreferences]  = useState([]);
+  const [navMode,        setNavMode]        = useState(null);
+  const [mapInstance,    setMapInstance]    = useState(null);
+
+  // Estado de oferta preview
+  const [offerRouteGeometry, setOfferRouteGeometry] = useState(null);
+  const [offerRouteLoading,  setOfferRouteLoading]  = useState(false);
+  const [showFullOfferRoute, setShowFullOfferRoute]  = useState(false); // ruta total + oferta
+
+  // Rerouting
+  const lastRerouteRef   = useRef(0);
+  const REROUTE_DIST_M   = 50;
+  const REROUTE_COOLDOWN = 15_000;
+
+  const centerModeRef      = useRef('nav');
+  const centerCycleRef     = useRef(0); // 0=nav, 1=nextStop, 2=fullRoute
+  const autoCenterRef      = useRef(null);
   const lastInteractionRef = useRef(Date.now());
 
   const refreshZones = useCallback(() => {
     fetchActiveZones()
-      .then((data) => {
-        if (Array.isArray(data?.zones)) setActiveZones(data.zones);
-      })
+      .then((data) => { if (Array.isArray(data?.zones)) setActiveZones(data.zones); })
       .catch(() => {});
     fetchAllImpassable(token)
-      .then((reports) => {
-        if (Array.isArray(reports)) setActiveImpassable(reports);
-      })
+      .then((reports) => { if (Array.isArray(reports)) setActiveImpassable(reports); })
       .catch(() => {});
     if (token) {
       fetchMyPreferences(token)
-        .then((prefs) => {
-          if (Array.isArray(prefs)) setMyPreferences(prefs);
-        })
+        .then((prefs) => { if (Array.isArray(prefs)) setMyPreferences(prefs); })
         .catch(() => {});
     }
   }, [token]);
@@ -69,18 +90,11 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
   }, [availability, token]);
 
   useEffect(() => {
-    if (hasActiveOrder) {
-      setCustomPin(null);
-      setPinAddress(null);
-    }
+    if (hasActiveOrder) { setCustomPin(null); setPinAddress(null); }
   }, [hasActiveOrder]);
 
   useEffect(() => {
-    if (!customPin) {
-      setPinAddress(null);
-      return;
-    }
-
+    if (!customPin) { setPinAddress(null); return; }
     setLoadingPin(true);
     reverseGeocode(customPin.lat, customPin.lng)
       .then((address) => setPinAddress(address || `${customPin.lat.toFixed(5)}, ${customPin.lng.toFixed(5)}`))
@@ -92,12 +106,11 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
       setRouteGeometry(null);
       setRouteSteps([]);
       setRouteActive(false);
+      centerCycleRef.current = 0;
     }
   }, [activeOrder]);
 
-  useEffect(() => {
-    refreshZones();
-  }, [refreshZones]);
+  useEffect(() => { refreshZones(); }, [refreshZones]);
 
   const scheduleAutoCenter = useCallback(() => {
     if (autoCenterRef.current) clearTimeout(autoCenterRef.current);
@@ -105,7 +118,7 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
     autoCenterRef.current = setTimeout(() => {
       if (centerModeRef.current === 'nav') setCenterSignal('nav');
     }, 5000);
-  }, [token]);
+  }, []);
 
   const handleMapInteraction = useCallback(() => {
     lastInteractionRef.current = Date.now();
@@ -118,25 +131,37 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
     return () => events.forEach((ev) => document.removeEventListener(ev, handleMapInteraction));
   }, [handleMapInteraction]);
 
+  // ── Ciclo de centrado en modo navegación ──────────────────────────────────
+  // 0 = nav (centrado + pitch 50), 1 = next stop, 2 = ruta completa
   const handleCenterCycle = useCallback(() => {
-    // Con ruta activa: nav(pitch50,z17) → overview → nav
-    // Sin ruta activa: siempre 'free' (pitch0, z14)
     if (!routeActive || !routeGeometry?.length) {
+      // Modo libre: solo centrar
       setCenterMode('nav');
       centerModeRef.current = 'nav';
       clearTimeout(autoCenterRef.current);
       setCenterSignal('free');
       return;
     }
-    // Con ruta: ciclo nav ↔ overview
-    const next = centerModeRef.current === 'nav' ? 'overview' : 'nav';
-    setCenterMode(next);
-    centerModeRef.current = next;
+
+    const next = (centerCycleRef.current + 1) % 3;
+    centerCycleRef.current = next;
     clearTimeout(autoCenterRef.current);
-    if (next === 'nav') {
+
+    if (next === 0) {
+      // Nav centrado
+      setCenterMode('nav');
+      centerModeRef.current = 'nav';
       setCenterSignal('nav');
       scheduleAutoCenter();
+    } else if (next === 1) {
+      // Next stop
+      setCenterMode('nextStop');
+      centerModeRef.current = 'nextStop';
+      setCenterSignal('nextStop');
     } else {
+      // Ruta completa
+      setCenterMode('overview');
+      centerModeRef.current = 'overview';
       setCenterSignal('overview');
     }
   }, [routeActive, routeGeometry, scheduleAutoCenter]);
@@ -154,37 +179,37 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
       .catch(() => onMessage('No se pudo calcular la ruta al pin'));
   }, [myPosition, onMessage, token]);
 
+  // ── Ruta activa (solo pedidos confirmados por restaurante) ─────────────────
   const openRoadRouteApi = useCallback(() => {
     if (!activeOrder) return;
 
-    // Construir lista de stops encadenados desde todos los pedidos activos
-    // Orden: por cada pedido (sorted by accepted_at), agregar pickup si no recogido, luego delivery
-    const orders = (activeOrders?.length ? activeOrders : [activeOrder])
+    // Usar solo pedidos confirmados por el restaurante en la ruta
+    const orders = (confirmedOrders?.length ? confirmedOrders : (activeOrder?.restaurant_confirmed !== false ? [activeOrder] : []))
       .filter(o => !['delivered', 'cancelled'].includes(o.status))
       .sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at));
 
-    // Construir waypoints: [pickup?, delivery] por pedido
+    if (!orders.length) {
+      onMessage('Esperando confirmación del restaurante para trazar la ruta');
+      return;
+    }
+
     const waypoints = [];
     for (const o of orders) {
       const { pickup, delivery } = getDriverRouteStops(o);
-      // Solo incluir pickup si el pedido aún no fue recogido
       if (pickup && !o.picked_up_at) waypoints.push(pickup);
       if (delivery) waypoints.push(delivery);
     }
 
-    if (waypoints.length === 0) {
+    if (!waypoints.length) {
       onMessage('Faltan coordenadas del pedido para trazar la ruta');
       return;
     }
 
     const buildRoute = (origin) => {
-      // Para rutas multi-stop: llamadas encadenadas tramo a tramo y combinar geometrías
       const segments = [origin, ...waypoints];
-      const fetches = [];
+      const fetches  = [];
       for (let i = 0; i < segments.length - 1; i++) {
-        fetches.push(
-          fetchRouteModel({ origin: segments[i], pickup: null, delivery: segments[i + 1], token })
-        );
+        fetches.push(fetchRouteModel({ origin: segments[i], pickup: null, delivery: segments[i + 1], token }));
       }
       Promise.all(fetches)
         .then((results) => {
@@ -194,11 +219,10 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
           setRouteGeometry(combined);
           setRouteSteps(steps);
           setRouteActive(true);
-          // Resumen del primer tramo
+          centerCycleRef.current = 0;
           const first = results[0];
           if (first) onMessage(formatRouteSummary(first));
-          // Activar overview para ver toda la ruta
-          setCenterSignal('overview');
+          setCenterSignal('nav'); // entrar directo en nav al activar ruta
         })
         .catch((error) => {
           setRouteGeometry(null);
@@ -217,31 +241,87 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
       );
       return;
     }
-
     buildRoute(waypoints[0]);
-  }, [activeOrder, activeOrders, myPosition, onMessage, token]);
+  }, [activeOrder, confirmedOrders, myPosition, onMessage, token]);
+
+  // ── Rerouting silencioso ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (!routeActive || !routeGeometry?.length || !myPosition) return;
+
+    const now = Date.now();
+    if (now - lastRerouteRef.current < REROUTE_COOLDOWN) return;
+
+    // Encontrar el punto más cercano de la ruta
+    let minDist = Infinity;
+    for (const pt of routeGeometry) {
+      const d = haversineMeters(myPosition.lat, myPosition.lng, pt.lat, pt.lng);
+      if (d < minDist) minDist = d;
+    }
+
+    if (minDist > REROUTE_DIST_M) {
+      lastRerouteRef.current = now;
+      console.log(`[reroute] desviación ${Math.round(minDist)}m — recalculando`);
+      openRoadRouteApi();
+    }
+  }, [myPosition?.lat, myPosition?.lng, routeActive, routeGeometry, openRoadRouteApi]);
 
   const handleToggleRoute = useCallback(() => {
     if (routeActive) {
-      // Desactivar: limpiar ruta y volver a modo nav libre
       setRouteActive(false);
       setRouteGeometry(null);
       setRouteSteps([]);
       setCenterMode('nav');
       centerModeRef.current = 'nav';
-      setCenterSignal('nav');
+      centerCycleRef.current = 0;
+      setCenterSignal('free');
       return;
     }
-    // Activar: calcular ruta
     openRoadRouteApi();
-  }, [routeActive, openRoadRouteApi]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [routeActive, openRoadRouteApi]);
+
+  // ── Preview de ruta de oferta ─────────────────────────────────────────────
+  const openOfferRoutePreview = useCallback(async (offer) => {
+    if (!offer?.restaurantLat || !offer?.customerLat) return;
+
+    const key = getOfferRouteCacheKey(offer);
+    const cached = offerRouteCache.get(key);
+    if (cached && Date.now() - cached.ts < OFFER_ROUTE_CACHE_MS) {
+      setOfferRouteGeometry(cached.geometry);
+      return;
+    }
+
+    setOfferRouteLoading(true);
+    try {
+      const pickup   = { lat: Number(offer.restaurantLat), lng: Number(offer.restaurantLng) };
+      const delivery = { lat: Number(offer.customerLat),   lng: Number(offer.customerLng)   };
+      const data = await fetchRouteModel({ origin: pickup, pickup: null, delivery, token });
+      if (data?.geometry?.length) {
+        offerRouteCache.set(key, { geometry: data.geometry, ts: Date.now() });
+        setOfferRouteGeometry(data.geometry);
+      }
+    } catch (_) {
+      setOfferRouteGeometry(null);
+    } finally {
+      setOfferRouteLoading(false);
+    }
+  }, [token]);
+
+  // Ruta completa (posición actual + oferta encadenada a pedidos confirmados)
+  const openFullOfferRoute = useCallback(async (offer) => {
+    if (!offer?.restaurantLat) return;
+    setShowFullOfferRoute(v => !v);
+    // La ruta completa se calcula combinando los waypoints confirmados + los de la oferta
+    // Se dibuja en el mapa como preview temporal (no activa la ruta del driver)
+  }, []);
+
+  const closeOfferPreview = useCallback(() => {
+    setOfferRouteGeometry(null);
+    setShowFullOfferRoute(false);
+  }, []);
 
   const openGoogleNavigation = useCallback(() => {
     const target = getGoogleNavigationTarget(activeOrder);
-    if (!target) {
-      onMessage('Faltan coordenadas para navegar');
-      return;
-    }
+    if (!target) { onMessage('Faltan coordenadas para navegar'); return; }
 
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     if (isIOS) {
@@ -251,41 +331,33 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
       setTimeout(() => window.open(buildGoogleMapsWebUrl(target), '_blank', 'noopener'), 500);
       return;
     }
-
     window.location.href = buildGoogleNavigationUrl(target);
   }, [activeOrder, onMessage]);
 
   const handleZoneConfirm = useCallback((params) => {
     createZoneReport(params, token)
-      .then(() => {
-        setNavMode(null);
-        refreshZones();
-        onMessage('Zona reportada ✓');
-      })
+      .then(() => { setNavMode(null); refreshZones(); onMessage('Zona reportada ✓'); })
       .catch((error) => onMessage(getErrorMessage(error, 'No se pudo reportar la zona')));
   }, [onMessage, refreshZones, token]);
 
   const handleImpassableConfirm = useCallback((ways) => {
     const pos = myPosition || { lat: 0, lng: 0 };
     submitImpassableRoads({ position: pos, ways, token })
-      .then(() => {
-        setNavMode(null);
-        onMessage(`${ways.length} calle(s) reportada(s) ✓`);
-      })
+      .then(() => { setNavMode(null); onMessage(`${ways.length} calle(s) reportada(s) ✓`); })
       .catch((error) => onMessage(getErrorMessage(error, 'No se pudieron reportar las calles')));
   }, [myPosition, onMessage, token]);
 
   const handlePreferenceConfirm = useCallback((ways) => {
     submitRoadPreferences({ ways, token })
-      .then(() => {
-        setNavMode(null);
-        onMessage(`${ways.length} preferencia(s) guardada(s) ✓`);
-      })
+      .then(() => { setNavMode(null); onMessage(`${ways.length} preferencia(s) guardada(s) ✓`); })
       .catch((error) => onMessage(getErrorMessage(error, 'No se pudieron guardar las preferencias')));
   }, [onMessage, token]);
 
-  // Todos los stops de pedidos activos — para fitBounds del overview multi-stop
-  const allStops = (activeOrders?.length ? activeOrders : (activeOrder ? [activeOrder] : []))
+  // allStops: solo de pedidos confirmados por restaurante
+  const allStops = (confirmedOrders?.length
+    ? confirmedOrders
+    : (activeOrder?.restaurant_confirmed !== false && activeOrder ? [activeOrder] : [])
+  )
     .filter(o => !['delivered', 'cancelled'].includes(o.status))
     .flatMap(o => {
       const pts = [];
@@ -298,24 +370,15 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
 
   return {
     counters,
-    customPin,
-    setCustomPin,
-    pinAddress,
-    loadingPin,
-    routeGeometry,
-    routeSteps,
-    navHeadingDeg,
-    setNavHeadingDeg,
-    centerSignal,
-    setCenterSignal,
-    centerMode,
-    activeZones,
-    activeImpassable,
-    myPreferences,
-    navMode,
-    setNavMode,
-    mapInstance,
-    setMapInstance,
+    customPin, setCustomPin,
+    pinAddress, loadingPin,
+    routeGeometry, routeSteps,
+    navHeadingDeg, setNavHeadingDeg,
+    centerSignal, setCenterSignal,
+    centerMode, centerCycleRef,
+    activeZones, activeImpassable, myPreferences,
+    navMode, setNavMode,
+    mapInstance, setMapInstance,
     lastInteractionRef,
     routeActive,
     handleToggleRoute,
@@ -328,5 +391,12 @@ export function useDriverHomeRuntime({ token, availability, activeOrder, activeO
     handleZoneConfirm,
     handleImpassableConfirm,
     handlePreferenceConfirm,
+    // Oferta preview
+    offerRouteGeometry,
+    offerRouteLoading,
+    showFullOfferRoute,
+    openOfferRoutePreview,
+    openFullOfferRoute,
+    closeOfferPreview,
   };
 }
