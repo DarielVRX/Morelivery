@@ -37,6 +37,32 @@ export default function CustomerHome({ onOrderUpdate } = {}) {
   const [dismissedSugg, setDismissedSugg] = useState(new Set());
   const [msg, setMsg] = useState('');
 
+  // Registrar loadSuggestions en el bus SSE para recibir updates de CustomerOrders
+  useEffect(() => {
+    if (!onOrderUpdate) return;
+    // onOrderUpdate es la función que App.jsx conecta al registerRef
+    // Cuando CustomerOrders recibe un SSE order_update, llama onOrderUpdate
+    // Aquí hacemos que eso dispare loadSuggestions
+    // Trick: sobrescribimos la referencia usando un efecto de limpieza
+    const handle = () => loadSuggestions();
+    // Señalizar a App que nuestro handler está disponible
+    // App pasa: onOrderUpdate={() => registerRef.current.onSuggUpdate?.()}
+    // Necesitamos setear registerRef.current.onSuggUpdate = loadSuggestions
+    // Pero no tenemos acceso directo al ref desde aquí.
+    // Solución: onOrderUpdate() ES el setter — App lo conecta al ref automáticamente
+    // PERO necesitamos que App exponga un setter. Cambio de diseño:
+    // onOrderUpdate no es un dispatcher sino un REGISTRADOR
+    // App pasa: onOrderUpdate={(fn) => { registerRef.current.onSuggUpdate = fn }}
+    if (typeof onOrderUpdate === 'function') {
+      // Si onOrderUpdate acepta un argumento fn, es un registrador
+      // Si no, es un dispatcher directo (fallback)
+      try { onOrderUpdate(handle); } catch (_) {}
+    }
+    return () => {
+      try { if (typeof onOrderUpdate === 'function') onOrderUpdate(null); } catch (_) {}
+    };
+  }, [auth.token]);
+
   // Cargar dirección guardada desde sessionDelivery cuando el token está disponible
   useEffect(() => {
     if (!auth.token) return;
@@ -73,7 +99,6 @@ export default function CustomerHome({ onOrderUpdate } = {}) {
         order.suggestion_status === 'pending_customer' && (order.suggestion_items || []).length > 0
       );
       setPendingSugg(pending);
-      onOrderUpdate?.();
     } catch (_) {}
   }
 

@@ -5,6 +5,7 @@
  * Al hacer "Ir a pagar" guarda en pendingOrder y navega a /customer/pagos.
  */
 
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../hooks/useCart';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,10 +33,17 @@ function EmptyState() {
   );
 }
 
-export default function CustomerCart() {
+export default function CustomerCart({ onOrderUpdate } = {}) {
   const navigate = useNavigate();
   const { auth } = useAuth();
   const { cart, adjustItem, clearCart } = useCart();
+
+  // Registrar en el bus SSE — fuerza re-lectura del carrito desde localStorage
+  useEffect(() => {
+    if (typeof onOrderUpdate !== 'function') return;
+    onOrderUpdate(() => { /* useCart ya es reactivo via useState — no-op */ });
+    return () => onOrderUpdate(null);
+  }, [onOrderUpdate]);
 
   if (!cart || cart.items.length === 0) {
     return <EmptyState />;

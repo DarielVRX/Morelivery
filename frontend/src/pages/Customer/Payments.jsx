@@ -30,7 +30,7 @@ function CardIcon() {
 function formatCard(v)   { return v.replace(/\D/g,'').slice(0,16).replace(/(\d{4})(?=\d)/g,'$1 '); }
 function formatExpiry(v) { return v.replace(/\D/g,'').slice(0,4).replace(/(\d{2})(\d)/,'$1/$2'); }
 
-export default function CustomerPayments() {
+export default function CustomerPayments({ onOrderUpdate } = {}) {
   const { auth }  = useAuth();
   const navigate  = useNavigate();
   const { cart, clearCart } = useCart();
@@ -60,6 +60,19 @@ export default function CustomerPayments() {
   const initialPos = deliveryLat
   ? { lat: deliveryLat, lng: deliveryLng }
   : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
+
+  // Registrar en el bus SSE omnidireccional
+  useEffect(() => {
+    if (typeof onOrderUpdate !== 'function') return;
+    // Cuando Orders recibe un SSE, recargamos el pendingOrder desde storage
+    // (el pedido pudo haber cambiado de estado)
+    const refresh = () => {
+      const d = readPendingOrder();
+      if (d) setDraft(d);
+    };
+    onOrderUpdate(refresh);
+    return () => onOrderUpdate(null);
+  }, [onOrderUpdate]);
 
   // GPS para el AddressSearchBar
   useEffect(() => {

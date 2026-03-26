@@ -142,8 +142,10 @@ export default function CustomerOrders({ registerRef } = {}) {
         auth.token,
         (data) => {
           loadDataRef.current?.();
-          // Notificar a CustomerHome para recargar sugerencias
+          // Notificar a todos los consumidores SSE
           registerRef?.current?.onSuggUpdate?.();
+          registerRef?.current?.onPaymentUpdate?.();
+          registerRef?.current?.onCartUpdate?.();
           if (data?.action === 'suggestion_received') loadDataRef.current?.();
         },
         ({ orderId, lat, lng }) => setDriverPos(p => ({ ...p, [orderId]: { lat, lng } })),
@@ -173,8 +175,11 @@ export default function CustomerOrders({ registerRef } = {}) {
         const note = window.prompt('Motivo de cancelación (obligatorio):');
         if (!note?.trim()) return;
         try {
-          await apiFetch(`/orders/${orderId}/cancel`, { method:'PATCH', body: JSON.stringify({ note }) }, auth.token);
+          const res = await apiFetch(`/orders/${orderId}/cancel`, { method:'PATCH', body: JSON.stringify({ note }) }, auth.token);
           loadActive();
+          if (res?.suspended) {
+            setMsg('⚠️ Tu cuenta ha sido suspendida por cancelar un pedido después de 5 minutos. Contacta a soporte para reactivarla.');
+          }
         } catch (e) { setMsg(e.message); }
       }
 

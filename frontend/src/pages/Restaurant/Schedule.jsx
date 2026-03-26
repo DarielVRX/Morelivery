@@ -82,6 +82,51 @@ function PrepTimeDefault({ value, onChange, onSave, saving, saved }) {
         style={{ opacity: saving ? 0.65 : 1 }}>
         {saving ? 'Guardando…' : 'Guardar como predeterminado'}
       </button>
+      {/* ── Clientes frecuentes ──────────────────────────────────────── */}
+      <div style={{
+        marginTop: '1rem',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+        borderRadius: 10,
+        padding: '0.875rem 1rem',
+      }}>
+        <p style={{
+          fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-tertiary)',
+          textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem',
+        }}>
+          Clientes frecuentes
+        </p>
+        <label style={{
+          display: 'flex', alignItems: 'flex-start', gap: '0.65rem', cursor: 'pointer',
+        }}>
+          <input
+            type="checkbox"
+            checked={allowFrequent}
+            disabled={allowFrequentSaving}
+            onChange={e => saveAllowFrequent(e.target.checked)}
+            style={{ marginTop: 3, accentColor: 'var(--brand)', flexShrink: 0 }}
+          />
+          <div>
+            <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
+              Permitir que clientes frecuentes superen el límite de 1 pedido activo
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+              Por defecto los clientes solo pueden tener 1 pedido activo a la vez.
+              Activar esto elimina esa restricción para quienes ya tienen 5+ pedidos en efectivo o 10+ en total.
+              {allowFrequentSaving && <span style={{ color: 'var(--text-tertiary)', marginLeft: '0.5rem' }}>Guardando…</span>}
+            </div>
+          </div>
+        </label>
+        {allowFrequentMsg && (
+          <p style={{
+            fontSize: '0.78rem', marginTop: '0.4rem',
+            color: allowFrequentMsg.startsWith('Error') ? 'var(--error)' : 'var(--success)',
+          }}>
+            {allowFrequentMsg.startsWith('Error') ? '' : '✓ '}{allowFrequentMsg}
+          </p>
+        )}
+      </div>
+
     </div>
   );
 }
@@ -95,6 +140,11 @@ export default function RestaurantSchedule() {
 
   // Límite de efectivo
   const [cashLimit,       setCashLimit]       = useState('');
+
+  // Clientes frecuentes
+  const [allowFrequent,       setAllowFrequent]       = useState(false);
+  const [allowFrequentSaving, setAllowFrequentSaving] = useState(false);
+  const [allowFrequentMsg,    setAllowFrequentMsg]    = useState('');
   const [cashLimitSaving, setCashLimitSaving] = useState(false);
   const [cashLimitMsg,    setCashLimitMsg]    = useState('');
 
@@ -112,6 +162,9 @@ export default function RestaurantSchedule() {
           if (maxCash && maxCash > 0) {
             setCashLimit(String(maxCash / 100));
           }
+          if (d.restaurant.allow_frequent_customers != null) {
+            setAllowFrequent(Boolean(d.restaurant.allow_frequent_customers));
+          }
         }
       })
       .catch(() => {});
@@ -127,6 +180,23 @@ export default function RestaurantSchedule() {
       setTimeout(() => setPrepSaved(false), 2500);
     } catch (_) {}
     finally { setPrepSaving(false); }
+  }
+
+  async function saveAllowFrequent(val) {
+    setAllowFrequentSaving(true);
+    setAllowFrequentMsg('');
+    try {
+      await apiFetch('/restaurants/my/frequent-customers',
+        { method: 'PATCH', body: JSON.stringify({ allow: val }) },
+        auth.token);
+      setAllowFrequent(val);
+      setAllowFrequentMsg(val ? 'Activado.' : 'Desactivado.');
+      setTimeout(() => setAllowFrequentMsg(''), 2500);
+    } catch (e) {
+      setAllowFrequentMsg(e.message || 'Error al guardar');
+    } finally {
+      setAllowFrequentSaving(false);
+    }
   }
 
   async function saveCashLimit() {

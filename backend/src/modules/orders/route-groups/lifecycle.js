@@ -117,27 +117,69 @@ export function registerLifecycleRoutes(router, deps) {
     try {
       const { note } = req.body || {};
       if (!note?.trim()) return next(new AppError(400, 'El motivo de cancelación es obligatorio'));
-      const check = await query(`SELECT id, status FROM orders WHERE id=$1 AND customer_id=$2`, [req.params.id, req.user.userId]);
+
+      const check = await query(
+        `SELECT id, status, created_at FROM orders WHERE id=$1 AND customer_id=$2`,
+        [req.params.id, req.user.userId]
+      );
       if (check.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
+
       const cancellable = ['created', 'pending_driver', 'assigned', 'accepted'];
-      if (!cancellable.includes(check.rows[0].status)) return next(new AppError(409, 'El pedido ya no puede cancelarse en este estado'));
+      if (!cancellable.includes(check.rows[0].status)) {
+        return next(new AppError(409, 'El pedido ya no puede cancelarse en este estado'));
+      }
+
+      // Verificar si han pasado más de 5 minutos desde la creación del pedido
+      const createdAt   = new Date(check.rows[0].created_at);
+      const elapsedMs   = Date.now() - createdAt.getTime();
+      const LATE_CANCEL_MS = 5 * 60 * 1000; // 5 minutos
+      const isLateCancel = elapsedMs > LATE_CANCEL_MS;
+
       const result = await query(
         `UPDATE orders SET status='cancelled', restaurant_note=$3, cancelled_at=NOW(), updated_at=NOW()
          WHERE id=$1 AND customer_id=$2 RETURNING *`,
-        [req.params.id, req.user.userId, `[CANCELADO POR CLIENTE] ${note.trim()}`]
+        [req.params.id, req.user.userId, `[CANCELADO POR CLIENTE${isLateCancel ? ' - TARDÍO' : ''}] ${note.trim()}`]
       );
       await notifyOrderParties(req.params.id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
 
       const prevStatus = check.rows[0].status;
       if (['accepted', 'preparing'].includes(prevStatus)) {
         try {
-          const ri = await query(`SELECT r.owner_user_id FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`, [req.params.id]);
+          const ri = await query(
+            `SELECT r.owner_user_id FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
+            [req.params.id]
+          );
           if (ri.rowCount > 0) {
-            sseHub.sendToUser(ri.rows[0].owner_user_id, 'order_cancelled_preparing', { orderId: req.params.id, prevStatus, note: note.trim() });
+            sseHub.sendToUser(ri.rows[0].owner_user_id, 'order_cancelled_preparing', {
+              orderId: req.params.id, prevStatus, note: note.trim()
+            });
           }
         } catch (_) {}
       }
-      return res.json({ order: result.rows[0] });
+
+      // Bloqueo permanente por cancelación tardía (>5min desde creación)
+      if (isLateCancel) {
+        try {
+          await query(
+            `UPDATE users SET status='suspended' WHERE id=$1 AND status='active'`,
+            [req.user.userId]
+          );
+          console.log(`🚫 [bloqueo.cancelacion_tardia] userId=${req.user.userId.slice(0,8)} orderId=${req.params.id.slice(0,8)} elapsed=${Math.round(elapsedMs/1000)}s`);
+          // Notificar al cliente via SSE para que haga logout automático
+          sseHub.sendToUser(req.user.userId, 'account_suspended', {
+            reason: 'late_cancellation',
+            message: 'Tu cuenta ha sido suspendida por cancelar un pedido tarde. Contacta soporte para reactivarla.',
+          });
+        } catch (suspendErr) {
+          console.error('[bloqueo.cancelacion_tardia] error al suspender:', suspendErr.message);
+        }
+      }
+
+      return res.json({
+        order: result.rows[0],
+        ...(isLateCancel ? { suspended: true, suspension_reason: 'late_cancellation' } : {}),
+      });
     } catch (error) { return next(error); }
   });
 }
+
