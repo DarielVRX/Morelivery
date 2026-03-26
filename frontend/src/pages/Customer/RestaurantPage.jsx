@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { readPendingOrder, savePendingOrder, schedulePendingOrderExpiry, cancelPendingOrderExpiry } from '../../utils/pendingOrder';
+import { useCart } from '../../hooks/useCart';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -34,6 +35,7 @@ export default function RestaurantPage() {
 
   const isCustomer = auth.user?.role === 'customer';
   const hasAddress = Boolean(auth.user?.address && auth.user.address !== 'address-pending');
+  const { addItem } = useCart();
   const initialPos = searchPos
   ? { lat: searchPos.lat, lng: searchPos.lng }
   : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
@@ -381,9 +383,8 @@ export default function RestaurantPage() {
         </div>
       </div>
 
-      {/* Content — padded to clear fixed bottom bar */}
-      <div style={{ padding:'0.875rem 1rem',
-        paddingBottom: isCustomer && !isClosed ? 'calc(var(--order-bar-h, 160px) + 0.5rem)' : '1rem'}}>
+      {/* Content */}
+      <div style={{ padding:'0.875rem 1rem' }}>
 
         {msg && <p className="flash flash-error" style={{ marginBottom:'0.75rem' }}>{msg}</p>}
 
@@ -460,12 +461,28 @@ export default function RestaurantPage() {
         )}
       </div>
 
-      {/* Sticky bottom bar */}
+      {/* Sticky bar — sticky en desktop, fixed en mobile */}
       {isCustomer && !isClosed && (
-        <div id="order-bar" style={{ position:'fixed', bottom:0, left:0, right:0, zIndex:50,
-          background:'var(--bg-card)', borderTop:'1px solid var(--border)',
-          padding:'0.75rem 1rem', paddingBottom:'calc(0.75rem + var(--nav-h-mobile) + env(safe-area-inset-bottom, 0px))',
-          boxShadow:'0 -4px 20px rgba(0,0,0,0.1)' }}>
+        <div id="order-bar" style={{
+          position: 'sticky',
+          bottom: 0,
+          zIndex: 50,
+          background: 'var(--bg-card)',
+          borderTop: '1px solid var(--border)',
+          padding: '0.75rem 1rem',
+          boxShadow: '0 -4px 20px rgba(0,0,0,0.1)',
+        }}>
+          <style>{`
+            @media (max-width: 767px) {
+              #order-bar {
+                position: fixed !important;
+                bottom: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                padding-bottom: calc(0.75rem + var(--nav-h-mobile, 0px) + env(safe-area-inset-bottom, 0px)) !important;
+              }
+            }
+          `}</style>
 
           {searchPos?.label && (
             <div style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginBottom:'0.5rem',
@@ -488,30 +505,66 @@ export default function RestaurantPage() {
             </p>
           )}
 
-          <button className="btn-primary"
-            style={{ width:'100%', fontSize:'1rem', fontWeight:800, padding:'0.75rem' }}
-            disabled={itemCount === 0 || tooFar || !isCustomer}
-            onClick={() => {
-              savePendingOrder({
-                restaurantId:     id,
-                items:            Object.entries(selectedItems).filter(([,q])=>Number(q)>0).map(([menuItemId,quantity])=>({ menuItemId, quantity:Number(quantity) })),
-                items_detail:     Object.entries(selectedItems).filter(([,q])=>Number(q)>0).map(([menuItemId,quantity]) => {
-                                    const item = menu.find(m => String(m.id) === String(menuItemId));
-                                    return { menuItemId, quantity: Number(quantity), name: item?.name || '', price_cents: item?.price_cents || 0 };
-                                  }),
-                subtotal_cents:   subtotal,
-                tip_cents:        tipCents,
-                delivery_lat:     searchPos?.lat ?? gpsPos?.lat,
-                delivery_lng:     searchPos?.lng ?? gpsPos?.lng,
-                delivery_address: searchPos?.label || '',
-                delivery_from_gps: !searchPos && !!gpsPos,
-              });
-              navigate('/customer/pagos');
-            }}>
-            {itemCount === 0 ? 'Selecciona productos'
-              : tooFar ? `Tienda fuera de rango (${distKm?.toFixed(1)}km)`
-              : `Ir a pagar · ${fmt(total)}`}
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            {/* Agregar al carrito — 30% */}
+            <button
+              className="btn-primary"
+              style={{
+                flex: '0 0 30%', fontSize: '0.8rem', fontWeight: 700,
+                padding: '0.75rem 0.25rem',
+                background: 'var(--bg-raised)', color: 'var(--text-primary)',
+                border: '1.5px solid var(--border)',
+              }}
+              disabled={itemCount === 0 || tooFar}
+              onClick={() => {
+                const items = Object.entries(selectedItems)
+                  .filter(([, qty]) => Number(qty) > 0);
+                if (items.length === 0) return;
+                items.forEach(([menuItemId, qty]) => {
+                  const menuItem = menu.find(m => String(m.id) === String(menuItemId));
+                  if (!menuItem) return;
+                  // Agregar qty unidades (una a la vez para respetar la lógica del hook)
+                  for (let i = 0; i < Number(qty); i++) {
+                    addItem(id, {
+                      menuItemId: menuItemId,
+                      name:        menuItem.name,
+                      price_cents: menuItem.price_cents,
+                    });
+                  }
+                });
+                setSelectedItems({});
+                setToast({ msg: 'Productos agregados al carrito', type: 'info' });
+                setTimeout(() => setToast(null), 2500);
+              }}>
+              🛒 Al carrito
+            </button>
+
+            {/* Ir a pagar — 70% */}
+            <button className="btn-primary"
+              style={{ flex: '0 0 calc(70% - 0.5rem)', fontSize: '0.95rem', fontWeight: 800, padding: '0.75rem' }}
+              disabled={itemCount === 0 || tooFar || !isCustomer}
+              onClick={() => {
+                savePendingOrder({
+                  restaurantId:      id,
+                  items:             Object.entries(selectedItems).filter(([, q]) => Number(q) > 0).map(([menuItemId, quantity]) => ({ menuItemId, quantity: Number(quantity) })),
+                  items_detail:      Object.entries(selectedItems).filter(([, q]) => Number(q) > 0).map(([menuItemId, quantity]) => {
+                                       const item = menu.find(m => String(m.id) === String(menuItemId));
+                                       return { menuItemId, quantity: Number(quantity), name: item?.name || '', price_cents: item?.price_cents || 0 };
+                                     }),
+                  subtotal_cents:    subtotal,
+                  tip_cents:         tipCents,
+                  delivery_lat:      searchPos?.lat ?? gpsPos?.lat,
+                  delivery_lng:      searchPos?.lng ?? gpsPos?.lng,
+                  delivery_address:  searchPos?.label || '',
+                  delivery_from_gps: !searchPos && !!gpsPos,
+                });
+                navigate('/customer/pagos');
+              }}>
+              {itemCount === 0 ? 'Selecciona productos'
+                : tooFar ? `Fuera de rango (${distKm?.toFixed(1)}km)`
+                : `Ir a pagar · ${fmt(total)}`}
+            </button>
+          </div>
         </div>
       )}
 
@@ -531,3 +584,4 @@ export default function RestaurantPage() {
     </div>
   );
 }
+

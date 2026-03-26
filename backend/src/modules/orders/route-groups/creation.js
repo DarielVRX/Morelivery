@@ -103,6 +103,28 @@ export function registerCreationRoutes(router, deps) {
       const paymentMethod = payment_method || 'cash';
       const tipCents = Number(tip_cents) || 0;
 
+      // Validar límite de efectivo
+      if (paymentMethod === 'cash') {
+        try {
+          const cashLimitRow = await query(
+            'SELECT max_cash_cents FROM restaurants WHERE id = $1',
+            [restaurantId]
+          );
+          const maxCash = cashLimitRow.rows[0]?.max_cash_cents;
+          // 0 o NULL = sin límite configurado
+          if (maxCash && maxCash > 0) {
+            const grandTotal = totalCents + Math.round(totalCents * SERVICE_FEE_PCT) + Math.round(totalCents * DELIVERY_FEE_PCT) + Number(tip_cents || 0);
+            if (grandTotal > maxCash) {
+              const fmtLimit = `$${(maxCash / 100).toFixed(2)}`;
+              return next(new AppError(409, `El pedido supera el límite de efectivo de esta tienda (${fmtLimit}). Usa tarjeta o reduce el total.`));
+            }
+          }
+        } catch (e) {
+          if (!isMissingColumnError(e)) throw e;
+          // Columna no existe aún — omitir validación silenciosamente
+        }
+      }
+
       const orderResult = await query(
         `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address, delivery_lat, delivery_lng, restaurant_lat, restaurant_lng, estimated_volume_liters)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
@@ -143,3 +165,4 @@ export function registerCreationRoutes(router, deps) {
     } catch (error) { return next(error); }
   });
 }
+
