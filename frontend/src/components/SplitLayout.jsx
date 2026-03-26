@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import PullToRefresh from './PullToRefresh';
 
-export default function SplitLayout({ homeContent, ordersContent, alertsContent, totalAlerts = 0, onRefresh, onCloseMobileDrawerRef }) {
+export default function SplitLayout({ homeContent, ordersContent, alertsContent, ordersLabel = '📦 Pedidos', totalAlerts = 0, onRefresh, onCloseMobileDrawerRef }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeTab, setActiveTab]   = useState('orders');
 
@@ -34,7 +34,7 @@ export default function SplitLayout({ homeContent, ordersContent, alertsContent,
           borderBottom: activeTab === 'orders' ? '2px solid var(--brand)' : '2px solid transparent',
           color: activeTab === 'orders' ? 'var(--brand)' : 'var(--text-secondary)',
         }}>
-          📦 Pedidos
+          {ordersLabel}
         </button>
         <button onClick={() => setActiveTab('alerts')} style={{
           flex: 1, padding: '0.6rem 0', fontSize: '0.78rem', fontWeight: 700,
@@ -195,3 +195,4 @@ export default function SplitLayout({ homeContent, ordersContent, alertsContent,
     </PullToRefresh>
   );
 }
+

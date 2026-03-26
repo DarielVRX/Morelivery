@@ -54,22 +54,23 @@ export function useCart() {
   }, []);
 
   /**
-   * Agrega 1 unidad de un item al carrito.
+   * Agrega un item al carrito sumando `item.quantity` unidades (default: 1).
    * Si el restaurantId difiere del actual, reemplaza el carrito completo.
    * @param {string} restaurantId
-   * @param {{ menuItemId: string, name: string, price_cents: number }} item
+   * @param {{ menuItemId: string, name: string, price_cents: number, quantity?: number }} item
    */
   const addItem = useCallback((restaurantId, item) => {
+    const qty = Math.max(1, Number(item.quantity) || 1);
     setCartState(prev => {
       let items = (prev?.restaurantId === restaurantId) ? [...prev.items] : [];
 
       const idx = items.findIndex(i => i.menuItemId === item.menuItemId);
       if (idx >= 0) {
-        items[idx] = { ...items[idx], quantity: items[idx].quantity + 1 };
+        items[idx] = { ...items[idx], quantity: items[idx].quantity + qty };
       } else {
         items.push({
           menuItemId:  item.menuItemId,
-          quantity:    1,
+          quantity:    qty,
           name:        item.name,
           price_cents: item.price_cents,
         });
