@@ -93,7 +93,7 @@ export default function CustomerPayments() {
       const lat  = d.delivery_lat ?? null;
       const lng  = d.delivery_lng ?? null;
       if (!lat || !lng) {
-        const sessionPos = readSessionDelivery();
+        const sessionPos = readSessionDelivery(auth.token);
         if (sessionPos) {
           setDeliveryAddress(sessionPos.label || '');
           setDeliveryLat(sessionPos.lat);
@@ -111,7 +111,7 @@ export default function CustomerPayments() {
       setFromGps(!!d.delivery_from_gps);
       setTipCents(d.tip_cents || 0);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [auth.token]); // rehidratar cuando el token esté disponible
 
   useEffect(() => {
     apiFetch('/payments/methods', {}, auth.token)
@@ -141,7 +141,7 @@ export default function CustomerPayments() {
     setDeliveryLat(lat);
     setDeliveryLng(lng);
     setFromGps(false);
-    if (lat && lng) saveSessionDelivery({ lat, lng, label });
+    if (lat && lng) saveSessionDelivery({ lat, lng, label }, auth.token);
     savePendingOrder({
       ...draft,
       delivery_address:  label,
