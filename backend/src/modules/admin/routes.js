@@ -8,6 +8,7 @@ import { getParamsWithMeta, saveParam } from '../../engine/params.js';
 import { sseHub } from '../events/hub.js';
 import webpush from 'web-push';
 import { sendPushToUser } from '../notifications/pushSubscription.js';
+import exportRoutes from './export.js';
 
 // Configurar VAPID (asegúrate de tener las variables de entorno)
 const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
@@ -23,6 +24,8 @@ if (vapidPublicKey && vapidPrivateKey) {
 }
 
 const router = Router();
+
+router.use('/orders', exportRoutes);
 
 /* ── GET /admin/orders ── */
 router.get('/orders', authenticate, authorize(['admin']), async (req, res, next) => {
