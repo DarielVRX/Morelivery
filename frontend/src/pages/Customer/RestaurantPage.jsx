@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { readPendingOrder, savePendingOrder, schedulePendingOrderExpiry, cancelPendingOrderExpiry } from '../../utils/pendingOrder';
 import { useCart } from '../../hooks/useCart';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -129,22 +129,6 @@ export default function RestaurantPage() {
   const tooFar   = distKm !== null && distKm > 5;
   const isClosed = restaurant?.is_open === false;
   const canOrder = isCustomer && hasAddress && !isClosed && !tooFar && restLat !== null;
-
-  // Measure order bar height so content isn't hidden behind fixed bar
-  useEffect(() => {
-    function update() {
-      const bar = document.getElementById('order-bar');
-      if (bar) document.documentElement.style.setProperty('--order-bar-h', bar.offsetHeight + 'px');
-    }
-    update();
-    const bar = document.getElementById('order-bar');
-    const obs = bar && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
-    if (obs) obs.observe(bar);
-    return () => {
-      obs?.disconnect();
-      document.documentElement.style.removeProperty('--order-bar-h');
-    };
-  }, [isCustomer, isClosed, searchPos]);
 
   async function submitRating() {
     if (!ratingOrder || ratingRestStar < 1) return;
@@ -523,14 +507,12 @@ export default function RestaurantPage() {
                 items.forEach(([menuItemId, qty]) => {
                   const menuItem = menu.find(m => String(m.id) === String(menuItemId));
                   if (!menuItem) return;
-                  // Agregar qty unidades (una a la vez para respetar la lógica del hook)
-                  for (let i = 0; i < Number(qty); i++) {
-                    addItem(id, {
-                      menuItemId: menuItemId,
-                      name:        menuItem.name,
-                      price_cents: menuItem.price_cents,
-                    });
-                  }
+                  addItem(id, {
+                    menuItemId:  menuItemId,
+                    name:        menuItem.name,
+                    price_cents: menuItem.price_cents,
+                    quantity:    Number(qty),
+                  });
                 });
                 setSelectedItems({});
                 setToast({ msg: 'Productos agregados al carrito', type: 'info' });

@@ -9,7 +9,6 @@ import PullToRefresh from './components/PullToRefresh';
 import SplitLayout from './components/SplitLayout';
 import AlertsPanel from './components/AlertsPanel';
 import AuthPage from './pages/AuthPage';
-import CustomerOrders   from './pages/Customer/Orders';
 import CustomerCart     from './components/CustomerCart';
 import DriverOrders     from './pages/Driver/Orders';
 import RestaurantOrders from './pages/Restaurant/Orders';
@@ -254,6 +253,7 @@ function CustomerLayout() {
     <ProtectedRole role="customer">
       <SplitLayout
         onRefresh={() => window.location.reload()}
+        ordersLabel="🛒 Carrito"
         ordersContent={<CustomerCart />}
         homeContent={
           <Suspense fallback={<Spinner />}>
