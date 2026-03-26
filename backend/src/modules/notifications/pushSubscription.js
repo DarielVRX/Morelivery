@@ -1,5 +1,5 @@
 import webpush from 'web-push';
-import pool from '../../config/db.js';
+import { query } from '../../config/db.js';
 import { env } from '../../config/env.js';
 
 webpush.setVapidDetails(
@@ -15,12 +15,12 @@ webpush.setVapidDetails(
  */
 export async function savePushSubscription(userId, subscription) {
     const { endpoint, keys } = subscription;
-    await pool.query(
-        `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, updated_at)
-        VALUES ($1, $2, $3, $4, NOW())
+    await query(
+        `INSERT INTO push_subscriptions (user_id, endpoint, keys, updated_at)
+        VALUES ($1, $2, $3, NOW())
         ON CONFLICT (endpoint)
-        DO UPDATE SET user_id=$1, p256dh=$3, auth=$4, updated_at=NOW()`,
-                     [userId, endpoint, keys.p256dh, keys.auth],
+        DO UPDATE SET user_id=$1, keys=$3, updated_at=NOW()`,
+                [userId, endpoint, JSON.stringify(keys)],
     );
 }
 
@@ -29,19 +29,19 @@ export async function savePushSubscription(userId, subscription) {
  * Elimina automáticamente suscripciones expiradas (410/404).
  */
 export async function sendPushToUser(userId, payload) {
-    const { rows } = await pool.query(
-        'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=$1',
+    const { rows } = await query(
+        'SELECT endpoint, keys FROM push_subscriptions WHERE user_id=$1',
         [userId],
     );
     const results = await Promise.allSettled(
         rows.map(row =>
         webpush.sendNotification(
-            { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } },
+            { endpoint: row.endpoint, keys: row.keys },
             JSON.stringify(payload),
         ).catch(async err => {
             if (err.statusCode === 410 || err.statusCode === 404) {
                 // Suscripción expirada — limpiar
-                await pool.query('DELETE FROM push_subscriptions WHERE endpoint=$1', [row.endpoint]);
+                await query('DELETE FROM push_subscriptions WHERE endpoint=$1', [row.endpoint]);
             }
             throw err;
         }),
