@@ -17,3 +17,5 @@ ALTER TABLE impassable_reports
 
 -- 4. Índice para búsqueda por nombre (útil para deduplicar por calle)
 CREATE INDEX IF NOT EXISTS idx_impassable_name ON impassable_reports(name) WHERE name IS NOT NULL;
+
+ALTER TABLE impassable_reports ADD COLUMN IF NOT EXISTS way_ids TEXT[];

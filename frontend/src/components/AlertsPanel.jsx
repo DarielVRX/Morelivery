@@ -1,11 +1,5 @@
 // components/AlertsPanel.jsx
-// Panel completo de alertas — reemplaza la página /alertas
-// • Zonas: votar confirm/dismiss, ver pending_edit
-// • Vialidad: confirmar impassable (si ≤50m), eliminar propias
-// • Preferencias: editar, eliminar
-// • Multi-selección: tocar selecciona en mapa, "Ver todas" → fitBounds
-
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { haversineMeters } from '../utils/geo';
 import {
   voteZone, confirmImpassable, deleteImpassable,
@@ -18,24 +12,98 @@ const ZONE_COLORS = {
 };
 const ZONE_LABELS = {
   traffic: '🚦 Tráfico', construction: '🚧 Obra', accident: '🚨 Accidente',
-  flood: '🌊 Inundación', blocked: '⛔ Bloqueada', other: '⚠️ Otro',
+  flood: '🌊 Inundación', blocked: '⛔ Bloqueada', other: '⚠ Otro',
 };
 const ZONE_TYPES = ['traffic', 'construction', 'accident', 'flood', 'blocked', 'other'];
 const PREF_COLORS = { preferred: '#16a34a', difficult: '#f59e0b', avoid: '#ef4444' };
-const PREF_LABELS = { preferred: '⭐ Favorita', difficult: '⚠️ Difícil', avoid: '🚫 Evitar' };
+const PREF_LABELS = { preferred: '⭐ Favorita', difficult: '⚠ Difícil', avoid: '🚫 Evitar' };
 const DUR_LABELS  = { days: '~días', weeks: '~semanas', months: '~meses', permanent: 'Permanente' };
 
-function timeAgo(d) {
-  if (!d) return '';
-  const m = Math.floor((Date.now() - new Date(d)) / 60000);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
+// ── Capa de selección en mapa ─────────────────────────────────────────────────
+const SEL_SRC   = 'alerts-sel-src';
+const SEL_BORDER = 'alerts-sel-border';
+const SEL_LINE  = 'alerts-sel-line';
+
+function ensureSelectionLayer(map) {
+  if (!map || !map.isStyleLoaded()) return;
+  if (!map.getSource(SEL_SRC)) {
+    map.addSource(SEL_SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({ id: SEL_BORDER, type: 'line', source: SEL_SRC,
+      paint: { 'line-color': '#fff', 'line-width': 9, 'line-opacity': 0.7 },
+      layout: { 'line-cap': 'round', 'line-join': 'round' } });
+    map.addLayer({ id: SEL_LINE, type: 'line', source: SEL_SRC,
+      paint: { 'line-color': ['get', 'color'], 'line-width': 5, 'line-opacity': 1 },
+      layout: { 'line-cap': 'round', 'line-join': 'round' } });
+  }
 }
 
+function updateSelectionLayer(selectedKeys, impassable, preferences) {
+  const map = window.__map;
+  if (!map) return;
+
+  // Inicializar capa si no existe
+  if (!map.getSource(SEL_SRC)) {
+    if (!map.isStyleLoaded()) {
+      map.once('load', () => updateSelectionLayer(selectedKeys, impassable, preferences));
+      return;
+    }
+    ensureSelectionLayer(map);
+  }
+
+  const features = [];
+
+  for (const key of selectedKeys) {
+    if (key.startsWith('i:')) {
+      const wayId  = key.slice(2);
+      const report = impassable.find(r => r.way_id === wayId);
+      if (!report) continue;
+
+      // coords puede venir como string JSON o array
+      let coords = report.coords;
+      if (typeof coords === 'string') {
+        try { coords = JSON.parse(coords); } catch (_) { coords = null; }
+      }
+      if (!Array.isArray(coords) || coords.length < 2) continue;
+
+      features.push({
+        type: 'Feature',
+        properties: { color: '#ef4444' },
+        geometry: { type: 'LineString', coordinates: coords },
+      });
+    } else if (key.startsWith('p:')) {
+      const wayId = key.slice(2);
+      const pref  = preferences.find(p => p.way_id === wayId);
+      if (!pref) continue;
+
+      let coords = pref.coords;
+      if (typeof coords === 'string') {
+        try { coords = JSON.parse(coords); } catch (_) { coords = null; }
+      }
+      if (!Array.isArray(coords) || coords.length < 2) continue;
+
+      const color = PREF_COLORS[pref.preference] || '#6b7280';
+      features.push({
+        type: 'Feature',
+        properties: { color },
+        geometry: { type: 'LineString', coordinates: coords },
+      });
+    }
+  }
+
+  try {
+    map.getSource(SEL_SRC)?.setData({ type: 'FeatureCollection', features });
+  } catch (_) {}
+}
+
+function clearSelectionLayer() {
+  try {
+    window.__map?.getSource(SEL_SRC)?.setData({ type: 'FeatureCollection', features: [] });
+  } catch (_) {}
+}
+
+// ── Helpers de navegación ─────────────────────────────────────────────────────
 function flyToOne(lat, lng) {
-  window.__map?.flyTo({ center: [lng, lat], zoom: 16, pitch: 0, bearing: 0, duration: 500, essential: true });
+  window.__map?.flyTo({ center: [lng, lat], zoom: 17, pitch: 0, bearing: 0, duration: 500, essential: true });
 }
 
 function fitBoundsMultiple(points) {
@@ -47,8 +115,17 @@ function fitBoundsMultiple(points) {
   try {
     const lnglats = points.map(([lat, lng]) => [lng, lat]);
     const b = lnglats.reduce((acc, pt) => acc.extend(pt), new ml.LngLatBounds(lnglats[0], lnglats[0]));
-    map.fitBounds(b, { padding: 80, maxZoom: 16, duration: 600, essential: true });
+    map.fitBounds(b, { padding: 80, maxZoom: 17, duration: 600, essential: true });
   } catch { flyToOne(points[0][0], points[0][1]); }
+}
+
+// Calcular bounds desde coords de un tramo
+function boundsFromCoords(coords) {
+  if (!coords || coords.length < 2) return null;
+  return coords.map(c => {
+    if (Array.isArray(c)) return [c[1], c[0]]; // [lng,lat] → [lat,lng] para fitBoundsMultiple
+    return [c.lat, c.lng];
+  });
 }
 
 function SectionHeader({ label, onSelectAll, allSelected }) {
@@ -157,7 +234,7 @@ function ZonesTab({ zones, token, onRefresh, myPosition, selected, onToggle, onS
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.76rem', fontWeight: 700, color }}>
-              {ZONE_LABELS[z.type] || '⚠️ Alerta'}
+              {ZONE_LABELS[z.type] || '⚠ Alerta'}
               {z.is_mine && <span style={{ marginLeft: 5, fontSize: '0.62rem',
                 background: 'var(--brand-light)', color: 'var(--brand)',
                 borderRadius: 6, padding: '0.05rem 0.3rem' }}>Mía</span>}
@@ -165,7 +242,9 @@ function ZonesTab({ zones, token, onRefresh, myPosition, selected, onToggle, onS
                 background: '#f0fdf4', color: '#16a34a',
                 borderRadius: 6, padding: '0.05rem 0.3rem' }}>✓ Validada</span>}
             </span>
-            <span style={{ fontSize: '0.64rem', color: 'var(--text-tertiary)' }}>{timeAgo(z.created_at)}</span>
+            <span style={{ fontSize: '0.64rem', color: 'var(--text-tertiary)' }}>
+              {z.created_at ? `${Math.floor((Date.now() - new Date(z.created_at)) / 60000)}m` : ''}
+            </span>
           </div>
           <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginTop: 1 }}>
             r: {z.radius_m}m · {z.estimated_hours}h
@@ -173,13 +252,13 @@ function ZonesTab({ zones, token, onRefresh, myPosition, selected, onToggle, onS
           <div style={{ display: 'flex', gap: 5, marginTop: 3, alignItems: 'center', flexWrap: 'wrap' }}
                onClick={e => e.stopPropagation()}>
             {!z.is_mine && (
-              <button onClick={e => vote(z, 'confirm', e)} disabled={voting === z.id} style={{
+              <button onClick={e => { e.stopPropagation(); vote(z, 'confirm', e); }} style={{
                 padding: '0.15rem 0.4rem', borderRadius: 5, fontSize: '0.66rem', fontWeight: 700,
                 background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac',
                 cursor: 'pointer', minHeight: 'unset',
               }}>✓ {z.confirm_count || 0}/3</button>
             )}
-            <button onClick={e => vote(z, 'dismiss', e)} disabled={voting === z.id} style={{
+            <button onClick={e => { e.stopPropagation(); vote(z, 'dismiss', e); }} style={{
               padding: '0.15rem 0.4rem', borderRadius: 5, fontSize: '0.66rem', fontWeight: 700,
               background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca',
               cursor: 'pointer', minHeight: 'unset',
@@ -188,7 +267,7 @@ function ZonesTab({ zones, token, onRefresh, myPosition, selected, onToggle, onS
               <span style={{ fontSize: '0.62rem', color: '#92400e',
                 background: '#fffbeb', border: '1px solid #fbbf24',
                 borderRadius: 5, padding: '0.05rem 0.3rem' }}>
-                ✏️ {ZONE_LABELS[z.pending_edit.type] || z.pending_edit.type}
+                ✏ {ZONE_LABELS[z.pending_edit.type] || z.pending_edit.type}
                 {z.pending_edit.estimated_hours ? ` · ${z.pending_edit.estimated_hours}h` : ''}
               </span>
             )}
@@ -259,7 +338,7 @@ function ZonesTab({ zones, token, onRefresh, myPosition, selected, onToggle, onS
 
 // ── VialidadTab ───────────────────────────────────────────────────────────────
 function VialidadTab({ impassable, preferences, token, onRefresh, myPosition, selected, onToggle, onSelectGroup }) {
-  const [duration,  setDuration]  = useState('days');
+  const [duration,   setDuration]   = useState('days');
   const [confirming, setConfirming] = useState(null);
   const [deleting,   setDeleting]   = useState(null);
   const [editing,    setEditing]    = useState(null);
@@ -294,14 +373,20 @@ function VialidadTab({ impassable, preferences, token, onRefresh, myPosition, se
   const confirmed = impassable.filter(r => r.confirmed);
 
   function renderImp(r) {
-    const isSel   = selected.has(`i:${r.way_id}`);
-    const color   = r.confirmed ? '#16a34a' : '#f97316';
-    const distM   = myPosition && r.lat && r.lng
+    const isSel  = selected.has(`i:${r.way_id}`);
+    const color  = r.confirmed ? '#16a34a' : '#f97316';
+    const distM  = myPosition && r.lat && r.lng
       ? haversineMeters(myPosition.lat, myPosition.lng, Number(r.lat), Number(r.lng))
       : null;
     const canConf = !r.is_mine && !r.confirmed && distM !== null && distM <= 50;
+    const hasCoords = (() => {
+      let c = r.coords;
+      if (typeof c === 'string') { try { c = JSON.parse(c); } catch (_) { c = null; } }
+      return Array.isArray(c) && c.length >= 2;
+    })();
+
     return (
-      <div key={r.way_id} onClick={() => onToggle(`i:${r.way_id}`, r.lat, r.lng)} style={{
+      <div key={r.way_id} onClick={() => onToggle(`i:${r.way_id}`, r.lat, r.lng, r)} style={{
         borderBottom: '1px solid var(--border-light)', cursor: 'pointer',
         padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'flex-start', gap: 8,
         background: isSel ? color + '0d' : 'none',
@@ -310,12 +395,16 @@ function VialidadTab({ impassable, preferences, token, onRefresh, myPosition, se
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.76rem', fontWeight: 700, color }}>
-              {r.confirmed ? '🔴 Confirmada' : '⏳ Pendiente'}
+              {r.name || (r.confirmed ? '🔴 Confirmada' : '⏳ Pendiente')}
               {r.is_mine && <span style={{ marginLeft: 5, fontSize: '0.62rem',
                 background: 'var(--brand-light)', color: 'var(--brand)',
                 borderRadius: 6, padding: '0.05rem 0.3rem' }}>Mía</span>}
+              {!hasCoords && <span style={{ marginLeft: 5, fontSize: '0.6rem',
+                color: 'var(--text-tertiary)' }}>📍</span>}
             </span>
-            <span style={{ fontSize: '0.64rem', color: 'var(--text-tertiary)' }}>{timeAgo(r.created_at)}</span>
+            <span style={{ fontSize: '0.64rem', color: 'var(--text-tertiary)' }}>
+              {r.created_at ? `${Math.floor((Date.now() - new Date(r.created_at)) / 60000)}m` : ''}
+            </span>
           </div>
           {r.description && (
             <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: 1,
@@ -368,7 +457,7 @@ function VialidadTab({ impassable, preferences, token, onRefresh, myPosition, se
     const isEdit = editing === p.way_id;
     const isDel  = deleting === p.way_id;
     return (
-      <div key={p.way_id} onClick={() => onToggle(`p:${p.way_id}`, p.lat, p.lng)} style={{
+      <div key={p.way_id} onClick={() => onToggle(`p:${p.way_id}`, p.lat, p.lng, p)} style={{
         borderBottom: '1px solid var(--border-light)', cursor: 'pointer',
         padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'flex-start', gap: 8,
         background: isSel ? color + '0d' : 'none',
@@ -463,6 +552,16 @@ export default function AlertsPanel({
   const [tab,      setTab]      = useState('zones');
   const [selected, setSelected] = useState(new Set());
 
+  // Limpiar capa de selección al desmontar
+  useEffect(() => {
+    return () => clearSelectionLayer();
+  }, []);
+
+  // Actualizar capa de geometría cuando cambia la selección
+  useEffect(() => {
+    updateSelectionLayer(selected, impassable, preferences);
+  }, [selected, impassable, preferences]);
+
   const coordMap = useCallback(() => {
     const m = new Map();
     zones.forEach(z       => m.set(`z:${z.id}`,      [Number(z.lat),   Number(z.lng)]));
@@ -471,16 +570,31 @@ export default function AlertsPanel({
     return m;
   }, [zones, impassable, preferences]);
 
-  function onToggle(key, lat, lng) {
+  // onToggle recibe opcionalmente el objeto completo para flyTo con coords
+  function onToggle(key, lat, lng, obj) {
     setSelected(prev => {
       const next = new Set(prev);
       if (next.has(key)) {
         next.delete(key);
       } else {
         next.add(key);
+        // Si tiene coords, hacer fitBounds sobre el tramo completo
+        if (obj) {
+          let coords = obj.coords;
+          if (typeof coords === 'string') { try { coords = JSON.parse(coords); } catch (_) { coords = null; } }
+          if (Array.isArray(coords) && coords.length >= 2) {
+            const pts = boundsFromCoords(coords);
+            if (pts) { fitBoundsMultiple(pts); return next; }
+          }
+        }
+        // Fallback: flyTo al punto lat/lng
+        flyToOne(lat, lng);
       }
-      const pts = [...next].map(k => coordMap().get(k)).filter(p => p && p[0] && p[1]);
-      if (pts.length) fitBoundsMultiple(pts);
+      // Si hay selección múltiple activa, fitBounds a todos
+      if (next.size > 0) {
+        const pts = [...next].map(k => coordMap().get(k)).filter(p => p && p[0] && p[1]);
+        if (pts.length > 1) fitBoundsMultiple(pts);
+      }
       return next;
     });
   }
@@ -520,7 +634,6 @@ export default function AlertsPanel({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border-light)', flexShrink: 0 }}>
         <button style={tabStyle(tab === 'zones')} onClick={() => setTab('zones')}>
           🚦 Zonas
@@ -542,7 +655,6 @@ export default function AlertsPanel({
         </button>
       </div>
 
-      {/* Barra de selección */}
       {totalAll > 0 && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
