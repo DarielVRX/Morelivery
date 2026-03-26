@@ -141,7 +141,7 @@ function Btn({ onClick, disabled, children, variant = 'default' }) {
 }
 
 // ─── Main component ────────────────────────────────────────────────────────────
-export default async function SystemTab({ onMessage }) {
+export default function SystemTab({ onMessage }) {
   const { auth } = useAuth();
   const videoRef = useRef(null);
   const cameraStreamRef = useRef(null);
@@ -237,6 +237,9 @@ export default async function SystemTab({ onMessage }) {
       onMessage?.('🎤 Programado: push en 30s y en 5 minutos');
     } catch (e) { onMessage?.(`❌ ${e.message}`); }
   };
+
+  // ADD this — the missing function wrapper:
+  const fireTestNotif = async () => {
     try {
       const reg = await navigator.serviceWorker.ready;
       reg.active?.postMessage({
