@@ -10,13 +10,10 @@ const VALID_PREFERENCES = ['preferred', 'difficult', 'avoid'];
 const VALID_DURATIONS   = ['days', 'weeks', 'months', 'permanent'];
 
 // POST /preference — guardar preferencia(s) de calle
-// Acepta objeto único { way_id, preference }
-// o array     { ways: [{ way_id, preference }] }
 router.post('/preference', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const body = req.body || {};
 
-    // Normalizar a array
     let items = [];
     if (Array.isArray(body.ways)) {
       items = body.ways.map(w => ({
@@ -72,7 +69,6 @@ router.post('/impassable', authenticate, authorize(['driver']), async (req, res,
     const baseLat = Number(body.lat ?? 0);
     const baseLng = Number(body.lng ?? 0);
 
-    // Normalizar a array
     let items = [];
     if (Array.isArray(body.ways)) {
       items = body.ways.map(w => ({
@@ -103,19 +99,28 @@ router.post('/impassable', authenticate, authorize(['driver']), async (req, res,
       if (description && description.length > 500) {
         throw new AppError(400, 'description no puede superar 500 caracteres');
       }
+
+      // ON CONFLICT usa el índice único (way_id) — un way_id solo puede tener un reporte pendiente
+      // Si ya existe uno confirmado del mismo driver, se actualiza; si es de otro driver, se inserta
+      // El schema tiene: CREATE UNIQUE INDEX idx_impassable_one_per_way ON impassable_reports(way_id) WHERE confirmed = false
+      // Por lo tanto usamos INSERT ... ON CONFLICT (way_id) WHERE confirmed = false
       try {
-        const coords = w?.coords ?? body.coords ?? null;
         const result = await query(
-          `INSERT INTO impassable_reports (way_id, lat, lng, coords, description, estimated_duration, reported_by)
-           VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
-           ON CONFLICT (way_id, reported_by) DO UPDATE
-             SET lat=$2, lng=$3, coords=$4::jsonb, estimated_duration=$6, updated_at=NOW()
+          `INSERT INTO impassable_reports (way_id, lat, lng, description, estimated_duration, reported_by)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (way_id) WHERE confirmed = false
+           DO UPDATE SET
+             lat                = EXCLUDED.lat,
+             lng                = EXCLUDED.lng,
+             description        = EXCLUDED.description,
+             estimated_duration = EXCLUDED.estimated_duration,
+             reported_by        = EXCLUDED.reported_by
            RETURNING *`,
-          [way_id, lat, lng, coords ? JSON.stringify(coords) : null,
-           description || null, estimated_duration, req.user.userId]
+          [way_id, lat, lng, description || null, estimated_duration, req.user.userId]
         );
-        reports.push(result.rows[0]);
+        if (result.rows[0]) reports.push(result.rows[0]);
       } catch (e) {
+        // 23505 = unique_violation para el caso de confirmed=true ya existente — ignorar
         if (e?.code !== '23505') throw e;
       }
     }
@@ -126,7 +131,7 @@ router.post('/impassable', authenticate, authorize(['driver']), async (req, res,
   }
 });
 
-// GET /impassable/mine — reportes del driver autenticado (para edición)
+// GET /impassable/mine — reportes del driver autenticado
 router.get('/impassable/mine', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const result = await query(
@@ -147,7 +152,7 @@ router.get('/impassable/mine', authenticate, authorize(['driver']), async (req, 
   }
 });
 
-// POST /impassable/:way_id/confirm — confirmar reporte
+// POST /impassable/:way_id/confirm — confirmar reporte de otro driver
 router.post('/impassable/:way_id/confirm', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const { way_id } = req.params;
@@ -157,7 +162,6 @@ router.post('/impassable/:way_id/confirm', authenticate, authorize(['driver']), 
       throw new AppError(400, `estimated_duration debe ser uno de: ${VALID_DURATIONS.join(', ')}`);
     }
 
-    // Verificar que el reporte existe
     const reportRes = await query(
       `SELECT id FROM impassable_reports WHERE way_id = $1 LIMIT 1`,
       [way_id]
@@ -166,7 +170,6 @@ router.post('/impassable/:way_id/confirm', authenticate, authorize(['driver']), 
       throw new AppError(404, 'No existe reporte para este way_id');
     }
 
-    // Verificar que el usuario no haya confirmado ya
     const alreadyConfirmed = await query(
       `SELECT id FROM impassable_confirmations WHERE way_id = $1 AND confirmed_by = $2`,
       [way_id, req.user.userId]
@@ -175,14 +178,12 @@ router.post('/impassable/:way_id/confirm', authenticate, authorize(['driver']), 
       throw new AppError(409, 'Ya confirmaste este reporte');
     }
 
-    // Insertar confirmación
     await query(
       `INSERT INTO impassable_confirmations (way_id, confirmed_by, estimated_duration)
        VALUES ($1, $2, $3)`,
       [way_id, req.user.userId, estimated_duration]
     );
 
-    // Contar confirmaciones y determinar consenso
     const confirmationsRes = await query(
       `SELECT estimated_duration FROM impassable_confirmations WHERE way_id = $1`,
       [way_id]
@@ -192,12 +193,10 @@ router.post('/impassable/:way_id/confirm', authenticate, authorize(['driver']), 
     const threshold = isPermanent ? 5 : 3;
 
     if (confirmationCount >= threshold) {
-      // Calcular moda (valor más frecuente)
       const freq = {};
       for (const row of confirmationsRes.rows) {
         freq[row.estimated_duration] = (freq[row.estimated_duration] || 0) + 1;
       }
-      // También incluir el estimated_duration del reporte original
       const origReport = await query(
         `SELECT estimated_duration FROM impassable_reports WHERE way_id = $1 LIMIT 1`,
         [way_id]
@@ -213,7 +212,6 @@ router.post('/impassable/:way_id/confirm', authenticate, authorize(['driver']), 
         [consensus_duration, way_id]
       );
 
-      // Emitir SSE a todos los drivers
       try {
         sseHub.sendToRole('driver', 'impassable_confirmed', { way_id, consensus_duration });
       } catch (_) {}
@@ -225,10 +223,7 @@ router.post('/impassable/:way_id/confirm', authenticate, authorize(['driver']), 
   }
 });
 
-// GET /impassable — todos los reportes (confirmed + pending)
-// ?confirmed=true  → solo confirmados
-// ?confirmed=false → solo pendientes
-// sin filtro       → todos
+// GET /impassable — todos los reportes
 router.get('/impassable', async (req, res, next) => {
   try {
     const filter = req.query.confirmed;
@@ -255,7 +250,7 @@ router.get('/impassable', async (req, res, next) => {
   }
 });
 
-// GET /impassable/near — reportes confirmados cercanos
+// GET /impassable/near — reportes cercanos
 router.get('/impassable/near', async (req, res, next) => {
   try {
     const lat      = Number(req.query.lat);

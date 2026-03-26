@@ -419,4 +419,36 @@ router.get('/earnings', authenticate, authorize(['driver']), async (req, res, ne
   } catch (error) { return next(error); }
 });
 
+router.patch('/me/bag-capacity', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const { bag_capacity_liters } = req.body || {};
+    const val = Number(bag_capacity_liters);
+    if (!Number.isFinite(val) || val < 1 || val > 200) {
+      return next(new AppError(400, 'bag_capacity_liters debe ser un número entre 1 y 200'));
+    }
+    const result = await query(
+      `UPDATE driver_profiles
+      SET bag_capacity_liters = $1
+      WHERE user_id = $2
+      RETURNING bag_capacity_liters`,
+      [val, req.user.userId]
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
+    return res.json({ ok: true, bag_capacity_liters: Number(result.rows[0].bag_capacity_liters) });
+  } catch (error) { return next(error); }
+});
+
+// GET /drivers/me/bag-capacity — obtener capacidad actual
+router.get('/me/bag-capacity', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT bag_capacity_liters FROM driver_profiles WHERE user_id = $1`,
+      [req.user.userId]
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Perfil de driver no encontrado'));
+    return res.json({ bag_capacity_liters: Number(result.rows[0].bag_capacity_liters) });
+  } catch (error) { return next(error); }
+});
+
+
 export default router;
