@@ -49,6 +49,7 @@ export function DashboardTabsBar({
     {tabBtn('ratings', '⭐ Ratings')}
     {tabBtn('feed', `📡 Feed${feedCount > 0 ? ` (${feedCount})` : ''}`)}
     {tabBtn('system', '🔧 Sistema')}
+    {tabBtn('emergency', '⚡ Emergencias')}
     <button
     onClick={onReload}
     style={{

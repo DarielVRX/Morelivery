@@ -526,5 +526,139 @@ router.post('/schedule-voice-reminders', authenticate, authorize(['admin']), asy
   }
 });
 
+router.post('/drivers/:id/reset-cooldowns', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const driverId = req.params.id;
+
+    // Solo limpiar cooldowns de pedidos aún abiertos (no entregados/cancelados)
+    const result = await query(
+      `UPDATE order_driver_offers
+      SET wait_until = NOW() - INTERVAL '1 second',
+                               updated_at = NOW()
+                               WHERE driver_id = $1
+                               AND status IN ('rejected', 'released', 'expired')
+                               AND wait_until > NOW()
+                               AND order_id IN (
+                                 SELECT id FROM orders
+                                 WHERE status NOT IN ('delivered', 'cancelled')
+                               )
+                               RETURNING order_id`,
+                               [driverId]
+    );
+
+    const orderIds = [...new Set(result.rows.map(r => r.order_id))];
+
+    // Notificar via SSE al driver que puede recibir ofertas de nuevo
+    sseHub.sendToUser(driverId, 'cooldowns_cleared', { message: 'Tus restricciones han sido eliminadas por el administrador.' });
+
+    console.log(`[admin.emergency] reset-cooldowns driver=${driverId.slice(0,8)} affected=${orderIds.length} orders`);
+    return res.json({ ok: true, clearedOrders: orderIds.length });
+  } catch (error) { return next(error); }
+});
+
+// ── POST /admin/users/:id/clear-penalties ─────────────────────────────────────
+// Elimina las penalizaciones de desconexión acumuladas de un driver.
+// Las penalizaciones afectan el scoring — un driver penalizado recibe menos ofertas.
+router.post('/users/:id/clear-penalties', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const result = await query(
+      `UPDATE driver_profiles
+      SET disconnect_penalties = 0,
+      updated_at = NOW()
+      WHERE user_id = $1
+      RETURNING user_id, disconnect_penalties`,
+      [req.params.id]
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Driver no encontrado'));
+
+    sseHub.sendToUser(req.params.id, 'penalties_cleared', { message: 'Tus penalizaciones han sido eliminadas.' });
+    console.log(`[admin.emergency] clear-penalties driver=${req.params.id.slice(0,8)}`);
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+
+// ── POST /admin/drivers/:id/force-available ───────────────────────────────────
+// Fuerza is_available=true en el perfil del driver y re-encola pedidos abiertos.
+// Útil si el driver se desconectó sin ponerse en "no disponible" y hay pedidos esperando.
+router.post('/drivers/:id/force-available', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const driverId = req.params.id;
+
+    const result = await query(
+      `UPDATE driver_profiles
+      SET is_available = true,
+      session_rebalances = 0,
+      session_releases   = 0,
+      session_cancels    = 0,
+      session_expires    = 0,
+      session_started_at = NOW()
+      WHERE user_id = $1
+      RETURNING user_id`,
+      [driverId]
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Driver no encontrado'));
+
+    // Limpiar reconnect_deadline si el driver tenía pedido on_the_way
+    await query(
+      `UPDATE orders
+      SET reconnect_deadline = NULL, updated_at = NOW()
+      WHERE driver_id = $1 AND status = 'on_the_way' AND reconnect_deadline IS NOT NULL`,
+      [driverId]
+    ).catch(() => {});
+
+    // Re-encolar pedidos abiertos para que este driver pueda recibirlos
+    try {
+      const { getQueuedOrders, serializedOffer } = await import('../orders/assignment/index.js');
+      const { offerNextDrivers } = await import('../orders/assignment/core.js');
+      const { offerCb } = await import('../events/offerCallback.js');
+      const openOrders = await getQueuedOrders();
+      for (const ord of openOrders) {
+        serializedOffer(ord.id, offerNextDrivers, offerCb);
+      }
+      console.log(`[admin.emergency] force-available driver=${driverId.slice(0,8)} requeued=${openOrders.length}`);
+    } catch (e) {
+      console.warn('[admin.emergency] force-available: error re-encolando:', e.message);
+    }
+
+    sseHub.sendToUser(driverId, 'forced_available', { message: 'El administrador te ha puesto en modo disponible.' });
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+
+// ── POST /admin/restaurants/:userId/silent-close ──────────────────────────────
+// Cierra un restaurante sin notificar al dueño por SSE.
+// Los clientes verán el restaurante como "cerrado" inmediatamente.
+router.post('/restaurants/:userId/silent-close', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const result = await query(
+      `UPDATE restaurants
+      SET is_open = false, updated_at = NOW()
+      WHERE owner_user_id = $1
+      RETURNING id, name`,
+      [req.params.userId]
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Restaurante no encontrado'));
+    console.log(`[admin.emergency] silent-close restaurant=${result.rows[0].name} by admin`);
+    return res.json({ ok: true, restaurant: result.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+// ── POST /admin/restaurants/:userId/silent-open ───────────────────────────────
+// Abre un restaurante silenciosamente (ej: abrió pero olvidó cambiar el estado).
+router.post('/restaurants/:userId/silent-open', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const result = await query(
+      `UPDATE restaurants
+      SET is_open = true, updated_at = NOW()
+      WHERE owner_user_id = $1
+      RETURNING id, name`,
+      [req.params.userId]
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Restaurante no encontrado'));
+    console.log(`[admin.emergency] silent-open restaurant=${result.rows[0].name} by admin`);
+    return res.json({ ok: true, restaurant: result.rows[0] });
+  } catch (error) { return next(error); }
+});
+
 export default router;
 
