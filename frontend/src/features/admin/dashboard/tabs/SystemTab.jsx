@@ -141,7 +141,7 @@ function Btn({ onClick, disabled, children, variant = 'default' }) {
 }
 
 // ─── Main component ────────────────────────────────────────────────────────────
-export default function SystemTab({ onMessage }) {
+export default async function SystemTab({ onMessage }) {
   const { auth } = useAuth();
   const videoRef = useRef(null);
   const cameraStreamRef = useRef(null);
