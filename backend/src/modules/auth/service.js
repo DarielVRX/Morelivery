@@ -77,7 +77,7 @@ async function resolveUniqueUsername(candidate) {
 // El fingerprint se genera en el frontend (FingerprintJS libre) y se envía en el body.
 // Si el fingerprint está en blocked_fingerprints → rechazar registro.
 // Si hay otro user con el mismo fp → "Detectamos una cuenta relacionada".
-async function checkAndSaveFingerprint(fingerprint, userId) {
+async function checkAndSaveFingerprint(fingerprint, userId, role) {
   if (!fingerprint) return; // sin fingerprint no bloqueamos (campo opcional desde frontend)
 
   // 1. ¿Está en la lista negra explícita?
@@ -99,8 +99,8 @@ async function checkAndSaveFingerprint(fingerprint, userId) {
   // 2. ¿Ya existe otro usuario con este fingerprint?
   try {
     const existing = await query(
-      'SELECT id FROM users WHERE device_fp = $1 AND id <> $2 LIMIT 1',
-      [fingerprint, userId]
+      'SELECT id FROM users WHERE device_fp = $1 AND id <> $2 AND role = $3 LIMIT 1',
+      [fingerprint, userId, role]
     );
     if (existing.rowCount > 0) {
       // Bloquear al nuevo usuario y lanzar error
@@ -203,7 +203,7 @@ export async function registerUser(payload) {
 
   // ── Device fingerprint (no bloqueante si falla) ────────────────────────────
   if (payload.deviceFingerprint) {
-    await checkAndSaveFingerprint(payload.deviceFingerprint, user.id);
+    await checkAndSaveFingerprint(payload.deviceFingerprint, user.id, user.role);
   }
 
   // ── Crear perfil de rol ────────────────────────────────────────────────────
