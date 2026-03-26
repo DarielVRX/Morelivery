@@ -39,4 +39,9 @@ export const env = {
   redisUrl: process.env.REDIS_URL || '',
   // OSRM propio en Railway — fallback al servidor público si no está configurado
   osrmUrl: process.env.OSRM_URL || 'https://router.project-osrm.org',
+
+  // ✅ AGREGAR ESTAS VARIABLES PARA WEB PUSH
+  vapidEmail: process.env.VAPID_EMAIL || 'admin@morelivery.com',
+  vapidPublicKey: process.env.VAPID_PUBLIC_KEY,
+  vapidPrivateKey: process.env.VAPID_PRIVATE_KEY,
 };
