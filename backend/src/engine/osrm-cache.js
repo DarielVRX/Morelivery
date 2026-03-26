@@ -58,6 +58,7 @@ function _evictIfNeeded() {
 
 // ─── Fetch con retry y backoff ────────────────────────────────────────────────
 
+console.log('[osrm] URL:', url);
 async function _fetchOSRM(from, to, attempt = 0) {
   if (Date.now() < _backoffUntil) {
     // En backoff: devolver haversine como fallback silencioso
