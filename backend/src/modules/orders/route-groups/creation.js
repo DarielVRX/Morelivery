@@ -1,3 +1,4 @@
+// backend/src/modules/orders/route-groups/creation.js
 import { authenticate, authorize } from '../../../middlewares/auth.js';
 import { validate } from '../../../middlewares/validate.js';
 import { DELIVERY_FEE_PCT, RESTAURANT_FEE_PCT, SERVICE_FEE_PCT, isMissingColumnError, isMissingRelationError } from '../shared.js';
@@ -20,7 +21,7 @@ export function registerCreationRoutes(router, deps) {
     try {
       const orders = await getPendingAssignmentOrders(
         req.user.userId,
-        req.query.available === '1'  // ← agregar
+        req.query.available === '1'
       );
       return res.json({ orders });
     } catch (error) { return next(error); }
@@ -43,7 +44,7 @@ export function registerCreationRoutes(router, deps) {
           ));
         }
       } catch (e) {
-        if (e?.code !== '42703') throw e; // ignorar si columna no existe aún
+        if (e?.code !== '42703') throw e;
       }
 
       let deliveryAddress = 'address-pending';
@@ -51,104 +52,89 @@ export function registerCreationRoutes(router, deps) {
         const c = await query('SELECT address FROM users WHERE id=$1', [req.user.userId]);
         deliveryAddress = delivery_address?.trim() || c.rows[0]?.address || 'address-pending';
       } catch (e) { if (!isMissingColumnError(e)) throw e; }
-      if (!deliveryAddress || deliveryAddress === 'address-pending') return next(new AppError(400, 'Debes guardar tu dirección antes de hacer un pedido'));
+      if (!deliveryAddress || deliveryAddress === 'address-pending')
+        return next(new AppError(400, 'Debes guardar tu dirección antes de hacer un pedido'));
 
-      const restCoords = await query(`SELECT COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
-                                      FROM restaurants r
-                                      LEFT JOIN users u ON u.id = r.owner_user_id
-                                      WHERE r.id=$1`, [restaurantId]);
+      const restCoords = await query(
+        `SELECT COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
+         FROM restaurants r
+         LEFT JOIN users u ON u.id = r.owner_user_id
+         WHERE r.id=$1`,
+        [restaurantId]
+      );
       if (restCoords.rowCount === 0) return next(new AppError(404, 'Restaurante no encontrado'));
 
-      const restaurantLat = restCoords.rows[0]?.lat != null ? Number(restCoords.rows[0].lat) : null;
-      const restaurantLng = restCoords.rows[0]?.lng != null ? Number(restCoords.rows[0].lng) : null;
+      const restaurantLat    = restCoords.rows[0]?.lat != null ? Number(restCoords.rows[0].lat) : null;
+      const restaurantLng    = restCoords.rows[0]?.lng != null ? Number(restCoords.rows[0].lng) : null;
       const orderDeliveryLat = Number.isFinite(Number(delivery_lat)) ? Number(delivery_lat) : null;
       const orderDeliveryLng = Number.isFinite(Number(delivery_lng)) ? Number(delivery_lng) : null;
 
-      if (orderDeliveryLat == null || orderDeliveryLng == null) {
-        return next(new AppError(400, 'Falta ubicación de entrega (lat/lng). Selecciona ubicación actual, casa o manual.'));
-      }
-      if (restaurantLat == null || restaurantLng == null) {
+      if (orderDeliveryLat == null || orderDeliveryLng == null)
+        return next(new AppError(400, 'Falta ubicación de entrega. Selecciona tu ubicación.'));
+      if (restaurantLat == null || restaurantLng == null)
         return next(new AppError(409, 'El restaurante no tiene coordenadas configuradas.'));
-      }
 
       const distResult = await query(
-        `SELECT (
-           6371 * acos(
-             cos(radians($1::float8)) * cos(radians($3::float8)) *
-             cos(radians($4::float8) - radians($2::float8)) +
-             sin(radians($1::float8)) * sin(radians($3::float8))
-           )
-         ) AS km`,
+        `SELECT (6371 * acos(
+           cos(radians($1::float8)) * cos(radians($3::float8)) *
+           cos(radians($4::float8) - radians($2::float8)) +
+           sin(radians($1::float8)) * sin(radians($3::float8))
+         )) AS km`,
         [orderDeliveryLat, orderDeliveryLng, restaurantLat, restaurantLng]
       );
       const distKm = Number(distResult.rows[0]?.km ?? Infinity);
-      if (!Number.isFinite(distKm) || distKm > 5) {
-        return next(new AppError(409, `Esta tienda está fuera de cobertura (${distKm.toFixed(1)} km). Máximo permitido: 5 km.`));
-      }
+      if (!Number.isFinite(distKm) || distKm > 5)
+        return next(new AppError(409, `Esta tienda está fuera de cobertura (${distKm.toFixed(1)} km). Máximo: 5 km.`));
 
-      // ── Límite de 1 pedido activo por cliente ────────────────────────────────
-      // La restricción se elimina cuando el cliente cumple UNO de estos criterios:
-      //   a) 5+ pedidos en efectivo completados (delivered)
-      //   b) 10+ pedidos totales completados (delivered)
-      // Si el restaurante tiene allow_frequent_customers=true, también se elimina.
+      // Límite de 1 pedido activo por cliente
       try {
         const activeCheck = await query(
           `SELECT COUNT(*) AS cnt FROM orders
-           WHERE customer_id = $1
-             AND status NOT IN ('delivered','cancelled')`,
+           WHERE customer_id = $1 AND status NOT IN ('delivered','cancelled')`,
           [req.user.userId]
         );
         const activeCount = Number(activeCheck.rows[0]?.cnt || 0);
 
         if (activeCount > 0) {
-          // Verificar si ya cumplió alguno de los criterios de exención
           const historyCheck = await query(
             `SELECT
                COUNT(*) FILTER (WHERE status = 'delivered') AS total_delivered,
                COUNT(*) FILTER (WHERE status = 'delivered' AND payment_method = 'cash') AS cash_delivered
-             FROM orders
-             WHERE customer_id = $1`,
+             FROM orders WHERE customer_id = $1`,
             [req.user.userId]
           );
           const totalDelivered = Number(historyCheck.rows[0]?.total_delivered || 0);
           const cashDelivered  = Number(historyCheck.rows[0]?.cash_delivered  || 0);
-
           const exemptByHistory = totalDelivered >= 10 || cashDelivered >= 5;
 
-          // Verificar si el restaurante permite frecuentes
           let exemptByRestaurant = false;
           if (!exemptByHistory) {
             try {
               const restCheck = await query(
-                'SELECT allow_frequent_customers FROM restaurants WHERE id = $1',
-                [restaurantId]
+                'SELECT allow_frequent_customers FROM restaurants WHERE id = $1', [restaurantId]
               );
               exemptByRestaurant = Boolean(restCheck.rows[0]?.allow_frequent_customers);
-            } catch (e) {
-              if (!isMissingColumnError(e)) throw e;
-            }
+            } catch (e) { if (!isMissingColumnError(e)) throw e; }
           }
 
-          if (!exemptByHistory && !exemptByRestaurant) {
-            return next(new AppError(409, 'Ya tienes un pedido en curso. Espera a que sea entregado antes de hacer otro.'));
-          }
+          if (!exemptByHistory && !exemptByRestaurant)
+            return next(new AppError(409, 'Ya tienes un pedido en curso. Espera a que sea entregado.'));
         }
       } catch (e) {
         if (!isMissingColumnError(e) && !isMissingRelationError(e)) throw e;
       }
-      // ─────────────────────────────────────────────────────────────────────────
 
-      const menuIds = items.map(i => i.menuItemId);
+      const menuIds  = items.map(i => i.menuItemId);
       const priceRows = await query(
         `SELECT id, price_cents,
-                COALESCE(pkg_units, 1)           AS pkg_units,
-                COALESCE(pkg_volume_liters, 0)   AS pkg_volume_liters
+                COALESCE(pkg_units, 1)         AS pkg_units,
+                COALESCE(pkg_volume_liters, 0) AS pkg_volume_liters
          FROM menu_items WHERE id = ANY($1::uuid[]) AND restaurant_id = $2`,
         [menuIds, restaurantId]
       );
-      if (priceRows.rowCount !== menuIds.length) {
+      if (priceRows.rowCount !== menuIds.length)
         return next(new AppError(400, 'Uno o más productos no pertenecen a este restaurante'));
-      }
+
       const priceMap = new Map(priceRows.rows.map(r => [r.id, {
         price_cents: r.price_cents,
         pkg_units: Number(r.pkg_units) || 1,
@@ -165,43 +151,52 @@ export function registerCreationRoutes(router, deps) {
       }
       estimatedVolumeLiters = Math.round(estimatedVolumeLiters * 1000) / 1000;
 
-      const serviceFee = Math.round(totalCents * SERVICE_FEE_PCT);
-      const deliveryFee = Math.round(totalCents * DELIVERY_FEE_PCT);
+      const serviceFee    = Math.round(totalCents * SERVICE_FEE_PCT);
+      const deliveryFee   = Math.round(totalCents * DELIVERY_FEE_PCT);
       const restaurantFee = Math.round(totalCents * RESTAURANT_FEE_PCT);
       const paymentMethod = payment_method || 'cash';
-      const tipCents = Number(tip_cents) || 0;
+      const tipCents      = Number(tip_cents) || 0;
 
       // Validar límite de efectivo
       if (paymentMethod === 'cash') {
         try {
           const cashLimitRow = await query(
-            'SELECT max_cash_cents FROM restaurants WHERE id = $1',
-            [restaurantId]
+            'SELECT max_cash_cents FROM restaurants WHERE id = $1', [restaurantId]
           );
           const maxCash = cashLimitRow.rows[0]?.max_cash_cents;
-          // 0 o NULL = sin límite configurado
           if (maxCash && maxCash > 0) {
-            const grandTotal = totalCents + Math.round(totalCents * SERVICE_FEE_PCT) + Math.round(totalCents * DELIVERY_FEE_PCT) + Number(tip_cents || 0);
+            const grandTotal = totalCents + serviceFee + deliveryFee + tipCents;
             if (grandTotal > maxCash) {
               const fmtLimit = `$${(maxCash / 100).toFixed(2)}`;
-              return next(new AppError(409, `El pedido supera el límite de efectivo de esta tienda (${fmtLimit}). Usa tarjeta o reduce el total.`));
+              return next(new AppError(409, `El pedido supera el límite de efectivo (${fmtLimit}).`));
             }
           }
-        } catch (e) {
-          if (!isMissingColumnError(e)) throw e;
-          // Columna no existe aún — omitir validación silenciosamente
-        }
+        } catch (e) { if (!isMissingColumnError(e)) throw e; }
       }
 
       const orderResult = await query(
-        `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address, delivery_lat, delivery_lng, restaurant_lat, restaurant_lng, estimated_volume_liters)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-        [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress, orderDeliveryLat, orderDeliveryLng, restaurantLat, restaurantLng, estimatedVolumeLiters]
+        `INSERT INTO orders(
+           customer_id, restaurant_id, status, total_cents,
+           service_fee_cents, delivery_fee_cents, restaurant_fee_cents,
+           payment_method, tip_cents, delivery_address,
+           delivery_lat, delivery_lng, restaurant_lat, restaurant_lng,
+           estimated_volume_liters,
+           restaurant_confirmed
+         )
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,false)
+         RETURNING *`,
+        [
+          req.user.userId, restaurantId, 'created', totalCents,
+          serviceFee, deliveryFee, restaurantFee,
+          paymentMethod, tipCents, deliveryAddress,
+          orderDeliveryLat, orderDeliveryLng, restaurantLat, restaurantLng,
+          estimatedVolumeLiters,
+        ]
       );
       const order = orderResult.rows[0];
-      console.log(`📦 [pedido.creado] id=${order.id.slice(0,8)} total=${order.total_cents} rest=${restaurantId.slice(0,8)}`);
+      console.log(`📦 [pedido.creado] id=${order.id.slice(0,8)} total=${order.total_cents}`);
 
-      const itemValues = items.map((item, i) => {
+      const itemValues = items.map((_, i) => {
         const base = i * 4;
         return `($${base + 1},$${base + 2},$${base + 3},$${base + 4})`;
       }).join(',');
@@ -222,9 +217,25 @@ export function registerCreationRoutes(router, deps) {
       const updated = await query('SELECT * FROM orders WHERE id=$1', [order.id]);
       orderEvents.emitOrderUpdate(order.id, updated.rows[0].status);
 
+      // Notificar al restaurante con evento dedicado `new_order`
+      // (distinto de order_update genérico para diferenciarlo en el SW)
       try {
-        const restInfo = await query('SELECT owner_user_id FROM restaurants WHERE id=$1', [restaurantId]);
-        if (restInfo.rowCount > 0) sseHub.sendToUser(restInfo.rows[0].owner_user_id, 'order_update', { orderId: order.id, status: 'created', action: 'new_order' });
+        const restInfo = await query(
+          'SELECT owner_user_id, name FROM restaurants WHERE id=$1', [restaurantId]
+        );
+        if (restInfo.rowCount > 0) {
+          const ownerId = restInfo.rows[0].owner_user_id;
+          const restName = restInfo.rows[0].name;
+          sseHub.sendToUser(ownerId, 'new_order', {
+            orderId:         order.id,
+            status:          'created',
+            totalCents:      totalCents,
+            paymentMethod,
+            restaurantConfirmed: false,
+            restaurantName:  restName,
+            itemCount:       items.length,
+          });
+        }
       } catch (_) {}
 
       console.log(`📦 [pedido.listo] id=${order.id.slice(0,8)} → notificando tienda y buscando driver`);
@@ -233,4 +244,3 @@ export function registerCreationRoutes(router, deps) {
     } catch (error) { return next(error); }
   });
 }
-

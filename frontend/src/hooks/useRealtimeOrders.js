@@ -5,46 +5,35 @@ import { API_BASE } from '../api/client';
 function canNotify() {
   return typeof window !== 'undefined' && 'Notification' in window;
 }
-
 function notificationsEnabled() {
-  try {
-    return localStorage.getItem('morelivery_notif_enabled') !== '0';
-  } catch {
-    return true;
-  }
+  try { return localStorage.getItem('morelivery_notif_enabled') !== '0'; }
+  catch { return true; }
 }
-
 function shouldNotifyInBackground() {
   if (typeof document === 'undefined') return true;
   return document.visibilityState !== 'visible' || !document.hasFocus();
 }
 
-
-// Sonido urgente para restaurante — cancelación mientras preparaba
+// ── Sonidos ───────────────────────────────────────────────────────────────────
 function playUrgentAlert() {
   if (typeof window === 'undefined') return;
   const Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx) return;
   try {
     const ctx = new Ctx();
-    // Tres pulsos descendentes — tono de alerta
     [[0.00, 880], [0.22, 660], [0.44, 440]].forEach(([offset, freq]) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'square';
-      osc.frequency.value = freq;
+      const osc = ctx.createOscillator(); const gain = ctx.createGain();
+      osc.type = 'square'; osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
       gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + offset + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + 0.18);
       osc.connect(gain); gain.connect(ctx.destination);
-      osc.start(ctx.currentTime + offset);
-      osc.stop(ctx.currentTime + offset + 0.2);
+      osc.start(ctx.currentTime + offset); osc.stop(ctx.currentTime + offset + 0.2);
     });
     setTimeout(() => ctx.close().catch(() => {}), 800);
   } catch (_) {}
 }
 
-// Sonido suave para driver_arrival — ding amigable
 function playArrivalChime() {
   if (typeof window === 'undefined') return;
   const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -52,18 +41,36 @@ function playArrivalChime() {
   try {
     const ctx = new Ctx();
     [[0.00, 1047], [0.18, 1319], [0.36, 1568]].forEach(([offset, freq]) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
+      const osc = ctx.createOscillator(); const gain = ctx.createGain();
+      osc.type = 'sine'; osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
       gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + offset + 0.01);
       gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + 0.25);
       osc.connect(gain); gain.connect(ctx.destination);
-      osc.start(ctx.currentTime + offset);
-      osc.stop(ctx.currentTime + offset + 0.3);
+      osc.start(ctx.currentTime + offset); osc.stop(ctx.currentTime + offset + 0.3);
     });
     setTimeout(() => ctx.close().catch(() => {}), 800);
+  } catch (_) {}
+}
+
+function playCallTone() {
+  if (typeof window === 'undefined') return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    // Tono de llamada: dos pulsos con pausa
+    [[0.0, 440, 1.0], [1.5, 440, 1.0]].forEach(([offset, freq, dur]) => {
+      const osc = ctx.createOscillator(); const gain = ctx.createGain();
+      osc.type = 'sine'; osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+      gain.gain.linearRampToValueAtTime(0.3, ctx.currentTime + offset + 0.1);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime + offset + dur - 0.1);
+      gain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + offset + dur);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + offset); osc.stop(ctx.currentTime + offset + dur + 0.05);
+    });
+    setTimeout(() => ctx.close().catch(() => {}), 3500);
   } catch (_) {}
 }
 
@@ -74,19 +81,15 @@ function playOfferPulse() {
   try {
     const ctx = new Ctx();
     const pulse = (offset, freq, duration = 0.11) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.value = freq;
+      const osc = ctx.createOscillator(); const gain = ctx.createGain();
+      osc.type = 'triangle'; osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
       gain.gain.exponentialRampToValueAtTime(0.22, ctx.currentTime + offset + 0.015);
       gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + duration);
       osc.connect(gain); gain.connect(ctx.destination);
-      osc.start(ctx.currentTime + offset);
-      osc.stop(ctx.currentTime + offset + duration + 0.02);
+      osc.start(ctx.currentTime + offset); osc.stop(ctx.currentTime + offset + duration + 0.02);
     };
-    pulse(0.00, 900);
-    pulse(0.16, 1200);
+    pulse(0.00, 900); pulse(0.16, 1200);
     setTimeout(() => ctx.close().catch(() => {}), 600);
   } catch (_) {}
 }
@@ -103,13 +106,11 @@ function notificationPriority(group) {
   try {
     const stored = localStorage.getItem('morelivery_notif_priority');
     if (stored === 'high') return 'high';
-    // Priorizar siempre ofertas y updates de pedido aunque el resto sea "normal"
-    if (group === 'offers' || group === 'order_updates') return 'high';
+    if (group === 'offers' || group === 'order_updates' || group === 'driver' || group === 'kitchen') return 'high';
     return 'normal';
   } catch { return 'normal'; }
 }
 
-// Notificar al SW que la app está activa → limpia badge y contadores
 async function notifyAppFocused() {
   try {
     if (!('serviceWorker' in navigator)) return;
@@ -118,59 +119,75 @@ async function notifyAppFocused() {
   } catch (_) {}
 }
 
-// group: clave de agrupación por categoría (ej. 'offers', 'order_updates', 'chat')
-// Todos los eventos del mismo group colapsan en una sola notificación en el SW.
-async function notifyRealtime({ title, body, tag, group, url = '/' }) {
+async function notifyRealtime({ title, body, tag, group, url = '/', vibrate, actions, pushType, orderId, driverName }) {
   if (!canNotify() || Notification.permission !== 'granted') return;
   if (!notificationsEnabled()) return;
 
   const priority = notificationPriority(group || tag);
-  const payload = {
+  const payload  = {
     type: 'SHOW_NOTIFICATION',
-    title,
-    body,
-    tag,
-    group: group || tag,   // el SW usa group para agrupar; tag era por pedido individual
-    url,
+    title, body, tag, group: group || tag, url,
     data: { url, ts: Date.now() },
-    priority,
+    priority, vibrate, actions, pushType, orderId, driverName,
   };
 
-  // Preferir SW para soporte en segundo plano (móvil/PWA)
   try {
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.getRegistration();
-      if (reg?.active) {
-        reg.active.postMessage(payload);
-        return;
-      }
+      if (reg?.active) { reg.active.postMessage(payload); return; }
     }
   } catch (_) {}
 
-  // Fallback foreground
   try {
-    const high = priority === 'high';
-    if (high && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-      navigator.vibrate([300, 100, 300, 100, 300]);
-    }
     new Notification(title, {
-      body,
-      tag,
-      icon: '/icon-192.png',
-      badge: '/badge.svg',
-      renotify: true,
-      requireInteraction: high,
-      silent: false,
+      body, tag, icon: '/icon-192.png', badge: '/badge.svg',
+      renotify: true, requireInteraction: priority === 'high',
       timestamp: Date.now(),
-      vibrate: high ? [300, 100, 300, 100, 300] : [180, 80, 180],
+      vibrate: vibrate || (priority === 'high' ? [300, 100, 300] : [180, 80, 180]),
     });
   } catch (_) {}
 }
 
-/**
- * SSE listener central — una sola conexión estable por token.
- */
-export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewOffer, onChatMessage, onReconnect, onKitchenEvent, onTransferEvent, onSupportMessage) {
+async function notifyCall({ orderId, driverName, url }) {
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg?.active) {
+        reg.active.postMessage({ type: 'SHOW_CALL_NOTIFICATION', orderId, driverName, url });
+        return;
+      }
+    }
+  } catch (_) {}
+}
+
+// ── Speech desde SW message ───────────────────────────────────────────────────
+if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data?.type === 'SPEAK') {
+      try {
+        const utt  = new SpeechSynthesisUtterance(event.data.text);
+        utt.lang   = 'es-MX';
+        utt.rate   = 0.95;
+        window.speechSynthesis?.speak(utt);
+      } catch (_) {}
+    }
+    if (event.data?.type === 'VIBRATE_EXECUTE') {
+      navigator.vibrate?.(event.data.pattern || [200]);
+    }
+  });
+}
+
+// ── Hook principal ────────────────────────────────────────────────────────────
+export function useRealtimeOrders(
+  token,
+  onOrderUpdate, onDriverLocation, onNewOffer,
+  onChatMessage, onReconnect, onKitchenEvent,
+  onTransferEvent, onSupportMessage,
+  onNewOrder,      // nuevo: pedido nuevo para restaurante
+  onEtaAlert,      // nuevo: ETA alert
+  onDriverArrived, // nuevo: driver arrived
+  onSimulatedCall, // nuevo: llamada simulada
+) {
   const esRef          = useRef(null);
   const reconnectTimer = useRef(null);
   const mountedRef     = useRef(true);
@@ -185,33 +202,34 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
   const cbKitchen   = useRef(onKitchenEvent);
   const cbTransfer  = useRef(onTransferEvent);
   const cbSupport   = useRef(onSupportMessage);
+  const cbNewOrder  = useRef(onNewOrder);
+  const cbEta       = useRef(onEtaAlert);
+  const cbArrived   = useRef(onDriverArrived);
+  const cbCall      = useRef(onSimulatedCall);
 
-  useEffect(() => { cbUpdate.current    = onOrderUpdate;    }, [onOrderUpdate]);
-  useEffect(() => { cbLocation.current  = onDriverLocation; }, [onDriverLocation]);
-  useEffect(() => { cbOffer.current     = onNewOffer;       }, [onNewOffer]);
-  useEffect(() => { cbChat.current      = onChatMessage;    }, [onChatMessage]);
-  useEffect(() => { cbReconnect.current = onReconnect;      }, [onReconnect]);
-  useEffect(() => { cbKitchen.current   = onKitchenEvent;   }, [onKitchenEvent]);
-  useEffect(() => { cbTransfer.current  = onTransferEvent;  }, [onTransferEvent]);
-  useEffect(() => { cbSupport.current   = onSupportMessage; }, [onSupportMessage]);
+  useEffect(() => { cbUpdate.current   = onOrderUpdate;    }, [onOrderUpdate]);
+  useEffect(() => { cbLocation.current = onDriverLocation; }, [onDriverLocation]);
+  useEffect(() => { cbOffer.current    = onNewOffer;       }, [onNewOffer]);
+  useEffect(() => { cbChat.current     = onChatMessage;    }, [onChatMessage]);
+  useEffect(() => { cbReconnect.current= onReconnect;      }, [onReconnect]);
+  useEffect(() => { cbKitchen.current  = onKitchenEvent;   }, [onKitchenEvent]);
+  useEffect(() => { cbTransfer.current = onTransferEvent;  }, [onTransferEvent]);
+  useEffect(() => { cbSupport.current  = onSupportMessage; }, [onSupportMessage]);
+  useEffect(() => { cbNewOrder.current = onNewOrder;       }, [onNewOrder]);
+  useEffect(() => { cbEta.current      = onEtaAlert;       }, [onEtaAlert]);
+  useEffect(() => { cbArrived.current  = onDriverArrived;  }, [onDriverArrived]);
+  useEffect(() => { cbCall.current     = onSimulatedCall;  }, [onSimulatedCall]);
 
-  // Pedir permiso una vez cuando hay sesión activa
   useEffect(() => {
     if (!token || !canNotify()) return;
     if (Notification.permission !== 'default') return;
-
     const request = () => {
-      if (Notification.permission === 'default') {
-        Notification.requestPermission().catch(() => {});
-      }
+      if (Notification.permission === 'default') Notification.requestPermission().catch(() => {});
       window.removeEventListener('pointerdown', request);
       window.removeEventListener('keydown', request);
     };
-
-    // Solicitar tras interacción real del usuario (más confiable en móvil)
     window.addEventListener('pointerdown', request, { once: true });
-    window.addEventListener('keydown', request, { once: true });
-
+    window.addEventListener('keydown',     request, { once: true });
     return () => {
       window.removeEventListener('pointerdown', request);
       window.removeEventListener('keydown', request);
@@ -223,8 +241,7 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
 
     const url = `${API_BASE}/api/events?token=${encodeURIComponent(token)}`;
-    console.log(`📡 [SSE] conectando (intento ${retryCount.current + 1})`);
-    const es = new EventSource(url);
+    const es  = new EventSource(url);
     esRef.current = es;
 
     es.addEventListener('order_update', (e) => {
@@ -232,13 +249,10 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
         const data = JSON.parse(e.data);
         cbUpdate.current?.(data);
         if (shouldNotifyInBackground()) {
-          const status = data?.status ? `Estado: ${data.status}` : 'Tu pedido fue actualizado';
           notifyRealtime({
             title: 'Actualización de pedido',
-            body:  status,
-            tag:   'order_updates',        // tag fijo = agrupa todos los updates
-            group: 'order_updates',
-            url:   '/customer/pedidos',
+            body:  data?.status ? `Estado: ${data.status}` : 'Tu pedido fue actualizado',
+            tag: 'order_updates', group: 'order_updates', url: '/customer/pedidos',
           });
         }
       } catch (_) {}
@@ -251,78 +265,127 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
     es.addEventListener('new_offer', (e) => {
       try {
         const data = JSON.parse(e.data);
-        console.log(`[SSE] new_offer received orderId=${data.orderId} secondsLeft=${data.secondsLeft}`);
         cbOffer.current?.(data);
-
-        // Alerta local inmediata por evento SSE (no depende de render en Home)
         const now = Date.now();
-        const sameOffer = lastOfferPulse.current.id && String(lastOfferPulse.current.id) === String(data?.orderId);
-        const tooSoon = now - (lastOfferPulse.current.at || 0) < 4000;
+        const sameOffer = String(lastOfferPulse.current.id) === String(data?.orderId);
+        const tooSoon   = now - (lastOfferPulse.current.at || 0) < 4000;
         if (!sameOffer || !tooSoon) {
-          const priority = notificationPriority('offers');
-          alertOfferAttention(priority);
+          alertOfferAttention(notificationPriority('offers'));
           lastOfferPulse.current = { id: data?.orderId || null, at: now };
         }
-
-        notifyRealtime({
-          title: 'Nueva oferta disponible',
-          body:  'Tienes un pedido por aceptar.',
-          tag:   'offers',          // tag fijo = todas las ofertas colapsan en una notif
-          group: 'offers',
-          url:   '/driver',
-        });
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: '🛵 Nueva oferta', body: 'Tienes un pedido por aceptar.',
+            tag: 'offers', group: 'driver', url: '/driver',
+            vibrate: [300,100,300,100,300,100,300],
+            pushType: 'new_offer',
+            actions: [{ action: 'accept', title: '✓ Aceptar' }, { action: 'reject', title: '✕ Rechazar' }],
+          });
+        }
       } catch (_) {}
     });
 
-    es.addEventListener('offer_cancelled', (e) => {
-      try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {}
+    // ── Pedido nuevo — evento dedicado para restaurante ────────────────────
+    es.addEventListener('new_order', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbNewOrder.current?.(data);
+        playUrgentAlert();
+        if (navigator?.vibrate) navigator.vibrate([500, 150, 500, 150, 500]);
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: '🆕 Nuevo pedido', body: `Pedido recibido — confirma para preparar`,
+            tag: `new_order_${data.orderId}`, group: 'kitchen', url: '/restaurant/pedidos',
+            vibrate: [500,150,500,150,500],
+            pushType: 'new_order', orderId: data.orderId,
+            actions: [{ action: 'confirm', title: '✓ Confirmar' }],
+          });
+        }
+      } catch (_) {}
     });
 
-    es.addEventListener('offer_assigned', (e) => {
-      try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {}
+    // ── ETA alert ─────────────────────────────────────────────────────────
+    es.addEventListener('driver_eta_alert', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbEta.current?.(data);
+        playArrivalChime();
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: '🛵 Tu repartidor se acerca',
+            body:  data.message || `Llegará en aprox. ${data.etaMins} min`,
+            tag: `eta_${data.orderId}`, group: 'customer', url: '/customer/pedidos',
+            vibrate: [150,80,150],
+            pushType: 'driver_eta_alert', orderId: data.orderId,
+            actions: [{ action: 'message', title: '💬 Mensaje' }],
+          });
+        }
+      } catch (_) {}
     });
 
-    // ── Eventos del motor de cocina ──────────────────────────────────────────
-    // kitchen_auto_ready: el sistema marcó automáticamente un pedido como listo
+    // ── Driver arrived ─────────────────────────────────────────────────────
+    es.addEventListener('driver_arrived', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbArrived.current?.(data);
+        playArrivalChime();
+        if (navigator?.vibrate) navigator.vibrate([300,100,100,100,300]);
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: '📍 Tu repartidor llegó',
+            body:  data.message || 'El conductor está afuera',
+            tag: `arrived_${data.orderId}`, group: 'customer', url: '/customer/pedidos',
+            vibrate: [300,100,100,100,300],
+            pushType: 'driver_arrived', orderId: data.orderId,
+            actions: [{ action: 'message', title: '💬 Mensaje' }],
+          });
+        }
+      } catch (_) {}
+    });
+
+    // ── Llamada simulada ───────────────────────────────────────────────────
+    es.addEventListener('simulated_call', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbCall.current?.(data);
+        playCallTone();
+        if (navigator?.vibrate) navigator.vibrate([500,300,500,300,500,300,500,300,500]);
+        notifyCall({ orderId: data.orderId, driverName: data.driverName, url: '/' });
+      } catch (_) {}
+    });
+
+    es.addEventListener('offer_cancelled',  (e) => { try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {} });
+    es.addEventListener('offer_assigned',   (e) => { try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {} });
+
     es.addEventListener('kitchen_auto_ready', (e) => {
       try {
         const data = JSON.parse(e.data);
         cbKitchen.current?.({ type: 'kitchen_auto_ready', ...data });
         if (shouldNotifyInBackground()) {
-          notifyRealtime({
-            title: 'Pedido marcado como listo',
-            body:  data.message || 'Un pedido fue marcado automáticamente como listo.',
-            tag:   'kitchen',
-            group: 'kitchen',
-            url:   '/restaurant/pedidos',
-          });
+          notifyRealtime({ title: 'Pedido marcado como listo', body: data.message || '',
+            tag: 'kitchen', group: 'kitchen', url: '/restaurant/pedidos' });
         }
       } catch (_) {}
     });
 
-    // prep_estimate_updated: el sistema ajustó el estimado de preparación
     es.addEventListener('prep_estimate_updated', (e) => {
       try {
         const data = JSON.parse(e.data);
         cbKitchen.current?.({ type: 'prep_estimate_updated', ...data });
-        if (shouldNotifyInBackground()) {
-          notifyRealtime({
-            title: 'Estimado de preparación ajustado',
-            body:  data.message || 'Tu tiempo estimado de preparación fue actualizado.',
-            tag:   'kitchen',
-            group: 'kitchen',
-            url:   '/restaurant/pedidos',
-          });
-        }
       } catch (_) {}
     });
 
-    // ── Eventos de rebalanceo (driver) ───────────────────────────────────────
     es.addEventListener('order_transferred_away', (e) => {
       try {
         const data = JSON.parse(e.data);
         cbTransfer.current?.({ type: 'order_transferred_away', ...data });
         cbUpdate.current?.(data);
+        if (navigator?.vibrate) navigator.vibrate([200,100,200]);
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({ title: 'Pedido reasignado', body: 'Un pedido fue transferido a otro conductor',
+            tag: 'driver', group: 'driver', url: '/driver', vibrate: [200,100,200],
+            pushType: 'reassigned' });
+        }
       } catch (_) {}
     });
 
@@ -332,13 +395,8 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
         cbTransfer.current?.({ type: 'order_transferred_in', ...data });
         cbUpdate.current?.(data);
         if (shouldNotifyInBackground()) {
-          notifyRealtime({
-            title: 'Nuevo pedido asignado',
-            body:  'Se te asignó un pedido transferido.',
-            tag:   'offers',
-            group: 'offers',
-            url:   '/driver',
-          });
+          notifyRealtime({ title: 'Nuevo pedido asignado', body: 'Se te asignó un pedido transferido',
+            tag: 'offers', group: 'driver', url: '/driver' });
         }
       } catch (_) {}
     });
@@ -348,123 +406,85 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
         const data = JSON.parse(e.data);
         cbChat.current?.(data);
         if (shouldNotifyInBackground()) {
-          notifyRealtime({
-            title: `Mensaje de ${data.senderName || 'soporte'}`,
-            body:  data.text || 'Tienes un nuevo mensaje.',
-            tag:   'chat',
-            group: 'chat',
-            url:   '/customer/pedidos',
-          });
+          notifyRealtime({ title: `Mensaje de ${data.senderName || 'soporte'}`,
+            body: data.text || 'Tienes un nuevo mensaje',
+            tag: 'chat', group: 'chat', url: '/customer/pedidos' });
         }
       } catch (_) {}
     });
 
-    // Mensajes del chat de soporte (independiente de pedidos)
     es.addEventListener('support_message', (e) => {
       try {
         const data = JSON.parse(e.data);
         cbSupport.current?.(data);
         if (shouldNotifyInBackground()) {
-          notifyRealtime({
-            title: '🛟 Soporte',
-            body:  data.text || 'Tienes un nuevo mensaje de soporte.',
-            tag:   'support',
-            group: 'support',
-            url:   '/profile',
-          });
+          notifyRealtime({ title: '🛟 Soporte', body: data.text || 'Nuevo mensaje de soporte',
+            tag: 'support', group: 'support', url: '/profile' });
         }
       } catch (_) {}
     });
 
-    // ── Eventos específicos de restaurante ───────────────────────────────────
-    // driver_arrival: el driver recogió el pedido (= marcó on_the_way)
     es.addEventListener('driver_arrival', (e) => {
       try {
         const data = JSON.parse(e.data);
         cbKitchen.current?.({ type: 'driver_arrival', ...data });
         playArrivalChime();
         if (shouldNotifyInBackground()) {
-          notifyRealtime({
-            title: '🛵 Conductor llegó',
-            body:  `${data.driverName || 'El conductor'} recogió el pedido`,
-            tag:   'kitchen',
-            group: 'kitchen',
-            url:   '/restaurant',
-          });
+          notifyRealtime({ title: '🛵 Conductor llegó', body: `${data.driverName || 'El conductor'} recogió el pedido`,
+            tag: 'kitchen', group: 'kitchen', url: '/restaurant' });
         }
       } catch (_) {}
     });
 
-    // order_cancelled_preparing: cliente canceló mientras el restaurante ya preparaba
     es.addEventListener('order_cancelled_preparing', (e) => {
       try {
         const data = JSON.parse(e.data);
         cbKitchen.current?.({ type: 'order_cancelled_preparing', ...data });
         playUrgentAlert();
-        if ('vibrate' in navigator) navigator.vibrate([500, 200, 500, 200, 500]);
+        if (navigator?.vibrate) navigator.vibrate([500,200,500,200,500]);
         if (shouldNotifyInBackground()) {
-          notifyRealtime({
-            title: '⚠️ Pedido cancelado',
-            body:  'El cliente canceló mientras estabas preparando',
-            tag:   'kitchen_cancel',
-            group: 'kitchen',
-            url:   '/restaurant',
-            priority: 'high',
-          });
+          notifyRealtime({ title: '⚠️ Pedido cancelado', body: 'El cliente canceló mientras estabas preparando',
+            tag: 'kitchen_cancel', group: 'kitchen', url: '/restaurant', priority: 'high' });
         }
       } catch (_) {}
     });
 
-    // Pedidos bloqueados — notificar via evento global (sin logout)
     es.addEventListener('orders_blocked', (e) => {
       try {
         const data = JSON.parse(e.data);
-        console.warn('[SSE] orders_blocked recibido:', data.reason);
         window.dispatchEvent(new CustomEvent('sse_orders_blocked', { detail: data }));
       } catch (_) {}
     });
 
     es.addEventListener('connected', () => {
       retryCount.current = 0;
-      console.log('📡 [SSE] conexión establecida');
       clearTimeout(reconnectTimer.current);
       cbReconnect.current?.();
     });
 
     es.onerror = () => {
-      es.close();
-      esRef.current = null;
+      es.close(); esRef.current = null;
       if (!mountedRef.current) return;
       clearTimeout(reconnectTimer.current);
       const delay = Math.min(4000 * Math.pow(2, retryCount.current), 30000);
       retryCount.current++;
-      console.warn(`📡 [SSE] error — reintentando en ${delay / 1000}s (intento ${retryCount.current})`);
       reconnectTimer.current = setTimeout(connect, delay);
     };
   }, [token]);
 
   useEffect(() => {
     mountedRef.current = true;
-    console.log('🔌 [SSE] mount — token:', token?.slice(0, 8), new Error().stack?.split('\n')[2]?.trim());
     connect();
 
-    // Reconectar si iOS/Android pausó el JS y el SSE quedó muerto al volver al foco
     function onVisible() {
       if (document.hidden || !mountedRef.current) return;
-      notifyAppFocused(); // limpiar badge del ícono de la app
+      notifyAppFocused();
       const state = esRef.current?.readyState;
-      // 1 = OPEN — si no está abierto, reconectar
-      if (state !== 1) {
-        console.warn('[SSE] tab visible pero SSE no activo (state=' + state + ') — reconectando');
-        clearTimeout(reconnectTimer.current);
-        retryCount.current = 0; // reset backoff al volver manual
-        connect();
-      }
+      if (state !== 1) { clearTimeout(reconnectTimer.current); retryCount.current = 0; connect(); }
     }
     document.addEventListener('visibilitychange', onVisible);
 
     return () => {
-      console.log('🔌 [SSE] unmount — token:', token?.slice(0, 8));
       mountedRef.current = false;
       clearTimeout(reconnectTimer.current);
       esRef.current?.close();
@@ -473,4 +493,3 @@ export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewO
     };
   }, [connect]);
 }
-

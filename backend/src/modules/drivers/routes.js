@@ -8,9 +8,21 @@ import { offerCb } from '../events/offerCallback.js';
 import { AppError } from '../../utils/errors.js';
 
 const router = Router();
+const ETA_ALERT_COOLDOWN_MS     = 5 * 60 * 1000; // 5 min entre alertas ETA
+const ARRIVED_ALERT_COOLDOWN_MS = 2 * 60 * 1000; // 2 min entre alertas arrived
+const etaAlertedAt     = new Map(); // orderId → ts
+const arrivedAlertedAt = new Map(); // orderId → ts
 
 function isMissingColumnError(e)   { return e?.code === '42703'; }
 function isMissingRelationError(e) { return e?.code === '42P01'; }
+function haversineM(lat1, lng1, lat2, lng2) {
+  const R    = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a    = Math.sin(dLat / 2) ** 2
+  + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 // POST /drivers/listener — deprecated
 router.post('/listener', authenticate, authorize(['driver']), async (_req, res) => {
@@ -332,7 +344,6 @@ router.post('/orders/:orderId/release', authenticate, authorize(['driver']), asy
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /drivers/location ─────────────────────────────────────────────── */
 router.patch('/location', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const { lat, lng } = req.body || {};
@@ -340,23 +351,100 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
       return next(new AppError(400, 'lat y lng son requeridos'));
 
     try {
-      await query('UPDATE driver_profiles SET last_lat=$1, last_lng=$2 WHERE user_id=$3', [lat, lng, req.user.userId]);
+      await query('UPDATE driver_profiles SET last_lat=$1, last_lng=$2 WHERE user_id=$3',
+                  [lat, lng, req.user.userId]);
     } catch (e) { if (!isMissingColumnError(e)) throw e; }
 
     const activeOrders = await query(
-      `SELECT o.id, o.customer_id, r.owner_user_id AS restaurant_owner_id
-       FROM orders o JOIN restaurants r ON r.id=o.restaurant_id
-       WHERE o.driver_id=$1 AND o.status IN ('assigned','accepted','preparing','ready','on_the_way')`,
-      [req.user.userId]
+      `SELECT o.id, o.status, o.customer_id,
+      o.restaurant_lat, o.restaurant_lng,
+      o.delivery_lat, o.delivery_lng,
+      r.owner_user_id AS restaurant_owner_id,
+      COALESCE(cu.alias, cu.full_name) AS customer_name
+      FROM orders o
+      JOIN restaurants r ON r.id = o.restaurant_id
+      JOIN users cu ON cu.id = o.customer_id
+      WHERE o.driver_id = $1
+      AND o.status IN ('assigned','accepted','preparing','ready','on_the_way')`,
+                                     [req.user.userId]
     );
+
+    const now = Date.now();
+
     for (const ord of activeOrders.rows) {
       const payload = { orderId: ord.id, driverId: req.user.userId, lat, lng };
-      sseHub.sendToUser(ord.customer_id, 'driver_location', payload);
-      sseHub.sendToUser(ord.restaurant_owner_id, 'driver_location', payload);
+      sseHub.sendToUser(ord.customer_id,          'driver_location', payload);
+      sseHub.sendToUser(ord.restaurant_owner_id,  'driver_location', payload);
+
+      // ── Calcular distancia al próximo stop ──────────────────────────────
+      const isOTW = ord.status === 'on_the_way';
+      const stopLat = isOTW ? Number(ord.delivery_lat)    : Number(ord.restaurant_lat);
+      const stopLng = isOTW ? Number(ord.delivery_lng)    : Number(ord.restaurant_lng);
+
+      if (!Number.isFinite(stopLat) || !Number.isFinite(stopLng)) continue;
+
+      const distM = haversineM(lat, lng, stopLat, stopLng);
+
+      // ETA estimada: distancia / velocidad promedio (25 km/h = 6.94 m/s)
+      const etaSecs  = Math.round(distM / 6.94);
+      const etaMins  = Math.round(etaSecs / 60);
+
+      // ── Alerta "driver cerca" — ETA ≤ 5 min ────────────────────────────
+      const lastEta = etaAlertedAt.get(ord.id) || 0;
+      if (etaMins <= 5 && (now - lastEta) > ETA_ALERT_COOLDOWN_MS) {
+        etaAlertedAt.set(ord.id, now);
+
+        const etaPayload = {
+          orderId:  ord.id,
+          etaMins,
+          distM:    Math.round(distM),
+             target:   isOTW ? 'delivery' : 'pickup',
+        };
+
+        if (isOTW) {
+          // Driver cerca del cliente
+          sseHub.sendToUser(ord.customer_id, 'driver_eta_alert', {
+            ...etaPayload,
+            message: `Tu conductor llegará en aproximadamente ${etaMins} minuto${etaMins !== 1 ? 's' : ''}`,
+          });
+        } else {
+          // Driver cerca del restaurante
+          sseHub.sendToUser(ord.restaurant_owner_id, 'driver_eta_alert', {
+            ...etaPayload,
+            message: `El conductor llegará en aproximadamente ${etaMins} minuto${etaMins !== 1 ? 's' : ''}`,
+          });
+        }
+      }
+
+      // ── Alerta "driver arrived" — distancia ≤ 200m ─────────────────────
+      const lastArrived = arrivedAlertedAt.get(`${ord.id}_${isOTW ? 'delivery' : 'pickup'}`) || 0;
+      if (distM <= 200 && (now - lastArrived) > ARRIVED_ALERT_COOLDOWN_MS) {
+        arrivedAlertedAt.set(`${ord.id}_${isOTW ? 'delivery' : 'pickup'}`, now);
+
+        const arrivedPayload = {
+          orderId: ord.id,
+          distM:   Math.round(distM),
+             target:  isOTW ? 'delivery' : 'pickup',
+        };
+
+        if (isOTW) {
+          sseHub.sendToUser(ord.customer_id, 'driver_arrived', {
+            ...arrivedPayload,
+            message: 'Tu conductor ha llegado',
+          });
+        } else {
+          sseHub.sendToUser(ord.restaurant_owner_id, 'driver_arrived', {
+            ...arrivedPayload,
+            message: 'El conductor ha llegado a recoger el pedido',
+          });
+        }
+      }
     }
+
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
+
 
 /* ── GET /drivers/earnings ───────────────────────────────────────────────── */
 router.get('/earnings', authenticate, authorize(['driver']), async (req, res, next) => {
@@ -407,6 +495,45 @@ router.get('/earnings', authenticate, authorize(['driver']), async (req, res, ne
       summary: { deliveries, total_earnings: totalEarnings, total_tips, days },
       limit, offset,
     });
+  } catch (error) { return next(error); }
+});
+
+router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const { target } = req.body || {}; // 'customer' | 'restaurant'
+    if (!['customer', 'restaurant'].includes(target))
+      return next(new AppError(400, 'target debe ser customer o restaurant'));
+
+    const { orderId } = req.params;
+    const driverId    = req.user.userId;
+
+    const orderRow = await query(
+      `SELECT o.customer_id, r.owner_user_id AS restaurant_owner_id,
+      d.full_name AS driver_name
+      FROM orders o
+      JOIN restaurants r ON r.id = o.restaurant_id
+      JOIN users d ON d.id = o.driver_id
+      WHERE o.id = $1 AND o.driver_id = $2
+      AND o.status NOT IN ('delivered','cancelled')`,
+                                 [orderId, driverId]
+    );
+
+    if (orderRow.rowCount === 0)
+      return next(new AppError(404, 'Pedido no encontrado o no asignado a ti'));
+
+    const ord        = orderRow.rows[0];
+    const targetId   = target === 'customer' ? ord.customer_id : ord.restaurant_owner_id;
+    const driverName = ord.driver_name || 'El repartidor';
+
+    sseHub.sendToUser(targetId, 'simulated_call', {
+      orderId,
+      driverId,
+      driverName,
+      message: `${driverName} está intentando localizarte`,
+    });
+
+    console.log(`[driver.call] ${driverId.slice(0,8)} → ${target} order=${orderId.slice(0,8)}`);
+    return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
 
