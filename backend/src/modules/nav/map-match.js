@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../../middlewares/auth.js';
 import { AppError } from '../../utils/errors.js';
+import { env } from '../../config/env.js';
+
+const OSRM_BASE = env.osrmUrl || 'https://router.project-osrm.org';
 
 const router = Router();
 
@@ -51,7 +54,7 @@ router.post('/', authenticate, authorize(['driver']), async (req, res, next) => 
 
     // Construir URL de OSRM map matching (lng,lat)
     const coordStr = filtered.map(c => `${c.lng},${c.lat}`).join(';');
-    const osrmUrl  = `https://router.project-osrm.org/match/v1/driving/${coordStr}?overview=full&geometries=geojson&steps=false&annotations=false&tidy=true`;
+    const osrmUrl  = `${OSRM_BASE}/match/v1/driving/${coordStr}?overview=full&geometries=geojson&steps=false&annotations=false&tidy=true`;
 
     let matched = false;
     let geometry = filtered;

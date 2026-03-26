@@ -1,0 +1,1526 @@
+// frontend/src/components/DriverMap.jsx
+//
+// OPT-4:  _ml singleton — evita Promise.resolve() en cada tick GPS
+// OPT-5:  posición y heading separados — heading solo muta el SVG sin recrear DOM
+// OPT-6:  SVG del marcador vive en el DOM; solo se muta su style.transform para rotar
+// OPT-7:  hasActiveOrder se lee desde ref dentro del listener de click del mapa
+// OPT-12: livePos y liveHeading son refs, NO estado — sin re-render en cada tick GPS
+// UPDATE: soporte para impassableWays y roadPreferences como props
+
+import { useEffect, useRef, useState } from 'react';
+import { DriverMapOverlays } from '../features/driver/map/overlays';
+import { DEFAULT_POS, MORELIA_BOUNDS, STADIA_KEY, STYLE_DARK, STYLE_LIGHT } from '../features/driver/map/config';
+import { createDriverPoiMarker, DRIVER_ROUTE_BORDER_ID, DRIVER_ROUTE_LAYER_ID, DRIVER_ROUTE_SOURCE_ID, getDriverRouteFeature, syncDriverRouteLayers } from '../features/driver/map/helpers';
+import { useTheme } from '../contexts/ThemeContext';
+import { getBearing } from '../utils/geo';
+import { ensureMapLibreCSS, ensureMapLibreJS } from '../utils/mapLibre';
+
+// OPT-4: singleton — se asigna una vez cuando la lib carga y se reutiliza
+var _ml = null;
+
+export default function DriverMap({
+  driverPos, customPin, onCustomPin, hasActiveOrder,
+  pickupPos, deliveryPos, pickupLabel, deliveryLabel,
+  routeGeometry, onRouteError,
+  allStops,
+  routeActive,
+  centerMode, navHeadingDeg, onHeadingChange,
+  centerSignal, onCenterDone,
+  onMapReady,
+  bottomOffset = 8,
+  pinAddress,
+  loadingPin,
+  onClearPin,
+  onRouteToPin,
+  // Nuevas props para layers de vialidad
+  impassableWays = [],
+  roadPreferences = [],
+}) {
+  const { isDark }        = useTheme();
+  const containerRef      = useRef(null);
+  const mapRef            = useRef(null);
+  const markersRef        = useRef({ driver: null, driverSvg: null, custom: null, pickup: null, delivery: null });
+  const livePosRef        = useRef(driverPos || null);
+  const liveHeadingRef    = useRef(0);
+  const watchIdRef        = useRef(null);
+  const prevWatchPosRef   = useRef(null);
+  const hasActiveOrderRef = useRef(hasActiveOrder);
+  const centerModeRef     = useRef(centerMode);
+  const routeActiveRef    = useRef(routeActive);
+  const onHeadingRef      = useRef(onHeadingChange);
+  const lastInteractionRef = useRef(Date.now());
+  const zoomCtrlRef       = useRef(null);
+  const zoomTimeRef       = useRef(null);
+  const isDarkRef         = useRef(isDark);
+
+  const [showAttrib, setShowAttrib] = useState(false);
+  const [hasGPS,     setHasGPS]     = useState(Boolean(driverPos));
+
+  useEffect(() => { isDarkRef.current = isDark; }, [isDark]);
+
+  function applyDarkFilter(dark) {
+    const el = containerRef.current;
+    if (el) {
+      el.style.filter = dark
+      ? 'invert(1) contrast(1.1) hue-rotate(180deg) brightness(0.85) saturate(1.5)'
+      : 'contrast(1.1) saturate(1.8) brightness(0.9) grayscale(0.1)';
+    }
+  }
+
+  useEffect(() => {
+    if (STADIA_KEY) {
+      const map = mapRef.current;
+      if (!map || !map.isStyleLoaded()) return;
+      const newStyle = isDark ? STYLE_DARK : STYLE_LIGHT;
+      map.setStyle(newStyle);
+      map.once('styledata', () => {
+        const routeFeature = getDriverRouteFeature(routeGeometry);
+        if (!routeFeature) return;
+        try {
+          if (!map.getSource(DRIVER_ROUTE_SOURCE_ID)) map.addSource(DRIVER_ROUTE_SOURCE_ID, { type: 'geojson', data: routeFeature });
+          if (!map.getLayer(DRIVER_ROUTE_BORDER_ID)) map.addLayer({ id: DRIVER_ROUTE_BORDER_ID, type: 'line', source: DRIVER_ROUTE_SOURCE_ID,
+            paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.4 },
+            layout: { 'line-cap': 'round', 'line-join': 'round' } });
+          if (!map.getLayer(DRIVER_ROUTE_LAYER_ID)) map.addLayer({ id: DRIVER_ROUTE_LAYER_ID, type: 'line', source: DRIVER_ROUTE_SOURCE_ID,
+            paint: { 'line-color': '#6366f1', 'line-width': 5, 'line-opacity': 0.95 },
+            layout: { 'line-cap': 'round', 'line-join': 'round' } });
+        } catch (_) {}
+      });
+    } else {
+      applyDarkFilter(isDark);
+    }
+  }, [isDark]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Sincronizar refs sin recrear listeners ───────────────────────────────────
+  useEffect(() => { hasActiveOrderRef.current = hasActiveOrder; }, [hasActiveOrder]);
+  useEffect(() => { centerModeRef.current     = centerMode;       }, [centerMode]);
+  useEffect(() => { routeActiveRef.current    = routeActive;      }, [routeActive]);
+  useEffect(() => { onHeadingRef.current      = onHeadingChange;  }, [onHeadingChange]);
+
+  useEffect(() => {
+    if (driverPos) { livePosRef.current = driverPos; setHasGPS(true); }
+  }, [driverPos?.lat, driverPos?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reconstruir marcador si el mapa ya existe y llega la primera posición GPS
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !_ml) return;
+    if (!driverPos && !livePosRef.current) return;
+    _buildDriverMarker(_ml, map);
+  }, [driverPos?.lat, driverPos?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── watchPosition — suscripción ÚNICA, todo vía refs (OPT-12) ────────────────
+  useEffect(() => {
+    if (!navigator?.geolocation) return;
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        const prev = prevWatchPosRef.current;
+        if (prev) {
+          const h = getBearing(prev, next);
+          liveHeadingRef.current = h;
+          onHeadingRef.current?.(h);
+          const svg = markersRef.current.driverSvg;
+          if (svg && routeActiveRef.current) svg.style.transform = `rotate(${h}deg)`;
+        }
+        prevWatchPosRef.current = next;
+        livePosRef.current      = next;
+        setHasGPS(true);
+        if (markersRef.current.driver && mapRef.current) {
+          markersRef.current.driver.setLngLat([next.lng, next.lat]);
+          const map  = mapRef.current;
+          const mode = centerModeRef.current;
+          if (mode === 'nav') {
+            const sinceInteraction = Date.now() - lastInteractionRef.current;
+            if (sinceInteraction > 5000) {
+              const h = liveHeadingRef.current;
+              map.easeTo({
+                center: [next.lng, next.lat], bearing: h, pitch: 50, zoom: 17,
+                duration: 250, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
+                         essential: true,
+              });
+            }
+          } else if (mode === 'free') {
+            const prevPos = prevWatchPosRef.current;
+            if (prevPos) {
+              const R   = 6371000;
+              const dLat = (next.lat - prevPos.lat) * Math.PI / 180;
+              const dLng = (next.lng - prevPos.lng) * Math.PI / 180;
+              const a   = Math.sin(dLat/2)**2 + Math.cos(prevPos.lat*Math.PI/180)*Math.cos(next.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+              const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+              const currentZoom = map.getZoom();
+              if (dist > 200 && currentZoom > 10) {
+                map.easeTo({
+                  center: [next.lng, next.lat], pitch: 0, bearing: 0, zoom: 14,
+                  duration: 400, essential: true,
+                });
+              }
+            }
+          }
+        }
+      },
+      () => {},
+                                                             { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+    );
+    return () => {
+      if (watchIdRef.current != null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Construir marcador del driver ────────────────────────────────────────────
+  function _buildDriverMarker(ml, map) {
+    if (markersRef.current.driver) {
+      markersRef.current.driver.remove();
+      markersRef.current.driver    = null;
+      markersRef.current.driverSvg = null;
+    }
+    const pos = livePosRef.current;
+    if (!pos) return;
+
+    const isDrive = routeActiveRef.current === true;
+    const wrap    = document.createElement('div');
+
+    if (isDrive) {
+      const arrowColor = isDarkRef.current ? '#c97f7f' : '#e3aaaa';
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('width',  '60');
+      svg.setAttribute('height', '60');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('fill',            arrowColor);
+      svg.setAttribute('stroke',          arrowColor + 'cc');
+      svg.setAttribute('stroke-width',    '1.4');
+      svg.setAttribute('stroke-linejoin', 'round');
+      svg.style.cssText   = 'display:block;transform-origin:50% 55%;';
+      svg.style.transform = `rotate(${liveHeadingRef.current}deg)`;
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', 'M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z');
+      svg.appendChild(path);
+
+      wrap.style.cssText = 'width:60px;height:60px';
+      wrap.appendChild(svg);
+      markersRef.current.driverSvg = svg;
+    } else {
+      const dot = document.createElement('div');
+      const dotColor = isDarkRef.current ? '#c97f7f' : '#e3aaaa';
+      dot.style.cssText = [
+        'width:20px', 'height:20px', 'border-radius:50%',
+        `background:${dotColor}`,
+        'border:2.5px solid rgba(255,255,255,0.9)',
+        'box-shadow:0 2px 8px rgba(0,0,0,0.35)',
+      ].join(';');
+      wrap.style.cssText = 'width:20px;height:20px';
+      wrap.appendChild(dot);
+      markersRef.current.driverSvg = null;
+    }
+
+    markersRef.current.driver = new ml.Marker({ element: wrap, anchor: 'center' })
+    .setLngLat([pos.lng, pos.lat]).addTo(map);
+  }
+
+  // ── Inicializar mapa UNA sola vez ────────────────────────────────────────────
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+    ensureMapLibreCSS();
+    ensureMapLibreJS().then((ml) => {
+      _ml = ml;
+      if (!containerRef.current || mapRef.current) return;
+      const start = livePosRef.current || DEFAULT_POS;
+
+      const map = new ml.Map({
+        container: containerRef.current,
+        style:   isDarkRef.current ? STYLE_DARK : STYLE_LIGHT,
+        center:  [start.lng, start.lat],
+        zoom:    14,
+        pitch:   0,
+        bearing: 0,
+        minZoom: 10,
+        maxZoom: 20,
+        maxBounds:            MORELIA_BOUNDS,
+        attributionControl:   false,
+        antialias:            false,
+        preserveDrawingBuffer: false,
+        dragRotate:      false,
+        pitchWithRotate: false,
+      });
+
+      if (map.touchPitch) map.touchPitch.disable();
+
+      map.addControl(new ml.NavigationControl({ showCompass: false }), 'top-right');
+
+      const ctrl = containerRef.current.querySelector('.maplibregl-ctrl-top-right');
+      if (ctrl) {
+        zoomCtrlRef.current       = ctrl;
+        ctrl.style.opacity        = '0';
+        ctrl.style.pointerEvents  = 'none';
+        ctrl.style.transition     = 'opacity 0.18s ease';
+      }
+      const showZoom = () => {
+        const el = zoomCtrlRef.current;
+        if (!el) return;
+        el.style.opacity       = '1';
+        el.style.pointerEvents = 'auto';
+        if (zoomTimeRef.current) clearTimeout(zoomTimeRef.current);
+        zoomTimeRef.current = setTimeout(() => {
+          el.style.opacity       = '0';
+          el.style.pointerEvents = 'none';
+        }, 3000);
+      };
+      ['mousedown', 'touchstart', 'wheel', 'dragstart'].forEach(ev => map.on(ev, showZoom));
+
+      const onMapInteract = () => { lastInteractionRef.current = Date.now(); };
+      ['mousedown', 'touchstart', 'wheel', 'dragstart', 'touchmove'].forEach(ev => map.on(ev, onMapInteract));
+
+      map.on('click', (e) => {
+        if (hasActiveOrderRef.current) return;
+        onCustomPin?.({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+      });
+
+      map.once('load', () => {
+        _buildDriverMarker(ml, map);
+        if (!STADIA_KEY && document.documentElement.getAttribute('data-theme') === 'dark') {
+          if (containerRef.current) {
+            containerRef.current.style.filter =
+            'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)';
+          }
+        }
+      });
+      mapRef.current = map;
+      window.__map = map;
+      onMapReady?.(map);
+    }).catch(() => onRouteError?.('No se pudo inicializar el mapa'));
+
+    return () => {
+      if (zoomTimeRef.current) { clearTimeout(zoomTimeRef.current); zoomTimeRef.current = null; }
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reconstruir marcador al cambiar modo nav
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !_ml) return;
+    _buildDriverMarker(_ml, map);
+    if (centerMode === 'nav') {
+      const pos = livePosRef.current;
+      if (!pos) return;
+      const h = liveHeadingRef.current || navHeadingDeg || 0;
+      map.easeTo({ center: [pos.lng, pos.lat], bearing: h, pitch: 50, zoom: 17,
+        duration: 350, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
+                 essential: true });
+    } else {
+      map.easeTo({ pitch: 0, bearing: 0, duration: 300, essential: true });
+    }
+  }, [centerMode, routeActive]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Heading — muta SVG
+  useEffect(() => {
+    const svg = markersRef.current.driverSvg;
+    if (!svg) return;
+    svg.style.transform = routeActive
+    ? `rotate(${navHeadingDeg}deg)` : 'rotate(0deg)';
+  }, [navHeadingDeg, routeActive]);
+
+  // Pin personalizado
+  const pinPopupRef   = useRef(null);
+  const pinHideTimer  = useRef(null);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !_ml) return;
+
+    if (markersRef.current.custom) { markersRef.current.custom.remove(); markersRef.current.custom = null; }
+    if (pinPopupRef.current)       { pinPopupRef.current.remove();       pinPopupRef.current = null; }
+    clearTimeout(pinHideTimer.current);
+
+    if (customPin && !hasActiveOrder) {
+      const el = document.createElement('div');
+      el.style.cssText = 'cursor:pointer;width:32px;height:40px;';
+  el.innerHTML = `<svg width="32" height="40" viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M16 2C9.37 2 4 7.37 4 14c0 9 12 24 12 24s12-15 12-24c0-6.63-5.37-12-12-12z" fill="var(--brand)" stroke="#fff" stroke-width="1.5"/>
+  <circle cx="16" cy="14" r="5" fill="#fff" fill-opacity="0.9"/>
+  </svg>`;
+  markersRef.current.custom = new _ml.Marker({ element: el, anchor: 'bottom' })
+  .setLngLat([customPin.lng, customPin.lat]).addTo(map);
+    }
+  }, [customPin?.lat, customPin?.lng, hasActiveOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Popup sobre el pin
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !_ml || !customPin || hasActiveOrder) return;
+    if (pinPopupRef.current) { pinPopupRef.current.remove(); pinPopupRef.current = null; }
+    clearTimeout(pinHideTimer.current);
+    if (loadingPin || !pinAddress) return;
+
+    const isDarkMode = document.documentElement.getAttribute('data-theme') === 'dark';
+    const bg  = isDarkMode ? '#1f2937' : '#fff';
+    const txt = isDarkMode ? '#f3f4f6' : '#111827';
+    const sub = isDarkMode ? '#9ca3af' : '#9e4f4f';
+  const html = `<div style="font-size:0.78rem;font-family:inherit;max-width:200px;background:${bg};color:${txt};border-radius:6px;padding:6px 8px;">
+  <div style="font-weight:600;margin-bottom:3px;line-height:1.3;">${pinAddress}</div>
+  <button onclick="this.dispatchEvent(new CustomEvent('routetopin',{bubbles:true}))"
+  style="font-size:0.7rem;color:${sub};background:none;border:none;cursor:pointer;padding:0;margin-top:2px;">
+  📍 Ruta hasta aquí
+  </button>
+  </div>`;
+
+  const popup = new _ml.Popup({ closeButton: false, offset: [0, -38], maxWidth: '220px' })
+  .setLngLat([customPin.lng, customPin.lat])
+  .setHTML(html)
+  .addTo(map);
+
+  pinPopupRef.current = popup;
+
+  const el = popup.getElement();
+  el?.addEventListener('routetopin', () => {
+    onRouteToPin?.({ lat: customPin.lat, lng: customPin.lng });
+  });
+
+  pinHideTimer.current = setTimeout(() => {
+    popup.remove();
+    pinPopupRef.current = null;
+    onClearPin?.();
+  }, 5000);
+
+  return () => clearTimeout(pinHideTimer.current);
+  }, [pinAddress, loadingPin, customPin?.lat, customPin?.lng, hasActiveOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ocultar popup al hacer click en otro punto
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const hide = () => {
+      if (pinPopupRef.current) { pinPopupRef.current.remove(); pinPopupRef.current = null; }
+      clearTimeout(pinHideTimer.current);
+    };
+    map.on('click', hide);
+    return () => map.off('click', hide);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Marcadores tienda / cliente
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !_ml) return;
+    if (markersRef.current.pickup)   { markersRef.current.pickup.remove();   markersRef.current.pickup   = null; }
+    if (markersRef.current.delivery) { markersRef.current.delivery.remove(); markersRef.current.delivery = null; }
+    if (pickupPos) {
+      markersRef.current.pickup = createDriverPoiMarker(_ml, pickupPos, { emoji: '🏪', color: '#16a34a', label: pickupLabel || 'Tienda' }).addTo(map);
+    }
+    if (deliveryPos) {
+      markersRef.current.delivery = createDriverPoiMarker(_ml, deliveryPos, { emoji: '📦', color: '#f97316', label: deliveryLabel || 'Cliente' }).addTo(map);
+    }
+  }, [pickupPos?.lat, pickupPos?.lng, deliveryPos?.lat, deliveryPos?.lng, pickupLabel, deliveryLabel]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ruta GeoJSON
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    function draw() {
+      try {
+        syncDriverRouteLayers(map, routeGeometry);
+      } catch (e) {
+        console.warn('[DriverMap] route draw error:', e.message);
+      }
+    }
+
+    if (map.isStyleLoaded()) {
+      draw();
+    } else {
+      map.once('styledata', draw);
+    }
+  }, [routeGeometry]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Centrar — señal puntual del padre ────────────────────────────────────────
+  useEffect(() => {
+    if (!centerSignal || !mapRef.current) return;
+    const map = mapRef.current;
+    const pos = livePosRef.current || driverPos;
+
+    if (centerSignal === 'nav') {
+      if (!pos) { onCenterDone?.(); return; }
+      const h       = liveHeadingRef.current || navHeadingDeg || 0;
+      const offsetY = Math.round(map.getContainer().clientHeight * 0.18);
+      map.easeTo({ center: [pos.lng, pos.lat], zoom: 17, pitch: 50, bearing: h,
+        duration: 350, offset: [0, offsetY], essential: true });
+
+    } else if (centerSignal === 'overview') {
+      const pts = [];
+      if (pos) pts.push([pos.lng, pos.lat]);
+      if (allStops?.length) {
+        allStops.forEach(s => pts.push([s.lng, s.lat]));
+      } else {
+        if (pickupPos)   pts.push([pickupPos.lng, pickupPos.lat]);
+        if (deliveryPos) pts.push([deliveryPos.lng, deliveryPos.lat]);
+      }
+
+      if (pts.length >= 2 && _ml) {
+        try {
+          const bounds = pts.reduce(
+            (b, pt) => b.extend(pt),
+                                    new _ml.LngLatBounds(pts[0], pts[0])
+          );
+          map.fitBounds(bounds, {
+            padding: { top: 80, bottom: 160, left: 40, right: 60 },
+            maxZoom: 16,
+            duration: 500,
+            essential: true,
+          });
+        } catch (_) {
+          if (pos) map.easeTo({ center: [pos.lng, pos.lat], zoom: 13, duration: 400 });
+        }
+      } else if (pos) {
+        map.easeTo({ center: [pos.lng, pos.lat], zoom: 13, pitch: 0, bearing: 0,
+          duration: 400, essential: true });
+      }
+
+    } else {
+      if (!pos) { onCenterDone?.(); return; }
+      map.easeTo({ center: [pos.lng, pos.lat], zoom: 14, pitch: 0, bearing: 0,
+        duration: 350, essential: true });
+    }
+
+    onCenterDone?.();
+  }, [centerSignal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div style={{ height: '100%', width: '100%', position: 'relative' }}>
+    <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
+
+    <DriverMapOverlays hasGPS={hasGPS} showAttrib={showAttrib} onToggleAttrib={() => setShowAttrib(v => !v)} bottomOffset={bottomOffset} />
+    </div>
+  );
+}
+// components/NavFABs.jsx
+
+var NAV_REPORT_MODES = ['zone', 'impassable', 'preference'];
+
+// Ciclo del FAB de reporte: null → normal → rapido → null
+// En modo normal abre ZonePlacer / WayPicker según submodo
+// En modo rápido envía directo sin pasos intermedios
+
+function IconCenter({ mode }) {
+  const color = mode === 'free' ? 'var(--text-secondary)' : '#fff';
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+      stroke={color} strokeWidth="2.2" strokeLinecap="round">
+      <circle cx="12" cy="12" r="3.5" fill={mode !== 'free' ? color : 'none'}/>
+      <line x1="12" y1="2"  x2="12" y2="7"/>
+      <line x1="12" y1="17" x2="12" y2="22"/>
+      <line x1="2"  y1="12" x2="7"  y2="12"/>
+      <line x1="17" y1="12" x2="22" y2="12"/>
+    </svg>
+  );
+}
+function IconVolume({ on }) {
+  return on
+    ? <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+    : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>;
+}
+function IconNavigate() {
+  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/></svg>;
+}
+function IconMore() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+      <circle cx="12" cy="5"  r="1" fill="currentColor"/>
+      <circle cx="12" cy="12" r="1" fill="currentColor"/>
+      <circle cx="12" cy="19" r="1" fill="currentColor"/>
+    </svg>
+  );
+}
+function IconReport({ reportMode }) {
+  if (reportMode === 'quick') {
+    return <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>;
+  }
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+      <line x1="4" y1="22" x2="4" y2="15"/>
+    </svg>
+  );
+}
+
+// Pills de reporte — igual en normal y rápido
+const REPORT_PILLS = [
+  { mode: 'zone',       label: 'Zona de alerta',   icon: '🚦', color: '#f97316' },
+  { mode: 'impassable', label: 'Calle no viable',   icon: '⛔', color: '#ef4444' },
+  { mode: 'preference', label: 'Preferencias',     icon: '⭐', color: '#16a34a' },
+];
+
+export default function NavFABs({
+  hasActiveOrder,
+  routeGeometry,
+  centerMode,
+  bottomOffset = 16,
+  voiceEnabled,
+  navMode,
+  myPosition,
+  onCenterCycle,
+  onVoiceToggle,
+  onGoogleNav,
+  onNavMode,
+  onQuickReport,  // (type, position) → envío directo sin pasos
+  isDark = false,
+}) {
+  const withRoute   = hasActiveOrder && (routeGeometry?.length > 0);
+  const safeBot     = 'env(safe-area-inset-bottom, 0px)';
+  const BASE        = bottomOffset;
+  const GAP         = 12;
+  const SZ_P        = 60;  // primary
+  const SZ_S        = 52;  // secondary
+
+  // reportMode: null | 'normal' | 'quick'
+  const isReportNormal = navMode === 'menu';
+  const isReportQuick  = navMode === 'menu-quick';
+  const isReportOpen   = isReportNormal || isReportQuick;
+
+  const centerBottom    = `calc(${BASE}px + ${safeBot})`;
+  const secondaryBottom = `calc(${BASE + SZ_P + GAP}px + ${safeBot})`;
+  const reportBottom    = withRoute
+    ? `calc(${BASE + SZ_P + GAP + SZ_S + GAP}px + ${safeBot})`
+    : secondaryBottom;
+  const menuBottom      = withRoute
+    ? `calc(${BASE + SZ_P + GAP + SZ_S + GAP + SZ_S + GAP}px + ${safeBot})`
+    : `calc(${BASE + SZ_P + GAP + SZ_S + GAP}px + ${safeBot})`;
+
+  const centerBg =
+    centerMode === 'nav'      ? 'var(--brand)' :
+    centerMode === 'overview' ? '#4f46e5'      : '#fff';
+
+  // Colores del FAB de reporte según estado
+  const reportFabBg    = isReportQuick
+    ? (isDark ? '#4c1d95' : '#7c3aed')
+    : isReportNormal ? 'var(--brand)' : '#fff';
+  const reportFabColor = isReportOpen ? '#fff' : 'var(--text-secondary)';
+  const reportFabBorder = isReportOpen ? 'none' : '1.5px solid var(--border)';
+
+  // Resplandor modo rápido
+  const quickGlow = isDark
+    ? '0 0 0 3px rgba(250,204,21,0.35), 0 2px 8px rgba(0,0,0,0.3)'
+    : '0 0 0 3px rgba(124,58,237,0.25), 0 2px 8px rgba(0,0,0,0.15)';
+
+  const fabBase = {
+    position: 'absolute', right: 14, zIndex: 402,
+    borderRadius: '50%', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    border: 'none', transition: 'background 0.15s, box-shadow 0.15s',
+  };
+
+  function cycleReport() {
+    if (!isReportOpen)      return onNavMode('menu');
+    if (isReportNormal)     return onNavMode('menu-quick');
+    return onNavMode(null);
+  }
+
+  function handlePill(type) {
+    if (isReportQuick) {
+      // Modo rápido: envío directo
+      if (!myPosition) return;
+      onQuickReport?.(type, myPosition);
+      onNavMode(null);
+    } else {
+      // Modo normal: abre el placer/picker
+      onNavMode(type);
+    }
+  }
+
+  const showReport = navMode !== 'zone' && navMode !== 'impassable' && navMode !== 'preference';
+  const showMore   = withRoute && navMode !== 'zone' && navMode !== 'impassable' && navMode !== 'preference' && !isReportOpen;
+
+  return (
+    <>
+      {/* ── Centrar ─────────────────────────────────────────────────── */}
+      <button onClick={onCenterCycle} title={
+        centerMode === 'nav'      ? 'Navegación activa' :
+        centerMode === 'overview' ? 'Vista de ruta' : 'Centrar en mi posición'}
+        aria-label="Centrar mapa" className="dh-fab"
+        style={{
+          ...fabBase, bottom: centerBottom,
+          width: SZ_P, height: SZ_P, background: centerBg,
+          border: centerMode === 'free' ? '1.5px solid var(--border)' : 'none',
+          boxShadow: centerMode !== 'free' ? '0 4px 16px rgba(0,0,0,0.28)' : '0 2px 10px rgba(0,0,0,0.16)',
+          color: centerMode !== 'free' ? '#fff' : 'var(--text-secondary)',
+        }}>
+        <IconCenter mode={centerMode} />
+      </button>
+
+      {/* ── Más (con ruta) ──────────────────────────────────────────── */}
+      {showMore && (
+        <button onClick={() => onNavMode(navMode === 'more' ? null : 'more')}
+          title="Más opciones" aria-label="Más" className="dh-fab"
+          style={{
+            ...fabBase, bottom: secondaryBottom,
+            width: SZ_S, height: SZ_S,
+            background: navMode === 'more' ? 'var(--brand)' : '#fff',
+            border: '1.5px solid var(--border)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            color: navMode === 'more' ? '#fff' : 'var(--text-secondary)',
+          }}>
+          <IconMore />
+        </button>
+      )}
+
+      {/* ── Menú Más expandido ──────────────────────────────────────── */}
+      {withRoute && navMode === 'more' && (
+        <div style={{
+          position: 'absolute',
+          bottom: `calc(${BASE + SZ_P + GAP + SZ_S + GAP}px + ${safeBot})`,
+          right: 14, zIndex: 403,
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
+        }}>
+          <button onClick={() => { onVoiceToggle(); onNavMode(null); }} style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '0.55rem 1rem', borderRadius: 20,
+            fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+            background: voiceEnabled ? '#f0fdf4' : '#f9fafb',
+            color: voiceEnabled ? '#15803d' : '#6b7280',
+            border: `1.5px solid ${voiceEnabled ? '#86efac' : 'var(--border)'}`,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.12)', minHeight: 'unset',
+          }}>
+            <IconVolume on={voiceEnabled} />
+            {voiceEnabled ? 'Voz activa' : 'Voz inactiva'}
+          </button>
+          <button onClick={() => { onGoogleNav(); onNavMode(null); }} style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '0.55rem 1rem', borderRadius: 20,
+            fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+            background: 'var(--brand)', color: '#fff', border: 'none',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)', minHeight: 'unset',
+          }}>
+            <IconNavigate /> Abrir en Maps
+          </button>
+        </div>
+      )}
+
+      {/* ── FAB Reportar ────────────────────────────────────────────── */}
+      {showReport && (
+        <button onClick={cycleReport}
+          aria-label={isReportQuick ? 'Reporte rápido' : isReportNormal ? 'Cerrar reporte' : 'Reportar'}
+          title={isReportQuick ? 'Modo rápido — toca para cerrar' : 'Reportar incidencia'}
+          className="dh-fab"
+          style={{
+            ...fabBase,
+            bottom: reportBottom,
+            width: SZ_S, height: SZ_S,
+            background: reportFabBg,
+            border: reportFabBorder,
+            boxShadow: isReportQuick ? quickGlow : '0 2px 8px rgba(0,0,0,0.15)',
+            color: reportFabColor,
+          }}>
+          <IconReport reportMode={isReportQuick ? 'quick' : 'normal'} />
+        </button>
+      )}
+
+      {/* ── Menú de reporte (normal o rápido) ──────────────────────── */}
+      {isReportOpen && (
+        <div style={{
+          position: 'absolute',
+          bottom: menuBottom,
+          right: 14, zIndex: 403,
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6,
+        }}>
+          {/* Etiqueta modo rápido */}
+          {isReportQuick && (
+            <div style={{
+              padding: '0.18rem 0.6rem', borderRadius: 20,
+              fontSize: '0.68rem', fontWeight: 700,
+              background: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.92)',
+              color: isDark ? '#fff' : '#111',
+              border: `1.5px solid ${isDark ? 'rgba(251,191,36,0.5)' : 'rgba(124,58,237,0.35)'}`,
+              boxShadow: isDark
+                ? '0 0 8px rgba(251,191,36,0.25)'
+                : '0 0 8px rgba(124,58,237,0.18)',
+              whiteSpace: 'nowrap',
+            }}>
+              ⚡ Modo rápido
+            </div>
+          )}
+
+          {REPORT_PILLS.map(pill => (
+            <button key={pill.mode}
+              onClick={() => handlePill(pill.mode)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 7,
+                padding: '0.55rem 1rem', borderRadius: 20,
+                fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                background: pill.color,
+                color: '#fff',
+                border: isReportQuick
+                  ? `2px solid ${isDark ? '#fbbf24' : '#7c3aed'}`
+                  : 'none',
+                boxShadow: isReportQuick
+                  ? (isDark
+                      ? `0 0 0 3px rgba(251,191,36,0.25), 0 2px 8px rgba(0,0,0,0.22)`
+                      : `0 0 0 3px rgba(124,58,237,0.2), 0 2px 8px rgba(0,0,0,0.22)`)
+                  : '0 2px 8px rgba(0,0,0,0.22)',
+                minHeight: 'unset',
+              }}>
+              <span>{pill.icon}</span>
+              {pill.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+// frontend/src/components/SplitLayout.jsx
+// ordersContent se monta UNA sola vez — en desktop es columna fija,
+// en móvil la misma columna se transforma en drawer via CSS (sin re-mount).
+import { useEffect, useState } from 'react';
+import PullToRefresh from './PullToRefresh';
+
+export default function SplitLayout({ homeContent, ordersContent, alertsContent, ordersLabel = '📦 Pedidos', alertsLabel = '🚨 Alertas', totalAlerts = 0, onRefresh, onCloseMobileDrawerRef }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [activeTab, setActiveTab]   = useState('orders');
+
+  // Exponer función de cierre para que componentes hijos puedan cerrar el drawer
+  if (onCloseMobileDrawerRef) onCloseMobileDrawerRef.current = () => setMobileOpen(false);
+
+  useEffect(() => {
+    document.body.style.overflow = mobileOpen ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [mobileOpen]);
+
+  return (
+    <PullToRefresh onRefresh={onRefresh}>
+    <div className="split-root">
+
+    {/* ── Orders/Alerts: una sola instancia — desktop col + mobile drawer ── */}
+    <aside className={`split-orders-col${mobileOpen ? ' mobile-open' : ''}`}>
+      {/* Header de pestañas */}
+      <div style={{
+        display: 'flex', flexShrink: 0,
+        borderBottom: '1px solid var(--border-light)',
+        background: 'var(--bg-card)',
+      }}>
+        <button onClick={() => setActiveTab('orders')} style={{
+          flex: 1, padding: '0.6rem 0', fontSize: '0.78rem', fontWeight: 700,
+          cursor: 'pointer', border: 'none', background: 'none',
+          borderBottom: activeTab === 'orders' ? '2px solid var(--brand)' : '2px solid transparent',
+          color: activeTab === 'orders' ? 'var(--brand)' : 'var(--text-secondary)',
+        }}>
+          {ordersLabel}
+        </button>
+        <button onClick={() => setActiveTab('alerts')} style={{
+          flex: 1, padding: '0.6rem 0', fontSize: '0.78rem', fontWeight: 700,
+          cursor: 'pointer', border: 'none', background: 'none',
+          borderBottom: activeTab === 'alerts' ? '2px solid var(--brand)' : '2px solid transparent',
+          color: activeTab === 'alerts' ? 'var(--brand)' : 'var(--text-secondary)',
+          position: 'relative',
+        }}>
+          {alertsLabel}
+          {totalAlerts > 0 && (
+            <span style={{
+              marginLeft: 4, fontSize: '0.65rem',
+              background: '#ef4444', color: '#fff',
+              borderRadius: 10, padding: '0 5px',
+            }}>{totalAlerts}</span>
+          )}
+        </button>
+      </div>
+
+      {/* Contenido de pestañas — ambos montados, solo uno visible */}
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'orders' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
+        {ordersContent}
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'alerts' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
+        {alertsContent}
+      </div>
+    </aside>
+
+    {/* ── Columna Home ──────────────────────────────────────────────── */}
+    <section className="split-home-col">
+    {homeContent}
+    </section>
+
+    {/* ── Mobile: botón tab fijo ────────────────────────────────────── */}
+    <button
+    className={`orders-tab-trigger${mobileOpen ? ' open' : ''}`}
+    onClick={() => setMobileOpen(v => !v)}
+    aria-label={mobileOpen ? 'Cerrar pedidos' : 'Ver pedidos'}
+    style={{
+      right: mobileOpen ? 'min(85vw, 360px)' : 0,
+          transition:'right 0.28s cubic-bezier(0.4,0,0.2,1), background 0.2s'
+    }}
+    >
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points={mobileOpen ? '15 18 9 12 15 6' : '9 18 15 12 9 6'}/>
+    </svg>
+    </button>
+
+    {/* Overlay */}
+    <div
+    className={`orders-overlay${mobileOpen ? ' visible' : ''}`}
+    onClick={() => setMobileOpen(false)}
+    />
+
+    <style>{`
+      .split-root {
+        display: flex;
+        flex-direction: row;
+        width: 100%;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      /* ════════ Desktop ≥768px ══════════════════════════════════ */
+      @media (min-width: 768px) {
+        .split-orders-col {
+          width: 33%;
+          min-width: 260px;
+          max-width: 380px;
+          flex-shrink: 0;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          border-right: 1px solid var(--gray-200);
+          background: #fff;
+        }
+        .split-home-col {
+          flex: 1;
+          min-width: 0;
+          overflow-y: auto;
+          overflow-x: hidden;
+        }
+        .split-home-col:has(.driver-map-root) {
+          overflow: hidden;
+        }
+        .orders-overlay     { display: none !important; }
+        .orders-tab-trigger { display: none !important; }
+      }
+
+      /* ════════ Mobile <768px ═══════════════════════════════════ */
+      @media (max-width: 767px) {
+
+        /* Orders col = drawer: hidden off-screen by default */
+        .split-orders-col {
+          position: fixed;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          width: 85vw;
+          max-width: 360px;
+          z-index: 320;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          background: #fff;
+          box-shadow: -4px 0 24px rgba(0,0,0,0.14);
+          transform: translateX(100%);
+          transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .split-orders-col.mobile-open {
+          transform: translateX(0);
+        }
+
+        .split-home-col {
+          flex: 1;
+          min-width: 0;
+          overflow-x: hidden;
+        }
+
+        .orders-overlay {
+          display: none;
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,0.35);
+          z-index: 315;
+          touch-action: none;
+        }
+        .orders-overlay.visible { display: block; }
+
+        .orders-tab-trigger {
+          position: fixed;
+          right: 0;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 28px;
+          height: 56px;
+          border-radius: 28px 0 0 28px;
+          background: var(--brand);
+          color: #fff;
+          border: none;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: -2px 0 8px rgba(0,0,0,0.18);
+          z-index: 325;
+          padding: 0;
+          transition: background 0.2s;
+        }
+        .orders-tab-trigger.open {
+          background: var(--gray-500);
+        }
+      }
+      `}</style>
+    </div>
+    </PullToRefresh>
+  );
+}
+
+// frontend/src/hooks/useNavFeatures.js
+import { useEffect, useRef, useState } from 'react';
+
+const ZONE_LABELS = {
+  traffic:      'tráfico pesado',
+  construction: 'obra en construcción',
+  accident:     'accidente',
+  flood:        'zona de inundación',
+  blocked:      'calle bloqueada',
+  other:        'problema en la vía',
+};
+
+function euclideanMeters(lat1, lng1, lat2, lng2) {
+  const dlat = (lat2 - lat1) * 111320;
+  const dlng = (lng2 - lng1) * 111320 * Math.cos((lat1 * Math.PI) / 180);
+  return Math.sqrt(dlat * dlat + dlng * dlng);
+}
+
+// routeUsesWay eliminado — la alerta de calles ahora usa distancia al polyline directamente
+
+export function useNavFeatures({
+  steps         = [],
+  currentPos,
+  activeZones   = [],
+  impassableWays = [],
+  routeGeometry  = [],
+  hasActiveOrder = false,
+  onVoice,
+  onZoneAlert,
+}) {
+  const [voiceEnabled,   setVoiceEnabled]   = useState(true);
+  const [wakeLockActive, setWakeLockActive] = useState(false);
+
+  const wakeLockRef      = useRef(null);
+  const announcedSteps   = useRef(new Set());
+  const zoneAlertedMap   = useRef(new Map());
+  const wayAlertedMap    = useRef(new Map());
+
+  // ── Wake Lock — solo activo con pedido activo Y ruta calculada ─────────────
+  useEffect(() => {
+    const shouldLock = hasActiveOrder && routeGeometry?.length > 0;
+
+    async function acquire() {
+      try {
+        if (!('wakeLock' in navigator)) return;
+        if (wakeLockRef.current) return; // ya activo
+        const lock = await navigator.wakeLock.request('screen');
+        wakeLockRef.current = lock;
+        setWakeLockActive(true);
+        lock.addEventListener('release', () => {
+          wakeLockRef.current = null;
+          setWakeLockActive(false);
+        });
+      } catch (_) {}
+    }
+
+    function release() {
+      try {
+        wakeLockRef.current?.release();
+        wakeLockRef.current = null;
+        setWakeLockActive(false);
+      } catch (_) {}
+    }
+
+    if (shouldLock) {
+      acquire();
+      // Re-adquirir al volver de background (iOS/Android liberan el lock al minimizar)
+      const onVis = () => { if (!document.hidden && shouldLock) acquire(); };
+      document.addEventListener('visibilitychange', onVis);
+      return () => {
+        document.removeEventListener('visibilitychange', onVis);
+        release();
+      };
+    } else {
+      release();
+    }
+  }, [hasActiveOrder, routeGeometry?.length]);
+
+  // Limpiar steps al cambiar la ruta
+  useEffect(() => { announcedSteps.current = new Set(); }, [steps]);
+
+  // ── Voz turn-by-turn ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!voiceEnabled || !currentPos || !steps.length) return;
+    if (!window.speechSynthesis) return;
+    steps.forEach((step, idx) => {
+      if (announcedSteps.current.has(idx) || !step.location) return;
+      const dist = euclideanMeters(
+        currentPos.lat, currentPos.lng,
+        step.location.lat, step.location.lng
+      );
+      if (dist < 80) {
+        announcedSteps.current.add(idx);
+        const text = step.instruction || 'Continúa';
+        try { window.speechSynthesis.speak(new SpeechSynthesisUtterance(text)); } catch (_) {}
+        onVoice?.(text);
+      }
+    });
+  }, [currentPos?.lat, currentPos?.lng, steps, voiceEnabled, onVoice]);
+
+  // ── Alertas de zonas (500 m) ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!currentPos || !activeZones.length) return;
+    const now       = Date.now();
+    const COOLDOWN  = 120_000; // 2 min entre alertas de la misma zona
+    const ALERT_M   = 500;
+
+    for (const zone of activeZones) {
+      const dist = euclideanMeters(currentPos.lat, currentPos.lng, zone.lat, zone.lng);
+      if (dist > ALERT_M) continue;
+
+      const last = zoneAlertedMap.current.get(zone.id) || 0;
+      if (now - last < COOLDOWN) continue;
+      zoneAlertedMap.current.set(zone.id, now);
+
+      const msg = 'Se reportó una zona de alerta cerca, revisa el mapa';
+      if (voiceEnabled) {
+        try {
+          window.speechSynthesis?.speak(new SpeechSynthesisUtterance(msg));
+        } catch (_) {}
+      }
+      onVoice?.(msg);
+      onZoneAlert?.(zone);
+    }
+  }, [currentPos?.lat, currentPos?.lng, activeZones, voiceEnabled, onVoice, onZoneAlert]);
+
+  // ── Alertas de calles no viables ────────────────────────────────────────────
+  // Alerta cuando el conductor está a menos de 50m de CUALQUIER nodo del way
+  // (no solo del primer nodo), independientemente de si la ruta pasa por ahí
+  useEffect(() => {
+    if (!currentPos || !impassableWays.length) return;
+    const now      = Date.now();
+    const COOLDOWN = 180_000;
+    const ALERT_DIST = 50; // metros desde cualquier nodo del tramo
+
+    for (const way of impassableWays) {
+      if (!way.coords?.length) continue;
+
+      // Distancia mínima al polyline completo (todos los nodos)
+      let minDist = Infinity;
+      for (const coord of way.coords) {
+        // coords pueden ser [lng, lat] o {lat, lng}
+        const cLat = Array.isArray(coord) ? coord[1] : coord.lat;
+        const cLng = Array.isArray(coord) ? coord[0] : coord.lng;
+        const d = euclideanMeters(currentPos.lat, currentPos.lng, cLat, cLng);
+        if (d < minDist) minDist = d;
+      }
+      if (minDist > ALERT_DIST) continue;
+
+      const last = wayAlertedMap.current.get(way.way_id) || 0;
+      if (now - last < COOLDOWN) continue;
+      wayAlertedMap.current.set(way.way_id, now);
+
+      const msg = `⚠️ Calle no viable cerca: ${way.name || 'tramo adelante'}`;
+      if (voiceEnabled) {
+        try { window.speechSynthesis?.speak(new SpeechSynthesisUtterance(msg)); } catch (_) {}
+      }
+      onVoice?.(msg);
+    }
+  }, [currentPos?.lat, currentPos?.lng, impassableWays, voiceEnabled, onVoice]);
+
+  return { voiceEnabled, setVoiceEnabled, wakeLockActive };
+}
+// frontend/src/hooks/useDriverLocation.js
+// GPS activo cuando: driver disponible OR tiene pedido activo
+// Se detiene solo cuando AMBAS condiciones son falsas.
+import { useEffect, useRef, useState } from 'react';
+import { apiFetch } from '../api/client';
+
+const MIN_SEND_INTERVAL_MS = 4000;
+const MIN_DISTANCE_METERS = 15;
+const MIN_RENDER_METERS   = 5;   // no actualizar estado UI si movimiento < 5m
+
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+/**
+ * @param token       JWT del driver
+ * @param isAvailable driver marcó disponibilidad
+ * @param hasActiveOrder driver tiene pedido activo (accepted/on_the_way/etc)
+ * GPS activo si isAvailable OR hasActiveOrder
+ */
+export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
+  const [position, setPosition] = useState(null);
+  const [error, setError]       = useState(null);
+  const lastSentRef = useRef(null);
+  const lastSentAtRef = useRef(0);
+  const watchRef    = useRef(null);
+  const posRef      = useRef(null);
+
+  const shouldTrack = Boolean(token && (isAvailable || hasActiveOrder));
+
+  useEffect(() => {
+    if (!shouldTrack) {
+      navigator.geolocation?.clearWatch(watchRef.current);
+      watchRef.current = null;
+      posRef.current = null;
+      lastSentRef.current = null;
+      lastSentAtRef.current = 0;
+      setPosition(null);
+      setError(null);
+      return;
+    }
+
+    if (!('geolocation' in navigator)) {
+      setError('GPS no disponible en este dispositivo');
+      return;
+    }
+
+    async function sendLocation(current, force = false) {
+      if (!token || !current) return;
+      const prevSent = lastSentRef.current;
+      const movedEnough = !prevSent || haversineMeters(prevSent.lat, prevSent.lng, current.lat, current.lng) >= MIN_DISTANCE_METERS;
+      const longEnough = Date.now() - lastSentAtRef.current >= MIN_SEND_INTERVAL_MS;
+
+      if (!force && (!movedEnough || !longEnough)) return;
+
+      lastSentRef.current = current;
+      lastSentAtRef.current = Date.now();
+      apiFetch('/drivers/location', { method:'PATCH', body: JSON.stringify(current) }, token).catch(() => {});
+    }
+
+    watchRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        if (pos.coords.accuracy > 2000) {
+          setError(`Precisión GPS baja (${Math.round(pos.coords.accuracy)}m)`);
+          return;
+        }
+        const p = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) };
+        // Solo re-renderizar si el driver se movió más de MIN_RENDER_METERS
+        const prev = posRef.current;
+        if (prev && haversineMeters(prev.lat, prev.lng, p.lat, p.lng) < MIN_RENDER_METERS) {
+          posRef.current = p; // actualizar ref para envíos, sin re-render
+          return;
+        }
+        posRef.current = p;
+        setPosition(p);
+        setError(null);
+
+        // La experiencia visual del conductor vive en frontend; el backend
+        // solo se sincroniza cuando realmente cambia la posición de forma útil.
+        sendLocation(p, !lastSentRef.current);
+      },
+      (err) => setError(err.message),
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 }
+    );
+
+    function maybeSend(force = false) {
+      const current = posRef.current;
+      if (!current) return;
+      sendLocation(current, force);
+    }
+
+    function onVisible() { if (!document.hidden) maybeSend(true); }
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      navigator.geolocation.clearWatch(watchRef.current);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [shouldTrack, token]);
+
+  return { position, error };
+}
+// utils/audio.js — efectos de sonido con Web Audio API
+
+export function playOfferAlertSound() {
+  if (typeof window === 'undefined') return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    const pulse = (offset, freq, duration = 0.12) => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type           = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + offset + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + duration + 0.03);
+    };
+    pulse(0.00, 880);
+    pulse(0.18, 1180);
+    setTimeout(() => ctx.close().catch(() => {}), 600);
+  } catch (_) {}
+}
+// utils/mapLibre.js — carga dinámica de MapLibre GL JS/CSS
+// OPT-4: _ml vive en el módulo — sin Promise.resolve() en cada tick GPS
+
+const ML_VERSION = '4.7.1';
+const ML_BASE    = `https://unpkg.com/maplibre-gl@${ML_VERSION}/dist/maplibre-gl`;
+
+// Referencia resuelta compartida entre todos los importadores
+export let _ml = null;
+
+export function ensureMapLibreCSS() {
+  if (document.getElementById('maplibre-css')) return;
+  const lnk = document.createElement('link');
+  lnk.id   = 'maplibre-css';
+  lnk.rel  = 'stylesheet';
+  lnk.href = `${ML_BASE}.css`;
+  document.head.appendChild(lnk);
+}
+
+export function ensureMapLibreJS() {
+  if (_ml) return Promise.resolve(_ml);
+  if (window.maplibregl) { _ml = window.maplibregl; return Promise.resolve(_ml); }
+  if (window.__mlPromise) return window.__mlPromise;
+
+  window.__mlPromise = new Promise((res, rej) => {
+    const s    = document.createElement('script');
+    s.src      = `${ML_BASE}.js`;
+    s.async    = true;
+    s.onload   = () => { _ml = window.maplibregl; res(_ml); };
+    s.onerror  = () => rej(new Error('No se pudo cargar MapLibre GL JS'));
+    document.head.appendChild(s);
+  });
+  return window.__mlPromise;
+}
+export const DRIVER_ROUTE_SOURCE_ID = 'driver-route-source';
+export const DRIVER_ROUTE_LAYER_ID = 'driver-route-layer';
+export const DRIVER_ROUTE_BORDER_ID = 'driver-route-border';
+
+export function getDriverRouteFeature(routeGeometry) {
+  const coordinates = (routeGeometry || []).map(point => [point.lng, point.lat]);
+  if (!coordinates.length) return null;
+
+  return {
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'LineString', coordinates },
+  };
+}
+
+export function clearDriverRouteLayers(map) {
+  try { if (map.getLayer(DRIVER_ROUTE_BORDER_ID)) map.removeLayer(DRIVER_ROUTE_BORDER_ID); } catch (_) {}
+  try { if (map.getLayer(DRIVER_ROUTE_LAYER_ID)) map.removeLayer(DRIVER_ROUTE_LAYER_ID); } catch (_) {}
+  try { if (map.getSource(DRIVER_ROUTE_SOURCE_ID)) map.removeSource(DRIVER_ROUTE_SOURCE_ID); } catch (_) {}
+}
+
+export function syncDriverRouteLayers(map, routeGeometry) {
+  const feature = getDriverRouteFeature(routeGeometry);
+  if (!feature) {
+    clearDriverRouteLayers(map);
+    return;
+  }
+
+  if (map.getSource(DRIVER_ROUTE_SOURCE_ID)) {
+    map.getSource(DRIVER_ROUTE_SOURCE_ID).setData(feature);
+  } else {
+    map.addSource(DRIVER_ROUTE_SOURCE_ID, { type: 'geojson', data: feature });
+  }
+
+  if (!map.getLayer(DRIVER_ROUTE_BORDER_ID)) {
+    map.addLayer({
+      id: DRIVER_ROUTE_BORDER_ID,
+      type: 'line',
+      source: DRIVER_ROUTE_SOURCE_ID,
+      paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.4 },
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+    });
+  }
+
+  if (!map.getLayer(DRIVER_ROUTE_LAYER_ID)) {
+    map.addLayer({
+      id: DRIVER_ROUTE_LAYER_ID,
+      type: 'line',
+      source: DRIVER_ROUTE_SOURCE_ID,
+      paint: { 'line-color': '#6366f1', 'line-width': 5, 'line-opacity': 0.95 },
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+    });
+  }
+}
+
+export function createDriverPoiMarker(ml, pos, { emoji, color, label }) {
+  const element = document.createElement('div');
+  element.style.cssText = `width:28px;height:28px;border-radius:50%;background:${color};display:grid;place-items:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);font-size:15px`;
+  element.textContent = emoji;
+
+  return new ml.Marker({ element }).setLngLat([pos.lng, pos.lat]).setPopup(
+    new ml.Popup({ closeButton: false }).setText(label)
+  );
+}
+import { STADIA_KEY } from './config';
+
+export function DriverMapOverlays({ hasGPS, showAttrib, onToggleAttrib, bottomOffset = 8 }) {
+  return (
+    <>
+      {/* Atribución expandida */}
+      {showAttrib && (
+        <div style={{
+          position: 'absolute', bottom: bottomOffset + 28, left: 8, zIndex: 10,
+          background: 'rgba(255,255,255,0.92)', borderRadius: 6,
+          padding: '0.3rem 0.6rem', fontSize: '0.65rem', color: '#444',
+          boxShadow: '0 1px 6px #0002', maxWidth: 260, pointerEvents: 'auto',
+        }}>
+          © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer"
+            style={{ color: '#2563eb' }}>OpenStreetMap</a> contributors ·{' '}
+          {STADIA_KEY
+            ? <><a href="https://stadiamaps.com" target="_blank" rel="noopener noreferrer"
+                style={{ color: '#2563eb' }}>Stadia Maps</a> · </>
+            : <><a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer"
+                style={{ color: '#2563eb' }}>OpenFreeMap</a> · </>}
+          <a href="https://maplibre.org" target="_blank" rel="noopener noreferrer"
+            style={{ color: '#2563eb' }}>MapLibre</a>
+        </div>
+      )}
+
+      {/* Botón atribución — siempre visible, sube con paneles */}
+      <button onClick={onToggleAttrib} title="Atribuciones del mapa"
+        style={{
+          position: 'absolute', bottom: bottomOffset, left: 8, zIndex: 10,
+          background: 'rgba(255,255,255,0.75)', border: 'none',
+          borderRadius: 3, padding: '1px 5px', cursor: 'pointer',
+          fontSize: '0.6rem', color: '#555', lineHeight: 1,
+          transition: 'bottom 0.25s ease',
+        }}>
+        ©
+      </button>
+
+      {/* Sin GPS */}
+      {!hasGPS && (
+        <div style={{
+          position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(0,0,0,0.5)', color: '#fff', borderRadius: 20,
+          padding: '0.2rem 0.75rem', fontSize: '0.72rem', zIndex: 5,
+          pointerEvents: 'none', whiteSpace: 'nowrap',
+          display: 'flex', alignItems: 'center', gap: 5,
+        }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+          Sin GPS — toca el mapa para marcar posición
+        </div>
+      )}
+    </>
+  );
+}
+const STADIA_KEY = import.meta.env?.VITE_STADIA_KEY || '';
+
+function stadiaStyle(name) {
+  const base = `https://tiles.stadiamaps.com/styles/${name}.json`;
+  return STADIA_KEY ? `${base}?api_key=${STADIA_KEY}` : base;
+}
+
+export { STADIA_KEY };
+
+export const STYLE_LIGHT = STADIA_KEY
+  ? stadiaStyle('alidade_smooth')
+  : 'https://tiles.openfreemap.org/styles/bright';
+
+export const STYLE_DARK = STADIA_KEY
+  ? stadiaStyle('alidade_smooth_dark')
+  : 'https://tiles.openfreemap.org/styles/bright';
+
+export const DEFAULT_POS = { lat: 19.70595, lng: -101.19498 };
+export const MORELIA_BOUNDS = [[-101.42, 19.57], [-100.98, 19.84]];
+import { Router } from 'express';
+import { authenticate, authorize } from '../../middlewares/auth.js';
+import { AppError } from '../../utils/errors.js';
+
+const router = Router();
+
+/**
+ * Kalman filter para suavizar coordenadas GPS.
+ * Q = varianza de proceso, R = varianza de medición.
+ */
+function kalmanFilter(coords) {
+  const Q = 0.0001;
+  const R = 0.01;
+
+  let latEst = coords[0].lat;
+  let lngEst = coords[0].lng;
+  let P = 1;
+
+  return coords.map((coord, i) => {
+    if (i === 0) return { lat: latEst, lng: lngEst };
+
+    // Predicción
+    const P_pred = P + Q;
+
+    // Ganancia de Kalman
+    const K = P_pred / (P_pred + R);
+
+    // Actualización
+    latEst = latEst + K * (coord.lat - latEst);
+    lngEst = lngEst + K * (coord.lng - lngEst);
+    P = (1 - K) * P_pred;
+
+    return { lat: latEst, lng: lngEst };
+  });
+}
+
+// POST / — map matching con Kalman filter + OSRM
+router.post('/', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const { coordinates } = req.body || {};
+
+    if (!Array.isArray(coordinates) || coordinates.length < 2) {
+      throw new AppError(400, 'coordinates debe ser un array de al menos 2 puntos');
+    }
+    if (coordinates.length > 100) {
+      throw new AppError(400, 'coordinates no puede superar 100 puntos');
+    }
+
+    // Aplicar Kalman filter
+    const filtered = kalmanFilter(coordinates);
+
+    // Construir URL de OSRM map matching (lng,lat)
+    const coordStr = filtered.map(c => `${c.lng},${c.lat}`).join(';');
+    const osrmUrl  = `https://router.project-osrm.org/match/v1/driving/${coordStr}?overview=full&geometries=geojson&steps=false&annotations=false&tidy=true`;
+
+    let matched = false;
+    let geometry = filtered;
+
+    try {
+      const response = await fetch(osrmUrl, { method: 'GET' });
+      if (response.ok) {
+        const data = await response.json();
+        if (data?.code === 'Ok' && data?.matchings?.length > 0) {
+          const coords = data.matchings[0]?.geometry?.coordinates || [];
+          if (coords.length > 0) {
+            geometry = coords.map(([lng, lat]) => ({ lat: Number(lat), lng: Number(lng) }));
+            matched = true;
+          }
+        }
+      }
+    } catch (_) {
+      // Degraded mode: usar coordenadas filtradas por Kalman
+    }
+
+    return res.json({
+      matched,
+      geometry,
+      raw_filtered: filtered,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+export default router;

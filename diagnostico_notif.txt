@@ -1,0 +1,1166 @@
+// ── Precache del shell de la app ──────────────────────────────────────────────
+// Lista de assets que se cachean en install. Los archivos con hash (generados
+// por Vite) se agregan en runtime via fetch; aquí solo el shell estático.
+const SHELL_VERSION = 'v4'; // v4: Stadia Maps tile caching
+const SHELL_CACHE   = `morelivery-shell-${SHELL_VERSION}`;
+const SHELL_ASSETS  = [
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/badge.svg',
+  '/logo.svg',
+];
+
+// ── Background Sync — cola de peticiones offline ──────────────────────────────
+// Cuando el conductor pulsa "Entregado" sin señal, la app envía ENQUEUE_REQUEST
+// al SW. El SW guarda la petición en Cache Storage y registra el tag de sync.
+// En cuanto el dispositivo recupera red, el navegador dispara el evento 'sync'
+// y el SW reintenta todas las peticiones encoladas.
+const SYNC_QUEUE_KEY = 'morelivery-sync-queue';
+const SYNC_TAG       = 'morelivery-status-sync';
+const VOICE_CACHE    = 'morelivery-voices-v1';
+const VOICE_ASSETS   = [
+  '/voices/recordatorio-30s.mp3',
+  '/voices/recordatorio-3min.mp3',
+];
+
+async function readQueue() {
+  try {
+    const cache = await caches.open(SYNC_QUEUE_KEY);
+    const resp  = await cache.match('queue');
+    return resp ? await resp.json() : [];
+  } catch { return []; }
+}
+
+async function writeQueue(queue) {
+  const cache = await caches.open(SYNC_QUEUE_KEY);
+  await cache.put('queue', new Response(JSON.stringify(queue), {
+    headers: { 'Content-Type': 'application/json' },
+  }));
+}
+
+// ── Install ───────────────────────────────────────────────────────────────────
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+  event.waitUntil(
+    Promise.all([
+      caches.open(SHELL_CACHE).then(cache =>
+        cache.addAll(SHELL_ASSETS).catch(() => {})
+      ),
+      caches.open(VOICE_CACHE).then(cache =>
+        cache.addAll(VOICE_ASSETS).catch(() => {})
+      ),
+    ])
+  );
+});
+
+// ── Activate: limpiar caches viejos ──────────────────────────────────────────
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    Promise.all([
+      self.clients.claim(),
+      caches.keys().then(keys =>
+        Promise.all(
+          keys
+            .filter(k => k.startsWith('morelivery-shell-') && k !== SHELL_CACHE)
+            .map(k => caches.delete(k))
+        )
+      ),
+    ])
+  );
+});
+
+// ── Tile cache (stale-while-revalidate) ───────────────────────────────────────
+const TILES_CACHE   = 'morelivery-tiles-v2';
+const TILES_DOMAINS = [
+  'tiles.openfreemap.org',
+  'tile.openfreemap.org',
+  'tiles.stadiamaps.com',
+  'tile.stadiamaps.com',
+];
+
+// ── Fetch ─────────────────────────────────────────────────────────────────────
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  const url = new URL(request.url);
+
+  const API_PREFIXES = ['/nav/', '/orders/', '/drivers/', '/auth/', '/restaurants/', '/users/', '/admin/', '/events', '/api/'];
+  if (API_PREFIXES.some(p => url.pathname.startsWith(p))) return;
+
+  if (request.method !== 'GET') return;
+
+  const isTile = TILES_DOMAINS.some(d => url.hostname.includes(d));
+  if (isTile) {
+    event.respondWith(
+      caches.open(TILES_CACHE).then(async cache => {
+        const cached = await cache.match(request);
+        const fetchPromise = fetch(request).then(res => {
+          if (res.ok) cache.put(request, res.clone());
+          return res;
+        }).catch(() => null);
+        return cached || fetchPromise;
+      })
+    );
+    return;
+  }
+
+  event.respondWith(
+    fetch(request)
+      .then(response => {
+        if (response.ok && SHELL_ASSETS.includes(url.pathname)) {
+          const clone = response.clone();
+          caches.open(SHELL_CACHE).then(c => c.put(request, clone));
+        }
+        return response;
+      })
+      .catch(() => caches.match(request).then(cached => cached || caches.match('/index.html')))
+  );
+});
+
+// ── Background Sync ───────────────────────────────────────────────────────────
+self.addEventListener('sync', (event) => {
+  if (event.tag !== SYNC_TAG) return;
+
+  event.waitUntil(
+    (async () => {
+      const queue = await readQueue();
+      if (!queue.length) return;
+
+      const remaining = [];
+      for (const item of queue) {
+        try {
+          const headers = { 'Content-Type': 'application/json' };
+          if (item.token) headers['Authorization'] = `Bearer ${item.token}`;
+
+          const res = await fetch(item.url, {
+            method:  item.method || 'PATCH',
+            headers,
+            body:    item.body ?? undefined,
+          });
+
+          // 409 = el pedido ya fue procesado → descartar
+          // 2xx = éxito → descartar
+          // 5xx / red → reintentar
+          if (!res.ok && res.status !== 409) {
+            remaining.push(item);
+          }
+        } catch {
+          remaining.push(item);
+        }
+      }
+
+      await writeQueue(remaining);
+
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const synced  = queue.length - remaining.length;
+      if (synced > 0) clients.forEach(c => c.postMessage({ type: 'SYNC_COMPLETE', synced }));
+    })()
+  );
+});
+
+// ── Voice playback (desde cache) ──────────────────────────────────────────────
+async function playVoice(voiceName) {
+  try {
+    const cache    = await caches.open(VOICE_CACHE);
+    const response = await cache.match(`/voices/${voiceName}.mp3`);
+    if (!response) { console.warn(`Voz no encontrada: ${voiceName}`); return; }
+    const blob = await response.blob();
+    const url  = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.play();
+    audio.onended = () => URL.revokeObjectURL(url);
+  } catch (e) { console.warn('Voice play error:', e); }
+}
+
+// ── Notificaciones agrupadas ──────────────────────────────────────────────────
+const notifCounts = {};
+
+async function showGroupedNotification({ group, title, body, url, priority, tag, vibrate }) {
+  if (!notifCounts[group]) notifCounts[group] = { count: 0, lastBody: '', url };
+  notifCounts[group].count++;
+  notifCounts[group].lastBody = body;
+  notifCounts[group].url = url;
+
+  const { count, lastBody } = notifCounts[group];
+  const isHigh = priority === 'high';
+
+  const displayTitle = count > 1 ? `${title} (${count})` : title;
+  const displayBody  = count > 1 ? `${lastBody} — y ${count - 1} más` : lastBody;
+
+  const existing = await self.registration.getNotifications({ tag });
+  existing.forEach(n => n.close());
+
+  const vibratePattern = vibrate || (isHigh ? [300, 100, 300, 100, 300] : [200, 100, 200]);
+
+  await self.registration.showNotification(displayTitle, {
+    body:               displayBody,
+    tag,
+    icon:               '/icon-192.png',
+    badge:              '/badge.svg',
+    requireInteraction: isHigh,
+    renotify:           true,
+    timestamp:          Date.now(),
+    vibrate:            vibratePattern,
+    actions:            [{ action: 'open', title: 'Abrir' }],
+    data:               { url, group },
+  });
+}
+
+// ── Mensajes desde la app (postMessage) ───────────────────────────────────────
+self.addEventListener('message', (event) => {
+  const type = event.data?.type;
+
+  // ── Existentes ──────────────────────────────────────────────────────────────
+
+  if (type === 'TEST_NOTIFICATION') {
+    const { title = 'Morelivery', body = 'Notificación de prueba ✓', tag = 'test' } = event.data;
+    notifCounts[tag] = { count: 0, lastBody: '', url: '/' };
+    showGroupedNotification({ group: tag, title, body, url: '/', priority: 'high', tag });
+    return;
+  }
+
+  if (type === 'SHOW_NOTIFICATION') {
+    const { title, body, tag, group, url = '/', priority = 'normal', data } = event.data;
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      const anyFocused = clients.some(c => c.focused);
+      if (anyFocused) return;
+      const resolvedGroup = group || tag || 'general';
+      showGroupedNotification({
+        group: resolvedGroup, title, body,
+        url: data?.url || url, priority, tag: resolvedGroup,
+      }).then(() => {
+        if ('setAppBadge' in self) {
+          const total = Object.values(notifCounts).reduce((s, v) => s + v.count, 0);
+          self.setAppBadge(total).catch(() => {});
+        }
+      });
+    });
+    return;
+  }
+
+  if (type === 'ENQUEUE_REQUEST') {
+    const { url, method, body, token } = event.data;
+    (async () => {
+      const queue = await readQueue();
+      queue.push({ url, method, body, token, ts: Date.now() });
+      await writeQueue(queue);
+      try { await self.registration.sync.register(SYNC_TAG); } catch { /* API no disponible */ }
+    })();
+    return;
+  }
+
+  if (type === 'APP_FOCUSED') {
+    Object.keys(notifCounts).forEach(k => { notifCounts[k].count = 0; });
+    if ('clearAppBadge' in self) self.clearAppBadge().catch(() => {});
+    return;
+  }
+
+  // ── Nuevos ──────────────────────────────────────────────────────────────────
+
+  // VIBRATE: la app puede pedir vibración desde background via postMessage
+  // Útil cuando el SW recibe un push y quiere patrones más complejos que el
+  // campo `vibrate` de showNotification (ej. pulsos encadenados con delay).
+  //
+  // Uso: reg.active.postMessage({ type: 'VIBRATE', pattern: [300, 100, 300] })
+  //
+  // Nota: navigator.vibrate() solo funciona en el contexto de window, no en SW.
+  // Este handler reenvía el mensaje a todas las ventanas abiertas para que
+  // ejecuten la vibración. Si la app está en background, la vibración viene
+  // del campo `vibrate` de la notificación push directamente.
+  if (type === 'VIBRATE') {
+    const { pattern = [200] } = event.data;
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      clients.forEach(c => c.postMessage({ type: 'VIBRATE_EXECUTE', pattern }));
+    });
+    return;
+  }
+
+  // SYNC_STATUS_UPDATE: variante tipada de ENQUEUE_REQUEST para actualizaciones
+  // de estado de pedido. Separa semánticamente el tipo de cola para que el
+  // backend pueda diferenciar qué endpoint llamar al reenviar.
+  //
+  // Campos: orderId, status, token, extra (objeto libre)
+  // El SW construye la URL y el body antes de encolar.
+  if (type === 'SYNC_STATUS_UPDATE') {
+    const { orderId, status, token, extra = {} } = event.data;
+    (async () => {
+      const queue = await readQueue();
+      queue.push({
+        url:    `/api/orders/${orderId}/status`,
+        method: 'PATCH',
+        body:   JSON.stringify({ status, ...extra }),
+        token,
+        ts:     Date.now(),
+        kind:   'status_update',  // para logging/analytics en el backend
+      });
+      await writeQueue(queue);
+      try { await self.registration.sync.register(SYNC_TAG); } catch { /* ok */ }
+    })();
+    return;
+  }
+
+  // SYNC_LOCATION_BATCH: encola un lote de pings de GPS acumulados offline.
+  // La app va guardando posiciones en localStorage mientras no hay red,
+  // y las manda todas en un solo mensaje cuando detecta que volvió la señal
+  // o cuando el SW se despierta por sync.
+  //
+  // Campos: driverId, positions (array de { lat, lng, ts }), token
+  if (type === 'SYNC_LOCATION_BATCH') {
+    const { driverId, positions, token } = event.data;
+    if (!positions?.length) return;
+    (async () => {
+      const queue = await readQueue();
+      queue.push({
+        url:    `/api/drivers/${driverId}/location-batch`,
+        method: 'POST',
+        body:   JSON.stringify({ positions }),
+        token,
+        ts:     Date.now(),
+        kind:   'location_batch',
+      });
+      await writeQueue(queue);
+      try { await self.registration.sync.register(SYNC_TAG); } catch { /* ok */ }
+    })();
+    return;
+  }
+});
+
+// ── Web Push (VAPID) ──────────────────────────────────────────────────────────
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+  let payload;
+  try { payload = event.data.json(); } catch { payload = { title: 'Morelivery', body: event.data.text() }; }
+
+  const {
+    title    = 'Morelivery',
+    body     = '',
+    tag      = 'general',
+    group    = tag,
+    url      = '/',
+    priority = 'normal',
+    vibrate,
+  } = payload;
+
+  event.waitUntil(
+    showGroupedNotification({ group, title, body, url, priority, tag: group, vibrate })
+  );
+});
+
+// ── Click en notificación ─────────────────────────────────────────────────────
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const group = event.notification.data?.group;
+  if (group && notifCounts[group]) notifCounts[group].count = 0;
+
+  if ('clearAppBadge' in self) self.clearAppBadge().catch(() => {});
+
+  const targetUrl = event.notification?.data?.url || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      const existing = clients.find(c => c.url.includes(self.location.origin));
+      if (existing) return existing.navigate(targetUrl).then(() => existing.focus());
+      return self.clients.openWindow(targetUrl);
+    })
+  );
+});
+// frontend/src/hooks/usePermissions.js
+//
+// Gestiona todos los permisos necesarios para el funcionamiento óptimo
+// de la app como PWA en móvil:
+//
+//   - Notificaciones push (con suscripción VAPID)
+//   - Geolocalización
+//   - Persistent storage (evita que el OS elimine el SW en móvil)
+//   - Wake lock (pantalla activa para drivers en ruta)
+//   - Clipboard, Battery, Network Information
+//
+// Se llama desde App.jsx al detectar sesión activa por primera vez,
+// y desde Profile.jsx para mostrar el estado actual y permitir reactivar.
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { apiFetch } from '../api/client';
+
+const STORAGE_KEY   = 'morelivery_perms_requested';
+const VAPID_PUB_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+
+// Convierte la VAPID public key de base64url a Uint8Array
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw     = window.atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+// ── Suscripción VAPID push ────────────────────────────────────────────────────
+async function subscribeToPush(token) {
+  if (!VAPID_PUB_KEY) {
+    console.warn('[perms] VITE_VAPID_PUBLIC_KEY no definida — push subscription omitida');
+    return null;
+  }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    // Si ya hay suscripción activa, reutilizarla
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly:      true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUB_KEY),
+      });
+    }
+    // Enviar al backend para guardar/actualizar
+    await apiFetch('/push/subscribe', {
+      method: 'POST',
+      body:   JSON.stringify(sub.toJSON()),
+    }, token);
+    return sub;
+  } catch (e) {
+    console.warn('[perms] push subscription error:', e.message);
+    return null;
+  }
+}
+
+// ── Nuevos permisos ───────────────────────────────────────────────────────────
+export async function requestClipboardPermission() {
+  if (!navigator.clipboard?.read) return 'unsupported';
+  try {
+    // Intenta leer texto vacío para solicitar permiso (navegadores modernos piden)
+    await navigator.clipboard.readText();
+    return 'granted';
+  } catch (e) {
+    if (e.name === 'NotAllowedError') return 'denied';
+    if (e.name === 'NotFoundError') return 'empty';
+    return 'error';
+  }
+}
+
+export async function getBatteryStatus() {
+  if (!('getBattery' in navigator)) return null;
+  try {
+    const battery = await navigator.getBattery();
+    return {
+      level: battery.level,
+      charging: battery.charging,
+      chargingTime: battery.chargingTime,
+      dischargingTime: battery.dischargingTime,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function getNetworkInfo() {
+  if (!('connection' in navigator)) return null;
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  return {
+    type: conn.type,
+    effectiveType: conn.effectiveType,
+    downlink: conn.downlink,
+    rtt: conn.rtt,
+    saveData: conn.saveData,
+  };
+}
+
+// ── Wake Lock con persistencia mejorada ───────────────────────────────────────
+function setupWakeLockPersistence(wakeLockRef, setStatus) {
+  // Re-adquirir cuando la página se vuelve visible O cuando la pantalla se desbloquea
+  const reacquire = () => {
+    if (document.visibilityState === 'visible' && !wakeLockRef.current) {
+      navigator.wakeLock?.request('screen').then(lock => {
+        wakeLockRef.current = lock;
+        setStatus(s => ({ ...s, wakeLock: 'active' }));
+        lock.addEventListener('release', () => {
+          wakeLockRef.current = null;
+          setStatus(s => ({ ...s, wakeLock: 'supported' }));
+        });
+      }).catch(() => {});
+    }
+  };
+
+  document.addEventListener('visibilitychange', reacquire);
+  // pageshow se dispara cuando la pantalla se desbloquea/la app vuelve de background
+  window.addEventListener('pageshow', reacquire);
+  // También cuando la pantalla se apaga/enciende (via pagehide)
+  window.addEventListener('pagehide', () => {
+    if (wakeLockRef.current) {
+      wakeLockRef.current.release().catch(() => {});
+      wakeLockRef.current = null;
+    }
+  });
+
+  return () => {
+    document.removeEventListener('visibilitychange', reacquire);
+    window.removeEventListener('pageshow', reacquire);
+    window.removeEventListener('pagehide', () => {});
+  };
+}
+
+// ── Estado de cada permiso ────────────────────────────────────────────────────
+function getInitialState() {
+  return {
+    notifications: typeof window !== 'undefined' && 'Notification' in window
+    ? Notification.permission   // 'default' | 'granted' | 'denied'
+    : 'unsupported',
+    geolocation: typeof navigator !== 'undefined' && 'geolocation' in navigator
+    ? 'unknown'                 // no hay API síncrona para leer el estado
+    : 'unsupported',
+    persistentStorage: 'unknown',
+    wakeLock: typeof navigator !== 'undefined' && 'wakeLock' in navigator
+    ? 'supported'
+    : 'unsupported',
+    clipboard: 'unknown',
+    battery: null,
+    network: null,
+  };
+}
+
+// ── Hook principal ────────────────────────────────────────────────────────────
+export function usePermissions(token, role) {
+  const [status,   setStatus]   = useState(getInitialState);
+  const [loading,  setLoading]  = useState(false);
+  const [msg,      setMsg]      = useState('');
+  const wakeLockRef = useRef(null);
+
+  // Leer estado de persistent storage al montar
+  useEffect(() => {
+    if (!navigator.storage?.persisted) return;
+    navigator.storage.persisted().then(persisted => {
+      setStatus(s => ({ ...s, persistentStorage: persisted ? 'granted' : 'default' }));
+    }).catch(() => {});
+  }, []);
+
+  // Leer network info (no es asíncrono)
+  useEffect(() => {
+    const updateNetwork = () => setStatus(s => ({ ...s, network: getNetworkInfo() }));
+    updateNetwork();
+    const conn = navigator.connection;
+    if (conn) {
+      conn.addEventListener('change', updateNetwork);
+      return () => conn.removeEventListener('change', updateNetwork);
+    }
+  }, []);
+
+  // ── Solicitar todos los permisos en secuencia ─────────────────────────────
+  const requestAll = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    setMsg('');
+
+    // 1. Service Worker — base para notificaciones y push
+    let reg = null;
+    try {
+      reg = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+    } catch (e) {
+      console.warn('[perms] SW registration failed:', e.message);
+    }
+
+    // 2. Notificaciones
+    let notifResult = Notification.permission;
+    if (notifResult === 'default' && 'Notification' in window) {
+      try {
+        notifResult = await Notification.requestPermission();
+      } catch (_) {}
+    }
+    setStatus(s => ({ ...s, notifications: notifResult }));
+
+    // 3. Push subscription VAPID (solo si notificaciones granted)
+    if (notifResult === 'granted' && reg && token) {
+      await subscribeToPush(token);
+      try { localStorage.setItem('morelivery_notif_enabled', '1'); } catch (_) {}
+    }
+
+    // 4. Geolocalización — crítico para driver, útil para customer
+    if ('geolocation' in navigator) {
+      try {
+        // Usar permissions API si está disponible (no pide prompt, solo lee estado)
+        if (navigator.permissions?.query) {
+          const perm = await navigator.permissions.query({ name: 'geolocation' });
+          if (perm.state === 'prompt') {
+            // Solicitar explícitamente solo si no se ha decidido
+            await new Promise((resolve) => {
+              navigator.geolocation.getCurrentPosition(
+                () => { setStatus(s => ({ ...s, geolocation: 'granted' })); resolve(); },
+                                                       (err) => {
+                                                         const state = err.code === 1 ? 'denied' : 'error';
+                                                         setStatus(s => ({ ...s, geolocation: state }));
+                                                         resolve();
+                                                       },
+                                                       { timeout: 8000, maximumAge: 60000 }
+              );
+            });
+          } else {
+            setStatus(s => ({ ...s, geolocation: perm.state }));
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 5. Persistent storage — evita que Android elimine el cache del SW
+    if (navigator.storage?.persist) {
+      try {
+        const granted = await navigator.storage.persist();
+        setStatus(s => ({ ...s, persistentStorage: granted ? 'granted' : 'denied' }));
+      } catch (_) {}
+    }
+
+    // 6. Clipboard (solo verificar estado, no pedir automáticamente)
+    const clipStatus = await requestClipboardPermission();
+    setStatus(s => ({ ...s, clipboard: clipStatus }));
+
+    // 7. Battery (no requiere permiso, solo lectura)
+    const battery = await getBatteryStatus();
+    setStatus(s => ({ ...s, battery }));
+
+    // Marcar como solicitado para no volver a pedir automáticamente
+    try { localStorage.setItem(STORAGE_KEY, '1'); } catch (_) {}
+
+    setLoading(false);
+    setMsg('Permisos configurados.');
+    setTimeout(() => setMsg(''), 3000);
+  }, [token, role]);
+
+  // ── Wake lock — activar/desactivar manualmente (solo para drivers) ─────────
+  const requestWakeLock = useCallback(async () => {
+    if (!('wakeLock' in navigator)) return;
+    try {
+      if (wakeLockRef.current) {
+        await wakeLockRef.current.release();
+        wakeLockRef.current = null;
+        setStatus(s => ({ ...s, wakeLock: 'released' }));
+      } else {
+        wakeLockRef.current = await navigator.wakeLock.request('screen');
+        setStatus(s => ({ ...s, wakeLock: 'active' }));
+        wakeLockRef.current.addEventListener('release', () => {
+          wakeLockRef.current = null;
+          setStatus(s => ({ ...s, wakeLock: 'supported' }));
+        });
+      }
+    } catch (e) {
+      console.warn('[perms] wake lock error:', e.message);
+    }
+  }, []);
+
+  // Re-adquirir wake lock si la página vuelve a ser visible (iOS/Android la libera al minimizar)
+  useEffect(() => {
+    if (status.wakeLock !== 'active') return;
+    const cleanup = setupWakeLockPersistence(wakeLockRef, setStatus);
+    return cleanup;
+  }, [status.wakeLock]);
+
+  // ── Auto-request al primer login (una sola vez) ───────────────────────────
+  const autoRequested = useRef(false);
+  useEffect(() => {
+    if (!token) return;
+    if (autoRequested.current) return;
+    try {
+      if (localStorage.getItem(STORAGE_KEY) === '1') return;
+    } catch (_) {}
+
+    // Esperar interacción del usuario antes de pedir (requerido en móvil)
+    function onInteraction() {
+      if (autoRequested.current) return;
+      autoRequested.current = true;
+      requestAll();
+      window.removeEventListener('pointerdown', onInteraction);
+      window.removeEventListener('keydown',     onInteraction);
+    }
+    window.addEventListener('pointerdown', onInteraction, { once: true });
+    window.addEventListener('keydown',     onInteraction, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', onInteraction);
+      window.removeEventListener('keydown',     onInteraction);
+    };
+  }, [token, requestAll]);
+
+  return {
+    status,           // estado de cada permiso
+    loading,          // true mientras se están pidiendo
+    msg,              // mensaje de feedback
+    requestAll,       // llamar manualmente desde Profile
+    requestWakeLock,  // toggle wake lock (solo drivers)
+    subscribeToPush:  () => subscribeToPush(token), // re-suscribir si expiró
+    // Funciones auxiliares para consultar estado actual de nuevos permisos
+    getClipboardStatus: () => requestClipboardPermission(),
+    getBatteryStatus:   () => getBatteryStatus(),
+    getNetworkInfo:     () => getNetworkInfo(),
+  };
+}
+// frontend/src/hooks/useRealtimeOrders.js
+import { useCallback, useEffect, useRef } from 'react';
+import { API_BASE } from '../api/client';
+
+function canNotify() {
+  return typeof window !== 'undefined' && 'Notification' in window;
+}
+
+function notificationsEnabled() {
+  try {
+    return localStorage.getItem('morelivery_notif_enabled') !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function shouldNotifyInBackground() {
+  if (typeof document === 'undefined') return true;
+  return document.visibilityState !== 'visible' || !document.hasFocus();
+}
+
+
+// Sonido urgente para restaurante — cancelación mientras preparaba
+function playUrgentAlert() {
+  if (typeof window === 'undefined') return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    // Tres pulsos descendentes — tono de alerta
+    [[0.00, 880], [0.22, 660], [0.44, 440]].forEach(([offset, freq]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+      gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + 0.18);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + 0.2);
+    });
+    setTimeout(() => ctx.close().catch(() => {}), 800);
+  } catch (_) {}
+}
+
+// Sonido suave para driver_arrival — ding amigable
+function playArrivalChime() {
+  if (typeof window === 'undefined') return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    [[0.00, 1047], [0.18, 1319], [0.36, 1568]].forEach(([offset, freq]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+      gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + offset + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + 0.25);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + 0.3);
+    });
+    setTimeout(() => ctx.close().catch(() => {}), 800);
+  } catch (_) {}
+}
+
+function playOfferPulse() {
+  if (typeof window === 'undefined') return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    const pulse = (offset, freq, duration = 0.11) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+      gain.gain.exponentialRampToValueAtTime(0.22, ctx.currentTime + offset + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + duration);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + duration + 0.02);
+    };
+    pulse(0.00, 900);
+    pulse(0.16, 1200);
+    setTimeout(() => ctx.close().catch(() => {}), 600);
+  } catch (_) {}
+}
+
+function alertOfferAttention(priority = 'high') {
+  const high = priority === 'high';
+  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    navigator.vibrate(high ? [300, 100, 300, 100, 300] : [180, 80, 180]);
+  }
+  playOfferPulse();
+}
+
+function notificationPriority(group) {
+  try {
+    const stored = localStorage.getItem('morelivery_notif_priority');
+    if (stored === 'high') return 'high';
+    // Priorizar siempre ofertas y updates de pedido aunque el resto sea "normal"
+    if (group === 'offers' || group === 'order_updates') return 'high';
+    return 'normal';
+  } catch { return 'normal'; }
+}
+
+// Notificar al SW que la app está activa → limpia badge y contadores
+async function notifyAppFocused() {
+  try {
+    if (!('serviceWorker' in navigator)) return;
+    const reg = await navigator.serviceWorker.getRegistration();
+    reg?.active?.postMessage({ type: 'APP_FOCUSED' });
+  } catch (_) {}
+}
+
+// group: clave de agrupación por categoría (ej. 'offers', 'order_updates', 'chat')
+// Todos los eventos del mismo group colapsan en una sola notificación en el SW.
+async function notifyRealtime({ title, body, tag, group, url = '/' }) {
+  if (!canNotify() || Notification.permission !== 'granted') return;
+  if (!notificationsEnabled()) return;
+
+  const priority = notificationPriority(group || tag);
+  const payload = {
+    type: 'SHOW_NOTIFICATION',
+    title,
+    body,
+    tag,
+    group: group || tag,   // el SW usa group para agrupar; tag era por pedido individual
+    url,
+    data: { url, ts: Date.now() },
+    priority,
+  };
+
+  // Preferir SW para soporte en segundo plano (móvil/PWA)
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg?.active) {
+        reg.active.postMessage(payload);
+        return;
+      }
+    }
+  } catch (_) {}
+
+  // Fallback foreground
+  try {
+    const high = priority === 'high';
+    if (high && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      navigator.vibrate([300, 100, 300, 100, 300]);
+    }
+    new Notification(title, {
+      body,
+      tag,
+      icon: '/icon-192.png',
+      badge: '/badge.svg',
+      renotify: true,
+      requireInteraction: high,
+      silent: false,
+      timestamp: Date.now(),
+      vibrate: high ? [300, 100, 300, 100, 300] : [180, 80, 180],
+    });
+  } catch (_) {}
+}
+
+/**
+ * SSE listener central — una sola conexión estable por token.
+ */
+export function useRealtimeOrders(token, onOrderUpdate, onDriverLocation, onNewOffer, onChatMessage, onReconnect, onKitchenEvent, onTransferEvent, onSupportMessage) {
+  const esRef          = useRef(null);
+  const reconnectTimer = useRef(null);
+  const mountedRef     = useRef(true);
+  const retryCount     = useRef(0);
+  const lastOfferPulse = useRef({ id: null, at: 0 });
+
+  const cbUpdate    = useRef(onOrderUpdate);
+  const cbLocation  = useRef(onDriverLocation);
+  const cbOffer     = useRef(onNewOffer);
+  const cbChat      = useRef(onChatMessage);
+  const cbReconnect = useRef(onReconnect);
+  const cbKitchen   = useRef(onKitchenEvent);
+  const cbTransfer  = useRef(onTransferEvent);
+  const cbSupport   = useRef(onSupportMessage);
+
+  useEffect(() => { cbUpdate.current    = onOrderUpdate;    }, [onOrderUpdate]);
+  useEffect(() => { cbLocation.current  = onDriverLocation; }, [onDriverLocation]);
+  useEffect(() => { cbOffer.current     = onNewOffer;       }, [onNewOffer]);
+  useEffect(() => { cbChat.current      = onChatMessage;    }, [onChatMessage]);
+  useEffect(() => { cbReconnect.current = onReconnect;      }, [onReconnect]);
+  useEffect(() => { cbKitchen.current   = onKitchenEvent;   }, [onKitchenEvent]);
+  useEffect(() => { cbTransfer.current  = onTransferEvent;  }, [onTransferEvent]);
+  useEffect(() => { cbSupport.current   = onSupportMessage; }, [onSupportMessage]);
+
+  // Pedir permiso una vez cuando hay sesión activa
+  useEffect(() => {
+    if (!token || !canNotify()) return;
+    if (Notification.permission !== 'default') return;
+
+    const request = () => {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+      window.removeEventListener('pointerdown', request);
+      window.removeEventListener('keydown', request);
+    };
+
+    // Solicitar tras interacción real del usuario (más confiable en móvil)
+    window.addEventListener('pointerdown', request, { once: true });
+    window.addEventListener('keydown', request, { once: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', request);
+      window.removeEventListener('keydown', request);
+    };
+  }, [token]);
+
+  const connect = useCallback(() => {
+    if (!token || !mountedRef.current) return;
+    if (esRef.current) { esRef.current.close(); esRef.current = null; }
+
+    const url = `${API_BASE}/api/events?token=${encodeURIComponent(token)}`;
+    console.log(`📡 [SSE] conectando (intento ${retryCount.current + 1})`);
+    const es = new EventSource(url);
+    esRef.current = es;
+
+    es.addEventListener('order_update', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbUpdate.current?.(data);
+        if (shouldNotifyInBackground()) {
+          const status = data?.status ? `Estado: ${data.status}` : 'Tu pedido fue actualizado';
+          notifyRealtime({
+            title: 'Actualización de pedido',
+            body:  status,
+            tag:   'order_updates',        // tag fijo = agrupa todos los updates
+            group: 'order_updates',
+            url:   '/customer/pedidos',
+          });
+        }
+      } catch (_) {}
+    });
+
+    es.addEventListener('driver_location', (e) => {
+      try { cbLocation.current?.(JSON.parse(e.data)); } catch (_) {}
+    });
+
+    es.addEventListener('new_offer', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        console.log(`[SSE] new_offer received orderId=${data.orderId} secondsLeft=${data.secondsLeft}`);
+        cbOffer.current?.(data);
+
+        // Alerta local inmediata por evento SSE (no depende de render en Home)
+        const now = Date.now();
+        const sameOffer = lastOfferPulse.current.id && String(lastOfferPulse.current.id) === String(data?.orderId);
+        const tooSoon = now - (lastOfferPulse.current.at || 0) < 4000;
+        if (!sameOffer || !tooSoon) {
+          const priority = notificationPriority('offers');
+          alertOfferAttention(priority);
+          lastOfferPulse.current = { id: data?.orderId || null, at: now };
+        }
+
+        notifyRealtime({
+          title: 'Nueva oferta disponible',
+          body:  'Tienes un pedido por aceptar.',
+          tag:   'offers',          // tag fijo = todas las ofertas colapsan en una notif
+          group: 'offers',
+          url:   '/driver',
+        });
+      } catch (_) {}
+    });
+
+    es.addEventListener('offer_cancelled', (e) => {
+      try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {}
+    });
+
+    es.addEventListener('offer_assigned', (e) => {
+      try { cbUpdate.current?.(JSON.parse(e.data)); } catch (_) {}
+    });
+
+    // ── Eventos del motor de cocina ──────────────────────────────────────────
+    // kitchen_auto_ready: el sistema marcó automáticamente un pedido como listo
+    es.addEventListener('kitchen_auto_ready', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbKitchen.current?.({ type: 'kitchen_auto_ready', ...data });
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: 'Pedido marcado como listo',
+            body:  data.message || 'Un pedido fue marcado automáticamente como listo.',
+            tag:   'kitchen',
+            group: 'kitchen',
+            url:   '/restaurant/pedidos',
+          });
+        }
+      } catch (_) {}
+    });
+
+    // prep_estimate_updated: el sistema ajustó el estimado de preparación
+    es.addEventListener('prep_estimate_updated', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbKitchen.current?.({ type: 'prep_estimate_updated', ...data });
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: 'Estimado de preparación ajustado',
+            body:  data.message || 'Tu tiempo estimado de preparación fue actualizado.',
+            tag:   'kitchen',
+            group: 'kitchen',
+            url:   '/restaurant/pedidos',
+          });
+        }
+      } catch (_) {}
+    });
+
+    // ── Eventos de rebalanceo (driver) ───────────────────────────────────────
+    es.addEventListener('order_transferred_away', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbTransfer.current?.({ type: 'order_transferred_away', ...data });
+        cbUpdate.current?.(data);
+      } catch (_) {}
+    });
+
+    es.addEventListener('order_transferred_in', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbTransfer.current?.({ type: 'order_transferred_in', ...data });
+        cbUpdate.current?.(data);
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: 'Nuevo pedido asignado',
+            body:  'Se te asignó un pedido transferido.',
+            tag:   'offers',
+            group: 'offers',
+            url:   '/driver',
+          });
+        }
+      } catch (_) {}
+    });
+
+    es.addEventListener('chat_message', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbChat.current?.(data);
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: `Mensaje de ${data.senderName || 'soporte'}`,
+            body:  data.text || 'Tienes un nuevo mensaje.',
+            tag:   'chat',
+            group: 'chat',
+            url:   '/customer/pedidos',
+          });
+        }
+      } catch (_) {}
+    });
+
+    // Mensajes del chat de soporte (independiente de pedidos)
+    es.addEventListener('support_message', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbSupport.current?.(data);
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: '🛟 Soporte',
+            body:  data.text || 'Tienes un nuevo mensaje de soporte.',
+            tag:   'support',
+            group: 'support',
+            url:   '/profile',
+          });
+        }
+      } catch (_) {}
+    });
+
+    // ── Eventos específicos de restaurante ───────────────────────────────────
+    // driver_arrival: el driver recogió el pedido (= marcó on_the_way)
+    es.addEventListener('driver_arrival', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbKitchen.current?.({ type: 'driver_arrival', ...data });
+        playArrivalChime();
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: '🛵 Conductor llegó',
+            body:  `${data.driverName || 'El conductor'} recogió el pedido`,
+            tag:   'kitchen',
+            group: 'kitchen',
+            url:   '/restaurant',
+          });
+        }
+      } catch (_) {}
+    });
+
+    // order_cancelled_preparing: cliente canceló mientras el restaurante ya preparaba
+    es.addEventListener('order_cancelled_preparing', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        cbKitchen.current?.({ type: 'order_cancelled_preparing', ...data });
+        playUrgentAlert();
+        if ('vibrate' in navigator) navigator.vibrate([500, 200, 500, 200, 500]);
+        if (shouldNotifyInBackground()) {
+          notifyRealtime({
+            title: '⚠️ Pedido cancelado',
+            body:  'El cliente canceló mientras estabas preparando',
+            tag:   'kitchen_cancel',
+            group: 'kitchen',
+            url:   '/restaurant',
+            priority: 'high',
+          });
+        }
+      } catch (_) {}
+    });
+
+    // Pedidos bloqueados — notificar via evento global (sin logout)
+    es.addEventListener('orders_blocked', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        console.warn('[SSE] orders_blocked recibido:', data.reason);
+        window.dispatchEvent(new CustomEvent('sse_orders_blocked', { detail: data }));
+      } catch (_) {}
+    });
+
+    es.addEventListener('connected', () => {
+      retryCount.current = 0;
+      console.log('📡 [SSE] conexión establecida');
+      clearTimeout(reconnectTimer.current);
+      cbReconnect.current?.();
+    });
+
+    es.onerror = () => {
+      es.close();
+      esRef.current = null;
+      if (!mountedRef.current) return;
+      clearTimeout(reconnectTimer.current);
+      const delay = Math.min(4000 * Math.pow(2, retryCount.current), 30000);
+      retryCount.current++;
+      console.warn(`📡 [SSE] error — reintentando en ${delay / 1000}s (intento ${retryCount.current})`);
+      reconnectTimer.current = setTimeout(connect, delay);
+    };
+  }, [token]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    console.log('🔌 [SSE] mount — token:', token?.slice(0, 8), new Error().stack?.split('\n')[2]?.trim());
+    connect();
+
+    // Reconectar si iOS/Android pausó el JS y el SSE quedó muerto al volver al foco
+    function onVisible() {
+      if (document.hidden || !mountedRef.current) return;
+      notifyAppFocused(); // limpiar badge del ícono de la app
+      const state = esRef.current?.readyState;
+      // 1 = OPEN — si no está abierto, reconectar
+      if (state !== 1) {
+        console.warn('[SSE] tab visible pero SSE no activo (state=' + state + ') — reconectando');
+        clearTimeout(reconnectTimer.current);
+        retryCount.current = 0; // reset backoff al volver manual
+        connect();
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      console.log('🔌 [SSE] unmount — token:', token?.slice(0, 8));
+      mountedRef.current = false;
+      clearTimeout(reconnectTimer.current);
+      esRef.current?.close();
+      esRef.current = null;
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [connect]);
+}
+
