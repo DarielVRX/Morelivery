@@ -1,38 +1,563 @@
-=== FILE: backend/src/config/db.js ===
-import pg from 'pg';
-import { env } from './env.js';
+=== FILE: backend/src/modules/orders/route-groups/creation.js ===
+import { authenticate, authorize } from '../../../middlewares/auth.js';
+import { validate } from '../../../middlewares/validate.js';
+import { DELIVERY_FEE_PCT, RESTAURANT_FEE_PCT, SERVICE_FEE_PCT, isMissingColumnError, isMissingRelationError } from '../shared.js';
 
-const { Pool } = pg;
+export function registerCreationRoutes(router, deps) {
+  const {
+    query,
+    AppError,
+    serializedOffer,
+    offerNextDrivers,
+    getPendingAssignmentOrders,
+    initKitchenTiming,
+    orderEvents,
+    sseHub,
+    logEvent,
+    createOrderSchema,
+  } = deps;
 
-export const pool = new Pool({
-  connectionString: env.databaseUrl,
-  ssl: env.nodeEnv === 'production' ? { rejectUnauthorized: false } : false
-});
+  router.get('/pending-assignment', authenticate, authorize(['driver']), async (req, res, next) => {
+    try {
+      const orders = await getPendingAssignmentOrders(
+        req.user.userId,
+        req.query.available === '1'  // ← agregar
+      );
+      return res.json({ orders });
+    } catch (error) { return next(error); }
+  });
 
-pool.on('error', (error) => {
-  console.error('[db.pool.error]', { message: error.message, code: error.code });
-});
+  router.post('/', authenticate, authorize(['customer']), validate(createOrderSchema), async (req, res, next) => {
+    const { restaurantId, items, payment_method, tip_cents, delivery_lat, delivery_lng, delivery_address } = req.validatedBody;
+    console.log(`📦 [pedido.nuevo] cliente=${req.user?.userId?.slice(0,8)} pago=${payment_method} propina=${tip_cents} productos=${items?.length}`);
+    try {
+      let deliveryAddress = 'address-pending';
+      try {
+        const c = await query('SELECT address FROM users WHERE id=$1', [req.user.userId]);
+        deliveryAddress = delivery_address?.trim() || c.rows[0]?.address || 'address-pending';
+      } catch (e) { if (!isMissingColumnError(e)) throw e; }
+      if (!deliveryAddress || deliveryAddress === 'address-pending') return next(new AppError(400, 'Debes guardar tu dirección antes de hacer un pedido'));
 
-export async function query(text, params = []) {
+      const restCoords = await query(`SELECT COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
+                                      FROM restaurants r
+                                      LEFT JOIN users u ON u.id = r.owner_user_id
+                                      WHERE r.id=$1`, [restaurantId]);
+      if (restCoords.rowCount === 0) return next(new AppError(404, 'Restaurante no encontrado'));
+
+      const restaurantLat = restCoords.rows[0]?.lat != null ? Number(restCoords.rows[0].lat) : null;
+      const restaurantLng = restCoords.rows[0]?.lng != null ? Number(restCoords.rows[0].lng) : null;
+      const orderDeliveryLat = Number.isFinite(Number(delivery_lat)) ? Number(delivery_lat) : null;
+      const orderDeliveryLng = Number.isFinite(Number(delivery_lng)) ? Number(delivery_lng) : null;
+
+      if (orderDeliveryLat == null || orderDeliveryLng == null) {
+        return next(new AppError(400, 'Falta ubicación de entrega (lat/lng). Selecciona ubicación actual, casa o manual.'));
+      }
+      if (restaurantLat == null || restaurantLng == null) {
+        return next(new AppError(409, 'El restaurante no tiene coordenadas configuradas.'));
+      }
+
+      const distResult = await query(
+        `SELECT (
+           6371 * acos(
+             cos(radians($1::float8)) * cos(radians($3::float8)) *
+             cos(radians($4::float8) - radians($2::float8)) +
+             sin(radians($1::float8)) * sin(radians($3::float8))
+           )
+         ) AS km`,
+        [orderDeliveryLat, orderDeliveryLng, restaurantLat, restaurantLng]
+      );
+      const distKm = Number(distResult.rows[0]?.km ?? Infinity);
+      if (!Number.isFinite(distKm) || distKm > 5) {
+        return next(new AppError(409, `Esta tienda está fuera de cobertura (${distKm.toFixed(1)} km). Máximo permitido: 5 km.`));
+      }
+
+      const menuIds = items.map(i => i.menuItemId);
+      const priceRows = await query(
+        `SELECT id, price_cents,
+                COALESCE(pkg_units, 1)           AS pkg_units,
+                COALESCE(pkg_volume_liters, 0)   AS pkg_volume_liters
+         FROM menu_items WHERE id = ANY($1::uuid[]) AND restaurant_id = $2`,
+        [menuIds, restaurantId]
+      );
+      if (priceRows.rowCount !== menuIds.length) {
+        return next(new AppError(400, 'Uno o más productos no pertenecen a este restaurante'));
+      }
+      const priceMap = new Map(priceRows.rows.map(r => [r.id, {
+        price_cents: r.price_cents,
+        pkg_units: Number(r.pkg_units) || 1,
+        pkg_volume_liters: Number(r.pkg_volume_liters) || 0,
+      }]));
+
+      let totalCents = 0;
+      let estimatedVolumeLiters = 0;
+      for (const item of items) {
+        const meta = priceMap.get(item.menuItemId);
+        totalCents += meta.price_cents * item.quantity;
+        const packs = Math.ceil(item.quantity / meta.pkg_units);
+        estimatedVolumeLiters += packs * meta.pkg_volume_liters;
+      }
+      estimatedVolumeLiters = Math.round(estimatedVolumeLiters * 1000) / 1000;
+
+      const serviceFee = Math.round(totalCents * SERVICE_FEE_PCT);
+      const deliveryFee = Math.round(totalCents * DELIVERY_FEE_PCT);
+      const restaurantFee = Math.round(totalCents * RESTAURANT_FEE_PCT);
+      const paymentMethod = payment_method || 'cash';
+      const tipCents = Number(tip_cents) || 0;
+
+      const orderResult = await query(
+        `INSERT INTO orders(customer_id, restaurant_id, status, total_cents, service_fee_cents, delivery_fee_cents, restaurant_fee_cents, payment_method, tip_cents, delivery_address, delivery_lat, delivery_lng, restaurant_lat, restaurant_lng, estimated_volume_liters)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+        [req.user.userId, restaurantId, 'created', totalCents, serviceFee, deliveryFee, restaurantFee, paymentMethod || 'cash', tipCents, deliveryAddress, orderDeliveryLat, orderDeliveryLng, restaurantLat, restaurantLng, estimatedVolumeLiters]
+      );
+      const order = orderResult.rows[0];
+      console.log(`📦 [pedido.creado] id=${order.id.slice(0,8)} total=${order.total_cents} rest=${restaurantId.slice(0,8)}`);
+
+      const itemValues = items.map((item, i) => {
+        const base = i * 4;
+        return `($${base + 1},$${base + 2},$${base + 3},$${base + 4})`;
+      }).join(',');
+      const itemParams = items.flatMap(item => [
+        order.id, item.menuItemId, item.quantity, priceMap.get(item.menuItemId).price_cents,
+      ]);
+      await query(
+        `INSERT INTO order_items(order_id, menu_item_id, quantity, unit_price_cents) VALUES ${itemValues}`,
+        itemParams
+      );
+
+      try { await serializedOffer(order.id, offerNextDrivers); } catch (e) {
+        if (!isMissingRelationError(e) && !isMissingColumnError(e)) throw e;
+      }
+
+      initKitchenTiming(order.id, restaurantId).catch(() => {});
+
+      const updated = await query('SELECT * FROM orders WHERE id=$1', [order.id]);
+      orderEvents.emitOrderUpdate(order.id, updated.rows[0].status);
+
+      try {
+        const restInfo = await query('SELECT owner_user_id FROM restaurants WHERE id=$1', [restaurantId]);
+        if (restInfo.rowCount > 0) sseHub.sendToUser(restInfo.rows[0].owner_user_id, 'order_update', { orderId: order.id, status: 'created', action: 'new_order' });
+      } catch (_) {}
+
+      console.log(`📦 [pedido.listo] id=${order.id.slice(0,8)} → notificando tienda y buscando driver`);
+      logEvent('order.created', { orderId: order.id, customerId: req.user.userId });
+      return res.status(201).json({ order: updated.rows[0] });
+    } catch (error) { return next(error); }
+  });
+}
+
+=== FILE: backend/src/modules/restaurants/routes.js ===
+// backend/modules/restaurants/routes.js
+import { Router } from 'express';
+import { query } from '../../config/db.js';
+import { authenticate, authorize } from '../../middlewares/auth.js';
+import { validate } from '../../middlewares/validate.js';
+import { resetPrepEstimateOnOpen, recordManualCorrection } from '../../engine/kitchen.js';
+import { createMenuItemSchema, updateMenuItemSchema } from './schemas.js';
+import { AppError } from '../../utils/errors.js';
+
+const router = Router();
+
+function isMissingColumn(e) { return e?.code === '42703'; }
+function isMissingRelation(e) { return e?.code === '42P01'; }
+
+async function getRestaurantIdByOwner(userId) {
+  const r = await query('SELECT id FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [userId]);
+  return r.rows[0]?.id || null;
+}
+
+/**
+ * Determina si el restaurante está abierto AHORA:
+ *   1. manual_open_override !== NULL  →  usar ese valor directamente
+ *   2. Buscar el horario del día actual en restaurant_schedules
+ *   3. Fallback: valor de is_open guardado en la tabla
+ */
+async function computeIsOpen(restaurantId) {
   try {
-    const result = await pool.query(text, params);
-    return result;
-  } catch (error) {
-    console.error('[db.query.error]', {
-      message: error.message,
-      code: error.code,
-      detail: error.detail,
-      table: error.table,
-      constraint: error.constraint
-    });
-    throw error;
-  }
+    const r = await query('SELECT is_open, manual_open_override FROM restaurants WHERE id = $1', [restaurantId]);
+    if (r.rowCount === 0) return false;
+    const { is_open, manual_open_override } = r.rows[0];
+    if (manual_open_override !== null && manual_open_override !== undefined) return Boolean(manual_open_override);
+
+    // Usar timezone de México — el servidor puede correr en UTC
+    const tz  = 'America/Mexico_City';
+    const now = new Date();
+    // getDay() equivalente en Mexico_City: restar el offset al momento UTC
+    const nowMx   = new Date(now.toLocaleString('en-US', { timeZone: tz }));
+    const dow     = nowMx.getDay();   // 0=Dom … 6=Sab
+    const hh      = String(nowMx.getHours()).padStart(2, '0');
+    const mm      = String(nowMx.getMinutes()).padStart(2, '0');
+    const hhmm    = `${hh}:${mm}`;
+
+    try {
+      const s = await query(
+        'SELECT opens_at, closes_at, is_closed FROM restaurant_schedules WHERE restaurant_id=$1 AND day_of_week=$2',
+        [restaurantId, dow]
+      );
+      if (s.rowCount === 0) return Boolean(is_open);
+      const { opens_at, closes_at, is_closed } = s.rows[0];
+      if (is_closed || !opens_at || !closes_at) return false;
+      return hhmm >= opens_at.slice(0,5) && hhmm < closes_at.slice(0,5);
+    } catch (e) {
+      if (isMissingRelation(e)) return Boolean(is_open);
+      throw e;
+    }
+  } catch (_) { return false; }
 }
 
-export async function checkDbConnection() {
-  const result = await query('SELECT NOW() as now');
-  return result.rows[0];
-}
+/* ── GET / — lista pública con is_open calculado en tiempo real ── */
+router.get('/', async (_req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT r.id, r.name, r.category, r.is_open,
+              COALESCE(u.address, r.address) AS address,
+              r.profile_photo, COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng,
+              r.rating_avg, r.rating_count
+       FROM restaurants r
+       LEFT JOIN users u ON u.id = r.owner_user_id
+       WHERE r.is_active = true
+       ORDER BY r.name`
+    ).catch(() =>
+      query(
+        `SELECT r.id, r.name, r.category, r.is_open,
+                COALESCE(u.address, r.address) AS address,
+                r.profile_photo, COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
+         FROM restaurants r
+         LEFT JOIN users u ON u.id = r.owner_user_id
+         WHERE r.is_active = true
+         ORDER BY r.name`
+      )
+    );
+    const restaurants = await Promise.all(result.rows.map(async r => ({ ...r, is_open: await computeIsOpen(r.id) })));
+    return res.json({ restaurants });
+  } catch (error) {
+    if (isMissingRelation(error)) return res.json({ restaurants: [] });
+    return next(error);
+  }
+});
+
+/* ── GET /my ── */
+router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT r.id, r.name, r.category, r.is_open,
+              COALESCE(u.address, r.address) AS address,
+              r.manual_open_override, r.profile_photo,
+              COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
+       FROM restaurants r
+       LEFT JOIN users u ON u.id = r.owner_user_id
+       WHERE r.owner_user_id=$1 LIMIT 1`,
+      [req.user.userId]
+    );
+    if (result.rowCount === 0) return res.json({ restaurant: null });
+    const rest = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
+    return res.json({ restaurant: rest });
+  } catch (error) { return next(error); }
+});
+
+/* ── GET /my/menu ── */
+router.get('/my/menu', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    const result = await query(
+      'SELECT id, name, description, price_cents, is_available, image_url FROM menu_items WHERE restaurant_id=$1 ORDER BY name',
+      [restaurantId]
+    );
+    return res.json({ menu: result.rows });
+  } catch (error) { return next(error); }
+});
+
+/* ── GET /my/schedule — horario guardado de los 7 días ── */
+router.get('/my/schedule', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    let rows = [];
+    try {
+      const result = await query(
+        'SELECT day_of_week, opens_at, closes_at, is_closed FROM restaurant_schedules WHERE restaurant_id=$1 ORDER BY day_of_week',
+        [restaurantId]
+      );
+      rows = result.rows;
+    } catch (e) { if (!isMissingRelation(e)) throw e; }
+
+    const scheduleMap = new Map(rows.map(r => [r.day_of_week, r]));
+    const schedule = Array.from({ length: 7 }, (_, i) => scheduleMap.get(i) || {
+      day_of_week: i, opens_at: '09:00:00', closes_at: '22:00:00', is_closed: false
+    });
+
+    const restInfo = await query('SELECT manual_open_override FROM restaurants WHERE id=$1', [restaurantId]);
+    return res.json({ schedule, manual_open_override: restInfo.rows[0]?.manual_open_override ?? null });
+  } catch (error) { return next(error); }
+});
+
+/* ── PUT /my/schedule — guardar horario semanal completo ── */
+router.put('/my/schedule', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    const { schedule } = req.body;
+    if (!Array.isArray(schedule) || schedule.length !== 7) return next(new AppError(400, 'Se requieren los 7 días'));
+
+    for (const day of schedule) {
+      await query(
+        `INSERT INTO restaurant_schedules(restaurant_id, day_of_week, opens_at, closes_at, is_closed)
+         VALUES($1,$2,$3,$4,$5)
+         ON CONFLICT(restaurant_id, day_of_week)
+         DO UPDATE SET opens_at=$3, closes_at=$4, is_closed=$5`,
+        [restaurantId, day.day_of_week,
+         day.is_closed ? null : (day.opens_at || '09:00'),
+         day.is_closed ? null : (day.closes_at || '22:00'),
+         Boolean(day.is_closed)]
+      );
+    }
+
+    // Recalcular y persistir is_open
+    const isOpen = await computeIsOpen(restaurantId);
+    await query('UPDATE restaurants SET is_open=$1 WHERE id=$2', [isOpen, restaurantId]);
+
+    return res.json({ ok: true, is_open: isOpen });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /my/toggle — override manual de apertura/cierre ── */
+router.patch('/my/toggle', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    // override: true | false | null (null = volver al horario automático)
+    const { override } = req.body;
+    const value = override === null || override === undefined ? null : Boolean(override);
+    await query('UPDATE restaurants SET manual_open_override=$1 WHERE id=$2', [value, restaurantId]);
+
+    const isOpen = await computeIsOpen(restaurantId);
+    await query('UPDATE restaurants SET is_open=$1 WHERE id=$2', [isOpen, restaurantId]);
+
+    // Al abrir el restaurante, registrar hora de apertura para el ciclo de prep
+    if (isOpen) {
+      resetPrepEstimateOnOpen(restaurantId).catch(() => {});
+    }
+
+    return res.json({ is_open: isOpen, manual_open_override: value });
+  } catch (error) { return next(error); }
+});
+
+router.get('/:id', async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT r.id, r.name, r.category, r.is_open,
+      COALESCE(u.address, r.address) AS address,
+                               r.profile_photo,
+                               COALESCE(u.home_lat, r.lat)   AS lat,
+                               COALESCE(u.home_lng, r.lng)   AS lng,
+                               r.rating_avg, r.rating_count
+                               FROM restaurants r
+                               LEFT JOIN users u ON u.id = r.owner_user_id
+                               WHERE r.id = $1 AND r.is_active = true`,
+                               [req.params.id]
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Restaurante no encontrado'));
+    const restaurant = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
+    return res.json({ restaurant });
+  } catch (error) { return next(error); }
+});
+
+/* ── GET /:id/menu ── */
+router.get('/:id/menu', async (req, res, next) => {
+  try {
+    const result = await query(
+      'SELECT id, name, description, price_cents, is_available, image_url FROM menu_items WHERE restaurant_id=$1 ORDER BY name',
+      [req.params.id]
+    );
+    return res.json({ menu: result.rows });
+  } catch (error) {
+    if (isMissingRelation(error)) return res.json({ menu: [] });
+    return next(error);
+  }
+});
+
+/* ── POST /menu-items ── */
+
+/* ── PATCH /restaurants/my/profile-photo ── */
+router.patch('/my/profile-photo', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    // Acepta base64 (data:image/...) o URL o null para eliminar
+    const { photoUrl } = req.body || {};
+    const val = (photoUrl === null || photoUrl === '') ? null
+      : (typeof photoUrl === 'string' ? photoUrl : null);
+    try {
+      await query(
+        `UPDATE restaurants SET profile_photo=$1 WHERE owner_user_id=$2`,
+        [val, req.user.userId]
+      );
+    } catch (e) {
+      // Columna puede no existir si la migration no se corrió
+      if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_v11.sql primero'));
+      throw e;
+    }
+    return res.json({ ok: true, photoUrl: val });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /my/cover-photo — foto de fachada/portada (almacena, no se muestra aún) ── */
+router.patch('/my/cover-photo', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const { photoUrl } = req.body || {};
+    const val = (photoUrl === null || photoUrl === '') ? null
+    : (typeof photoUrl === 'string' ? photoUrl : null);
+    try {
+      await query(
+        `UPDATE restaurants SET cover_photo=$1 WHERE owner_user_id=$2`,
+        [val, req.user.userId]
+      );
+    } catch (e) {
+      if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_cover_photo.sql primero'));
+      throw e;
+    }
+    return res.json({ ok: true, coverPhoto: val });
+  } catch (error) { return next(error); }
+});
+
+router.post('/menu-items', authenticate, authorize(['restaurant']), validate(createMenuItemSchema), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    const { name, description, priceCents, pkgUnits, pkgVolumeLiters } = req.validatedBody;
+    // priceCents validado: entero entre $1 y $10,000
+    if (!Number.isInteger(priceCents) || priceCents < 100 || priceCents > 1_000_000) {
+      return next(new AppError(400, 'El precio debe estar entre $1.00 y $10,000.00'));
+    }
+    const safeUnits  = pkgUnits        != null ? Math.max(1, Math.round(Number(pkgUnits)))  : 1;
+    const safeVolume = pkgVolumeLiters != null ? Math.max(0, Number(pkgVolumeLiters))        : 0;
+    const result = await query(
+      `INSERT INTO menu_items(restaurant_id, name, description, price_cents, is_available, pkg_units, pkg_volume_liters)
+       VALUES($1,$2,$3,$4,true,$5,$6) RETURNING *`,
+      [restaurantId, name, description, priceCents, safeUnits, safeVolume]
+    );
+    return res.status(201).json({ menuItem: result.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /menu-items/:id ── */
+router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  // No usar updateMenuItemSchema porque bloquea peticiones que solo traen imageUrl
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    const item = await query('SELECT * FROM menu_items WHERE id=$1 AND restaurant_id=$2', [req.params.id, restaurantId]);
+    if (item.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
+    const cur = item.rows[0];
+    const p = req.body || {};
+    // imageUrl: acepta base64 (data:image/...) o null para eliminar imagen
+    let imageUrl = cur.image_url;
+    if (req.body.imageUrl !== undefined) {
+      if (req.body.imageUrl === null || req.body.imageUrl === '') {
+        imageUrl = null;
+      } else if (typeof req.body.imageUrl === 'string') {
+        // base64 o URL — aceptar sin restricción de formato
+        imageUrl = req.body.imageUrl;
+      }
+    }
+    const result = await query(
+      `UPDATE menu_items
+       SET name=$1, description=$2, price_cents=$3, is_available=$4, image_url=$5,
+           pkg_units=$6, pkg_volume_liters=$7
+       WHERE id=$8 RETURNING *`,
+      [
+        p.name        ?? cur.name,
+        p.description ?? cur.description ?? '',
+        (p.priceCents != null ? Math.round(Number(p.priceCents)) : null) ?? cur.price_cents,
+        p.isAvailable ?? cur.is_available,
+        imageUrl,
+        p.pkgUnits        != null ? Math.max(1, Math.round(Number(p.pkgUnits)))       : (cur.pkg_units         ?? 1),
+        p.pkgVolumeLiters != null ? Math.max(0, Number(p.pkgVolumeLiters))            : (cur.pkg_volume_liters ?? 0),
+        req.params.id,
+      ]
+    );
+    return res.json({ menuItem: result.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+
+/* ── DELETE /menu-items/:id — eliminar producto ── */
+router.delete('/menu-items/:id', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    // Verificar que el item pertenece a este restaurante
+    const check = await query(
+      `SELECT mi.id FROM menu_items mi
+       JOIN restaurants r ON r.id = mi.restaurant_id
+       WHERE mi.id = $1 AND r.owner_user_id = $2`,
+      [req.params.id, req.user.userId]
+    );
+    if (check.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
+
+    // Preservar historial: limpiar referencia en order_items antes de borrar
+    try {
+      await query(`UPDATE order_items SET menu_item_id = NULL WHERE menu_item_id = $1`, [req.params.id]);
+    } catch (_) {}
+    await query(`DELETE FROM menu_items WHERE id = $1`, [req.params.id]);
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+/* ── PATCH /my/prep-estimate — restaurante actualiza su estimado de preparación ── */
+router.patch('/my/prep-estimate', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    const val = Number(req.body.prep_time_estimate_s);
+    if (!Number.isFinite(val) || val < 30 || val > 7200) {
+      return next(new AppError(400, 'El estimado debe estar entre 30 segundos y 2 horas'));
+    }
+
+    // Leer estimado actual para la marca de corrección
+    const prev = await query(
+      'SELECT prep_time_estimate_s FROM restaurants WHERE id = $1',
+      [restaurantId]
+    );
+    const previousS = prev.rows[0]?.prep_time_estimate_s ?? null;
+
+    const r = await query(
+      `UPDATE restaurants
+       SET prep_time_estimate_s = $1, prep_estimate_updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, prep_time_estimate_s`,
+      [val, restaurantId]
+    );
+
+    // Registrar marca de corrección manual (fire-and-forget, no bloquea)
+    if (previousS !== null && previousS !== val) {
+      recordManualCorrection(restaurantId, previousS, val).catch(() => {});
+    }
+
+    return res.json({ restaurant: r.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+export default router;
+
+=== FILE: backend/src/modules/restaurants/schemas.js ===
+import { z } from 'zod';
+
+export const createMenuItemSchema = z.object({
+  name: z.string().min(2).max(140),
+  description: z.string().max(400).optional().default(''),
+  priceCents: z.number().int().positive()
+});
+
+export const updateMenuItemSchema = z.object({
+  name: z.string().min(2).max(140).optional(),
+  description: z.string().max(400).optional(),
+  priceCents: z.number().int().positive().optional(),
+  isAvailable: z.boolean().optional()
+}).refine((data) => Object.keys(data).length > 0, 'At least one field is required');
+
+=== FILE: database/migration_maxcashcents_and_disputes.sql ===
+ALTER TABLE restaurants ADD COLUMN max_cash_cents INT NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS dispute_cancelled_by_driver BOOLEAN DEFAULT FALSE;
 
 === FILE: database/schema.sql ===
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -401,4 +926,1165 @@ INSERT INTO engine_params (key, value, description) VALUES
   ('transfer_max_route_eta_s', 180, 'ETA de ruta máximo para disparar rebalanceo automático'),
   ('default_bag_capacity_liters', 25, 'Litros de capacidad de mochila si el driver no especificó la suya')
 ON CONFLICT (key) DO NOTHING;
+
+=== FILE: frontend/src/components/SplitLayout.jsx ===
+// frontend/src/components/SplitLayout.jsx
+// ordersContent se monta UNA sola vez — en desktop es columna fija,
+// en móvil la misma columna se transforma en drawer via CSS (sin re-mount).
+import { useEffect, useState } from 'react';
+import PullToRefresh from './PullToRefresh';
+
+export default function SplitLayout({ homeContent, ordersContent, alertsContent, totalAlerts = 0, onRefresh, onCloseMobileDrawerRef }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [activeTab, setActiveTab]   = useState('orders');
+
+  // Exponer función de cierre para que componentes hijos puedan cerrar el drawer
+  if (onCloseMobileDrawerRef) onCloseMobileDrawerRef.current = () => setMobileOpen(false);
+
+  useEffect(() => {
+    document.body.style.overflow = mobileOpen ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [mobileOpen]);
+
+  return (
+    <PullToRefresh onRefresh={onRefresh}>
+    <div className="split-root">
+
+    {/* ── Orders/Alerts: una sola instancia — desktop col + mobile drawer ── */}
+    <aside className={`split-orders-col${mobileOpen ? ' mobile-open' : ''}`}>
+      {/* Header de pestañas */}
+      <div style={{
+        display: 'flex', flexShrink: 0,
+        borderBottom: '1px solid var(--border-light)',
+        background: 'var(--bg-card)',
+      }}>
+        <button onClick={() => setActiveTab('orders')} style={{
+          flex: 1, padding: '0.6rem 0', fontSize: '0.78rem', fontWeight: 700,
+          cursor: 'pointer', border: 'none', background: 'none',
+          borderBottom: activeTab === 'orders' ? '2px solid var(--brand)' : '2px solid transparent',
+          color: activeTab === 'orders' ? 'var(--brand)' : 'var(--text-secondary)',
+        }}>
+          📦 Pedidos
+        </button>
+        <button onClick={() => setActiveTab('alerts')} style={{
+          flex: 1, padding: '0.6rem 0', fontSize: '0.78rem', fontWeight: 700,
+          cursor: 'pointer', border: 'none', background: 'none',
+          borderBottom: activeTab === 'alerts' ? '2px solid var(--brand)' : '2px solid transparent',
+          color: activeTab === 'alerts' ? 'var(--brand)' : 'var(--text-secondary)',
+          position: 'relative',
+        }}>
+          🚨 Alertas
+          {totalAlerts > 0 && (
+            <span style={{
+              marginLeft: 4, fontSize: '0.65rem',
+              background: '#ef4444', color: '#fff',
+              borderRadius: 10, padding: '0 5px',
+            }}>{totalAlerts}</span>
+          )}
+        </button>
+      </div>
+
+      {/* Contenido de pestañas — ambos montados, solo uno visible */}
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'orders' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
+        {ordersContent}
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'alerts' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
+        {alertsContent}
+      </div>
+    </aside>
+
+    {/* ── Columna Home ──────────────────────────────────────────────── */}
+    <section className="split-home-col">
+    {homeContent}
+    </section>
+
+    {/* ── Mobile: botón tab fijo ────────────────────────────────────── */}
+    <button
+    className={`orders-tab-trigger${mobileOpen ? ' open' : ''}`}
+    onClick={() => setMobileOpen(v => !v)}
+    aria-label={mobileOpen ? 'Cerrar pedidos' : 'Ver pedidos'}
+    style={{
+      right: mobileOpen ? 'min(85vw, 360px)' : 0,
+          transition:'right 0.28s cubic-bezier(0.4,0,0.2,1), background 0.2s'
+    }}
+    >
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points={mobileOpen ? '15 18 9 12 15 6' : '9 18 15 12 9 6'}/>
+    </svg>
+    </button>
+
+    {/* Overlay */}
+    <div
+    className={`orders-overlay${mobileOpen ? ' visible' : ''}`}
+    onClick={() => setMobileOpen(false)}
+    />
+
+    <style>{`
+      .split-root {
+        display: flex;
+        flex-direction: row;
+        width: 100%;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      /* ════════ Desktop ≥768px ══════════════════════════════════ */
+      @media (min-width: 768px) {
+        .split-orders-col {
+          width: 33%;
+          min-width: 260px;
+          max-width: 380px;
+          flex-shrink: 0;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          border-right: 1px solid var(--gray-200);
+          background: #fff;
+        }
+        .split-home-col {
+          flex: 1;
+          min-width: 0;
+          overflow-y: auto;
+          overflow-x: hidden;
+        }
+        .split-home-col:has(.driver-map-root) {
+          overflow: hidden;
+        }
+        .orders-overlay     { display: none !important; }
+        .orders-tab-trigger { display: none !important; }
+      }
+
+      /* ════════ Mobile <768px ═══════════════════════════════════ */
+      @media (max-width: 767px) {
+
+        /* Orders col = drawer: hidden off-screen by default */
+        .split-orders-col {
+          position: fixed;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          width: 85vw;
+          max-width: 360px;
+          z-index: 320;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          background: #fff;
+          box-shadow: -4px 0 24px rgba(0,0,0,0.14);
+          transform: translateX(100%);
+          transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .split-orders-col.mobile-open {
+          transform: translateX(0);
+        }
+
+        .split-home-col {
+          flex: 1;
+          min-width: 0;
+          overflow-x: hidden;
+        }
+
+        .orders-overlay {
+          display: none;
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,0.35);
+          z-index: 315;
+          touch-action: none;
+        }
+        .orders-overlay.visible { display: block; }
+
+        .orders-tab-trigger {
+          position: fixed;
+          right: 0;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 28px;
+          height: 56px;
+          border-radius: 28px 0 0 28px;
+          background: var(--brand);
+          color: #fff;
+          border: none;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: -2px 0 8px rgba(0,0,0,0.18);
+          z-index: 325;
+          padding: 0;
+          transition: background 0.2s;
+        }
+        .orders-tab-trigger.open {
+          background: var(--gray-500);
+        }
+      }
+      `}</style>
+    </div>
+    </PullToRefresh>
+  );
+}
+
+=== FILE: frontend/src/pages/Customer/Payments.jsx ===
+// frontend/src/pages/Customer/Payments.jsx
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { readPendingOrder, clearPendingOrder, savePendingOrder } from '../../utils/pendingOrder';
+import { apiFetch } from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
+import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
+
+// ── Iconos SVG ────────────────────────────────────────────────────────────────
+function IconPin()      { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>; }
+function IconPackage()  { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>; }
+function IconWarning()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>; }
+function IconCash()     { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></svg>; }
+function IconCard()     { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>; }
+function IconBank()     { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="22" x2="21" y2="22"/><line x1="6" y1="18" x2="6" y2="11"/><line x1="10" y1="18" x2="10" y2="11"/><line x1="14" y1="18" x2="14" y2="11"/><line x1="18" y1="18" x2="18" y2="11"/><polygon points="12 2 20 7 4 7"/></svg>; }
+function IconLock()     { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>; }
+
+function CardIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}
+    style={{ width:20, height:20, verticalAlign:'middle' }}>
+    <rect x="2" y="5" width="20" height="14" rx="2"/>
+    <path d="M2 10h20"/>
+    </svg>
+  );
+}
+
+function formatCard(v)   { return v.replace(/\D/g,'').slice(0,16).replace(/(\d{4})(?=\d)/g,'$1 '); }
+function formatExpiry(v) { return v.replace(/\D/g,'').slice(0,4).replace(/(\d{2})(\d)/,'$1/$2'); }
+
+export default function CustomerPayments() {
+  const { auth }  = useAuth();
+  const navigate  = useNavigate();
+
+  const [draft,    setDraft]    = useState(null);
+  const [sending,  setSending]  = useState(false);
+  const [methods,  setMethods]  = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [method,   setMethod]   = useState('cash');
+  const [msg,      setMsg]      = useState('');
+  const [msgType,  setMsgType]  = useState('ok');
+
+  // Dirección de entrega — se puede cambiar aquí
+  const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [deliveryLat,     setDeliveryLat]     = useState(null);
+  const [deliveryLng,     setDeliveryLng]     = useState(null);
+  const [fromGps,         setFromGps]         = useState(false);
+  const [gpsPos,          setGpsPos]          = useState(null);
+
+  const [tipCents, setTipCents] = useState(0);
+
+  // Card fields
+  const [cardNum,  setCardNum]  = useState('');
+  const [expiry,   setExpiry]   = useState('');
+  const [cvv,      setCvv]      = useState('');
+  const [name,     setName]     = useState('');
+  const initialPos = deliveryLat
+  ? { lat: deliveryLat, lng: deliveryLng }
+  : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
+
+  // GPS para el AddressSearchBar
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      pos => setGpsPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => {},
+      { timeout: 5000, maximumAge: 60000 }
+    );
+  }, []);
+
+  // Leer draft de pedido pendiente
+  useEffect(() => {
+    const d = readPendingOrder();
+    if (d) {
+      setDraft(d);
+      setDeliveryAddress(d.delivery_address || '');
+      setDeliveryLat(d.delivery_lat ?? null);
+      setDeliveryLng(d.delivery_lng ?? null);
+      setFromGps(!!d.delivery_from_gps);
+      setTipCents(d.tip_cents || 0);
+    }
+  }, []);
+
+  useEffect(() => {
+    apiFetch('/payments/methods', {}, auth.token)
+    .then(d => {
+      const list = (d.methods || [])
+        .filter(m => m.id !== 'spei' && m.id !== 'bank')
+        .map(m => ({ ...m, available: true, coming_soon: false }));
+      setMethods(list);
+    })
+    .catch(() => setMethods([
+      { id:'cash', label:'Efectivo al entregar',      available:true },
+      { id:'card', label:'Tarjeta de crédito/débito', available:true },
+    ]))
+    .finally(() => setLoading(false));
+  }, [auth.token]);
+
+  function flash(text, type = 'ok') {
+    setMsg(text); setMsgType(type === 'error' ? 'error' : 'ok');
+    setTimeout(() => setMsg(''), 5000);
+  }
+
+  function handleAddressChange(pos) {
+    const label = pos.label || '';
+    const lat   = pos.lat   ?? null;
+    const lng   = pos.lng   ?? null;
+    setDeliveryAddress(label);
+    setDeliveryLat(lat);
+    setDeliveryLng(lng);
+    setFromGps(false);
+    savePendingOrder({
+      ...draft,
+      delivery_address:  label,
+      delivery_lat:      lat,
+      delivery_lng:      lng,
+      delivery_from_gps: false,
+    });
+    setDraft(prev => prev ? { ...prev, delivery_address: label, delivery_lat: lat, delivery_lng: lng, delivery_from_gps: false } : prev);
+  }
+
+  async function handleSave() {
+    if (!draft) {
+      flash('No hay un pedido pendiente. Vuelve a la tienda y selecciona productos.', 'error');
+      return;
+    }
+    setSending(true);
+    try {
+      const body = {
+        restaurantId:     draft.restaurantId,
+        items:            draft.items || [],
+        payment_method:   method,
+        tip_cents:        tipCents,
+        delivery_address: deliveryAddress,
+        delivery_lat:     deliveryLat,
+        delivery_lng:     deliveryLng,
+        ...(method === 'card' ? { card_name: name, card_last4: cardNum.replace(/\s/g,'').slice(-4) } : {}),
+      };
+      await apiFetch('/orders', { method: 'POST', body: JSON.stringify(body) }, auth.token);
+      clearPendingOrder();
+      flash('¡Pedido confirmado! Puedes seguirlo en Mis Pedidos.');
+      setTimeout(() => navigate('/customer'), 1800);
+    } catch (e) {
+      flash(e.message || 'Error al crear el pedido.', 'error');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  if (loading) return (
+    <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)' }}>Cargando…</div>
+  );
+
+  return (
+    <div style={{ padding:'1rem', maxWidth:480, margin:'0 auto' }}>
+
+    {/* ── Pedido pendiente + dirección de entrega ── */}
+    {draft && (
+      <div style={{ background:'var(--bg-sunken)', border:'1px solid var(--border)',
+        borderRadius:10, padding:'0.75rem', marginBottom:'1.25rem',
+        fontSize:'0.82rem', color:'var(--text-secondary)' }}>
+        <div style={{ fontWeight:700, color:'var(--text-primary)', marginBottom:'0.4rem' }}>
+        <span style={{display:'flex',alignItems:'center',gap:'0.4rem'}}><IconPackage /> Pedido pendiente</span>
+        </div>
+        {draft.items?.length > 0 && (
+          <div style={{ marginBottom:'0.4rem' }}>
+          {draft.items.length} producto{draft.items.length !== 1 ? 's' : ''}
+          </div>
+        )}
+
+        {/* Alerta GPS */}
+        {fromGps && (
+          <div style={{ background:'#fffbeb', border:'1px solid #fde68a',
+            borderRadius:8, padding:'0.5rem 0.65rem', marginBottom:'0.5rem',
+            fontSize:'0.78rem', color:'#92400e', display:'flex', alignItems:'flex-start', gap:'0.4rem' }}>
+            <span style={{ flexShrink:0, display:'flex' }}><IconWarning /></span>
+            <span>La dirección de entrega se detectó desde tu GPS. Confirma que es correcta o cámbiala.</span>
+            </div>
+        )}
+
+        {/* Dirección actual + botón cambiar */}
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+          gap:'0.5rem', flexWrap:'wrap' }}>
+          <div style={{ fontSize:'0.8rem', color: deliveryAddress ? 'var(--text-primary)' : 'var(--warn)',
+            fontWeight: deliveryAddress ? 400 : 600, flex:1, minWidth:0 }}>
+            {deliveryAddress
+              ? <span style={{display:'flex',alignItems:'center',gap:'0.3rem'}}><IconPin />{deliveryAddress}</span>
+              : <span style={{display:'flex',alignItems:'center',gap:'0.3rem'}}><IconWarning />Sin dirección de entrega</span>
+            }
+            </div>
+            <AddressSearchBar
+            variant="default"
+            userPos={gpsPos}
+            homeAddress={auth.user?.address || null}
+            initialPos={initialPos}
+            onSelectPos={handleAddressChange}
+            />
+            </div>
+            </div>
+    )}
+
+    {/* ── Resumen de productos ── */}
+    {draft?.items_detail?.length > 0 && (() => {
+      const subtotal    = draft.subtotal_cents || 0;
+      const serviceFee  = Math.round(subtotal * 0.05);
+      const deliveryFee = Math.round(subtotal * 0.10);
+      const total       = subtotal + serviceFee + deliveryFee + tipCents;
+      const fmt         = cents => `$${((cents ?? 0) / 100).toFixed(2)}`;
+      return (
+        <div style={{ background:'var(--bg-sunken)', border:'1px solid var(--border)',
+          borderRadius:10, padding:'0.75rem', marginBottom:'1.25rem' }}>
+
+          {/* Lista de productos */}
+          <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
+            textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.5rem' }}>
+            Productos
+          </p>
+          <ul style={{ listStyle:'none', padding:0, margin:'0 0 0.75rem' }}>
+            {draft.items_detail.map((it, i) => (
+              <li key={i} style={{ display:'flex', justifyContent:'space-between',
+                fontSize:'0.82rem', color:'var(--text-secondary)', marginBottom:'0.2rem' }}>
+                <span>{it.quantity > 1 ? `${it.quantity}× ` : ''}{it.name}</span>
+                <span style={{ flexShrink:0, marginLeft:'0.5rem' }}>{fmt(it.price_cents * it.quantity)}</span>
+              </li>
+            ))}
+          </ul>
+
+          {/* Selector de agradecimiento */}
+          <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
+            textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
+            Agradecimiento al conductor
+          </p>
+          <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', marginBottom:'0.75rem' }}>
+            {[{pct:0,label:'—'},{pct:5,label:'5%'},{pct:10,label:'10%'},{pct:20,label:'20%'}].map(({pct, label}) => {
+              const v = pct === 0 ? 0 : Math.round(subtotal * pct / 100);
+              const sel = tipCents === v;
+              return (
+                <button key={pct} onClick={() => {
+                  setTipCents(v);
+                  savePendingOrder({ ...draft, tip_cents: v });
+                }}
+                  style={{ padding:'0.25rem 0.55rem', cursor:'pointer', fontSize:'0.78rem',
+                    border:`1.5px solid ${sel ? 'var(--success)' : 'var(--border)'}`,
+                    borderRadius:6, background: sel ? 'var(--success-bg)' : 'var(--bg-card)',
+                    color: sel ? 'var(--success)' : 'var(--text-secondary)',
+                    fontWeight: sel ? 700 : 400, minHeight:'unset' }}>
+                  {label}{pct > 0 && subtotal > 0 ? ` (${fmt(v)})` : ''}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Desglose */}
+          <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)',
+            borderTop:'1px solid var(--border-light)', paddingTop:'0.6rem' }}>
+            {[['Subtotal', subtotal],['Servicio (5%)', serviceFee],['Envío (10%)', deliveryFee]].map(([label, val]) => (
+              <div key={label} style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.15rem' }}>
+                <span>{label}</span><span>{fmt(val)}</span>
+              </div>
+            ))}
+            {tipCents > 0 && (
+              <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)', marginBottom:'0.15rem' }}>
+                <span>Agradecimiento</span><span>+{fmt(tipCents)}</span>
+              </div>
+            )}
+            <div style={{ display:'flex', justifyContent:'space-between', fontWeight:800,
+              fontSize:'0.95rem', color:'var(--text-primary)', marginTop:'0.4rem',
+              paddingTop:'0.4rem', borderTop:'1px solid var(--border)' }}>
+              <span>Total</span><span>{fmt(total)}</span>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
+
+    <h2 style={{ fontSize:'1.05rem', fontWeight:800, marginBottom:'0.25rem', display:'flex', alignItems:'center', gap:'0.5rem' }}><IconCard /> Método de pago</h2>
+    <p style={{ fontSize:'0.82rem', color:'var(--gray-500)', marginBottom:'1.25rem' }}>
+    Elige cómo quieres pagar tus pedidos.
+    </p>
+
+    {/*Selector de método*/}
+    <div style={{ display:'flex', flexDirection:'column', gap:'0.5rem', marginBottom:'1.5rem' }}>
+    {methods.map(m => (
+      <label key={m.id} style={{
+        display:'flex', alignItems:'center', gap:'0.75rem',
+        padding:'0.75rem 1rem', borderRadius:10, cursor:'pointer',
+        border:`2px solid ${method===m.id ? 'var(--brand)' : 'var(--gray-200)'}`,
+                       background: method===m.id ? 'var(--brand-light)' : 'var(--bg-card)',
+      }}>
+      <input type="radio" name="method" value={m.id}
+      checked={method===m.id}
+      onChange={() => setMethod(m.id)}
+      style={{ accentColor:'var(--brand)', flexShrink:0, width:16, height:16 }} />
+      <span style={{ fontSize:'1.1rem', flexShrink:0 }}>
+      {m.id==='cash' ? <IconCash /> : m.id==='card' ? <IconCard /> : <IconBank />}
+      </span>
+      <span style={{ fontWeight:700, fontSize:'0.875rem', whiteSpace:'nowrap' }}>{m.label}</span>
+      </label>
+    ))}
+    </div>
+
+    {/* ── Formulario tarjeta ── */}
+    {method === 'card' && (
+      <div style={{ background:'var(--bg-sunken)', border:'1px solid var(--gray-200)',
+        borderRadius:10, padding:'1rem', marginBottom:'1rem' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', marginBottom:'0.875rem',
+          fontSize:'0.875rem', fontWeight:700, color:'var(--text-secondary)' }}>
+          <CardIcon /> Datos de tarjeta
+          </div>
+          <label style={{ display:'block', marginBottom:'0.6rem', fontSize:'0.82rem', fontWeight:600 }}>
+          Nombre en la tarjeta
+          <input type="text" value={name} onChange={e => setName(e.target.value)}
+          placeholder="Como aparece en la tarjeta"
+          style={{ display:'block', width:'100%', marginTop:4, boxSizing:'border-box' }} />
+          </label>
+          <label style={{ display:'block', marginBottom:'0.6rem', fontSize:'0.82rem', fontWeight:600 }}>
+          Número de tarjeta
+          <input type="text" inputMode="numeric" value={cardNum}
+          onChange={e => setCardNum(formatCard(e.target.value))}
+          placeholder="1234 5678 9012 3456" maxLength={19}
+          style={{ display:'block', width:'100%', marginTop:4, fontFamily:'monospace', boxSizing:'border-box' }} />
+          </label>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.6rem', marginBottom:'0.75rem' }}>
+          <label style={{ fontSize:'0.82rem', fontWeight:600 }}>
+          Vencimiento
+          <input type="text" inputMode="numeric" value={expiry}
+          onChange={e => setExpiry(formatExpiry(e.target.value))}
+          placeholder="MM/AA" maxLength={5}
+          style={{ display:'block', width:'100%', marginTop:4, boxSizing:'border-box' }} />
+          </label>
+          <label style={{ fontSize:'0.82rem', fontWeight:600 }}>
+          CVV
+          <input type="text" inputMode="numeric" value={cvv}
+          onChange={e => setCvv(e.target.value.replace(/\D/g,'').slice(0,4))}
+          placeholder="123" maxLength={4}
+          style={{ display:'block', width:'100%', marginTop:4, boxSizing:'border-box' }} />
+          </label>
+          </div>
+          <div style={{ padding:'0.5rem 0.75rem', background:'#fffbeb',
+            border:'1px solid #fde68a', borderRadius:8, fontSize:'0.78rem', color:'#92400e' }}>
+            <span style={{display:'inline-flex',alignItems:'center',gap:'0.35rem'}}><IconLock />Procesador pendiente de integración. Los datos no se envían a ningún servidor.</span>
+            </div>
+            </div>
+    )}
+
+    <button className="btn-primary"
+    style={{ width:'100%', padding:'0.75rem', fontSize:'0.95rem' }}
+    disabled={sending || !draft}
+    onClick={handleSave}>
+    {sending ? 'Procesando…'
+      : !draft ? 'Sin pedido pendiente'
+      : method === 'cash' ? 'Confirmar pedido — Efectivo'
+      : method === 'card' ? 'Confirmar pedido — Tarjeta'
+      : 'Confirmar pedido'}
+  </button>
+
+  {!draft && (
+    <p style={{ fontSize:'0.8rem', color:'var(--text-tertiary)', marginTop:'0.5rem', textAlign:'center' }}>
+    Selecciona productos en una tienda antes de pagar.
+    </p>
+  )}
+
+  {msg && (
+    <div className={`flash ${msgType === 'error' ? 'flash-error' : 'flash-ok'}`}
+    style={{ marginTop:'0.75rem' }}>
+    {msg}
+    </div>
+  )}
+  </div>
+  );
+}
+
+=== FILE: frontend/src/pages/Customer/RestaurantPage.jsx ===
+import { useEffect, useRef, useState } from 'react';
+import { readPendingOrder, savePendingOrder, schedulePendingOrderExpiry, cancelPendingOrderExpiry } from '../../utils/pendingOrder';
+import { useNavigate, useParams } from 'react-router-dom';
+import { apiFetch } from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
+import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
+import { fmt, haversineKm, IconMap, IconPin, IconSearch, IconWarning, ProductImage, StarPicker } from '../../features/customer/restaurant-page/components';
+import {IconRestaurant } from '../../App';
+
+export default function RestaurantPage() {
+  const { id }   = useParams();
+  const { auth } = useAuth();
+  const navigate = useNavigate();
+
+  const [restaurant,    setRestaurant]    = useState(null);
+  const [menu,          setMenu]          = useState([]);
+  const [selectedItems, setSelectedItems] = useState({});
+  const [loading,       setLoading]       = useState(true);
+  const [msg,           setMsg]           = useState('');
+  const [ordering,      setOrdering]      = useState(false);
+  const [tipCents,      setTipCents]      = useState(0);
+  const [sortBy,        setSortBy]        = useState('default');
+  const [searchPos,     setSearchPos]     = useState(null);
+  const [gpsPos,        setGpsPos]        = useState(null);
+  const [toast,         setToast]         = useState(null); // {msg, type}
+
+  // Rating
+  const [ratingOrder,    setRatingOrder]    = useState(null);
+  const [ratingRestStar, setRatingRestStar] = useState(0);
+  const [ratingDrvStar,  setRatingDrvStar]  = useState(0);
+  const [ratingComment,  setRatingComment]  = useState('');
+  const [ratingLoading,  setRatingLoading]  = useState(false);
+  const [ratedOrders,    setRatedOrders]    = useState(new Set());
+
+  const isCustomer = auth.user?.role === 'customer';
+  const hasAddress = Boolean(auth.user?.address && auth.user.address !== 'address-pending');
+  const initialPos = searchPos
+  ? { lat: searchPos.lat, lng: searchPos.lng }
+  : (auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null);
+
+  // Load restaurant + menu
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const [restData, menuData] = await Promise.all([
+          apiFetch(`/restaurants/${id}`),
+          apiFetch(`/restaurants/${id}/menu`),
+        ]);
+        setRestaurant(restData.restaurant);
+        setMenu((menuData.menu || []).filter(i => i.is_available !== false));
+      } catch (_) {
+        setMsg('Error cargando la tienda');
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [id]);
+
+  // GPS — para centrar el mapa y calcular distancia home
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      pos => setGpsPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => {},
+      { timeout: 6000, maximumAge: 60000 }
+    );
+  }, []);
+
+  // Leer draft de ubicación de Home o sesión anterior
+  useEffect(() => {
+    const draft = readPendingOrder();
+    if (draft?.delivery_lat && draft?.delivery_lng) {
+      setSearchPos({ lat: draft.delivery_lat, lng: draft.delivery_lng, label: draft.delivery_address || '' });
+      return; // ya hay ubicación, no mostrar toast
+    }
+    // Sin draft — mostrar toast apropiado después de cargar GPS
+    const timer = setTimeout(() => {
+      const homeLatNum = Number(auth.user?.home_lat);
+      const homeLngNum = Number(auth.user?.home_lng);
+      const hasHome = Number.isFinite(homeLatNum) && Number.isFinite(homeLngNum);
+      if (hasHome && gpsPos) {
+        const dist = haversineKm(gpsPos.lat, gpsPos.lng, homeLatNum, homeLngNum);
+        if (dist > 0.5) {
+          setToast({ msg: '¿Te encuentras lejos de casa?', type: 'warn' });
+          return;
+        }
+      }
+      setToast({ msg: 'Por favor confirma tu ubicación', type: 'info' });
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [gpsPos]);
+
+  // TTL del draft al salir
+  useEffect(() => {
+    function onHide()  { schedulePendingOrderExpiry(); }
+    function onShow()  { if (document.visibilityState === 'visible') cancelPendingOrderExpiry(); }
+    document.addEventListener('visibilitychange', onShow);
+    window.addEventListener('pagehide', onHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onShow);
+      window.removeEventListener('pagehide', onHide);
+    };
+  }, []);
+
+  // Order totals
+  const subtotal    = Object.entries(selectedItems).reduce((sum, [itemId, qty]) => {
+    const item = menu.find(i => i.id === itemId);
+    return sum + (item ? item.price_cents * Number(qty) : 0);
+  }, 0);
+  const serviceFee  = Math.round(subtotal * 0.05);
+  const deliveryFee = Math.round(subtotal * 0.10);
+  const total       = subtotal + serviceFee + deliveryFee + tipCents;
+  const itemCount   = Object.values(selectedItems).reduce((s, q) => s + Number(q), 0);
+
+  // Distance / state — coords válidas solo dentro del bbox de Morelia y zona metropolitana
+  const _rLat = Number(restaurant?.lat);
+  const _rLng = Number(restaurant?.lng);
+  const _inMorelia = Number.isFinite(_rLat) && Number.isFinite(_rLng)
+    && _rLat > 19.5 && _rLat < 20.0 && _rLng > -101.6 && _rLng < -100.8;
+  const restLat = _inMorelia ? _rLat : null;
+  const restLng = _inMorelia ? _rLng : null;
+  const refPos = searchPos || gpsPos;
+  const distKm = (refPos && restLat !== null && restLng !== null)
+  ? haversineKm(refPos.lat, refPos.lng, restLat, restLng) : null;
+  const tooFar   = distKm !== null && distKm > 5;
+  const isClosed = restaurant?.is_open === false;
+  const canOrder = isCustomer && hasAddress && !isClosed && !tooFar && restLat !== null;
+
+  // Measure order bar height so content isn't hidden behind fixed bar
+  useEffect(() => {
+    function update() {
+      const bar = document.getElementById('order-bar');
+      if (bar) document.documentElement.style.setProperty('--order-bar-h', bar.offsetHeight + 'px');
+    }
+    update();
+    const bar = document.getElementById('order-bar');
+    const obs = bar && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    if (obs) obs.observe(bar);
+    return () => {
+      obs?.disconnect();
+      document.documentElement.style.removeProperty('--order-bar-h');
+    };
+  }, [isCustomer, isClosed, searchPos]);
+
+  async function submitRating() {
+    if (!ratingOrder || ratingRestStar < 1) return;
+    setRatingLoading(true);
+    try {
+      await apiFetch(`/orders/${ratingOrder.id}/rating`, {
+        method: 'POST',
+        body: JSON.stringify({
+          restaurant_stars: ratingRestStar,
+          driver_stars: ratingDrvStar > 0 ? ratingDrvStar : undefined,
+          comment: ratingComment.trim() || undefined,
+        }),
+      }, auth.token);
+      setRatedOrders(prev => new Set([...prev, ratingOrder.id]));
+      setRatingOrder(null); setRatingRestStar(0); setRatingDrvStar(0); setRatingComment('');
+      setMsg('¡Gracias por tu calificación!');
+      setTimeout(() => setMsg(''), 4000);
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setRatingLoading(false);
+    }
+  }
+
+  function adjust(itemId, delta) {
+    setSelectedItems(p => ({ ...p, [itemId]: Math.max(0, (Number(p[itemId]) || 0) + delta) }));
+  }
+
+  async function createOrder() {
+    if (!auth.token) return navigate('/customer/login');
+    if (!isCustomer) return setMsg('Solo los clientes pueden hacer pedidos');
+    if (!hasAddress) return setMsg('Guarda tu dirección antes de hacer un pedido');
+    const items = Object.entries(selectedItems)
+      .filter(([, qty]) => Number(qty) > 0)
+      .map(([menuItemId, quantity]) => ({ menuItemId, quantity: Number(quantity) }));
+    if (items.length === 0) return setMsg('Selecciona al menos un producto');
+    setOrdering(true);
+    try {
+      const body = { restaurantId: id, items, payment_method: paymentMethod, tip_cents: tipCents };
+      if (searchPos) {
+        body.delivery_address = searchPos.label;
+        body.delivery_lat = searchPos.lat;
+        body.delivery_lng = searchPos.lng;
+      }
+      await apiFetch('/orders', { method: 'POST', body: JSON.stringify(body) }, auth.token);
+      setMsg('');
+      setSelectedItems({});
+      setTimeout(() => navigate('/customer'), 800);
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setOrdering(false);
+    }
+  }
+
+  if (loading) return (
+    <div style={{ padding:'3rem', textAlign:'center', color:'var(--text-tertiary)' }}>Cargando…</div>
+  );
+
+  // Restaurante sin ubicación configurada — página deshabilitada
+  if (restaurant && restLat === null) return (
+    <div style={{ backgroundColor:'var(--bg-base)', minHeight:'100vh' }}>
+      <div style={{
+        background:'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)',
+        position:'relative', overflow:'hidden', minHeight:120,
+        padding:'1rem 1rem 1.25rem', display:'flex', flexDirection:'column', gap:'0.5rem',
+      }}>
+        <button onClick={() => navigate(-1)}
+          style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.3)',
+            borderRadius:8, color:'#fff', padding:'0.3rem 0.65rem', fontSize:'0.82rem',
+            fontWeight:600, cursor:'pointer', alignSelf:'flex-start', minHeight:'unset',
+            display:'flex', alignItems:'center', gap:'0.3rem', width:'fit-content' }}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Volver
+        </button>
+        <div style={{ display:'flex', gap:'0.875rem', alignItems:'center' }}>
+          <div style={{ width:48, height:48, borderRadius:'50%', background:'rgba(255,255,255,0.2)',
+            border:'2px solid rgba(255,255,255,0.4)', display:'flex', alignItems:'center',
+            justifyContent:'center', flexShrink:0, color:'rgba(255,255,255,0.8)' }}>
+            <IconRestaurant />
+          </div>
+          <h2 style={{ fontSize:'1.1rem', fontWeight:900, color:'#fff', margin:0, letterSpacing:'-0.02em' }}>
+            {restaurant.name}
+          </h2>
+        </div>
+      </div>
+      <div style={{ padding:'2.5rem 1.5rem', textAlign:'center' }}>
+        <div style={{ fontSize:'2.5rem', marginBottom:'0.75rem' }}>📍</div>
+        <div style={{ fontWeight:800, fontSize:'1rem', color:'var(--text-primary)', marginBottom:'0.5rem' }}>
+          Tienda sin ubicación configurada
+        </div>
+        <p style={{ fontSize:'0.88rem', color:'var(--text-secondary)', lineHeight:1.5, maxWidth:300, margin:'0 auto' }}>
+          Esta tienda aún no ha configurado su dirección. No es posible realizar pedidos hasta que el restaurante complete su perfil.
+        </p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ backgroundColor:'var(--bg-base)', minHeight:'100vh' }}>
+
+      {/* Toast de ubicación */}
+      {toast && (
+        <div style={{
+          position:'fixed', top:'calc(var(--header-h, 56px) + 0.5rem)', left:'50%',
+          transform:'translateX(-50%)', zIndex:900,
+          background: toast.type === 'warn' ? 'var(--warn-bg)' : 'var(--bg-card)',
+          border: `1px solid ${toast.type === 'warn' ? 'var(--warn-border)' : 'var(--border)'}`,
+          borderRadius:10, padding:'0.6rem 1rem',
+          boxShadow:'0 4px 16px rgba(0,0,0,0.14)',
+          display:'flex', alignItems:'center', gap:'0.5rem',
+          fontSize:'0.85rem', fontWeight:600, whiteSpace:'nowrap',
+          color: toast.type === 'warn' ? 'var(--warn)' : 'var(--text-primary)',
+          animation:'fadeInDown 0.25s ease',
+        }}>
+          <span style={{display:'inline-flex',alignItems:'center',gap:'0.4rem'}}>{toast.type === 'warn' ? <IconWarning /> : <IconPin />}{toast.msg}</span>
+          <button onClick={() => setToast(null)}
+            style={{ background:'none', border:'none', cursor:'pointer', fontSize:'0.9rem',
+              color:'var(--text-tertiary)', minHeight:'unset', padding:'0 2px', marginLeft:4 }}>✕</button>
+        </div>
+      )}
+      <style>{`@keyframes fadeInDown { from { opacity:0; transform:translateX(-50%) translateY(-8px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }`}</style>
+
+      {/* Rating modal */}
+      {ratingOrder && (
+        <div style={{ position:'fixed', inset:0, background:'var(--bg-overlay)', zIndex:999,
+          display:'flex', alignItems:'flex-end', justifyContent:'center' }}
+          onClick={e => { if (e.target === e.currentTarget) setRatingOrder(null); }}>
+          <div style={{ background:'var(--bg-card)', borderRadius:'20px 20px 0 0',
+            padding:'1.5rem', width:'100%', maxWidth:480, boxShadow:'0 -4px 32px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ fontSize:'1rem', fontWeight:800, marginBottom:'1rem' }}>Calificar pedido</h3>
+            <StarPicker value={ratingRestStar} onChange={setRatingRestStar} label="Tienda / Restaurante" />
+            {ratingOrder.driver_id && (
+              <StarPicker value={ratingDrvStar} onChange={setRatingDrvStar} label="Conductor (opcional)" />
+            )}
+            <textarea value={ratingComment} onChange={e => setRatingComment(e.target.value)}
+              placeholder="Comentario opcional…" rows={2}
+              style={{ width:'100%', marginBottom:'0.75rem', fontSize:'0.875rem', resize:'none', boxSizing:'border-box' }} />
+            <div style={{ display:'flex', gap:'0.5rem' }}>
+              <button className="btn-primary" style={{ flex:1 }}
+                disabled={ratingRestStar < 1 || ratingLoading} onClick={submitRating}>
+                {ratingLoading ? 'Enviando…' : 'Enviar calificación'}
+              </button>
+              <button className="btn-sm" onClick={() => setRatingOrder(null)}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hero header */}
+      <div style={{
+        background: restaurant?.profile_photo
+          ? '#2a1a1a'
+          : 'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)',
+        position:'relative', overflow:'hidden', minHeight:140,
+      }}>
+        {restaurant?.profile_photo && (
+          <>
+            <img src={restaurant.profile_photo} alt={restaurant.name}
+              style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover', opacity:0.35 }} />
+            <div style={{ position:'absolute', inset:0,
+              background:'linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.7) 100%)' }} />
+          </>
+        )}
+        <div style={{ position:'relative', padding:'1rem 1rem 1.25rem', display:'flex', flexDirection:'column', gap:'0.5rem' }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            <button onClick={() => navigate(-1)}
+              style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.3)',
+                borderRadius:8, color:'#fff', padding:'0.3rem 0.65rem', fontSize:'0.82rem',
+                fontWeight:600, cursor:'pointer', alignSelf:'flex-start', minHeight:'unset',
+                display:'flex', alignItems:'center', gap:'0.3rem' }}>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Volver
+            </button>
+            <AddressSearchBar
+            userPos={gpsPos}
+            homeAddress={auth.user?.address || null}
+            initialPos={initialPos}
+            onSelectPos={pos => {
+                setSearchPos(pos);
+                setToast(null);
+                if (pos?.lat && pos?.lng) savePendingOrder({ delivery_lat: pos.lat, delivery_lng: pos.lng, delivery_address: pos.label });
+              }}
+            />
+          </div>
+
+          <div style={{ display:'flex', gap:'0.875rem', alignItems:'flex-start' }}>
+            {restaurant?.profile_photo
+              ? <img src={restaurant.profile_photo} alt={restaurant.name}
+                  style={{ width:56, height:56, borderRadius:'50%', objectFit:'cover',
+                    border:'2px solid rgba(255,255,255,0.7)', flexShrink:0 }} />
+              : <div style={{ width:56, height:56, borderRadius:'50%',
+                  background:'rgba(255,255,255,0.2)', border:'2px solid rgba(255,255,255,0.4)',
+                  display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                  <span style={{color:'rgba(255,255,255,0.7)'}}><IconRestaurant /></span>
+                </div>
+            }
+            <div style={{ flex:1 }}>
+              <h2 style={{ fontSize:'1.15rem', fontWeight:900, margin:'0 0 0.2rem', color:'#fff',
+                letterSpacing:'-0.02em' }}>{restaurant?.name}</h2>
+              {restaurant?.address && (
+                <p style={{ color:'rgba(255,255,255,0.8)', fontSize:'0.8rem', margin:'0 0 0.3rem' }}>
+                  {restaurant.address}
+                </p>
+              )}
+              <div style={{ display:'flex', gap:'0.5rem', alignItems:'center', flexWrap:'wrap' }}>
+                {restaurant?.rating_avg != null && restaurant.rating_count > 0 && (
+                  <span style={{ fontSize:'0.78rem', color:'rgba(255,255,255,0.9)',
+                    display:'flex', alignItems:'center', gap:'0.2rem' }}>
+                    <span style={{ color:'#fbbf24' }}>★</span>
+                    {Number(restaurant.rating_avg).toFixed(1)}
+                    <span style={{ opacity:0.7 }}>({restaurant.rating_count})</span>
+                  </span>
+                )}
+                {distKm !== null && (
+                  <span style={{ fontSize:'0.75rem', color:'rgba(255,255,255,0.8)', display:'inline-flex', alignItems:'center', gap:'0.2rem' }}>
+                    <IconPin />{distKm < 1 ? `${Math.round(distKm*1000)}m` : `${distKm.toFixed(1)}km`}
+                  </span>
+                )}
+                <span style={{
+                  fontSize:'0.72rem', fontWeight:700,
+                  color: isClosed ? 'rgba(255,255,255,0.55)' : '#fff',
+                  background: isClosed ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.2)',
+                  border:`1px solid ${isClosed ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.5)'}`,
+                  borderRadius:10, padding:'0.15rem 0.55rem',
+                }}>
+                  {isClosed ? '· Cerrado' : '· Abierto'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Content — padded to clear fixed bottom bar */}
+      <div style={{ padding:'0.875rem 1rem',
+        paddingBottom: isCustomer && !isClosed ? 'calc(var(--order-bar-h, 160px) + 0.5rem)' : '1rem'}}>
+
+        {msg && <p className="flash flash-error" style={{ marginBottom:'0.75rem' }}>{msg}</p>}
+
+        {isClosed && (
+          <div style={{ background:'var(--bg-raised)', border:'1px solid var(--border)',
+            borderRadius:'var(--radius)', padding:'0.75rem', marginBottom:'1rem',
+            fontSize:'0.85rem', color:'var(--text-secondary)', textAlign:'center' }}>
+            Esta tienda está cerrada. Puedes ver el menú pero no hacer pedidos.
+          </div>
+        )}
+
+        {tooFar && (
+          <div className="flash flash-error" style={{ marginBottom:'0.75rem' }}>
+            Esta tienda está a {distKm?.toFixed(1)} km. Solo se aceptan pedidos dentro de 5 km.
+          </div>
+        )}
+
+        {/* Menu */}
+        <div style={{ fontWeight:800, fontSize:'0.85rem', color:'var(--text-tertiary)',
+          textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'0.75rem' }}>
+          Menú
+        </div>
+
+        {menu.length === 0 ? (
+          <p style={{ color:'var(--text-tertiary)' }}>Sin productos disponibles.</p>
+        ) : (
+          <>
+            <div style={{ display:'flex', gap:'0.4rem', marginBottom:'0.6rem', alignItems:'center' }}>
+              <span style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', fontWeight:600 }}>Ordenar:</span>
+              {[['default','Por defecto'],['asc','Menor precio'],['desc','Mayor precio']].map(([val, label]) => (
+                <button key={val} onClick={() => setSortBy(val)}
+                  className={`chip${sortBy===val?' active':''}`}
+                  style={{ fontSize:'0.7rem', padding:'3px 9px' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <ul style={{ listStyle:'none', padding:0, margin:0 }}>
+              {[...menu].sort((a,b) => {
+                if (sortBy === 'asc')  return (a.price_cents||0) - (b.price_cents||0);
+                if (sortBy === 'desc') return (b.price_cents||0) - (a.price_cents||0);
+                return 0;
+              }).map(item => {
+                const qty = Number(selectedItems[item.id]) || 0;
+                return (
+                  <li key={item.id} className="card"
+                    style={{ display:'flex', gap:'0.75rem', alignItems:'center',
+                      opacity: isClosed ? 0.65 : 1 }}>
+                    <ProductImage src={item.image_url} name={item.name} />
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontWeight:700, fontSize:'0.95rem', color:'var(--text-primary)' }}>{item.name}</div>
+                      {item.description && (
+                        <div style={{ color:'var(--text-secondary)', fontSize:'0.82rem', margin:'0.1rem 0' }}>
+                          {item.description}
+                        </div>
+                      )}
+                      <div style={{ fontWeight:700, color:'var(--brand)', marginTop:'0.2rem' }}>
+                        {fmt(item.price_cents)}
+                      </div>
+                    </div>
+                    {isCustomer && !isClosed && (
+                      <div className="qty-control" style={{ flexShrink:0 }}>
+                        <button className="qty-btn" disabled={qty === 0} onClick={() => adjust(item.id, -1)}>−</button>
+                        <span className="qty-num">{qty}</span>
+                        <button className="qty-btn add" onClick={() => adjust(item.id, 1)}>+</button>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
+      </div>
+
+      {/* Sticky bottom bar */}
+      {isCustomer && !isClosed && (
+        <div id="order-bar" style={{ position:'fixed', bottom:0, left:0, right:0, zIndex:50,
+          background:'var(--bg-card)', borderTop:'1px solid var(--border)',
+          padding:'0.75rem 1rem', paddingBottom:'calc(0.75rem + var(--nav-h-mobile) + env(safe-area-inset-bottom, 0px))',
+          boxShadow:'0 -4px 20px rgba(0,0,0,0.1)' }}>
+
+          {searchPos?.label && (
+            <div style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginBottom:'0.5rem',
+              display:'flex', alignItems:'center', gap:'0.3rem' }}>
+              <span style={{display:'inline-flex',alignItems:'center',gap:'0.3rem'}}><IconPin />{searchPos.label}</span>
+              <button onClick={() => setSearchPos(null)}
+                style={{ background:'none', border:'none', cursor:'pointer',
+                  color:'var(--text-tertiary)', fontSize:'0.7rem', minHeight:'unset', padding:0 }}>✕</button>
+            </div>
+          )}
+          {!searchPos && (
+            <div style={{ fontSize:'0.78rem', color:'var(--warn)', marginBottom:'0.5rem', fontWeight:600 }}>
+              <span style={{display:'inline-flex',alignItems:'center',gap:'0.3rem'}}>Toca <IconPin /> en el encabezado para indicar dónde entregar</span>
+            </div>
+          )}
+
+          {!hasAddress && (
+            <p style={{ fontSize:'0.82rem', color:'var(--warn)', marginBottom:'0.4rem', fontWeight:600 }}>
+              Guarda tu dirección en Perfil antes de pedir
+            </p>
+          )}
+
+          <button className="btn-primary"
+            style={{ width:'100%', fontSize:'1rem', fontWeight:800, padding:'0.75rem' }}
+            disabled={itemCount === 0 || tooFar || !isCustomer}
+            onClick={() => {
+              savePendingOrder({
+                restaurantId:     id,
+                items:            Object.entries(selectedItems).filter(([,q])=>Number(q)>0).map(([menuItemId,quantity])=>({ menuItemId, quantity:Number(quantity) })),
+                items_detail:     Object.entries(selectedItems).filter(([,q])=>Number(q)>0).map(([menuItemId,quantity]) => {
+                                    const item = menu.find(m => String(m.id) === String(menuItemId));
+                                    return { menuItemId, quantity: Number(quantity), name: item?.name || '', price_cents: item?.price_cents || 0 };
+                                  }),
+                subtotal_cents:   subtotal,
+                tip_cents:        tipCents,
+                delivery_lat:     searchPos?.lat ?? gpsPos?.lat,
+                delivery_lng:     searchPos?.lng ?? gpsPos?.lng,
+                delivery_address: searchPos?.label || '',
+                delivery_from_gps: !searchPos && !!gpsPos,
+              });
+              navigate('/customer/pagos');
+            }}>
+            {itemCount === 0 ? 'Selecciona productos'
+              : tooFar ? `Tienda fuera de rango (${distKm?.toFixed(1)}km)`
+              : `Ir a pagar · ${fmt(total)}`}
+          </button>
+        </div>
+      )}
+
+      {!isCustomer && auth.user && (
+        <div style={{ padding:'1rem', textAlign:'center', color:'var(--text-tertiary)', fontSize:'0.85rem' }}>
+          Solo los clientes pueden hacer pedidos.
+        </div>
+      )}
+      {!auth.user && (
+        <div style={{ padding:'1rem' }}>
+          <button className="btn-primary" style={{ width:'100%' }}
+            onClick={() => navigate('/customer/login')}>
+            Iniciar sesión para pedir
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+=== FILE: frontend/src/utils/pendingOrder.js ===
+// src/utils/pendingOrder.js
+// Draft de pedido en sessionStorage — se escribe al elegir ubicación,
+// se lee en RestaurantPage, se confirma al pagar, se borra al salir sin pagar.
+// TTL de 5 minutos: si el usuario regresa dentro de ese tiempo, retoma el draft.
+
+const KEY     = 'morelivery_pending_order';
+const TIMER   = 'morelivery_pending_timer';
+const TTL_MS  = 5 * 60 * 1000; // 5 minutos
+
+export function savePendingOrder(data) {
+  try {
+    sessionStorage.setItem(KEY,   JSON.stringify({ ...data, savedAt: Date.now() }));
+    sessionStorage.removeItem(TIMER); // reset expiry timer
+  } catch (_) {}
+}
+
+export function readPendingOrder() {
+  try {
+    const raw = sessionStorage.getItem(KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    // Check if expired via timer key (set on page hide)
+    const expireAt = sessionStorage.getItem(TIMER);
+    if (expireAt && Date.now() > Number(expireAt)) {
+      clearPendingOrder();
+      return null;
+    }
+    return data;
+  } catch (_) { return null; }
+}
+
+export function clearPendingOrder() {
+  try {
+    sessionStorage.removeItem(KEY);
+    sessionStorage.removeItem(TIMER);
+  } catch (_) {}
+}
+
+// Call on visibilitychange/pagehide — sets the expiry timestamp
+export function schedulePendingOrderExpiry() {
+  try {
+    if (!sessionStorage.getItem(KEY)) return;
+    sessionStorage.setItem(TIMER, String(Date.now() + TTL_MS));
+  } catch (_) {}
+}
+
+// Call on page focus/visibilitychange visible — cancels the expiry
+export function cancelPendingOrderExpiry() {
+  try {
+    sessionStorage.removeItem(TIMER);
+  } catch (_) {}
+}
 
