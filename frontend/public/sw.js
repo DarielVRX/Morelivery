@@ -227,7 +227,6 @@ async function showGroupedNotification({ group, title, body, url, priority, tag 
     badge:             '/badge.svg',
     requireInteraction: isHigh,
     renotify:          true,   // vibrar/sonar aunque el tag sea el mismo
-    silent:            false,
     timestamp:         Date.now(),
     vibrate:           isHigh ? [300, 100, 300, 100, 300] : [200, 100, 200],
     actions:           [{ action: 'open', title: 'Abrir' }],
@@ -239,6 +238,15 @@ async function showGroupedNotification({ group, title, body, url, priority, tag 
 // Un solo handler para todos los tipos de mensaje — evita que se pisen.
 self.addEventListener('message', (event) => {
   const type = event.data?.type;
+
+  // TEST_NOTIFICATION: prueba local desde SystemTab — siempre muestra aunque la app esté en foco
+  if (type === 'TEST_NOTIFICATION') {
+    const { title = 'Morelivery', body = 'Notificación de prueba ✓', tag = 'test' } = event.data;
+    // Resetear contador para que no diga "(2)"
+    notifCounts[tag] = { count: 0, lastBody: '', url: '/' };
+    showGroupedNotification({ group: tag, title, body, url: '/', priority: 'high', tag });
+    return;
+  }
 
   // SHOW_NOTIFICATION: notificación SSE desde foreground
   if (type === 'SHOW_NOTIFICATION') {
@@ -333,3 +341,4 @@ self.addEventListener('notificationclick', (event) => {
     })
   );
 });
+

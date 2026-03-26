@@ -149,6 +149,10 @@ export default function SystemTab({ onMessage }) {
 
   const [loading, setLoading] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState('environment');
+  const [flashOn, setFlashOn] = useState(false);
+  const [capturedPhoto, setCapturedPhoto] = useState(null);
+  const canvasRef = useRef(null);
   const [geoResult, setGeoResult] = useState(null);  // { lat, lng, accuracy }
   const [clipResult, setClipResult] = useState(null); // string written/read
   const [pushSending, setPushSending] = useState(false);
@@ -220,10 +224,25 @@ export default function SystemTab({ onMessage }) {
     setS(prev => ({ ...prev, notifications: result }));
     if (result === 'granted') {
       onMessage?.('✅ Notificaciones concedidas');
-      // Test inmediato — dispara una notificación local
-      new Notification('Morelivery', { body: 'Notificaciones funcionando ✓', icon: '/icon-192.png' });
+      fireTestNotif();
     } else {
       onMessage?.(`⚠️ Resultado: ${result}`);
+    }
+  };
+
+  // Dispara notificación de prueba siempre a través del SW (funciona en móvil)
+  const fireTestNotif = async () => {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      reg.active?.postMessage({
+        type: 'TEST_NOTIFICATION',
+        title: 'Morelivery',
+        body: 'Notificaciones funcionando ✓',
+        tag: 'test',
+      });
+      onMessage?.('🔔 Notificación enviada al SW');
+    } catch (e) {
+      onMessage?.(`❌ ${e.message}`);
     }
   };
 
@@ -316,20 +335,55 @@ export default function SystemTab({ onMessage }) {
       cameraStreamRef.current?.getTracks().forEach(t => t.stop());
       cameraStreamRef.current = null;
       setCameraOpen(false);
-      setS(prev => ({ ...prev, camera: 'granted' }));
+      setCapturedPhoto(null);
+      setFlashOn(false);
     } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        cameraStreamRef.current = stream;
-        if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); }
-        setCameraOpen(true);
-        setS(prev => ({ ...prev, camera: 'granted' }));
-        onMessage?.('✅ Cámara activa');
-      } catch (e) {
-        setS(prev => ({ ...prev, camera: e.name === 'NotAllowedError' ? 'denied' : 'error' }));
-        onMessage?.(`❌ Cámara: ${e.message}`);
-      }
+      await startCamera(cameraFacing);
     }
+  };
+
+  const startCamera = async (facing) => {
+    cameraStreamRef.current?.getTracks().forEach(t => t.stop());
+    cameraStreamRef.current = null;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      cameraStreamRef.current = stream;
+      if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); }
+      setCameraOpen(true);
+      setCameraFacing(facing);
+      setS(prev => ({ ...prev, camera: 'granted' }));
+    } catch (e) {
+      setS(prev => ({ ...prev, camera: e.name === 'NotAllowedError' ? 'denied' : 'error' }));
+      onMessage?.(`❌ Cámara: ${e.message}`);
+    }
+  };
+
+  const flipCamera = async () => {
+    const next = cameraFacing === 'environment' ? 'user' : 'environment';
+    await startCamera(next);
+  };
+
+  const toggleFlash = async () => {
+    const track = cameraStreamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    try {
+      const next = !flashOn;
+      await track.applyConstraints({ advanced: [{ torch: next }] });
+      setFlashOn(next);
+    } catch { onMessage?.('⚠️ Flash no disponible en este dispositivo'); }
+  };
+
+  const takePhoto = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const canvas = canvasRef.current || document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    setCapturedPhoto(canvas.toDataURL('image/jpeg', 0.92));
   };
 
   useEffect(() => () => {
@@ -381,7 +435,7 @@ export default function SystemTab({ onMessage }) {
             <Btn variant="warning" onClick={requestNotifications}>Solicitar permiso</Btn>
           )}
           {s.notifications === 'granted' && (
-            <Btn onClick={requestNotifications}>🔔 Notif. local de prueba</Btn>
+            <Btn onClick={fireTestNotif}>🔔 Notif. local de prueba</Btn>
           )}
           {!s.push && s.notifications === 'granted' && (
             <Btn variant="warning" onClick={requestPush}>Registrar push</Btn>
@@ -445,12 +499,52 @@ export default function SystemTab({ onMessage }) {
         {row('Permiso', <Badge state={s.camera} />)}
         <div style={{ marginTop: '0.65rem' }}>
           <Btn variant={cameraOpen ? 'danger' : 'default'} onClick={toggleCamera}>
-            {cameraOpen ? '⏹ Detener cámara' : '▶ Probar cámara'}
+            {cameraOpen ? '⏹ Cerrar cámara' : '▶ Abrir cámara'}
           </Btn>
         </div>
         {cameraOpen && (
-          <div style={{ marginTop: '0.5rem', borderRadius: 8, overflow: 'hidden', background: '#000' }}>
-            <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', maxHeight: 220, display: 'block' }} />
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            background: '#000',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            {/* Viewfinder */}
+            <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+              <video
+                ref={videoRef}
+                autoPlay playsInline muted
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: capturedPhoto ? 'none' : 'block' }}
+              />
+              {capturedPhoto && (
+                <img src={capturedPhoto} alt="foto" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              )}
+              {/* Top bar */}
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <button onClick={toggleCamera} style={{ background: 'rgba(0,0,0,0.5)', color: '#fff', border: 'none', borderRadius: '50%', width: 40, height: 40, fontSize: '1.1rem', cursor: 'pointer' }}>✕</button>
+                {capturedPhoto && (
+                  <button onClick={() => setCapturedPhoto(null)} style={{ background: 'rgba(0,0,0,0.5)', color: '#fff', border: 'none', borderRadius: 20, padding: '0.3rem 0.8rem', fontSize: '0.85rem', cursor: 'pointer' }}>↩ Retomar</button>
+                )}
+              </div>
+            </div>
+            {/* Bottom controls */}
+            <div style={{ padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111' }}>
+              {/* Flash */}
+              <button onClick={toggleFlash} style={{ background: flashOn ? '#fbbf24' : 'rgba(255,255,255,0.15)', color: flashOn ? '#000' : '#fff', border: 'none', borderRadius: '50%', width: 48, height: 48, fontSize: '1.3rem', cursor: 'pointer' }}>⚡</button>
+              {/* Shutter */}
+              {!capturedPhoto
+                ? <button onClick={takePhoto} style={{ width: 70, height: 70, borderRadius: '50%', background: '#fff', border: '4px solid rgba(255,255,255,0.5)', cursor: 'pointer' }} />
+                : (
+                  <a
+                    href={capturedPhoto}
+                    download={`foto-${Date.now()}.jpg`}
+                    style={{ width: 70, height: 70, borderRadius: '50%', background: '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.8rem', textDecoration: 'none' }}
+                  >⬇️</a>
+                )
+              }
+              {/* Flip */}
+              <button onClick={flipCamera} style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: '50%', width: 48, height: 48, fontSize: '1.3rem', cursor: 'pointer' }}>🔄</button>
+            </div>
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
           </div>
         )}
       </Card>
