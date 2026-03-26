@@ -135,21 +135,26 @@ export default function CustomerPayments() {
 
   function handleAddressChange(pos) {
     const label = pos.label || '';
-    const lat   = pos.lat   ?? null;
-    const lng   = pos.lng   ?? null;
+    const lat   = pos.lat != null ? Number(pos.lat) : null;
+    const lng   = pos.lng != null ? Number(pos.lng) : null;
+    const validCoords = Number.isFinite(lat) && Number.isFinite(lng);
     setDeliveryAddress(label);
-    setDeliveryLat(lat);
-    setDeliveryLng(lng);
-    setFromGps(false);
-    if (lat && lng) saveSessionDelivery({ lat, lng, label }, auth.token);
-    savePendingOrder({
-      ...draft,
-      delivery_address:  label,
-      delivery_lat:      lat,
-      delivery_lng:      lng,
-      delivery_from_gps: false,
-    });
-    setDraft(prev => prev ? { ...prev, delivery_address: label, delivery_lat: lat, delivery_lng: lng, delivery_from_gps: false } : prev);
+    if (validCoords) {
+      setDeliveryLat(lat);
+      setDeliveryLng(lng);
+      saveSessionDelivery({ lat, lng, label }, auth.token);
+      savePendingOrder({
+        ...draft,
+        delivery_address:  label,
+        delivery_lat:      lat,
+        delivery_lng:      lng,
+        delivery_from_gps: false,
+      });
+      setDraft(prev => prev ? { ...prev, delivery_address: label, delivery_lat: lat, delivery_lng: lng, delivery_from_gps: false } : prev);
+    } else {
+      // preset: 'home' sin coords — solo actualizar el label visible
+      setFromGps(false);
+    }
   }
 
   async function handleSave() {
@@ -163,6 +168,11 @@ export default function CustomerPayments() {
       let finalLat = deliveryLat;
       let finalLng = deliveryLng;
       let finalAddr = deliveryAddress;
+
+      // Asegurar que son números, no strings
+      if (finalLat != null) finalLat = Number(finalLat);
+      if (finalLng != null) finalLng = Number(finalLng);
+      if (!Number.isFinite(finalLat) || !Number.isFinite(finalLng)) { finalLat = null; finalLng = null; }
 
       if (!finalLat || !finalLng) {
         const po = readPendingOrder();
@@ -248,6 +258,7 @@ export default function CustomerPayments() {
             variant="default"
             userPos={gpsPos}
             homeAddress={auth.user?.address || null}
+            homePos={auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null}
             initialPos={initialPos}
             onSelectPos={handleAddressChange}
             />

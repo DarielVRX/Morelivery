@@ -326,13 +326,26 @@ export default function RestaurantPage() {
             <AddressSearchBar
             userPos={gpsPos}
             homeAddress={auth.user?.address || null}
+            homePos={auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null}
             initialPos={initialPos}
             onSelectPos={pos => {
                 setSearchPos(pos);
                 setToast(null);
                 if (pos?.lat && pos?.lng) {
-                  savePendingOrder({ delivery_lat: pos.lat, delivery_lng: pos.lng, delivery_address: pos.label });
-                  saveSessionDelivery(pos, auth.token);
+                  const lat = Number(pos.lat);
+                  const lng = Number(pos.lng);
+                  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    // Merge con draft existente para no borrar restaurantId/items
+                    const existing = readPendingOrder() || {};
+                    savePendingOrder({
+                      ...existing,
+                      delivery_lat:      lat,
+                      delivery_lng:      lng,
+                      delivery_address:  pos.label || '',
+                      delivery_from_gps: false,
+                    });
+                    saveSessionDelivery({ lat, lng, label: pos.label || '' }, auth.token);
+                  }
                 }
               }}
             />

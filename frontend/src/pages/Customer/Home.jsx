@@ -21,7 +21,14 @@ export default function CustomerHome({ onOrderUpdate } = {}) {
   const [menuCache, setMenuCache] = useState({});
   const [loading, setLoading] = useState(true);
   const [userPos, setUserPos] = useState(null);
-  const [deliveryPos, setDeliveryPos] = useState(null);
+  const [deliveryPos, setDeliveryPos] = useState(() => {
+    // Inicializar desde pendingOrder o sessionDelivery para mostrar dirección activa
+    const po = readPendingOrder();
+    if (po?.delivery_lat && po?.delivery_lng) {
+      return { lat: po.delivery_lat, lng: po.delivery_lng, label: po.delivery_address || '' };
+    }
+    return null; // sessionDelivery se lee con auth.token que aún no está disponible aquí
+  });
   const [query, setQuery] = useState('');
   const [sortBy, setSortBy] = useState('default');
   const [pendingSugg, setPendingSugg] = useState([]);
@@ -29,6 +36,14 @@ export default function CustomerHome({ onOrderUpdate } = {}) {
   const [suggDrafts, setSuggDrafts] = useState({});
   const [dismissedSugg, setDismissedSugg] = useState(new Set());
   const [msg, setMsg] = useState('');
+
+  // Cargar dirección guardada desde sessionDelivery cuando el token está disponible
+  useEffect(() => {
+    if (!auth.token) return;
+    if (deliveryPos) return; // ya tiene una posición del pendingOrder
+    const sp = readSessionDelivery(auth.token);
+    if (sp?.lat && sp?.lng) setDeliveryPos(sp);
+  }, [auth.token]);
 
   useEffect(() => {
     if (!navigator.geolocation) return;
@@ -263,13 +278,30 @@ export default function CustomerHome({ onOrderUpdate } = {}) {
           <AddressSearchBar
           userPos={userPos}
           homeAddress={homeAddress}
+          homePos={auth.user?.home_lat ? { lat: Number(auth.user.home_lat), lng: Number(auth.user.home_lng) } : null}
           initialPos={initialPos}
           onError={setMsg}
           onSelectPos={(pos) => {
-              setDeliveryPos(pos);
               if (pos?.lat && pos?.lng) {
-                savePendingOrder({ delivery_lat: pos.lat, delivery_lng: pos.lng, delivery_address: pos.label });
-                saveSessionDelivery(pos, auth.token);
+                const lat = Number(pos.lat);
+                const lng = Number(pos.lng);
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                  const normalized = { lat, lng, label: pos.label || '' };
+                  setDeliveryPos(normalized);
+                  const existing = readPendingOrder() || {};
+                  savePendingOrder({
+                    ...existing,
+                    delivery_lat:      lat,
+                    delivery_lng:      lng,
+                    delivery_address:  pos.label || '',
+                    delivery_from_gps: false,
+                  });
+                  saveSessionDelivery(normalized, auth.token);
+                } else {
+                  setDeliveryPos(pos);
+                }
+              } else {
+                setDeliveryPos(pos);
               }
             }}
           />

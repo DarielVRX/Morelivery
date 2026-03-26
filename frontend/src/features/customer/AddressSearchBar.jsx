@@ -87,7 +87,7 @@ function useVariantTokens(variant) {
   };
 }
 
-export default function AddressSearchBar({ userPos, homeAddress, onSelectPos, onError, variant = 'hero', initialPos }) {
+export default function AddressSearchBar({ userPos, homeAddress, homePos, onSelectPos, onError, variant = 'hero', initialPos }) {
   const [open,      setOpen]      = useState(false);
   const [showMap,   setShowMap]   = useState(false);
   const [pinPlaced, setPinPlaced] = useState(false);
@@ -249,7 +249,14 @@ export default function AddressSearchBar({ userPos, homeAddress, onSelectPos, on
   }
 
   function selectHome() {
-    if (homeAddress) onSelectPos({ label: homeAddress, preset: 'home' });
+    if (!homeAddress) return;
+    // Incluir coords de casa si están disponibles
+    const lat = homePos?.lat != null ? Number(homePos.lat) : null;
+    const lng = homePos?.lng != null ? Number(homePos.lng) : null;
+    const pos = (Number.isFinite(lat) && Number.isFinite(lng))
+      ? { label: homeAddress, lat, lng }
+      : { label: homeAddress, preset: 'home' };
+    onSelectPos(pos);
     setOpen(false);
     setResults([]);
     setInputVal('');
