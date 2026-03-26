@@ -15,9 +15,10 @@
 
 import { query } from '../config/db.js';
 import { getParam } from './params.js';
-import { shortId } from '../utils/geo.js';
+import { shortId, haversineMeters } from '../utils/geo.js';
 import { serializedOffer, hasActiveChain } from '../modules/orders/assignment/queue.js';
 import { offerNextDrivers } from '../modules/orders/assignment/core.js';
+import { sseHub } from '../modules/events/hub.js';
 
 /**
  * Limpia entidades stale y re-encola pedidos huérfanos.
@@ -155,7 +156,7 @@ export async function cleanStaleEntities(onOffer) {
                                        AND dp.last_lat IS NOT NULL AND dp.last_lng IS NOT NULL`
     );
 
-    const cancelled = [];
+    const cancelledDisputes = [];
     for (const dispute of activeDisputes) {
       const distance = haversineMeters(
         { lat: dispute.driver_lat, lng: dispute.driver_lng },
@@ -167,7 +168,7 @@ export async function cleanStaleEntities(onOffer) {
           WHERE id = $1`,
           [dispute.id]
         );
-        cancelled.push(dispute.id);
+        cancelledDisputes.push(dispute.id);
         // Notificar al driver que la disputa se canceló automáticamente
         sseHub.sendToUser(dispute.driver_id, 'dispute_cancelled_auto', {
           orderId: dispute.id,
@@ -175,8 +176,8 @@ export async function cleanStaleEntities(onOffer) {
         });
       }
     }
-    if (cancelled.length) {
-      console.log(`[stale] ${cancelled.length} disputa(s) canceladas automáticamente por proximidad`);
+    if (cancelledDisputes.length) {
+      console.log(`[stale] ${cancelledDisputes.length} disputa(s) canceladas automáticamente por proximidad`);
     }
 
   } catch (e) {
@@ -190,3 +191,4 @@ export async function cleanStaleEntities(onOffer) {
     reassigned,
   };
 }
+

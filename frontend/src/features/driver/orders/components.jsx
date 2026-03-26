@@ -98,6 +98,7 @@ export function DriverActiveOrderCard({
   onToggleChat,
   authToken,
   chatTick,
+  onCancelDispute,
 }) {
   const isOnTheWay = order.status === 'on_the_way';
   const isCash = isCashPayment(order);
@@ -177,9 +178,14 @@ export function DriverActiveOrderCard({
                           {rebalancingId === order.id ? '…' : '🔄 Rebalancear'}
                         </button>
                       ) : (
-                        <span style={{ fontSize:'0.72rem', color:'#854d0e', fontStyle:'italic' }}>
-                          En disputa — buscando conductor…
-                        </span>
+                        <div style={{ display:'flex', gap:'0.35rem', alignItems:'center', flexWrap:'wrap' }}>
+                          <span style={{ fontSize:'0.72rem', color:'#854d0e', fontStyle:'italic' }}>
+                            En disputa — buscando conductor…
+                          </span>
+                          <button className="btn-sm" style={{ fontSize:'0.72rem', color:'var(--text-secondary)', borderColor:'var(--border)' }} disabled={rebalancingId === order.id} onClick={onCancelDispute}>
+                            {rebalancingId === order.id ? '…' : '✕ Cancelar'}
+                          </button>
+                        </div>
                       )}
                       <button className="btn-sm" style={{ fontSize:'0.75rem', color:'var(--danger)', borderColor:'var(--danger)' }} onClick={onStartRelease}>
                         Liberar
@@ -264,3 +270,4 @@ export function DriverPastOrderCard({
     </li>
   );
 }
+

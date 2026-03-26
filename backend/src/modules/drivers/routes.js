@@ -264,6 +264,34 @@ router.post('/orders/:orderId/rebalance', authenticate, authorize(['driver']), a
   } catch (error) { return next(error); }
 });
 
+/* ── POST /drivers/orders/:orderId/cancel-dispute — cancelar disputa manual ── */
+router.post('/orders/:orderId/cancel-dispute', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+    const driverId    = req.user.userId;
+
+    // Verificar que el pedido pertenece al driver y está en disputa
+    const r = await query(
+      `UPDATE orders
+       SET is_disputed = false, disputed_until = NULL, disputed_by = NULL, updated_at = NOW()
+       WHERE id = $1 AND driver_id = $2 AND is_disputed = true
+       RETURNING id`,
+      [orderId, driverId]
+    );
+
+    if (r.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado o no está en disputa'));
+
+    // Notificar al driver vía SSE
+    sseHub.sendToUser(driverId, 'order_update', {
+      orderId,
+      isDisputed: false,
+      message:    'Disputa cancelada. El pedido sigue en tu ruta.',
+    });
+
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+
 /* ── GET /drivers/me/counters — contadores de sesión e histórico ────────────── */
 router.get('/me/counters', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
@@ -390,3 +418,4 @@ router.get('/earnings', authenticate, authorize(['driver']), async (req, res, ne
 });
 
 export default router;
+

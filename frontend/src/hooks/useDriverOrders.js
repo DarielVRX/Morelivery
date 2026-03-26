@@ -164,6 +164,20 @@ export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, 
     }
   }
 
+  async function doCancelDispute(orderId) {
+    setRebalancingId(orderId);
+    try {
+      await apiFetch(`/drivers/orders/${orderId}/cancel-dispute`, { method: 'POST' }, token);
+      setActionMsg('Disputa cancelada. El pedido sigue en tu ruta.');
+      loadOrdersRef.current?.();
+      setTimeout(() => setActionMsg(''), 4000);
+    } catch (error) {
+      setActionMsg(error.message || 'Error al cancelar disputa');
+    } finally {
+      setRebalancingId(null);
+    }
+  }
+
   async function acceptDirectly(orderId) {
     setActionLoading(orderId);
     try {
@@ -218,8 +232,10 @@ export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, 
     sendReport,
     changeStatusWithGps,
     doRebalance,
+    doCancelDispute,
     acceptDirectly,
     releaseOrder,
     setChatOpen,
   };
 }
+

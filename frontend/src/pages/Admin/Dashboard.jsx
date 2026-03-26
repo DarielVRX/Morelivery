@@ -19,8 +19,6 @@ import RatingsTab from '../../features/admin/dashboard/tabs/RatingsTab';
 import FeedTab from '../../features/admin/dashboard/tabs/FeedTab';
 import SystemTab from '../../features/admin/dashboard/tabs/SystemTab';
 
-// Orden de pestañas para swipe
-const TABS_ORDER = ['assignment', 'orders', 'metrics', 'users', 'engine', 'reports', 'notes', 'ratings', 'feed', 'system'];
 
 export default function AdminDashboard() {
   const { auth } = useAuth();
@@ -49,38 +47,6 @@ export default function AdminDashboard() {
   // Debounce y cooldown
   const debounceTimer = useRef(null);
   const lastReload = useRef({});
-
-  // Swipe handling
-  const touchStartX = useRef(0);
-  const touchEndX = useRef(0);
-  const minSwipeDistance = 50;
-
-  const handleTouchStart = (e) => {
-    touchStartX.current = e.touches[0].clientX;
-  };
-
-  const handleTouchMove = (e) => {
-    touchEndX.current = e.touches[0].clientX;
-  };
-
-  const handleTouchEnd = () => {
-    const distance = touchEndX.current - touchStartX.current;
-    const currentIndex = TABS_ORDER.indexOf(tab);
-
-    if (Math.abs(distance) > minSwipeDistance) {
-      if (distance > 0 && currentIndex > 0) {
-        // Swipe derecha → pestaña anterior
-        setTab(TABS_ORDER[currentIndex - 1]);
-      } else if (distance < 0 && currentIndex < TABS_ORDER.length - 1) {
-        // Swipe izquierda → pestaña siguiente
-        setTab(TABS_ORDER[currentIndex + 1]);
-      }
-    }
-
-    // Reset
-    touchStartX.current = 0;
-    touchEndX.current = 0;
-  };
 
   // Funciones de carga
   const loadAssignment = useCallback(async () => {
@@ -262,15 +228,9 @@ export default function AdminDashboard() {
       overflowY: 'auto',
       position: 'relative'
     }}
-    onTouchStart={handleTouchStart}
-    onTouchMove={handleTouchMove}
-    onTouchEnd={handleTouchEnd}
     >
     <div style={{ margin: '-1rem -1rem 1.25rem', padding: '0.75rem 1rem 0.65rem', background: 'var(--promo-gradient)', color: '#fff' }}>
     <div style={{ fontWeight: 800, fontSize: '1.05rem' }}>🛠 Panel de administración</div>
-    <div style={{ fontSize: '0.75rem', opacity: 0.8, marginTop: '0.1rem' }}>
-    Desliza lateralmente para cambiar de pestaña
-    </div>
     </div>
 
     <DashboardTabsBar
@@ -333,3 +293,4 @@ export default function AdminDashboard() {
     </PullToRefresh>
   );
 }
+
