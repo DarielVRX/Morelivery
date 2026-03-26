@@ -7,6 +7,7 @@ import { registerUser } from '../auth/service.js';
 import { getParamsWithMeta, saveParam } from '../../engine/params.js';
 import { sseHub } from '../events/hub.js';
 import webpush from 'web-push';
+import { sendPushToUser } from '../notifications/pushSubscription.js';
 
 // Configurar VAPID (asegúrate de tener las variables de entorno)
 const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
@@ -447,24 +448,7 @@ router.get('/sse-status', authenticate, authorize(['admin']), async (req, res, n
 // ── POST /admin/test-push — enviar notificación push de prueba ───────────────
 router.post('/test-push', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
-    const adminId = req.user.userId;
-
-    // Obtener suscripción push del admin
-    const subResult = await query(
-      `SELECT endpoint, keys FROM push_subscriptions WHERE user_id = $1 LIMIT 1`,
-      [adminId]
-    );
-
-    if (subResult.rowCount === 0) {
-      return res.status(400).json({ error: 'No hay suscripción push registrada para este usuario' });
-    }
-
-    const subscription = {
-      endpoint: subResult.rows[0].endpoint,
-      keys: subResult.rows[0].keys,
-    };
-
-    const payload = JSON.stringify({
+    const results = await sendPushToUser(req.user.userId, {
       title: '🔔 Notificación de prueba',
       body: 'Esta es una notificación push de alta prioridad.',
       tag: 'test',
@@ -474,10 +458,9 @@ router.post('/test-push', authenticate, authorize(['admin']), async (req, res, n
       vibrate: [300, 100, 300, 100, 300],
       requireInteraction: true,
     });
-
-    await webpush.sendNotification(subscription, payload);
-
-    res.json({ ok: true });
+    const sent = results.filter(r => r.status === 'fulfilled').length;
+    if (sent === 0) return next(new AppError(400, 'No hay suscripciones push activas para este usuario'));
+    res.json({ ok: true, sent });
   } catch (error) {
     console.error('Error enviando push test:', error);
     return next(new AppError(500, 'Error al enviar notificación push'));
@@ -487,35 +470,28 @@ router.post('/test-push', authenticate, authorize(['admin']), async (req, res, n
 // POST /admin/schedule-voice-reminders
 router.post('/schedule-voice-reminders', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
-    const adminId = req.user.userId;
+    const userId = req.user.userId;
 
-    // Obtener suscripción push del admin
-    const subResult = await query(
-      `SELECT endpoint, keys FROM push_subscriptions WHERE user_id = $1 LIMIT 1`,
-      [adminId]
+    // Verificar que hay al menos una suscripción antes de programar
+    const check = await query(
+      `SELECT 1 FROM push_subscriptions WHERE user_id = $1 LIMIT 1`,
+      [userId]
     );
-
-    if (subResult.rowCount === 0) {
+    if (check.rowCount === 0) {
       return res.status(400).json({ error: 'No hay suscripción push registrada para este usuario' });
     }
 
-    const subscription = {
-      endpoint: subResult.rows[0].endpoint,
-      keys: subResult.rows[0].keys,
-    };
-
     // Programar primera notificación (30s)
     setTimeout(async () => {
-      const payload30s = JSON.stringify({
-        title: '🔔 Recordatorio de prueba (30s)',
-        body: 'Han pasado 30 segundos.',
-        priority: 'high',
-        tag: 'test-reminder-30s',
-        url: '/admin',
-        vibrate: [500, 150, 500, 150, 500, 300, 100, 100, 150, 100, 150, 100, 100],
-      });
       try {
-        await webpush.sendNotification(subscription, payload30s);
+        await sendPushToUser(userId, {
+          title: '🔔 Recordatorio de prueba (30s)',
+          body: 'Han pasado 30 segundos.',
+          priority: 'high',
+          tag: 'test-reminder-30s',
+          url: '/admin',
+          vibrate: [500, 150, 500, 150, 500, 300, 100, 100, 150, 100, 150, 100, 100],
+        });
         console.log('[admin] Push 30s enviado');
       } catch (e) {
         console.error('Error en push 30s:', e);
@@ -524,17 +500,16 @@ router.post('/schedule-voice-reminders', authenticate, authorize(['admin']), asy
 
     // Programar segunda notificación (5 minutos)
     setTimeout(async () => {
-      const payload5min = JSON.stringify({
-        title: '⏰ Recordatorio de prueba (5 min)',
-        body: 'Han pasado 5 minutos.',
-        priority: 'high',
-        tag: 'test-reminder-5min',
-        url: '/admin',
-        vibrate: [500, 150, 500, 150, 500, 300, 100, 100, 150, 100, 150, 100, 100],
-        requireInteraction: true,
-      });
       try {
-        await webpush.sendNotification(subscription, payload5min);
+        await sendPushToUser(userId, {
+          title: '⏰ Recordatorio de prueba (5 min)',
+          body: 'Han pasado 5 minutos.',
+          priority: 'high',
+          tag: 'test-reminder-5min',
+          url: '/admin',
+          vibrate: [500, 150, 500, 150, 500, 300, 100, 100, 150, 100, 150, 100, 100],
+          requireInteraction: true,
+        });
         console.log('[admin] Push 5min enviado');
       } catch (e) {
         console.error('Error en push 5min:', e);
