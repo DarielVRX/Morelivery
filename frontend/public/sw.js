@@ -18,15 +18,12 @@ const SHELL_ASSETS  = [
 // al SW. El SW guarda la petición en Cache Storage y registra el tag de sync.
 // En cuanto el dispositivo recupera red, el navegador dispara el evento 'sync'
 // y el SW reintenta todas las peticiones encoladas.
-//
-// Se usa Cache Storage como key-value store liviano — evita añadir una dependencia
-// de IndexedDB y está disponible en el mismo contexto que los demás caches.
 const SYNC_QUEUE_KEY = 'morelivery-sync-queue';
 const SYNC_TAG       = 'morelivery-status-sync';
-const VOICE_CACHE = 'morelivery-voices-v1';
-const VOICE_ASSETS = [
+const VOICE_CACHE    = 'morelivery-voices-v1';
+const VOICE_ASSETS   = [
   '/voices/recordatorio-30s.mp3',
-'/voices/recordatorio-3min.mp3',
+  '/voices/recordatorio-3min.mp3',
 ];
 
 async function readQueue() {
@@ -44,22 +41,22 @@ async function writeQueue(queue) {
   }));
 }
 
-
+// ── Install ───────────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
     Promise.all([
       caches.open(SHELL_CACHE).then(cache =>
-      cache.addAll(SHELL_ASSETS).catch(() => {})
+        cache.addAll(SHELL_ASSETS).catch(() => {})
       ),
       caches.open(VOICE_CACHE).then(cache =>
-      cache.addAll(VOICE_ASSETS).catch(() => {})
+        cache.addAll(VOICE_ASSETS).catch(() => {})
       ),
     ])
   );
 });
 
-// ── Activar: limpiar caches viejos ────────────────────────────────────────
+// ── Activate: limpiar caches viejos ──────────────────────────────────────────
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     Promise.all([
@@ -75,33 +72,25 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// ── Caché de tiles vectoriales (stale-while-revalidate) ───────────────────────
-const TILES_CACHE   = 'morelivery-tiles-v2'; // v2: adds Stadia Maps
+// ── Tile cache (stale-while-revalidate) ───────────────────────────────────────
+const TILES_CACHE   = 'morelivery-tiles-v2';
 const TILES_DOMAINS = [
   'tiles.openfreemap.org',
   'tile.openfreemap.org',
-  'tiles.stadiamaps.com',    // Stadia vector tiles
-  'tile.stadiamaps.com',     // Stadia raster fallback
+  'tiles.stadiamaps.com',
+  'tile.stadiamaps.com',
 ];
 
-// ── IndexedDB para última ruta/destino/posición ────────────────────────────────
-// Usado por el frontend para persistir contexto de navegación entre sesiones.
-// El SW no escribe aquí — solo gestiona el caché de tiles.
-// La app escribe directamente con indexedDB.open('morelivery-nav', 1).
-
-// ── Fetch: shell-first para navegación, network-first para API ────────────
+// ── Fetch ─────────────────────────────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // API y SSE: nunca cachear — siempre red
-  const API_PREFIXES = ['/nav/', '/orders/', '/drivers/', '/auth/', '/restaurants/', '/users/', '/admin/', '/events'];
+  const API_PREFIXES = ['/nav/', '/orders/', '/drivers/', '/auth/', '/restaurants/', '/users/', '/admin/', '/events', '/api/'];
   if (API_PREFIXES.some(p => url.pathname.startsWith(p))) return;
 
-  // Solo GET
   if (request.method !== 'GET') return;
 
-  // Tiles vectoriales: stale-while-revalidate
   const isTile = TILES_DOMAINS.some(d => url.hostname.includes(d));
   if (isTile) {
     event.respondWith(
@@ -117,13 +106,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Estrategia: red primero, fallback a caché (shell assets)
-  // Para assets con hash (JS/CSS de Vite), la red siempre gana.
-  // Si offline, el caché entrega el shell para que React pueda montar.
   event.respondWith(
     fetch(request)
       .then(response => {
-        // Cachear respuestas del shell en runtime
         if (response.ok && SHELL_ASSETS.includes(url.pathname)) {
           const clone = response.clone();
           caches.open(SHELL_CACHE).then(c => c.put(request, clone));
@@ -134,7 +119,7 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// ── Background Sync — reenvío de peticiones al recuperar red ─────────────────
+// ── Background Sync ───────────────────────────────────────────────────────────
 self.addEventListener('sync', (event) => {
   if (event.tag !== SYNC_TAG) return;
 
@@ -155,21 +140,19 @@ self.addEventListener('sync', (event) => {
             body:    item.body ?? undefined,
           });
 
-          // 409 Conflict = el pedido ya fue procesado por otro medio → descartar
+          // 409 = el pedido ya fue procesado → descartar
           // 2xx = éxito → descartar
-          // Cualquier otro error de servidor (5xx) o red → reintentar
+          // 5xx / red → reintentar
           if (!res.ok && res.status !== 409) {
             remaining.push(item);
           }
         } catch {
-          // Sin red todavía — volver a encolar
           remaining.push(item);
         }
       }
 
       await writeQueue(remaining);
 
-      // Avisar a la app si está abierta para que refresque datos
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       const synced  = queue.length - remaining.length;
       if (synced > 0) clients.forEach(c => c.postMessage({ type: 'SYNC_COMPLETE', synced }));
@@ -177,29 +160,22 @@ self.addEventListener('sync', (event) => {
   );
 });
 
+// ── Voice playback (desde cache) ──────────────────────────────────────────────
 async function playVoice(voiceName) {
   try {
-    const cache = await caches.open(VOICE_CACHE);
+    const cache    = await caches.open(VOICE_CACHE);
     const response = await cache.match(`/voices/${voiceName}.mp3`);
-    if (!response) {
-      console.warn(`Voz no encontrada: ${voiceName}`);
-      return;
-    }
+    if (!response) { console.warn(`Voz no encontrada: ${voiceName}`); return; }
     const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
+    const url  = URL.createObjectURL(blob);
     const audio = new Audio(url);
     audio.play();
     audio.onended = () => URL.revokeObjectURL(url);
-  } catch (e) {
-    console.warn('Voice play error:', e);
-  }
+  } catch (e) { console.warn('Voice play error:', e); }
 }
 
-
-// Mantener conteo acumulado de notificaciones no vistas por categoría.
-// Cuando llega una nueva del mismo tag-group, se reemplaza la notificación
-// existente (mismo tag) con un resumen actualizado en lugar de apilar.
-const notifCounts = {};  // { [group]: { count, lastBody, url } }
+// ── Notificaciones agrupadas ──────────────────────────────────────────────────
+const notifCounts = {};
 
 async function showGroupedNotification({ group, title, body, url, priority, tag, vibrate }) {
   if (!notifCounts[group]) notifCounts[group] = { count: 0, lastBody: '', url };
@@ -211,14 +187,11 @@ async function showGroupedNotification({ group, title, body, url, priority, tag,
   const isHigh = priority === 'high';
 
   const displayTitle = count > 1 ? `${title} (${count})` : title;
-  const displayBody  = count > 1
-    ? `${lastBody} — y ${count - 1} más`
-    : lastBody;
+  const displayBody  = count > 1 ? `${lastBody} — y ${count - 1} más` : lastBody;
 
   const existing = await self.registration.getNotifications({ tag });
   existing.forEach(n => n.close());
 
-  // vibrate: usar el del payload si viene, si no el default por prioridad
   const vibratePattern = vibrate || (isHigh ? [300, 100, 300, 100, 300] : [200, 100, 200]);
 
   await self.registration.showNotification(displayTitle, {
@@ -235,38 +208,29 @@ async function showGroupedNotification({ group, title, body, url, priority, tag,
   });
 }
 
-// ── Mensajes desde la app (postMessage) ──────────────────────────────────────
-// Un solo handler para todos los tipos de mensaje — evita que se pisen.
+// ── Mensajes desde la app (postMessage) ───────────────────────────────────────
 self.addEventListener('message', (event) => {
   const type = event.data?.type;
 
-  // TEST_NOTIFICATION: prueba local desde SystemTab — siempre muestra aunque la app esté en foco
+  // ── Existentes ──────────────────────────────────────────────────────────────
+
   if (type === 'TEST_NOTIFICATION') {
     const { title = 'Morelivery', body = 'Notificación de prueba ✓', tag = 'test' } = event.data;
-    // Resetear contador para que no diga "(2)"
     notifCounts[tag] = { count: 0, lastBody: '', url: '/' };
     showGroupedNotification({ group: tag, title, body, url: '/', priority: 'high', tag });
     return;
   }
 
-  // SHOW_NOTIFICATION: notificación SSE desde foreground
   if (type === 'SHOW_NOTIFICATION') {
     const { title, body, tag, group, url = '/', priority = 'normal', data } = event.data;
-
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
       const anyFocused = clients.some(c => c.focused);
-      if (anyFocused) return; // App en primer plano — el UI ya muestra la info
-
+      if (anyFocused) return;
       const resolvedGroup = group || tag || 'general';
       showGroupedNotification({
-        group:    resolvedGroup,
-        title,
-        body,
-        url:      data?.url || url,
-        priority,
-        tag:      resolvedGroup,
+        group: resolvedGroup, title, body,
+        url: data?.url || url, priority, tag: resolvedGroup,
       }).then(() => {
-        // Actualizar badge del ícono de la app
         if ('setAppBadge' in self) {
           const total = Object.values(notifCounts).reduce((s, v) => s + v.count, 0);
           self.setAppBadge(total).catch(() => {});
@@ -276,40 +240,105 @@ self.addEventListener('message', (event) => {
     return;
   }
 
-  // ENQUEUE_REQUEST: conductor tomó acción sin señal (ej. marcó entregado offline).
-  // La app detecta el error de red y delega al SW para garantizar la entrega.
   if (type === 'ENQUEUE_REQUEST') {
     const { url, method, body, token } = event.data;
     (async () => {
       const queue = await readQueue();
       queue.push({ url, method, body, token, ts: Date.now() });
       await writeQueue(queue);
-      // Registrar sync tag — el navegador nos despertará cuando haya red
       try { await self.registration.sync.register(SYNC_TAG); } catch { /* API no disponible */ }
     })();
     return;
   }
 
-  // APP_FOCUSED: el usuario abrió la app — limpiar badge y contadores
   if (type === 'APP_FOCUSED') {
     Object.keys(notifCounts).forEach(k => { notifCounts[k].count = 0; });
     if ('clearAppBadge' in self) self.clearAppBadge().catch(() => {});
     return;
   }
+
+  // ── Nuevos ──────────────────────────────────────────────────────────────────
+
+  // VIBRATE: la app puede pedir vibración desde background via postMessage
+  // Útil cuando el SW recibe un push y quiere patrones más complejos que el
+  // campo `vibrate` de showNotification (ej. pulsos encadenados con delay).
+  //
+  // Uso: reg.active.postMessage({ type: 'VIBRATE', pattern: [300, 100, 300] })
+  //
+  // Nota: navigator.vibrate() solo funciona en el contexto de window, no en SW.
+  // Este handler reenvía el mensaje a todas las ventanas abiertas para que
+  // ejecuten la vibración. Si la app está en background, la vibración viene
+  // del campo `vibrate` de la notificación push directamente.
+  if (type === 'VIBRATE') {
+    const { pattern = [200] } = event.data;
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      clients.forEach(c => c.postMessage({ type: 'VIBRATE_EXECUTE', pattern }));
+    });
+    return;
+  }
+
+  // SYNC_STATUS_UPDATE: variante tipada de ENQUEUE_REQUEST para actualizaciones
+  // de estado de pedido. Separa semánticamente el tipo de cola para que el
+  // backend pueda diferenciar qué endpoint llamar al reenviar.
+  //
+  // Campos: orderId, status, token, extra (objeto libre)
+  // El SW construye la URL y el body antes de encolar.
+  if (type === 'SYNC_STATUS_UPDATE') {
+    const { orderId, status, token, extra = {} } = event.data;
+    (async () => {
+      const queue = await readQueue();
+      queue.push({
+        url:    `/api/orders/${orderId}/status`,
+        method: 'PATCH',
+        body:   JSON.stringify({ status, ...extra }),
+        token,
+        ts:     Date.now(),
+        kind:   'status_update',  // para logging/analytics en el backend
+      });
+      await writeQueue(queue);
+      try { await self.registration.sync.register(SYNC_TAG); } catch { /* ok */ }
+    })();
+    return;
+  }
+
+  // SYNC_LOCATION_BATCH: encola un lote de pings de GPS acumulados offline.
+  // La app va guardando posiciones en localStorage mientras no hay red,
+  // y las manda todas en un solo mensaje cuando detecta que volvió la señal
+  // o cuando el SW se despierta por sync.
+  //
+  // Campos: driverId, positions (array de { lat, lng, ts }), token
+  if (type === 'SYNC_LOCATION_BATCH') {
+    const { driverId, positions, token } = event.data;
+    if (!positions?.length) return;
+    (async () => {
+      const queue = await readQueue();
+      queue.push({
+        url:    `/api/drivers/${driverId}/location-batch`,
+        method: 'POST',
+        body:   JSON.stringify({ positions }),
+        token,
+        ts:     Date.now(),
+        kind:   'location_batch',
+      });
+      await writeQueue(queue);
+      try { await self.registration.sync.register(SYNC_TAG); } catch { /* ok */ }
+    })();
+    return;
+  }
 });
 
-// ── Web Push nativo (VAPID) ───────────────────────────────────────────────
+// ── Web Push (VAPID) ──────────────────────────────────────────────────────────
 self.addEventListener('push', (event) => {
   if (!event.data) return;
   let payload;
   try { payload = event.data.json(); } catch { payload = { title: 'Morelivery', body: event.data.text() }; }
 
   const {
-    title = 'Morelivery',
-    body = '',
-    tag = 'general',
-    group = tag,
-    url = '/',
+    title    = 'Morelivery',
+    body     = '',
+    tag      = 'general',
+    group    = tag,
+    url      = '/',
     priority = 'normal',
     vibrate,
   } = payload;
@@ -319,15 +348,13 @@ self.addEventListener('push', (event) => {
   );
 });
 
-// ── Click en notificación ─────────────────────────────────────────────────
+// ── Click en notificación ─────────────────────────────────────────────────────
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  // Resetear el conteo del grupo al abrir
   const group = event.notification.data?.group;
   if (group && notifCounts[group]) notifCounts[group].count = 0;
 
-  // Limpiar badge al abrir cualquier notificación
   if ('clearAppBadge' in self) self.clearAppBadge().catch(() => {});
 
   const targetUrl = event.notification?.data?.url || '/';
@@ -339,4 +366,3 @@ self.addEventListener('notificationclick', (event) => {
     })
   );
 });
-
