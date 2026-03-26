@@ -19,10 +19,10 @@ export function cleanRestaurantName(name) {
   return name.trim().replace(/\s+(kitchen|restaurant)$/i, '');
 }
 
-// ── Google OAuth client (para verificar tokens de Google Login) ───────────────
+// ── Google OAuth client ───────────────────────────────────────────────────────
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// ── Gmail API (para envío de correos via HTTP — sin SMTP) ─────────────────────
+// ── Gmail API ─────────────────────────────────────────────────────────────────
 const gmailAuth = new google.auth.OAuth2(
   process.env.GMAIL_CLIENT_ID,
   process.env.GMAIL_CLIENT_SECRET,
@@ -40,19 +40,26 @@ async function sendGmail({ to, subject, html }) {
     html,
   ].join('\n');
   const encoded = Buffer.from(message).toString('base64url');
-  await gmail.users.messages.send({
-    userId: 'me',
-    requestBody: { raw: encoded },
-  });
+  await gmail.users.messages.send({ userId: 'me', requestBody: { raw: encoded } });
 }
 
-// ── Utilidad: resolver username único ────────────────────────────────────────
+// ── Envío no-bloqueante: el usuario se crea aunque Gmail falle ────────────────
+async function sendGmailSafe(opts) {
+  try {
+    await sendGmail(opts);
+  } catch (err) {
+    logEvent('auth.email_send_error', { to: opts.to, error: err.message });
+    console.warn('[auth] Gmail send failed (non-blocking):', err.message);
+  }
+}
+
+// ── Utilidad: resolver username único ─────────────────────────────────────────
 async function resolveUniqueUsername(candidate) {
   const base = candidate
-  .toLowerCase()
-  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  .replace(/[^a-z0-9._-]/g, '')
-  .slice(0, 27) || 'user';
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9._-]/g, '')
+    .slice(0, 27) || 'user';
 
   const taken = await query('SELECT 1 FROM users WHERE email = $1', [pseudoEmailFromUsername(base)]);
   if (taken.rowCount === 0) return base;
@@ -66,9 +73,61 @@ async function resolveUniqueUsername(candidate) {
   return `${base}${Date.now().toString(36).slice(-4)}`;
 }
 
-// ── REGISTER ─────────────────────────────────────────────────────────────────
+// ── Device fingerprint: verificar bloqueo y registrar ────────────────────────
+// El fingerprint se genera en el frontend (FingerprintJS libre) y se envía en el body.
+// Si el fingerprint está en blocked_fingerprints → rechazar registro.
+// Si hay otro user con el mismo fp → "Detectamos una cuenta relacionada".
+async function checkAndSaveFingerprint(fingerprint, userId) {
+  if (!fingerprint) return; // sin fingerprint no bloqueamos (campo opcional desde frontend)
+
+  // 1. ¿Está en la lista negra explícita?
+  try {
+    const blocked = await query(
+      'SELECT 1 FROM blocked_fingerprints WHERE fingerprint = $1',
+      [fingerprint]
+    );
+    if (blocked.rowCount > 0) {
+      throw new AppError(403, 'No es posible crear una cuenta desde este dispositivo.');
+    }
+  } catch (e) {
+    if (e instanceof AppError) throw e;
+    if (e?.code === '42P01') {
+      // Tabla no existe aún — migración pendiente, ignorar silenciosamente
+    } else throw e;
+  }
+
+  // 2. ¿Ya existe otro usuario con este fingerprint?
+  try {
+    const existing = await query(
+      'SELECT id FROM users WHERE device_fp = $1 AND id <> $2 LIMIT 1',
+      [fingerprint, userId]
+    );
+    if (existing.rowCount > 0) {
+      // Bloquear al nuevo usuario y lanzar error
+      await query('UPDATE users SET status = $1 WHERE id = $2', ['suspended', userId]);
+      throw new AppError(403, 'Detectamos una cuenta relacionada con este dispositivo. Contacta a soporte si crees que esto es un error.');
+    }
+  } catch (e) {
+    if (e instanceof AppError) throw e;
+    if (e?.code === '42703') {
+      // Columna device_fp no existe aún — migración pendiente
+    } else throw e;
+  }
+
+  // 3. Guardar fingerprint en el usuario
+  try {
+    await query('UPDATE users SET device_fp = $1 WHERE id = $2', [fingerprint, userId]);
+  } catch (_) {}
+}
+
+// ── REGISTER ──────────────────────────────────────────────────────────────────
 export async function registerUser(payload) {
   const realEmail = payload.email.trim().toLowerCase();
+
+  // ── Teléfono obligatorio para clientes ─────────────────────────────────────
+  if (payload.role === 'customer' && !payload.phone?.trim()) {
+    throw new AppError(400, 'El número de teléfono es obligatorio para registrarse como cliente.');
+  }
 
   try {
     const existingReal = await query(
@@ -94,63 +153,114 @@ export async function registerUser(payload) {
   const verifyExpires = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
 
   const addressFull = payload.address ||
-  [payload.calle, payload.numero, payload.colonia, payload.ciudad, payload.estado, payload.postalCode]
-  .filter(Boolean).join(', ') || null;
+    [payload.calle, payload.numero, payload.colonia, payload.ciudad, payload.estado, payload.postalCode]
+    .filter(Boolean).join(', ') || null;
   const userAddress = ['customer','restaurant'].includes(payload.role) ? addressFull : null;
 
   let result;
   try {
     result = await query(
       `INSERT INTO users
-      (full_name, alias, email, real_email, password_hash, role, status, address,
-       postal_code, colonia, estado, ciudad,
-       email_verified, email_verify_token, email_verify_expires)
-      VALUES($1,$2,$3,$4,$5,$6,'active',$7,$8,$9,$10,$11, false,$12,$13)
-      RETURNING id, full_name, alias, email, real_email, role, address`,
+       (full_name, alias, email, real_email, password_hash, role, status, address,
+        postal_code, colonia, estado, ciudad, phone,
+        email_verified, email_verify_token, email_verify_expires)
+       VALUES($1,$2,$3,$4,$5,$6,'active',$7,$8,$9,$10,$11,$12,false,$13,$14)
+       RETURNING id, full_name, alias, email, real_email, role, address`,
       [
         payload.fullName.trim(),
-                         payload.alias.trim(),
-                         pseudoEmail,
-                         realEmail,
-                         passwordHash,
-                         payload.role,
-                         userAddress,
-                         payload.postalCode || null,
-                         payload.colonia    || null,
-                         payload.estado     || null,
-                         payload.ciudad     || null,
-                         verifyToken,
-                         verifyExpires,
+        payload.alias.trim(),
+        pseudoEmail,
+        realEmail,
+        passwordHash,
+        payload.role,
+        userAddress,
+        payload.postalCode || null,
+        payload.colonia    || null,
+        payload.estado     || null,
+        payload.ciudad     || null,
+        payload.phone?.trim() || null,
+        verifyToken,
+        verifyExpires,
       ]
     );
   } catch (e) {
     if (e?.code === '42703') {
+      // Fallback si columnas nuevas no existen aún (migración pendiente)
       result = await query(
-        `INSERT INTO users(full_name, alias, email, password_hash, role, status, address)
-        VALUES($1,$2,$3,$4,$5,'active',$6)
-        RETURNING id, full_name, alias, email, role, address`,
-        [payload.fullName.trim(), payload.alias.trim(), pseudoEmail, passwordHash, payload.role, userAddress]
+        `INSERT INTO users(full_name, alias, email, real_email, password_hash, role, status, address,
+          email_verified, email_verify_token, email_verify_expires)
+         VALUES($1,$2,$3,$4,$5,$6,'active',$7,false,$8,$9)
+         RETURNING id, full_name, alias, email, real_email, role, address`,
+        [
+          payload.fullName.trim(), payload.alias.trim(), pseudoEmail, realEmail,
+          passwordHash, payload.role, userAddress, verifyToken, verifyExpires,
+        ]
       );
     } else throw e;
   }
 
   const user = result.rows[0];
 
+  // ── Device fingerprint (no bloqueante si falla) ────────────────────────────
+  if (payload.deviceFingerprint) {
+    await checkAndSaveFingerprint(payload.deviceFingerprint, user.id);
+  }
+
+  // ── Crear perfil de rol ────────────────────────────────────────────────────
   if (user.role === 'restaurant') {
     const restName = cleanRestaurantName(payload.displayName || payload.alias || payload.fullName);
     try {
-      await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1,$2,$3)',
-                  [user.id, restName, 'General']);
+      await query(
+        `INSERT INTO restaurants(owner_user_id, name, category, is_open, is_verified)
+         VALUES($1,$2,'General',false,false)`,
+        [user.id, restName]
+      );
     } catch (e) {
-      if (e?.code !== '42703') throw e;
+      if (e?.code === '42703') {
+        await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1,$2,$3)',
+          [user.id, restName, 'General']).catch(() => {});
+      } else throw e;
     }
   }
 
   if (user.role === 'driver') {
     await query(
-      'INSERT INTO driver_profiles(user_id, vehicle_type, is_verified, is_available) VALUES($1,$2,true,true)',
-                [user.id, 'bike']
+      'INSERT INTO driver_profiles(user_id, vehicle_type, is_verified, is_available) VALUES($1,$2,true,false)',
+      [user.id, payload.vehicleType || 'bike']
     );
+  }
+
+  // ── Enviar email de verificación (no-bloqueante) ───────────────────────────
+  // Para drivers y admins registrados por el admin, skip verificación de email.
+  const skipEmailVerification = ['driver','admin'].includes(payload.role) && payload._adminRegister;
+
+  if (!skipEmailVerification) {
+    const frontUrl  = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const verifyUrl = `${frontUrl}/verify-email?token=${verifyToken}`;
+    const name      = payload.alias || payload.fullName;
+
+    sendGmailSafe({
+      to:      realEmail,
+      subject: 'Confirma tu correo en Morelivery 📬',
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+          <h2 style="color:#1a202c;margin-bottom:8px">Hola, ${name} 👋</h2>
+          <p style="color:#4a5568">Gracias por registrarte. Confirma tu correo para empezar a hacer pedidos.</p>
+          <p style="margin:24px 0">
+            <a href="${verifyUrl}"
+               style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">
+              Verificar correo
+            </a>
+          </p>
+          <p style="color:#718096;font-size:13px">
+            Este enlace expira en <strong>48 horas</strong>.<br>
+            Si no creaste esta cuenta, ignora este correo.
+          </p>
+          <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
+          <p style="color:#a0aec0;font-size:12px">Morelivery · No responder este correo</p>
+        </div>
+      `,
+    });
   }
 
   return { id: user.id, username, role: user.role };
@@ -166,7 +276,7 @@ export async function loginUser(payload) {
 
     if (isLegacy) {
       result = await query(
-        'SELECT id, full_name, alias, email, password_hash, role, status, address FROM users WHERE email = $1',
+        'SELECT id, full_name, alias, email, password_hash, role, status, address, email_verified FROM users WHERE email = $1',
         [rawEmail]
       );
     } else {
@@ -174,7 +284,8 @@ export async function loginUser(payload) {
         const roleFilter = payload.role ? 'AND role = $2' : '';
         const params = payload.role ? [rawEmail, payload.role] : [rawEmail];
         result = await query(
-          `SELECT id, full_name, alias, email, real_email, password_hash, role, status, address FROM users WHERE real_email = $1 ${roleFilter}`,
+          `SELECT id, full_name, alias, email, real_email, password_hash, role, status, address, email_verified
+           FROM users WHERE real_email = $1 ${roleFilter}`,
           params
         );
       } catch (e) {
@@ -194,12 +305,34 @@ export async function loginUser(payload) {
   }
 
   const user = result.rows[0];
-  if (user.status === 'suspended') throw new AppError(403, 'Cuenta suspendida');
+  if (user.status === 'suspended') throw new AppError(403, 'Cuenta suspendida. Contacta a soporte.');
+
+  // ── Verificación de email obligatoria para clientes ────────────────────────
+  if (user.role === 'customer' && user.email_verified === false) {
+    throw new AppError(403, 'Debes verificar tu correo electrónico antes de ingresar. Revisa tu bandeja de entrada.');
+  }
 
   const passwordMatch = await bcrypt.compare(payload.password, user.password_hash);
   if (!passwordMatch) {
     logEvent('auth.login_error', { userId: user.id, reason: 'wrong_password' });
     throw new AppError(401, 'Credenciales inválidas');
+  }
+
+  // ── Fingerprint en login también (detectar cuentas relacionadas) ───────────
+  if (payload.deviceFingerprint && user.role === 'customer') {
+    try {
+      // Solo verificar bloqueo explícito — no crear nueva asociación en login
+      const blocked = await query(
+        'SELECT 1 FROM blocked_fingerprints WHERE fingerprint = $1',
+        [payload.deviceFingerprint]
+      );
+      if (blocked.rowCount > 0) {
+        throw new AppError(403, 'Acceso bloqueado desde este dispositivo.');
+      }
+    } catch (e) {
+      if (e instanceof AppError) throw e;
+      // Si la tabla no existe, ignorar
+    }
   }
 
   const username = user.email.replace(/@local\.test$/, '');
@@ -285,15 +418,12 @@ export async function googleLogin(credential, role = 'customer') {
   try {
     const r = await query(
       'SELECT * FROM users WHERE (real_email = $1 OR google_id = $2) AND role = $3 LIMIT 1',
-                          [realEmail, googleId, role]
+      [realEmail, googleId, role]
     );
     user = r.rows[0];
   } catch (e) {
     if (e?.code === '42703') {
-      const r = await query(
-        'SELECT * FROM users WHERE email = $1 AND role = $2 LIMIT 1',
-        [realEmail, role]
-      );
+      const r = await query('SELECT * FROM users WHERE email = $1 AND role = $2 LIMIT 1', [realEmail, role]);
       user = r.rows[0];
     } else throw e;
   }
@@ -305,38 +435,38 @@ export async function googleLogin(credential, role = 'customer') {
     const pseudoEmail = pseudoEmailFromUsername(username);
     const placeholderHash = await bcrypt.hash(randomUUID(), 12);
 
+    // Google login → email ya verificado por Google
     try {
       const r = await query(
-        `INSERT INTO users(full_name, alias, email, real_email, google_id, role, status, password_hash)
-        VALUES($1,$2,$3,$4,$5,$6,'active',$7) RETURNING *`,
-                            [fullName, alias, pseudoEmail, realEmail, googleId, role, placeholderHash]
+        `INSERT INTO users(full_name, alias, email, real_email, google_id, role, status, password_hash, email_verified)
+         VALUES($1,$2,$3,$4,$5,$6,'active',$7,true) RETURNING *`,
+        [fullName, alias, pseudoEmail, realEmail, googleId, role, placeholderHash]
       );
       user = r.rows[0];
     } catch (e) {
       if (e?.code === '42703') {
         const r = await query(
           `INSERT INTO users(full_name, alias, email, role, status, password_hash)
-          VALUES($1,$2,$3,$4,'active',$5) RETURNING *`,
-                              [fullName, alias, pseudoEmail, role, placeholderHash]
+           VALUES($1,$2,$3,$4,'active',$5) RETURNING *`,
+          [fullName, alias, pseudoEmail, role, placeholderHash]
         );
         user = r.rows[0];
       } else throw e;
     }
 
-    // Crear perfil de rol igual que registerUser
     if (role === 'restaurant') {
       const restName = cleanRestaurantName(alias);
       try {
-        await query('INSERT INTO restaurants(owner_user_id, name, category) VALUES($1,$2,$3)',
-                    [user.id, restName, 'General']);
+        await query('INSERT INTO restaurants(owner_user_id, name, category, is_open, is_verified) VALUES($1,$2,$3,false,false)',
+          [user.id, restName, 'General']);
       } catch (e) {
         if (e?.code !== '42703' && e?.code !== '23505') throw e;
       }
     } else if (role === 'driver') {
       try {
         await query(
-          'INSERT INTO driver_profiles(user_id, vehicle_type, is_verified, is_available) VALUES($1,$2,true,true)',
-                    [user.id, 'bike']
+          'INSERT INTO driver_profiles(user_id, vehicle_type, is_verified, is_available) VALUES($1,$2,true,false)',
+          [user.id, 'bike']
         );
       } catch (e) {
         if (e?.code !== '23505') throw e;
@@ -345,7 +475,7 @@ export async function googleLogin(credential, role = 'customer') {
   } else {
     try {
       if (!user.google_id) {
-        await query('UPDATE users SET google_id=$1 WHERE id=$2 AND role=$3', [googleId, user.id, role]);
+        await query('UPDATE users SET google_id=$1, email_verified=true WHERE id=$2 AND role=$3', [googleId, user.id, role]);
       }
     } catch (_) {}
   }
@@ -353,7 +483,6 @@ export async function googleLogin(credential, role = 'customer') {
   const username = user.email.replace(/@local\.test$/, '');
   const token = jwt.sign({ userId: user.id, role: user.role, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 
-  // Cargar datos de rol para la respuesta (igual que loginUser)
   let profile = {
     alias:        user.alias || user.full_name || username,
     address:      user.address || null,
@@ -399,17 +528,64 @@ export async function verifyEmail(token) {
   if (payload.purpose !== 'email-verify') throw new AppError(401, 'Token inválido');
 
   try {
-    await query(
+    const r = await query(
       `UPDATE users
-      SET email_verified = true, email_verify_token = NULL, email_verify_expires = NULL
-      WHERE real_email = $1 AND email_verified = false
-      RETURNING id`,
+       SET email_verified = true, email_verify_token = NULL, email_verify_expires = NULL
+       WHERE real_email = $1 AND email_verified = false
+       RETURNING id`,
       [payload.email]
     );
+    if (r.rowCount === 0) {
+      // Ya estaba verificado — no es error
+      return { alreadyVerified: true };
+    }
+    return { ok: true };
   } catch (e) {
-    if (e?.code === '42703') return;
+    if (e?.code === '42703') return { ok: true }; // columna no existe aún
     throw e;
   }
+}
+
+// ── REENVIAR EMAIL DE VERIFICACIÓN ───────────────────────────────────────────
+export async function resendVerificationEmail(email) {
+  const realEmail = email.trim().toLowerCase();
+  const r = await query(
+    'SELECT id, alias, full_name, email_verified FROM users WHERE real_email = $1 AND role = $2',
+    [realEmail, 'customer']
+  ).catch(() => ({ rows: [], rowCount: 0 }));
+
+  const user = r.rows[0];
+  if (!user || user.email_verified) return; // silencioso — no revelar si existe
+
+  const verifyToken   = jwt.sign({ email: realEmail, purpose: 'email-verify' }, env.jwtSecret, { expiresIn: '48h' });
+  const verifyExpires = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+
+  await query(
+    'UPDATE users SET email_verify_token=$1, email_verify_expires=$2 WHERE id=$3',
+    [verifyToken, verifyExpires, user.id]
+  ).catch(() => {});
+
+  const frontUrl  = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const verifyUrl = `${frontUrl}/verify-email?token=${verifyToken}`;
+  const name      = user.alias || user.full_name || 'usuario';
+
+  sendGmailSafe({
+    to:      realEmail,
+    subject: 'Tu enlace de verificación — Morelivery',
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+        <h2 style="color:#1a202c">Verificación de correo 📬</h2>
+        <p style="color:#4a5568">Hola ${name}, aquí tienes tu nuevo enlace de verificación:</p>
+        <p style="margin:24px 0">
+          <a href="${verifyUrl}"
+             style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700">
+            Verificar correo
+          </a>
+        </p>
+        <p style="color:#718096;font-size:13px">Expira en 48 horas.</p>
+      </div>
+    `,
+  });
 }
 
 // ── FORGOT PASSWORD ───────────────────────────────────────────────────────────
@@ -430,15 +606,11 @@ export async function forgotPassword(email) {
   } catch (e) {
     if (e?.code === '42703') {
       try {
-        const r = await query(
-          'SELECT id, alias, full_name FROM users WHERE email = $1',
-          [pseudoEmailFromUsername(realEmail.split('@')[0])]
-        );
+        const r = await query('SELECT id, alias, full_name FROM users WHERE email = $1',
+          [pseudoEmailFromUsername(realEmail.split('@')[0])]);
         user = r.rows[0];
       } catch (_) { return; }
-    } else {
-      return;
-    }
+    } else { return; }
   }
 
   if (!user) return;
@@ -453,32 +625,28 @@ export async function forgotPassword(email) {
   const frontUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const resetUrl = `${frontUrl}/reset-password?token=${resetToken}`;
 
-  try {
-    await sendGmail({
-      to:      realEmail,
-      subject: 'Recupera tu contrase\u00F1a en Morelivery',
-      html: `
+  sendGmailSafe({
+    to:      realEmail,
+    subject: 'Recupera tu contraseña en Morelivery',
+    html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
-      <h2 style="color:#1a202c;margin-bottom:8px">Hola, ${name} 👋</h2>
-      <p style="color:#4a5568">Recibimos una solicitud para restablecer la contraseña de tu cuenta.</p>
-      <p style="margin:24px 0">
-      <a href="${resetUrl}"
-      style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">
-      Restablecer contraseña
-      </a>
-      </p>
-      <p style="color:#718096;font-size:13px">
-      Este enlace expira en <strong>15 minutos</strong>.<br>
-      Si no solicitaste esto, ignora este correo — tu contraseña no cambiará.
-      </p>
-      <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
-      <p style="color:#a0aec0;font-size:12px">Morelivery · No responder este correo</p>
+        <h2 style="color:#1a202c;margin-bottom:8px">Hola, ${name} 👋</h2>
+        <p style="color:#4a5568">Recibimos una solicitud para restablecer tu contraseña.</p>
+        <p style="margin:24px 0">
+          <a href="${resetUrl}"
+             style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">
+            Restablecer contraseña
+          </a>
+        </p>
+        <p style="color:#718096;font-size:13px">
+          Este enlace expira en <strong>15 minutos</strong>.<br>
+          Si no solicitaste esto, ignora este correo.
+        </p>
+        <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
+        <p style="color:#a0aec0;font-size:12px">Morelivery · No responder este correo</p>
       </div>
-      `,
-    });
-  } catch (err) {
-    logEvent('auth.forgot_password_email_error', { userId: user.id, error: err.message });
-  }
+    `,
+  });
 }
 
 // ── RESET PASSWORD ────────────────────────────────────────────────────────────
@@ -539,15 +707,9 @@ export async function updateProfileAddress(userId, role, address, displayName, l
         const candidates = [
           ['full_name', displayName !== undefined && displayName !== null ? displayName.trim() : undefined],
           ['alias', displayName !== undefined && displayName !== null ? displayName.trim() : undefined],
-          ['address', address],
-          ['lat', lat],
-          ['lng', lng],
-          ['home_lat', homeLat],
-          ['home_lng', homeLng],
-          ['postal_code', postalCode],
-          ['colonia', colonia],
-          ['estado', estado],
-          ['ciudad', ciudad],
+          ['address', address], ['lat', lat], ['lng', lng],
+          ['home_lat', homeLat], ['home_lng', homeLng],
+          ['postal_code', postalCode], ['colonia', colonia], ['estado', estado], ['ciudad', ciudad],
         ];
         for (const [col, val] of candidates) {
           if (val === undefined) continue;
@@ -570,7 +732,10 @@ export async function updateProfileAddress(userId, role, address, displayName, l
 
   let row = {};
   try {
-    const confirmed = await query('SELECT full_name, alias, address, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM users WHERE id=$1', [userId]);
+    const confirmed = await query(
+      'SELECT full_name, alias, address, lat, lng, home_lat, home_lng, postal_code, colonia, estado, ciudad FROM users WHERE id=$1',
+      [userId]
+    );
     row = confirmed.rows[0] || {};
   } catch (_) {
     try {
@@ -594,44 +759,6 @@ export async function updateProfileAddress(userId, role, address, displayName, l
   };
 }
 
-// ── VERIFICACIÓN DE EMAIL — descomenta cuando estés listo ────────────────
-// Paso 1: Agrega EMAIL_VERIFICATION_ENABLED=true en Render
-// Paso 2: Descomenta el bloque de abajo
-//
-// if (process.env.EMAIL_VERIFICATION_ENABLED === 'true') {
-//   const frontUrl  = process.env.FRONTEND_URL || 'http://localhost:5173';
-//   const verifyUrl = `${frontUrl}/verify-email?token=${verifyToken}`;
-//   try {
-//     await mailer.sendMail({
-//       from:    `"Morelivery" <${process.env.SMTP_USER}>`,
-//       to:      realEmail,
-//       subject: 'Confirma tu correo en Morelivery',
-//       html: `
-//         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
-//           <h2 style="color:#1a202c">Confirma tu correo 📬</h2>
-//           <p>Hola ${payload.alias}, haz clic para verificar tu cuenta:</p>
-//           <p style="margin:24px 0">
-//             <a href="${verifyUrl}"
-//                style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700">
-//               Verificar correo
-//             </a>
-//           </p>
-//           <p style="color:#718096;font-size:13px">El enlace expira en 48 horas.</p>
-//         </div>
-//       `,
-//     });
-//   } catch (err) {
-//     logEvent('auth.verify_email_send_error', { userId: result.rows[0]?.id, error: err.message });
-//   }
-// }
-
-// ── BLOQUEAR LOGIN SIN VERIFICAR — descomenta en loginUser cuando actives lo de arriba ──
-// Busca la función loginUser y agrega esto justo después del check de user.status:
-//
-// if (user.email_verified === false) {
-//   throw new AppError(403, 'Verifica tu correo antes de ingresar');
-// }
-
 export async function changePassword(userId, currentPassword, newPassword) {
   const r = await query('SELECT password_hash FROM users WHERE id = $1', [userId]);
   if (r.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
@@ -643,7 +770,6 @@ export async function changePassword(userId, currentPassword, newPassword) {
 }
 
 export async function deleteAccount(userId, role, currentPassword) {
-  // Verificar contraseña
   const pwdRow = await query('SELECT password_hash, google_id FROM users WHERE id=$1', [userId]).catch(() => ({ rows: [], rowCount: 0 }));
   if (pwdRow.rowCount === 0) throw new AppError(404, 'Usuario no encontrado');
   const { password_hash: hash, google_id: googleId } = pwdRow.rows[0];
@@ -666,14 +792,13 @@ export async function deleteAccount(userId, role, currentPassword) {
   } else if (role === 'restaurant') {
     const r = await query(
       `SELECT 1 FROM orders o JOIN restaurants rest ON rest.id=o.restaurant_id
-      WHERE rest.owner_user_id=$1 AND o.status=ANY($2::text[]) LIMIT 1`,
-                          [userId, PENDING_STATUSES]
+       WHERE rest.owner_user_id=$1 AND o.status=ANY($2::text[]) LIMIT 1`,
+      [userId, PENDING_STATUSES]
     );
     hasPending = r.rowCount > 0;
   }
-  if (hasPending) throw new AppError(409, 'No puedes eliminar tu cuenta mientras tengas pedidos activos. Completa o cancela tus pedidos primero.');
+  if (hasPending) throw new AppError(409, 'No puedes eliminar tu cuenta mientras tengas pedidos activos.');
 
-  // Limpiar FKs antes de borrar user
   try {
     if (role === 'driver') {
       await query('DELETE FROM driver_profiles WHERE user_id=$1', [userId]);
