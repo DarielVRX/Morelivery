@@ -8,8 +8,7 @@
 //   // Queda disponible como GET /api/admin/orders/export
 
 import { Router }       from 'express';
-import { authenticate } from '../../middlewares/auth.js';
-import { authorizeRole } from '../../middlewares/auth.js'; // ajustar si el nombre difiere
+import { authenticate, authorize } from '../../middlewares/auth.js';
 import { AppError }     from '../../utils/errors.js';
 import { query }        from '../../config/db.js';
 
@@ -25,7 +24,7 @@ const router = Router();
 //   format — "json" | "csv" (default: "json")
 //
 // Solo accesible para admin.
-router.get('/export', authenticate, authorizeRoleMiddleware('admin'), async (req, res, next) => {
+router.get('/export', authenticate, authorize(['admin']), async (req, res, next) => {
   try {
     const { date, format = 'json' } = req.query;
 
@@ -77,14 +76,4 @@ router.get('/export', authenticate, authorizeRoleMiddleware('admin'), async (req
 
 export default router;
 
-// ── Helper local ─────────────────────────────────────────────────────────────
-// Si tu middleware de roles se llama diferente, reemplaza authorizeRoleMiddleware.
-// Ejemplo si usas authorizeRole('admin') de tu auth middleware:
-//   router.get('/export', authenticate, authorizeRole('admin'), async ...)
-function authorizeRoleMiddleware(role) {
-  return (req, _res, next) => {
-    if (req.user?.role !== role)
-      return next(new AppError(403, `Requiere rol: ${role}`));
-    next();
-  };
-}
+
