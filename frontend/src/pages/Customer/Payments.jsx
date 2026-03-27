@@ -21,7 +21,7 @@ const fmt = cents => `$${((cents ?? 0) / 100).toFixed(2)}`;
 const MP_PUBLIC_KEY = import.meta.env.VITE_MP_PUBLIC_KEY;
 
 // ── MP Card Brick ─────────────────────────────────────────────────────────────
-function MPCardBrick({ preferenceId, amountCents, onSuccess, onError }) {
+function MPCardBrick({ preferenceId, amountCents, onSuccess, onError, token }) {
   const brickRef   = useRef(null);
   const mpRef      = useRef(null);
   const [ready,    setReady]    = useState(false);
@@ -60,7 +60,7 @@ function MPCardBrick({ preferenceId, amountCents, onSuccess, onError }) {
               const res = await apiFetch('/payments/process-card', {
                 method: 'POST',
                 body: JSON.stringify(cardFormData),
-              }, null); // token se agrega en apiFetch desde contexto
+              }, token);
               if (res?.status === 'approved') {
                 onSuccess(res.payment_id);
               } else {
@@ -634,6 +634,7 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
           <MPCardBrick
             preferenceId={preferenceId}
             amountCents={grandTotal}
+            token={auth.token}
             onSuccess={handleBrickSuccess}
             onError={handleBrickError}
           />
