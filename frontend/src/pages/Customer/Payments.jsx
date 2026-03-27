@@ -8,6 +8,7 @@ import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
 
+// ── Icons ─────────────────────────────────────────────────────────────────────
 function IconPin()     { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>; }
 function IconPackage() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>; }
 function IconWarning() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>; }
@@ -17,6 +18,7 @@ function IconLock()    { return <svg width="13" height="13" viewBox="0 0 24 24" 
 
 const VITE_STRIPE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 
+// ── Stripe loader ─────────────────────────────────────────────────────────────
 let stripePromise = null;
 function getStripe() {
   if (!VITE_STRIPE_KEY) return Promise.resolve(null);
@@ -28,10 +30,11 @@ function getStripe() {
   return stripePromise;
 }
 
+// ── Stripe Elements form ──────────────────────────────────────────────────────
 function StripeCardForm({ clientSecret, onSuccess, onError }) {
-  const [ready,  setReady]  = useState(false);
-  const [paying, setPaying] = useState(false);
-  const [stripe, setStripe] = useState(null);
+  const [ready,    setReady]    = useState(false);
+  const [paying,   setPaying]   = useState(false);
+  const [stripe,   setStripe]   = useState(null);
   const [elements, setElements] = useState(null);
 
   useEffect(() => {
@@ -41,7 +44,10 @@ function StripeCardForm({ clientSecret, onSuccess, onError }) {
       if (!s || cancelled) return;
       setStripe(s);
       const els = s.elements({ clientSecret, locale: 'es' });
-      const el  = els.create('payment', { layout: 'tabs', fields: { billingDetails: { address: 'never' } } });
+      const el  = els.create('payment', {
+        layout: 'tabs',
+        fields: { billingDetails: { address: 'never' } },
+      });
       const container = document.getElementById('stripe-payment-element');
       if (container && !cancelled) {
         el.mount(container);
@@ -57,47 +63,77 @@ function StripeCardForm({ clientSecret, onSuccess, onError }) {
     setPaying(true);
     try {
       const { error, paymentIntent } = await stripe.confirmPayment({
-        elements, confirmParams: { return_url: window.location.href }, redirect: 'if_required',
+        elements,
+        confirmParams: { return_url: window.location.href },
+        redirect: 'if_required',
       });
       if (error) onError(error.message || 'Pago rechazado');
       else if (paymentIntent?.status === 'succeeded') onSuccess(paymentIntent);
       else onError('Estado de pago inesperado. Contacta a soporte.');
-    } catch (e) { onError(e.message || 'Error inesperado'); }
-    finally { setPaying(false); }
+    } catch (e) {
+      onError(e.message || 'Error inesperado al procesar el pago');
+    } finally { setPaying(false); }
   }
 
   return (
     <div>
-      <div id="stripe-payment-element" style={{ minHeight: 120 }}>
-        {!ready && <div style={{ padding:'1rem', textAlign:'center', color:'var(--text-tertiary)', fontSize:'0.82rem' }}>Cargando formulario de pago…</div>}
+      {/* Overlay de carga bloqueante mientras Stripe procesa */}
+      {paying && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:9999,
+          display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ background:'var(--bg-card)', borderRadius:16, padding:'2rem 2.5rem',
+            textAlign:'center', maxWidth:280, width:'90%' }}>
+            <div style={{ width:40, height:40, border:'3px solid var(--brand)',
+              borderTopColor:'transparent', borderRadius:'50%',
+              animation:'spin 0.8s linear infinite', margin:'0 auto 1rem' }} />
+            <div style={{ fontWeight:700, fontSize:'1rem', marginBottom:'0.25rem' }}>Procesando pago…</div>
+            <div style={{ fontSize:'0.82rem', color:'var(--text-tertiary)' }}>No cierres esta pantalla</div>
+          </div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+      <div id="stripe-payment-element" style={{ minHeight:120 }}>
+        {!ready && (
+          <div style={{ padding:'1.5rem', textAlign:'center', color:'var(--text-tertiary)', fontSize:'0.82rem' }}>
+            Cargando formulario de pago…
+          </div>
+        )}
       </div>
-      <div style={{ display:'flex', alignItems:'center', gap:'0.35rem', fontSize:'0.72rem', color:'var(--text-tertiary)', margin:'0.75rem 0', justifyContent:'center' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'0.35rem', fontSize:'0.72rem',
+        color:'var(--text-tertiary)', margin:'0.75rem 0', justifyContent:'center' }}>
         <IconLock /> Pago procesado de forma segura por Stripe
       </div>
-      <button className="btn-primary" style={{ width:'100%', padding:'0.75rem', fontSize:'0.95rem' }}
-        disabled={!ready || paying} onClick={pay}>
-        {paying ? 'Procesando pago…' : 'Pagar con tarjeta'}
+      <button className="btn-primary"
+        style={{ width:'100%', padding:'0.75rem', fontSize:'0.95rem' }}
+        disabled={!ready || paying}
+        onClick={pay}>
+        {paying ? 'Procesando…' : 'Pagar con tarjeta'}
       </button>
     </div>
   );
 }
 
+// ── Main ──────────────────────────────────────────────────────────────────────
 export default function CustomerPayments({ onOrderUpdate } = {}) {
   const { auth }  = useAuth();
   const navigate  = useNavigate();
   const { cart, clearCart } = useCart();
 
-  const [draft,         setDraft]         = useState(null);
-  const [sending,       setSending]       = useState(false);
-  const [methods,       setMethods]       = useState([]);
-  const [loading,       setLoading]       = useState(true);
-  const [method,        setMethod]        = useState('cash');
-  const [msg,           setMsg]           = useState('');
-  const [msgType,       setMsgType]       = useState('ok');
-  const [tipCents,      setTipCents]      = useState(0);
-  const [clientSecret,  setClientSecret]  = useState(null);
-  const [orderId,       setOrderId]       = useState(null);
-  const [stripeStep,    setStripeStep]    = useState('idle');
+  const [draft,          setDraft]          = useState(null);
+  const [sending,        setSending]        = useState(false);
+  const [methods,        setMethods]        = useState([]);
+  const [loading,        setLoading]        = useState(true);
+  const [method,         setMethod]         = useState('cash');
+  const [msg,            setMsg]            = useState('');
+  const [msgType,        setMsgType]        = useState('ok');
+  const [tipCents,       setTipCents]       = useState(0);
+
+  // Stripe
+  const [clientSecret,   setClientSecret]   = useState(null);
+  const [paymentIntentId, setPaymentIntentId] = useState(null);
+  const [stripeStep,     setStripeStep]     = useState('idle'); // idle | creating | paying | done
+
+  // Dirección
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryLat,     setDeliveryLat]     = useState(null);
   const [deliveryLng,     setDeliveryLng]     = useState(null);
@@ -194,14 +230,24 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
     return { lat, lng, addr };
   }
 
+  // Calcular totales
+  const subtotal    = draft?.subtotal_cents || 0;
+  const serviceFee  = Math.round(subtotal * 0.05);
+  const deliveryFee = Math.round(subtotal * 0.10);
+  const grandTotal  = subtotal + serviceFee + deliveryFee + tipCents;
+  const fmt         = cents => `$${((cents ?? 0) / 100).toFixed(2)}`;
+
+  // ── Flujo efectivo ────────────────────────────────────────────────────────
   async function handleCash() {
     if (!draft) { flash('No hay un pedido pendiente.', 'error'); return; }
     const { lat, lng, addr } = resolveCoords();
     setSending(true);
     try {
       await apiFetch('/orders', { method: 'POST', body: JSON.stringify({
-        restaurantId: draft.restaurantId, items: draft.items || [],
-        payment_method: 'cash', tip_cents: tipCents,
+        restaurantId:   draft.restaurantId,
+        items:          draft.items || [],
+        payment_method: 'cash',
+        tip_cents:      tipCents,
         ...(addr?.trim() ? { delivery_address: addr } : {}),
         ...(lat != null  ? { delivery_lat: lat }       : {}),
         ...(lng != null  ? { delivery_lng: lng }       : {}),
@@ -213,27 +259,24 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
     finally { setSending(false); }
   }
 
+  // ── Flujo tarjeta paso 1: crear PaymentIntent sin pedido ─────────────────
   async function handleCardStart() {
     if (!draft) { flash('No hay un pedido pendiente.', 'error'); return; }
-    if (!VITE_STRIPE_KEY) { flash('Pago con tarjeta no disponible.', 'error'); return; }
-    const { lat, lng, addr } = resolveCoords();
-    if (!lat || !lng) { flash('Selecciona una dirección de entrega.', 'error'); return; }
+    if (!VITE_STRIPE_KEY) { flash('Pago con tarjeta no disponible en este momento.', 'error'); return; }
+    const { lat, lng } = resolveCoords();
+    if (!lat || !lng) { flash('Selecciona una dirección de entrega antes de continuar.', 'error'); return; }
+    if (grandTotal < 1000) { flash('El monto mínimo para pago con tarjeta es $10.00 MXN.', 'error'); return; }
 
     setStripeStep('creating'); setSending(true);
     try {
-      // Solo calcular el monto — NO crear el pedido aún
-      const subtotal    = draft.subtotal_cents || 0;
-      const serviceFee  = Math.round(subtotal * 0.05);
-      const deliveryFee = Math.round(subtotal * 0.10);
-      const total       = subtotal + serviceFee + deliveryFee + tipCents;
-
       const intentRes = await apiFetch('/payments/intent', {
         method: 'POST',
-        body: JSON.stringify({ amount_cents: total, method: 'card' }),
+        body: JSON.stringify({ amount_cents: grandTotal, method: 'card' }),
       }, auth.token);
 
-      if (!intentRes.clientSecret) throw new Error('No se recibió clientSecret');
+      if (!intentRes.clientSecret) throw new Error('No se recibió clientSecret de Stripe');
       setClientSecret(intentRes.clientSecret);
+      setPaymentIntentId(intentRes.paymentIntentId);
       setStripeStep('paying');
     } catch (e) {
       flash(e.message || 'Error al iniciar el pago.', 'error');
@@ -241,60 +284,73 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
     } finally { setSending(false); }
   }
 
+  // ── Flujo tarjeta paso 2: pago exitoso → crear pedido ────────────────────
   async function handlePaymentSuccess(paymentIntent) {
     setStripeStep('creating');
     const { lat, lng, addr } = resolveCoords();
     try {
       await apiFetch('/orders', { method: 'POST', body: JSON.stringify({
-        restaurantId:   draft.restaurantId,
-        items:          draft.items || [],
-        payment_method: 'card',
-        tip_cents:      tipCents,
+        restaurantId:             draft.restaurantId,
+        items:                    draft.items || [],
+        payment_method:           'card',
+        tip_cents:                tipCents,
         stripe_payment_intent_id: paymentIntent.id,
         ...(addr?.trim() ? { delivery_address: addr } : {}),
-                                                                       ...(lat != null  ? { delivery_lat: lat }       : {}),
-                                                                       ...(lng != null  ? { delivery_lng: lng }       : {}),
+        ...(lat != null  ? { delivery_lat: lat }       : {}),
+        ...(lng != null  ? { delivery_lng: lng }       : {}),
       })}, auth.token);
       clearPendingOrder(); clearCart();
       setStripeStep('done');
       setTimeout(() => navigate('/customer'), 2000);
     } catch (e) {
-      flash(`Pago exitoso pero error al crear el pedido: ${e.message}. Contacta a soporte con tu comprobante de pago.`, 'error');
+      flash(
+        `Pago exitoso pero error al crear el pedido: ${e.message}. ` +
+        `Guarda tu referencia de pago: ${paymentIntent.id} y contacta a soporte.`,
+        'error'
+      );
       setStripeStep('idle');
     }
   }
 
   function handlePaymentError(errorMsg) {
     flash(errorMsg, 'error');
-    setStripeStep('idle'); setClientSecret(null); setOrderId(null);
+    setStripeStep('idle');
+    setClientSecret(null);
+    setPaymentIntentId(null);
   }
 
-  if (loading) return <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)' }}>Cargando…</div>;
-
-  const subtotal    = draft?.subtotal_cents || 0;
-  const serviceFee  = Math.round(subtotal * 0.05);
-  const deliveryFee = Math.round(subtotal * 0.10);
-  const total       = subtotal + serviceFee + deliveryFee + (method === 'cash' ? tipCents : 0);
-  const fmt         = cents => `$${((cents ?? 0) / 100).toFixed(2)}`;
+  if (loading) return (
+    <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)' }}>Cargando…</div>
+  );
 
   return (
     <div style={{ padding:'1rem', maxWidth:480, margin:'0 auto' }}>
 
-      {/* Resumen pedido + dirección */}
+      {/* Resumen + dirección */}
       {draft && (
-        <div style={{ background:'var(--bg-sunken)', border:'1px solid var(--border)', borderRadius:10, padding:'0.75rem', marginBottom:'1.25rem', fontSize:'0.82rem', color:'var(--text-secondary)' }}>
-          <div style={{ fontWeight:700, color:'var(--text-primary)', marginBottom:'0.4rem', display:'flex', alignItems:'center', gap:'0.4rem' }}>
+        <div style={{ background:'var(--bg-sunken)', border:'1px solid var(--border)',
+          borderRadius:10, padding:'0.75rem', marginBottom:'1.25rem',
+          fontSize:'0.82rem', color:'var(--text-secondary)' }}>
+          <div style={{ fontWeight:700, color:'var(--text-primary)', marginBottom:'0.4rem',
+            display:'flex', alignItems:'center', gap:'0.4rem' }}>
             <IconPackage /> Pedido pendiente
           </div>
-          {draft.items?.length > 0 && <div style={{ marginBottom:'0.4rem' }}>{draft.items.length} producto{draft.items.length !== 1 ? 's' : ''}</div>}
+          {draft.items?.length > 0 && (
+            <div style={{ marginBottom:'0.4rem' }}>
+              {draft.items.length} producto{draft.items.length !== 1 ? 's' : ''}
+            </div>
+          )}
           {fromGps && (
-            <div style={{ background:'var(--warn-bg)', border:'1px solid var(--warn-border)', borderRadius:8, padding:'0.5rem 0.65rem', marginBottom:'0.5rem', fontSize:'0.78rem', color:'var(--warn)', display:'flex', alignItems:'flex-start', gap:'0.4rem' }}>
+            <div style={{ background:'var(--warn-bg)', border:'1px solid var(--warn-border)',
+              borderRadius:8, padding:'0.5rem 0.65rem', marginBottom:'0.5rem',
+              fontSize:'0.78rem', color:'var(--warn)', display:'flex', alignItems:'flex-start', gap:'0.4rem' }}>
               <span style={{ flexShrink:0, display:'flex' }}><IconWarning /></span>
               <span>Dirección detectada por GPS. Confirma que es correcta.</span>
             </div>
           )}
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'0.5rem', flexWrap:'wrap' }}>
-            <div style={{ fontSize:'0.8rem', color: deliveryAddress ? 'var(--text-primary)' : 'var(--warn)', fontWeight: deliveryAddress ? 400 : 600, flex:1, minWidth:0 }}>
+            <div style={{ fontSize:'0.8rem', color: deliveryAddress ? 'var(--text-primary)' : 'var(--warn)',
+              fontWeight: deliveryAddress ? 400 : 600, flex:1, minWidth:0 }}>
               {deliveryAddress
                 ? <span style={{ display:'flex', alignItems:'center', gap:'0.3rem' }}><IconPin />{deliveryAddress}</span>
                 : <span style={{ display:'flex', alignItems:'center', gap:'0.3rem' }}><IconWarning />Sin dirección de entrega</span>
@@ -308,76 +364,88 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
         </div>
       )}
 
-      {/* Desglose */}
-      {draft?.items_detail?.length > 0 && (
-        <div style={{ background:'var(--bg-sunken)', border:'1px solid var(--border)', borderRadius:10, padding:'0.75rem', marginBottom:'1.25rem' }}>
-          <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.5rem' }}>Productos</p>
+      {/* Desglose de precios */}
+      {draft?.items_detail?.length > 0 && stripeStep === 'idle' && (
+        <div style={{ background:'var(--bg-sunken)', border:'1px solid var(--border)',
+          borderRadius:10, padding:'0.75rem', marginBottom:'1.25rem' }}>
+          <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
+            textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.5rem' }}>Productos</p>
           <ul style={{ listStyle:'none', padding:0, margin:'0 0 0.75rem' }}>
             {draft.items_detail.map((it, i) => (
-              <li key={i} style={{ display:'flex', justifyContent:'space-between', fontSize:'0.82rem', color:'var(--text-secondary)', marginBottom:'0.2rem' }}>
+              <li key={i} style={{ display:'flex', justifyContent:'space-between',
+                fontSize:'0.82rem', color:'var(--text-secondary)', marginBottom:'0.2rem' }}>
                 <span>{it.quantity > 1 ? `${it.quantity}× ` : ''}{it.name}</span>
                 <span style={{ flexShrink:0, marginLeft:'0.5rem' }}>{fmt(it.price_cents * it.quantity)}</span>
               </li>
             ))}
           </ul>
 
-          {/* Propina solo para efectivo */}
-          {method === 'cash' && (
-            <>
-              <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>Agradecimiento al conductor</p>
-              <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', marginBottom:'0.75rem' }}>
-                {[{pct:0,label:'—'},{pct:5,label:'5%'},{pct:10,label:'10%'},{pct:20,label:'20%'}].map(({pct, label}) => {
-                  const v = pct === 0 ? 0 : Math.round(subtotal * pct / 100);
-                  const sel = tipCents === v;
-                  return (
-                    <button key={pct} onClick={() => { setTipCents(v); savePendingOrder({ ...draft, tip_cents: v }); }}
-                      style={{ padding:'0.25rem 0.55rem', cursor:'pointer', fontSize:'0.78rem',
-                        border:`1.5px solid ${sel ? 'var(--success)' : 'var(--border)'}`,
-                        borderRadius:6, background: sel ? 'var(--success-bg)' : 'var(--bg-card)',
-                        color: sel ? 'var(--success)' : 'var(--text-secondary)',
-                        fontWeight: sel ? 700 : 400, minHeight:'unset' }}>
-                      {label}{pct > 0 && subtotal > 0 ? ` (${fmt(v)})` : ''}
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
+          {/* Propina — disponible para ambos métodos */}
+          <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
+            textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
+            Agradecimiento al conductor
+          </p>
+          <div style={{ display:'flex', gap:'0.25rem', flexWrap:'wrap', marginBottom:'0.75rem' }}>
+            {[{pct:0,label:'—'},{pct:5,label:'5%'},{pct:10,label:'10%'},{pct:20,label:'20%'}].map(({pct, label}) => {
+              const v = pct === 0 ? 0 : Math.round(subtotal * pct / 100);
+              const sel = tipCents === v;
+              return (
+                <button key={pct} onClick={() => { setTipCents(v); savePendingOrder({ ...draft, tip_cents: v }); }}
+                  style={{ padding:'0.25rem 0.55rem', cursor:'pointer', fontSize:'0.78rem',
+                    border:`1.5px solid ${sel ? 'var(--success)' : 'var(--border)'}`,
+                    borderRadius:6, background: sel ? 'var(--success-bg)' : 'var(--bg-card)',
+                    color: sel ? 'var(--success)' : 'var(--text-secondary)',
+                    fontWeight: sel ? 700 : 400, minHeight:'unset' }}>
+                  {label}{pct > 0 && subtotal > 0 ? ` (${fmt(v)})` : ''}
+                </button>
+              );
+            })}
+          </div>
 
-          <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)', borderTop:'1px solid var(--border-light)', paddingTop:'0.6rem' }}>
+          {/* Desglose */}
+          <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)',
+            borderTop:'1px solid var(--border-light)', paddingTop:'0.6rem' }}>
             {[['Subtotal', subtotal],['Servicio (5%)', serviceFee],['Envío (10%)', deliveryFee]].map(([label, val]) => (
               <div key={label} style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.15rem' }}>
                 <span>{label}</span><span>{fmt(val)}</span>
               </div>
             ))}
-            {method === 'cash' && tipCents > 0 && (
+            {tipCents > 0 && (
               <div style={{ display:'flex', justifyContent:'space-between', color:'var(--success)', marginBottom:'0.15rem' }}>
                 <span>Agradecimiento</span><span>+{fmt(tipCents)}</span>
               </div>
             )}
-            {method === 'card' && (
-              <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginBottom:'0.15rem', fontStyle:'italic' }}>
-                La propina al conductor se gestiona en efectivo al momento de la entrega
-              </div>
-            )}
-            <div style={{ display:'flex', justifyContent:'space-between', fontWeight:800, fontSize:'0.95rem', color:'var(--text-primary)', marginTop:'0.4rem', paddingTop:'0.4rem', borderTop:'1px solid var(--border)' }}>
-              <span>Total</span><span>{fmt(total)}</span>
+            <div style={{ display:'flex', justifyContent:'space-between', fontWeight:800,
+              fontSize:'0.95rem', color:'var(--text-primary)', marginTop:'0.4rem',
+              paddingTop:'0.4rem', borderTop:'1px solid var(--border)' }}>
+              <span>Total</span><span>{fmt(grandTotal)}</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Selector método + botón */}
+      {/* Selector de método + botón confirmar */}
       {stripeStep === 'idle' && (
         <>
-          <h2 style={{ fontSize:'1.05rem', fontWeight:800, marginBottom:'0.25rem', display:'flex', alignItems:'center', gap:'0.5rem' }}>
+          <h2 style={{ fontSize:'1.05rem', fontWeight:800, marginBottom:'0.25rem',
+            display:'flex', alignItems:'center', gap:'0.5rem' }}>
             <IconCard /> Método de pago
           </h2>
           <div style={{ display:'flex', flexDirection:'column', gap:'0.5rem', marginBottom:'1.5rem' }}>
             {methods.map(m => (
-              <label key={m.id} style={{ display:'flex', alignItems:'center', gap:'0.75rem', padding:'0.75rem 1rem', borderRadius:10, cursor: m.available ? 'pointer' : 'not-allowed', border:`2px solid ${method===m.id ? 'var(--brand)' : 'var(--border)'}`, background: method===m.id ? 'var(--brand-light)' : 'var(--bg-card)', opacity: m.available ? 1 : 0.5 }}>
-                <input type="radio" name="method" value={m.id} checked={method===m.id} disabled={!m.available} onChange={() => m.available && setMethod(m.id)} style={{ accentColor:'var(--brand)', flexShrink:0, width:16, height:16 }} />
-                <span style={{ fontSize:'1.1rem', flexShrink:0 }}>{m.id==='cash' ? <IconCash /> : <IconCard />}</span>
+              <label key={m.id} style={{ display:'flex', alignItems:'center', gap:'0.75rem',
+                padding:'0.75rem 1rem', borderRadius:10,
+                cursor: m.available ? 'pointer' : 'not-allowed',
+                border:`2px solid ${method===m.id ? 'var(--brand)' : 'var(--border)'}`,
+                background: method===m.id ? 'var(--brand-light)' : 'var(--bg-card)',
+                opacity: m.available ? 1 : 0.5 }}>
+                <input type="radio" name="method" value={m.id}
+                  checked={method===m.id} disabled={!m.available}
+                  onChange={() => m.available && setMethod(m.id)}
+                  style={{ accentColor:'var(--brand)', flexShrink:0, width:16, height:16 }} />
+                <span style={{ fontSize:'1.1rem', flexShrink:0 }}>
+                  {m.id === 'cash' ? <IconCash /> : <IconCard />}
+                </span>
                 <div>
                   <span style={{ fontWeight:700, fontSize:'0.875rem' }}>{m.label}</span>
                   {m.coming_soon && <span style={{ fontSize:'0.7rem', color:'var(--text-tertiary)', marginLeft:6 }}>Próximamente</span>}
@@ -385,10 +453,15 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
               </label>
             ))}
           </div>
-          <button className="btn-primary" style={{ width:'100%', padding:'0.75rem', fontSize:'0.95rem' }}
+
+          <button className="btn-primary"
+            style={{ width:'100%', padding:'0.75rem', fontSize:'0.95rem' }}
             disabled={sending || !draft}
             onClick={method === 'cash' ? handleCash : handleCardStart}>
-            {sending ? 'Procesando…' : !draft ? 'Sin pedido pendiente' : method === 'cash' ? 'Confirmar pedido — Efectivo' : 'Continuar con tarjeta'}
+            {sending ? 'Procesando…'
+              : !draft ? 'Sin pedido pendiente'
+              : method === 'cash' ? 'Confirmar pedido — Efectivo'
+              : 'Continuar con tarjeta'}
           </button>
         </>
       )}
@@ -397,24 +470,46 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
       {stripeStep === 'paying' && clientSecret && (
         <div>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1rem' }}>
-            <h2 style={{ fontSize:'1.05rem', fontWeight:800, display:'flex', alignItems:'center', gap:'0.5rem' }}><IconLock /> Pago seguro</h2>
-            <button onClick={() => { setStripeStep('idle'); setClientSecret(null); setOrderId(null); }}
-              style={{ background:'none', border:'none', cursor:'pointer', fontSize:'0.8rem', color:'var(--text-tertiary)', minHeight:'unset' }}>← Volver</button>
+            <h2 style={{ fontSize:'1.05rem', fontWeight:800, display:'flex', alignItems:'center', gap:'0.5rem' }}>
+              <IconLock /> Pago seguro
+            </h2>
+            <button onClick={() => { setStripeStep('idle'); setClientSecret(null); setPaymentIntentId(null); }}
+              style={{ background:'none', border:'none', cursor:'pointer', fontSize:'0.8rem',
+                color:'var(--text-tertiary)', minHeight:'unset' }}>
+              ← Volver
+            </button>
           </div>
-          <div style={{ background:'var(--bg-sunken)', border:'1px solid var(--border)', borderRadius:10, padding:'0.75rem', marginBottom:'1rem', fontSize:'0.82rem', color:'var(--text-secondary)' }}>
-            Total a cobrar: <strong style={{ color:'var(--text-primary)' }}>{fmt(total)}</strong>
+          <div style={{ background:'var(--bg-sunken)', border:'1px solid var(--border)',
+            borderRadius:10, padding:'0.75rem', marginBottom:'1rem', fontSize:'0.82rem' }}>
+            Total a cobrar: <strong>{fmt(grandTotal)}</strong>
+            {tipCents > 0 && <span style={{ color:'var(--success)', marginLeft:6 }}>(incl. {fmt(tipCents)} de agradecimiento)</span>}
           </div>
-          <StripeCardForm clientSecret={clientSecret} onSuccess={handlePaymentSuccess} onError={handlePaymentError} />
+          <StripeCardForm
+            clientSecret={clientSecret}
+            onSuccess={handlePaymentSuccess}
+            onError={handlePaymentError}
+          />
         </div>
       )}
 
+      {/* Creando pedido post-pago */}
       {stripeStep === 'creating' && (
-        <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)' }}>Preparando tu pago…</div>
+        <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)' }}>
+          <div style={{ width:36, height:36, border:'3px solid var(--brand)',
+            borderTopColor:'transparent', borderRadius:'50%',
+            animation:'spin 0.8s linear infinite', margin:'0 auto 1rem' }} />
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          Creando tu pedido…
+        </div>
       )}
 
+      {/* Éxito */}
       {stripeStep === 'done' && (
         <div style={{ padding:'2rem', textAlign:'center' }}>
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.5" strokeLinecap="round" style={{ margin:'0 auto 0.75rem', display:'block' }}><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
+          <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="var(--success)"
+            strokeWidth="2" strokeLinecap="round" style={{ margin:'0 auto 0.75rem', display:'block' }}>
+            <circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/>
+          </svg>
           <div style={{ fontWeight:700, fontSize:'1.1rem', color:'var(--success)' }}>¡Pago exitoso!</div>
           <div style={{ fontSize:'0.85rem', color:'var(--text-tertiary)', marginTop:'0.4rem' }}>Redirigiendo…</div>
         </div>
@@ -427,7 +522,8 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
       )}
 
       {msg && (
-        <div className={`flash ${msgType === 'error' ? 'flash-error' : 'flash-ok'}`} style={{ marginTop:'0.75rem' }}>
+        <div className={`flash ${msgType === 'error' ? 'flash-error' : 'flash-ok'}`}
+          style={{ marginTop:'0.75rem' }}>
           {msg}
         </div>
       )}
