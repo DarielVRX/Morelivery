@@ -95,12 +95,55 @@ router.post('/confirm', authenticate, async (_req, res, next) => {
   return next(new AppError(501, 'Confirmación manual no disponible. Stripe confirma vía webhook.'));
 });
 
-/* ── POST /payments/webhook ── webhook procesador (verificar firma antes de activar) ── */
-router.post('/webhook', async (_req, res) => {
-  // Arquitectura lista para recibir eventos Stripe:
-  // - payment_intent.succeeded
-  // - payment_intent.payment_failed
-  // Pendiente: verificación de firma + persistencia de estado de pago por orden.
+router.post('/webhook', async (req, res) => {
+  const sig    = req.headers['stripe-signature'];
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!secret || !sig) return res.json({ received: true });
+
+  let event;
+  try {
+    // req.body es Buffer gracias al middleware raw en app.js
+    const crypto = await import('node:crypto');
+    const payload = req.body.toString('utf8');
+    const parts   = secret.split('_secret_')[0]; // solo para validar que existe
+    // Verificación manual de firma Stripe (sin SDK)
+    const [tPart, v1Part] = sig.split(',').reduce((acc, part) => {
+      if (part.startsWith('t='))  acc[0] = part.slice(2);
+      if (part.startsWith('v1=')) acc[1] = part.slice(3);
+      return acc;
+    }, [null, null]);
+    const signed   = `${tPart}.${payload}`;
+    const expected = crypto.createHmac('sha256', secret).update(signed).digest('hex');
+    if (expected !== v1Part) return res.status(400).json({ error: 'Firma inválida' });
+    event = JSON.parse(payload);
+  } catch (err) {
+    return res.status(400).json({ error: 'Webhook error: ' + err.message });
+  }
+
+  if (event.type === 'payment_intent.succeeded') {
+    const intent  = event.data.object;
+    const orderId = intent.metadata?.order_id;
+    if (orderId) {
+      await query(
+        `UPDATE payment_intents SET status='succeeded', updated_at=NOW() WHERE provider_intent_id=$1`,
+                  [intent.id],
+      );
+      // Opcional: marcar la orden como pagada
+      // await query(`UPDATE orders SET payment_status='paid' WHERE id=$1`, [orderId]);
+    }
+  }
+
+  if (event.type === 'payment_intent.payment_failed') {
+    const intent = event.data.object;
+    if (intent.id) {
+      await query(
+        `UPDATE payment_intents SET status='failed', updated_at=NOW() WHERE provider_intent_id=$1`,
+                  [intent.id],
+      );
+    }
+  }
+
   return res.json({ received: true });
 });
 
