@@ -1,12 +1,6 @@
 // frontend/src/components/ActiveOrderPanel.jsx
-// FIX aplicado:
-//   1. Botón "Notificar" muestra estado de carga y feedback de éxito/error
-//      directamente en el panel — antes fallaba silenciosamente.
-//   2. showCallSelector se cierra al colapsar el panel (useEffect).
-//   3. onSimulatedCall ahora recibe un callback de resultado para mostrar
-//      confirmación visual sin depender solo de setMsg en Home.
-
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getDriverEarningCents, getOrderGrandTotalCents, isCashPayment } from '../features/driver/shared/orderUtils';
 import { fmt } from '../utils/format';
 import FeeBreakdown from './FeeBreakdown';
@@ -20,27 +14,15 @@ const STATUS_LABEL = {
   created:    'Nuevo pedido',
 };
 
-// ── Iconos ────────────────────────────────────────────────────────────────────
+// ── Icons ─────────────────────────────────────────────────────────────────────
 function IconNavigateActive() {
   return <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/></svg>;
 }
 function IconRoute() {
-  return (
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/>
-      <path d="M6 17V9a6 6 0 016-6h.5"/><path d="M18 7v8a6 6 0 01-6 6h-.5"/>
-    </svg>
-  );
+  return <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M6 17V9a6 6 0 016-6h.5"/><path d="M18 7v8a6 6 0 01-6 6h-.5"/></svg>;
 }
 function IconChevron({ up }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
-      style={{ transform: up ? 'rotate(180deg)' : 'rotate(0deg)', transition:'transform 0.2s' }}>
-      <polyline points="6 9 12 15 18 9"/>
-    </svg>
-  );
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ transform: up ? 'rotate(180deg)' : 'rotate(0deg)', transition:'transform 0.2s' }}><polyline points="6 9 12 15 18 9"/></svg>;
 }
 function IconOTW() {
   return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11" fill="currentColor"/></svg>;
@@ -49,12 +31,7 @@ function IconDelivered() {
   return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>;
 }
 function IconRelevo() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/>
-      <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/>
-    </svg>
-  );
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>;
 }
 function IconRelease() {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>;
@@ -66,12 +43,10 @@ function IconCash() {
   return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></svg>;
 }
 function IconPhone() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.55 12 19.79 19.79 0 01.48 3.38 2 2 0 012.46 1h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 8.73A16 16 0 0015.27 17l1.8-1.8a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/>
-    </svg>
-  );
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.55 12 19.79 19.79 0 01.48 3.38 2 2 0 012.46 1h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 8.73A16 16 0 0015.27 17l1.8-1.8a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>;
+}
+function IconSupport() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;
 }
 
 export default function ActiveOrderPanel({
@@ -93,17 +68,12 @@ export default function ActiveOrderPanel({
   handMode = 'left',
   panelRef,
 }) {
+  const navigate = useNavigate();
   const [showCallSelector, setShowCallSelector] = useState(false);
-  // FIX: estado de carga y feedback por target ('customer' | 'restaurant' | null)
-  const [callingTarget,  setCallingTarget]  = useState(null);   // target en vuelo
-  const [callFeedback,   setCallFeedback]   = useState(null);   // { ok, msg }
+  const [callingTarget,    setCallingTarget]    = useState(null);
+  const [callFeedback,     setCallFeedback]     = useState(null);
 
-  // FIX: cerrar selector cuando el panel se colapsa
-  useEffect(() => {
-    if (!expanded) setShowCallSelector(false);
-  }, [expanded]);
-
-  // Limpiar feedback después de 3 segundos
+  useEffect(() => { if (!expanded) setShowCallSelector(false); }, [expanded]);
   useEffect(() => {
     if (!callFeedback) return;
     const t = setTimeout(() => setCallFeedback(null), 3000);
@@ -123,20 +93,15 @@ export default function ActiveOrderPanel({
   const canRelease = !['on_the_way','delivered','cancelled'].includes(order.status);
 
   const isRight = handMode === 'right';
-
   const restaurantConfirmed = order.restaurant_confirmed !== false;
 
-  // FIX: handler con feedback visual — antes onSimulatedCall fallaba silenciosamente
   const handleNotify = async (target) => {
     setShowCallSelector(false);
     setCallingTarget(target);
     setCallFeedback(null);
     try {
       await onSimulatedCall?.(target);
-      setCallFeedback({
-        ok: true,
-        msg: target === 'customer' ? '✓ Cliente notificado' : '✓ Tienda notificada',
-      });
+      setCallFeedback({ ok: true, msg: target === 'customer' ? '✓ Cliente notificado' : '✓ Tienda notificada' });
     } catch (e) {
       setCallFeedback({ ok: false, msg: e?.message || 'Error al notificar' });
     } finally {
@@ -151,19 +116,19 @@ export default function ActiveOrderPanel({
       position:'absolute', bottom:0, left:0, right:0,
       display:'flex', flexDirection:'column',
     }}>
-      {/* ── Indicador de confirmación pendiente ─────────────────────────── */}
+      {/* Confirmación pendiente */}
       {!restaurantConfirmed && (
         <div style={{
-          background:'#fffbeb', borderBottom:'1px solid #fde68a',
-          padding:'0.3rem 0.75rem', fontSize:'0.72rem', color:'#92400e',
+          background:'var(--warn-bg)', borderBottom:'1px solid var(--warn-border)',
+          padding:'0.3rem 0.75rem', fontSize:'0.72rem', color:'var(--warn)',
           display:'flex', alignItems:'center', gap:6, fontWeight:600,
         }}>
-          <span style={{ animation:'blink 1.2s infinite' }}>⏳</span>
-          Esperando confirmación de la tienda — el pedido no está en tu ruta aún
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Esperando confirmación de la tienda
         </div>
       )}
 
-      {/* ── Fila principal siempre visible ──────────────────────────────── */}
+      {/* Fila principal */}
       <div style={{ display:'flex', alignItems:'stretch', minHeight:72,
         flexDirection: isRight ? 'row-reverse' : 'row' }}>
 
@@ -226,7 +191,7 @@ export default function ActiveOrderPanel({
           </div>
         </div>
 
-        {/* Botones principales SIEMPRE visibles — fuera del expandible */}
+        {/* Botones principales */}
         <div style={{
           display:'flex', flexDirection:'column', gap:4, padding:'0.4rem 0.5rem',
           justifyContent:'center', flexShrink:0,
@@ -239,8 +204,7 @@ export default function ActiveOrderPanel({
               display:'flex', alignItems:'center', justifyContent:'center', gap:5,
               background: canOTW ? 'var(--brand)' : 'var(--bg-raised)',
               color: canOTW ? '#fff' : 'var(--text-tertiary)',
-              opacity: canOTW ? 1 : 0.45,
-              minWidth: 100, minHeight: 44,
+              opacity: canOTW ? 1 : 0.45, minWidth:100, minHeight:44,
             }}
             disabled={loadingStatus === 'on_the_way' || !canOTW}
             onClick={() => onChangeStatus(order.id, 'on_the_way')}>
@@ -253,8 +217,7 @@ export default function ActiveOrderPanel({
               display:'flex', alignItems:'center', justifyContent:'center', gap:5,
               background: canDeliver ? 'var(--success)' : 'var(--bg-raised)',
               color: canDeliver ? '#fff' : 'var(--text-tertiary)',
-              opacity: canDeliver ? 1 : 0.45,
-              minWidth: 100, minHeight: 44,
+              opacity: canDeliver ? 1 : 0.45, minWidth:100, minHeight:44,
             }}
             disabled={loadingStatus === 'delivered' || !canDeliver}
             onClick={() => onChangeStatus(order.id, 'delivered')}>
@@ -263,7 +226,7 @@ export default function ActiveOrderPanel({
         </div>
       </div>
 
-      {/* ── Expandible ──────────────────────────────────────────────────── */}
+      {/* Expandible */}
       <div style={{
         display:'grid',
         gridTemplateRows: expanded ? '1fr' : '0fr',
@@ -275,7 +238,7 @@ export default function ActiveOrderPanel({
             borderTop:'1px solid var(--border-light)',
             display:'flex', flexDirection:'column', gap:'0.4rem' }}>
 
-            {/* Botón llamada simulada — FIX: con feedback visual */}
+            {/* Notificar */}
             <div style={{ position:'relative' }}>
               <button
                 onClick={() => setShowCallSelector(v => !v)}
@@ -287,7 +250,6 @@ export default function ActiveOrderPanel({
                   background: callingTarget ? '#dbeafe' : '#eff6ff',
                   color:'#1d4ed8', cursor: callingTarget ? 'not-allowed' : 'pointer',
                   width:'100%', opacity: callingTarget ? 0.7 : 1,
-                  transition:'all 0.15s',
                 }}>
                 <IconPhone />
                 {callingTarget ? 'Notificando…' : 'Notificar'}
@@ -296,17 +258,13 @@ export default function ActiveOrderPanel({
                 </span>
               </button>
 
-              {/* FIX: feedback de éxito o error visible en el panel */}
               {callFeedback && (
                 <div style={{
-                  marginTop: 4,
-                  padding: '0.3rem 0.6rem',
-                  borderRadius: 6,
-                  fontSize: '0.75rem',
-                  fontWeight: 600,
-                  background: callFeedback.ok ? '#f0fdf4' : '#fef2f2',
-                  color:      callFeedback.ok ? '#15803d' : '#dc2626',
-                  border: `1px solid ${callFeedback.ok ? '#bbf7d0' : '#fecaca'}`,
+                  marginTop:4, padding:'0.3rem 0.6rem', borderRadius:6,
+                  fontSize:'0.75rem', fontWeight:600,
+                  background: callFeedback.ok ? 'var(--success-bg)' : 'var(--danger-bg)',
+                  color:      callFeedback.ok ? 'var(--success)' : 'var(--danger)',
+                  border:`1px solid ${callFeedback.ok ? 'var(--success-border)' : 'var(--danger-border)'}`,
                 }}>
                   {callFeedback.msg}
                 </div>
@@ -319,37 +277,48 @@ export default function ActiveOrderPanel({
                   borderRadius:8, boxShadow:'0 4px 16px rgba(0,0,0,0.15)',
                   zIndex:50, overflow:'hidden',
                 }}>
-                  {/* FIX: llamar handleNotify en lugar de onSimulatedCall directamente */}
-                  <button
-                    onClick={() => handleNotify('customer')}
+                  <button onClick={() => handleNotify('customer')}
                     style={{ width:'100%', padding:'0.6rem 0.75rem', textAlign:'left',
                       background:'none', border:'none', borderBottom:'1px solid var(--border-light)',
                       cursor:'pointer', fontSize:'0.82rem', fontWeight:600 }}>
-                    📱 Notificar al cliente
+                    Notificar al cliente
                   </button>
-                  <button
-                    onClick={() => handleNotify('restaurant')}
+                  <button onClick={() => handleNotify('restaurant')}
                     style={{ width:'100%', padding:'0.6rem 0.75rem', textAlign:'left',
                       background:'none', border:'none', cursor:'pointer',
                       fontSize:'0.82rem', fontWeight:600 }}>
-                    🏪 Notificar a la tienda
+                    Notificar a la tienda
                   </button>
                 </div>
               )}
             </div>
 
+            {/* Botón de soporte — compacto */}
+            <button
+              onClick={() => navigate('/profile?tab=support')}
+              style={{
+                display:'flex', alignItems:'center', gap:6,
+                padding:'0.35rem 0.75rem', borderRadius:8, fontWeight:600,
+                fontSize:'0.75rem', border:'1px solid var(--border)',
+                background:'var(--bg-raised)', color:'var(--text-secondary)',
+                cursor:'pointer', width:'100%',
+              }}>
+              <IconSupport />
+              Contactar soporte
+            </button>
+
             {/* Disputa activa */}
             {order.is_disputed && (
               <div style={{ display:'flex', alignItems:'center', gap:'0.4rem',
                 padding:'0.35rem 0.5rem', borderRadius:8,
-                background:'#fef9c3', border:'1px solid #fde047' }}>
-                <span style={{ fontSize:'0.72rem', color:'#854d0e', flex:1 }}>
+                background:'var(--warn-bg)', border:'1px solid var(--warn-border)' }}>
+                <span style={{ fontSize:'0.72rem', color:'var(--warn)', flex:1 }}>
                   En disputa — buscando conductor…
                 </span>
                 <button
                   style={{ padding:'0.3rem 0.65rem', borderRadius:7, fontWeight:700,
-                    fontSize:'0.72rem', border:'1.5px solid #d97706', cursor:'pointer',
-                    background:'#fff', color:'#b45309', whiteSpace:'nowrap' }}
+                    fontSize:'0.72rem', border:'1.5px solid var(--warn-border)', cursor:'pointer',
+                    background:'var(--bg-card)', color:'var(--warn)', whiteSpace:'nowrap' }}
                   onClick={onCancelDispute}>
                   Cancelar disputa
                 </button>
@@ -362,9 +331,9 @@ export default function ActiveOrderPanel({
                 {canRelevo && (
                   <button style={{
                     flex:1, padding:'0.45rem 0', borderRadius:8, fontWeight:700,
-                    fontSize:'0.78rem', border:'1.5px solid #fde047', cursor:'pointer',
+                    fontSize:'0.78rem', border:'1.5px solid var(--warn-border)', cursor:'pointer',
                     display:'flex', alignItems:'center', justifyContent:'center', gap:5,
-                    color:'#854d0e', background:'#fef9c3',
+                    color:'var(--warn)', background:'var(--warn-bg)',
                   }} onClick={onRebalance}>
                     <IconRelevo /> Buscar relevo
                   </button>
@@ -372,9 +341,9 @@ export default function ActiveOrderPanel({
                 {canRelease && (
                   <button style={{
                     flex:1, padding:'0.45rem 0', borderRadius:8, fontWeight:700,
-                    fontSize:'0.78rem', border:'1.5px solid #dc2626', cursor:'pointer',
+                    fontSize:'0.78rem', border:'1.5px solid var(--danger-border)', cursor:'pointer',
                     display:'flex', alignItems:'center', justifyContent:'center', gap:5,
-                    background:'#fef2f2', color:'#dc2626',
+                    background:'var(--danger-bg)', color:'var(--danger)',
                   }} onClick={onToggleRelease}>
                     <IconRelease /> Liberar
                   </button>
@@ -390,7 +359,7 @@ export default function ActiveOrderPanel({
                   style={{ width:'100%', boxSizing:'border-box', marginBottom:'0.15rem', fontSize:'0.82rem' }} />
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.3rem' }}>
                   <span style={{ fontSize:'0.68rem',
-                    color: releaseNote.trim().length < 10 ? '#dc2626' : 'var(--text-tertiary)' }}>
+                    color: releaseNote.trim().length < 10 ? 'var(--danger)' : 'var(--text-tertiary)' }}>
                     {releaseNote.trim().length}/10 mín.
                   </span>
                 </div>
