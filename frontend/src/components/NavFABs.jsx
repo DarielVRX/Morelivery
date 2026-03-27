@@ -82,8 +82,8 @@ function IconReport({ reportMode }) {
 }
 
 const REPORT_PILLS = [
-  { mode: 'zone',       label: 'Zona de alerta', icon: '🚦', color: '#f97316' },
-  { mode: 'impassable', label: 'Calle no viable', icon: '⛔', color: '#ef4444' },
+  { mode: 'zone',       label: 'Zona de alerta', icon: '◆', color: '#f97316' },
+  { mode: 'impassable', label: 'Calle no viable', icon: '✕', color: '#ef4444' },
   { mode: 'preference', label: 'Preferencias',   icon: '⭐', color: '#16a34a' },
 ];
 
@@ -323,7 +323,7 @@ export default function NavFABs({
               boxShadow: isDark ? '0 0 8px rgba(251,191,36,0.25)' : '0 0 8px rgba(124,58,237,0.18)',
               whiteSpace: 'nowrap',
             }}>
-              ⚡ Modo rápido
+              Modo rápido
             </div>
           )}
           {REPORT_PILLS.map(pill => (
@@ -350,3 +350,4 @@ export default function NavFABs({
     </>
   );
 }
+

@@ -30,7 +30,7 @@ function DriverSection({ token, bagCapacity, onBagCapacityChange }) {
     <div style={{ background: 'var(--bg-card)', borderRadius: 12, padding: '1rem', marginBottom: '1rem', border: '1px solid var(--border-light)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: '1.2rem' }}>🎒</span>
+          <span style={{ fontSize: '1.2rem', color: 'var(--brand)' }}>◆</span>
           <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Capacidad de mochila</span>
         </div>
         {!editing && (
@@ -193,3 +193,4 @@ export default function ProfilePage() {
     </div>
   );
 }
+

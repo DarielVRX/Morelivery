@@ -314,7 +314,8 @@ export default function DriverMap({
 
     return () => {
       if (zoomTimeRef.current) { clearTimeout(zoomTimeRef.current); zoomTimeRef.current = null; }
-      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; window.__map = null; }
+      onMapReady?.(null); // notificar al padre que el mapa ya no existe
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -537,3 +538,4 @@ export default function DriverMap({
     </div>
   );
 }
+
