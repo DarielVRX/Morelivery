@@ -29,7 +29,7 @@ function PriceCalculator({ onApply }) {
   const fee     = RESTAURANT_FEE_PCT;
 
   // Precio sugerido: costo * (1 + profit/100) / (1 - fee)
-  const suggested    = cost > 0 ? Math.ceil(cost * (1 + profit / 100) / (1 - fee)) : 0;
+  const suggested    = cost > 0 ? Math.ceil(cost * (profit / 100) / (1 - fee)) : 0;
   const finalEarning = suggested > 0 ? Math.round(suggested * (1 - fee) - cost) : 0;
 
   if (!open) return (
