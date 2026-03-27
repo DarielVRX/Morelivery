@@ -111,19 +111,20 @@ async function trySubscribePush() {
     const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
     if (!vapidKey) return; // No hay key configurada aún
     const reg = await navigator.serviceWorker.ready;
-    const existing = await reg.pushManager.getSubscription();
-    if (existing) return; // Ya suscrito
-    const sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapidKey),
-    });
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      });
+    }
     // Enviar suscripción al backend
     const token = JSON.parse(localStorage.getItem('morelivery_auth_v1') || '{}')?.token;
     if (!token) return;
     await fetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${token}` },
-      body: JSON.stringify(sub),
+      body: JSON.stringify(sub.toJSON()),
     });
   } catch (_) {}
 }
