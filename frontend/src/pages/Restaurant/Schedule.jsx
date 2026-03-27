@@ -25,7 +25,8 @@ function IconSchedule() {
 }
 
 // ── Control de tiempo de preparación predeterminado ──────────────────────────
-function PrepTimeDefault({ value, onChange, onSave, saving, saved }) {
+function PrepTimeDefault({ value, onChange, onSave, saving, saved,
+  allowFrequent, allowFrequentSaving, onToggleAllowFrequent, allowFrequentMsg }) {
   return (
     <div style={{ background:'var(--bg-card)', border:'1px solid var(--border)',
       borderRadius:10, padding:'0.875rem 1rem', marginBottom:'1.25rem' }}>
