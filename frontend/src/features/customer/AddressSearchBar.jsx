@@ -157,8 +157,8 @@ export default function AddressSearchBar({ userPos, homeAddress, homePos, onSele
           pendingPos.current = { lat: initialPos.lat, lng: initialPos.lng };
           setPinPlaced(true);
           const el = document.createElement('div');
-          el.style.cssText = 'font-size:24px;line-height:1;filter:drop-shadow(0 2px 4px #0005)';
-          el.textContent = '📍';
+          el.style.cssText = 'display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 2px 4px #0005)';
+          el.innerHTML = '<svg width="28" height="28" viewBox="0 0 24 24" fill="#c97b7b" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5" fill="#fff" stroke="none"/></svg>';
           markerRef.current = new ml.Marker({ element: el, anchor: 'bottom' })
           .setLngLat([initialPos.lng, initialPos.lat])
           .addTo(map);
@@ -174,8 +174,8 @@ export default function AddressSearchBar({ userPos, homeAddress, homePos, onSele
           markerRef.current.setLngLat([pos.lng, pos.lat]);
         } else {
           const el = document.createElement('div');
-          el.style.cssText = 'font-size:24px;line-height:1;filter:drop-shadow(0 2px 4px #0005)';
-          el.textContent = '📍';
+          el.style.cssText = 'display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 2px 4px #0005)';
+          el.innerHTML = '<svg width="28" height="28" viewBox="0 0 24 24" fill="#c97b7b" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5" fill="#fff" stroke="none"/></svg>';
           markerRef.current = new ml.Marker({ element: el, anchor: 'bottom' })
             .setLngLat([pos.lng, pos.lat])
             .addTo(map);
@@ -531,3 +531,4 @@ export default function AddressSearchBar({ userPos, homeAddress, homePos, onSele
     </div>
   );
 }
+
