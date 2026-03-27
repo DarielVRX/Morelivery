@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@fingerprintjs/fingerprintjs": "^5.1.0",
-    "@mercadopago/sdk-react": "^1.0.7",
     "@stripe/react-stripe-js": "^6.0.0",
     "@stripe/stripe-js": "^9.0.0",
     "leaflet": "^1.9.4",

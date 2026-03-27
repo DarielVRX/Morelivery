@@ -46,10 +46,7 @@ export const env = {
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY,
 
   // Stripe (tarjeta)
-  //stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
-  //stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '',
-  //stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
-
-  mpAccessToken: process.env.MP_ACCESS_TOKEN || '',
-  mpWebhookSecret:  process.env.MP_WEBHOOK_SECRET  || '',
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
+  stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '',
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
 };
