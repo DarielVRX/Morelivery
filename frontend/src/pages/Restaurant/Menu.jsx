@@ -72,7 +72,7 @@ function PriceCalculator({ onApply }) {
             <span style={{ fontWeight:800, color:'var(--brand)', fontSize:'1rem' }}>${suggested}.00</span>
           </div>
           <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
-            <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>Fee plataforma ({Math.round(fee*100)}%)</span>
+            <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>Tarifa de la plataforma ({Math.round(fee*100)}%)</span>
             <span style={{ color:'var(--text-tertiary)', fontSize:'0.72rem' }}>−${Math.round(suggested * fee)}</span>
           </div>
           <div style={{ display:'flex', justifyContent:'space-between', paddingTop:3, borderTop:'1px solid var(--border-light)' }}>

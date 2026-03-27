@@ -5,6 +5,7 @@ import { STATUS_TS, notifyOrderParties } from '../shared.js';
 export function registerLifecycleRoutes(router, deps) {
   const { query, AppError, orderEvents, recordPickupWait, evaluatePrepEstimate, sseHub, logEvent, updateOrderStatusSchema } = deps;
 
+  // ── PATCH /:id/status ─────────────────────────────────────────────────────
   router.patch('/:id/status', authenticate, authorize(['restaurant', 'driver', 'admin']), validate(updateOrderStatusSchema), async (req, res, next) => {
     try {
       const current = await query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
@@ -13,9 +14,9 @@ export function registerLifecycleRoutes(router, deps) {
       const order = current.rows[0];
       const nextStatus = req.validatedBody.status;
 
-      if (req.user.role === 'driver' && order.driver_id !== req.user.userId) {
+      if (req.user.role === 'driver' && order.driver_id !== req.user.userId)
         return next(new AppError(403, 'No tienes permiso para modificar este pedido'));
-      }
+
       if (req.user.role === 'restaurant') {
         const restCheck = await query('SELECT 1 FROM restaurants WHERE id=$1 AND owner_user_id=$2', [order.restaurant_id, req.user.userId]);
         if (restCheck.rowCount === 0) return next(new AppError(403, 'No tienes permiso para modificar este pedido'));
@@ -24,24 +25,23 @@ export function registerLifecycleRoutes(router, deps) {
       const ACTIVE = ['created', 'pending_driver', 'assigned', 'accepted', 'preparing', 'ready', 'on_the_way'];
       const VALID = {
         restaurant: { preparing: ACTIVE, ready: ACTIVE },
-        driver: { accepted: ['assigned', 'pending_driver'], on_the_way: ['ready'], delivered: ['on_the_way'] },
-        admin: { cancelled: ['created', 'pending_driver', 'assigned', 'accepted', 'preparing', 'ready', 'on_the_way'] },
+        driver:     { accepted: ['assigned', 'pending_driver'], on_the_way: ['ready'], delivered: ['on_the_way'] },
+        admin:      { cancelled: ['created', 'pending_driver', 'assigned', 'accepted', 'preparing', 'ready', 'on_the_way'] },
       };
       const STATUS_ES = {
         created: 'Recibido', pending_driver: 'Buscando conductor', assigned: 'Asignado',
         accepted: 'Aceptado', preparing: 'En preparación', ready: 'Listo',
         on_the_way: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado',
       };
+
       const allowed = VALID[req.user.role]?.[nextStatus];
       if (!allowed) return next(new AppError(403, `El rol '${req.user.role}' no puede establecer el estado '${STATUS_ES[nextStatus] || nextStatus}'`));
-      if (allowed !== '*' && !allowed.includes(order.status)) {
+      if (allowed !== '*' && !allowed.includes(order.status))
         return next(new AppError(409, `No se puede cambiar de '${STATUS_ES[order.status] || order.status}' a '${STATUS_ES[nextStatus] || nextStatus}'`));
-      }
 
       if (req.user.role === 'driver' && ['on_the_way', 'delivered'].includes(nextStatus)) {
         const driverLat = Number(req.body.lat);
         const driverLng = Number(req.body.lng);
-        const MAX_RADIUS_M = 100;
         if (Number.isFinite(driverLat) && Number.isFinite(driverLng)) {
           const refLat = nextStatus === 'on_the_way' ? Number(order.restaurant_lat) : Number(order.delivery_lat);
           const refLng = nextStatus === 'on_the_way' ? Number(order.restaurant_lng) : Number(order.delivery_lng);
@@ -51,21 +51,20 @@ export function registerLifecycleRoutes(router, deps) {
             const dLng = toRad(refLng - driverLng);
             const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(driverLat)) * Math.cos(toRad(refLat)) * Math.sin(dLng / 2) ** 2;
             const distM = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            if (distM > MAX_RADIUS_M && req.body.grace !== true) {
-              return next(new AppError(409, `Debes estar a menos de ${MAX_RADIUS_M}m del ${nextStatus === 'on_the_way' ? 'restaurante' : 'cliente'} para marcar este estado. Distancia actual: ${Math.round(distM)}m`));
-            }
+            if (distM > 100 && req.body.grace !== true)
+              return next(new AppError(409, `Debes estar a menos de 100m del ${nextStatus === 'on_the_way' ? 'restaurante' : 'cliente'} para marcar este estado. Distancia actual: ${Math.round(distM)}m`));
           }
         }
       }
 
-      let driverNote = order.driver_note;
+      let driverNote     = order.driver_note;
       let restaurantNote = order.restaurant_note;
       if (req.user.role === 'restaurant' && nextStatus === 'preparing') driverNote = 'Restaurante: pedido en preparación';
-      if (req.user.role === 'restaurant' && nextStatus === 'ready') driverNote = 'Restaurante: pedido listo para retiro';
-      if (req.user.role === 'driver' && nextStatus === 'on_the_way') restaurantNote = 'Driver: pedido en camino';
-      if (req.user.role === 'driver' && nextStatus === 'delivered') restaurantNote = 'Driver: pedido entregado';
+      if (req.user.role === 'restaurant' && nextStatus === 'ready')     driverNote = 'Restaurante: pedido listo para retiro';
+      if (req.user.role === 'driver' && nextStatus === 'on_the_way')    restaurantNote = 'Driver: pedido en camino';
+      if (req.user.role === 'driver' && nextStatus === 'delivered')     restaurantNote = 'Driver: pedido entregado';
 
-      const tsCol = STATUS_TS[nextStatus];
+      const tsCol    = STATUS_TS[nextStatus];
       const tsClause = tsCol ? `, ${tsCol} = NOW()` : '';
 
       const result = await query(
@@ -78,8 +77,7 @@ export function registerLifecycleRoutes(router, deps) {
 
       if (nextStatus === 'on_the_way' && updated.driver_id) {
         const waitResult = await query(
-          `SELECT EXTRACT(EPOCH FROM (NOW() - ready_at))::int AS wait_s
-           FROM orders WHERE id=$1 AND ready_at IS NOT NULL`,
+          `SELECT EXTRACT(EPOCH FROM (NOW() - ready_at))::int AS wait_s FROM orders WHERE id=$1 AND ready_at IS NOT NULL`,
           [updated.id]
         );
         const waitSec = waitResult.rows[0]?.wait_s ?? 0;
@@ -106,84 +104,138 @@ export function registerLifecycleRoutes(router, deps) {
         } catch (_) {}
       }
 
-      const STATUS_ES_LOG = { created: 'Recibido', pending_driver: 'Sin conductor', assigned: 'Asignado', accepted: 'Aceptado', preparing: 'En preparación', ready: 'Listo para retiro', on_the_way: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado' };
-      console.log(`🔄 [pedido.estado] id=${updated.id.slice(0,8)} → "${STATUS_ES_LOG[updated.status] || updated.status}" por rol=${req.user.role} actor=${req.user.userId.slice(0,8)}`);
+      console.log(`[pedido.estado] id=${updated.id.slice(0,8)} → "${nextStatus}" por rol=${req.user.role}`);
       logEvent('order.status_changed', { orderId: updated.id, status: updated.status, actor: req.user.userId });
       return res.json({ order: updated });
     } catch (error) { return next(error); }
   });
 
+  // ── PATCH /:id/cancel — cancelación por el cliente ────────────────────────
   router.patch('/:id/cancel', authenticate, authorize(['customer']), async (req, res, next) => {
     try {
       const { note } = req.body || {};
       if (!note?.trim()) return next(new AppError(400, 'El motivo de cancelación es obligatorio'));
 
       const check = await query(
-        `SELECT id, status, created_at FROM orders WHERE id=$1 AND customer_id=$2`,
+        `SELECT id, status, created_at, restaurant_confirmed, driver_id, customer_id, restaurant_id
+         FROM orders WHERE id=$1 AND customer_id=$2`,
         [req.params.id, req.user.userId]
       );
       if (check.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
 
+      const order = check.rows[0];
       const cancellable = ['created', 'pending_driver', 'assigned', 'accepted'];
-      if (!cancellable.includes(check.rows[0].status)) {
+      if (!cancellable.includes(order.status))
         return next(new AppError(409, 'El pedido ya no puede cancelarse en este estado'));
-      }
 
-      // Verificar si han pasado más de 5 minutos desde la creación del pedido
-      const createdAt   = new Date(check.rows[0].created_at);
-      const elapsedMs   = Date.now() - createdAt.getTime();
-      const LATE_CANCEL_MS = 5 * 60 * 1000; // 5 minutos
-      const isLateCancel = elapsedMs > LATE_CANCEL_MS;
+      const elapsedMs      = Date.now() - new Date(order.created_at).getTime();
+      const LATE_CANCEL_MS = 5 * 60 * 1000;
+      const restaurantConfirmed = Boolean(order.restaurant_confirmed);
+      const driverConfirmed     = order.driver_id ? ['accepted', 'on_the_way'].includes(order.status) : false;
+      const bothConfirmed       = restaurantConfirmed && driverConfirmed;
+      const isLateCancel        = elapsedMs > LATE_CANCEL_MS && bothConfirmed;
 
-      const result = await query(
-        `UPDATE orders SET status='cancelled', restaurant_note=$3, cancelled_at=NOW(), updated_at=NOW()
-         WHERE id=$1 AND customer_id=$2 RETURNING *`,
-        [req.params.id, req.user.userId, `[CANCELADO POR CLIENTE${isLateCancel ? ' - TARDÍO' : ''}] ${note.trim()}`]
+      await query(
+        `UPDATE orders SET status='cancelled', restaurant_note=$2, cancelled_at=NOW(), updated_at=NOW()
+         WHERE id=$1`,
+        [req.params.id, `[CANCELADO POR CLIENTE${isLateCancel ? ' - TARDÍO' : ''}] ${note.trim()}`]
       );
+
       await notifyOrderParties(req.params.id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
 
-      const prevStatus = check.rows[0].status;
-      if (['accepted', 'preparing'].includes(prevStatus)) {
-        try {
-          const ri = await query(
-            `SELECT r.owner_user_id FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
-            [req.params.id]
-          );
-          if (ri.rowCount > 0) {
-            sseHub.sendToUser(ri.rows[0].owner_user_id, 'order_cancelled_preparing', {
-              orderId: req.params.id, prevStatus, note: note.trim()
-            });
-          }
-        } catch (_) {}
+      // Notificar explícitamente al restaurante — FIX: el restaurante no recibía el evento
+      try {
+        const restInfo = await query('SELECT owner_user_id FROM restaurants WHERE id=$1', [order.restaurant_id]);
+        if (restInfo.rowCount > 0) {
+          sseHub.sendToUser(restInfo.rows[0].owner_user_id, 'order_cancelled_preparing', {
+            orderId: req.params.id,
+            prevStatus: order.status,
+            note: note.trim(),
+            cancelledBy: 'customer',
+          });
+        }
+      } catch (_) {}
+
+      // Notificar al driver si estaba asignado
+      if (order.driver_id) {
+        sseHub.sendToUser(order.driver_id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
       }
 
-      // Bloqueo de pedidos por cancelación tardía (>5min desde creación)
-      // Solo bloquea la creación de nuevos pedidos, NO el acceso a la app
       if (isLateCancel) {
         try {
           await query(
             `UPDATE users SET orders_blocked = true, orders_blocked_reason = $2 WHERE id = $1`,
             [req.user.userId, 'late_cancellation']
           );
-          console.log(`🚫 [bloqueo.cancelacion_tardia] userId=${req.user.userId.slice(0,8)} orderId=${req.params.id.slice(0,8)} elapsed=${Math.round(elapsedMs/1000)}s`);
-          // Notificar al cliente via SSE para mostrar aviso inmediato
           sseHub.sendToUser(req.user.userId, 'orders_blocked', {
             reason: 'late_cancellation',
-            message: 'Tu acceso a nuevos pedidos ha sido restringido. Por favor contacta a soporte si crees que esto fue un error.',
+            message: 'Tu cuenta fue suspendida temporalmente por cancelar un pedido en proceso. Contacta a soporte para reactivarla.',
           });
         } catch (blockErr) {
-          // Si la columna no existe aún, ignorar silenciosamente
-          if (blockErr?.code !== '42703') {
-            console.error('[bloqueo.cancelacion_tardia] error al bloquear:', blockErr.message);
-          }
+          if (blockErr?.code !== '42703') console.error('[bloqueo] error:', blockErr.message);
         }
       }
 
       return res.json({
-        order: result.rows[0],
+        ok: true,
+        late_cancel: isLateCancel,
+        both_confirmed: bothConfirmed,
+        elapsed_s: Math.round(elapsedMs / 1000),
         ...(isLateCancel ? { orders_blocked: true, block_reason: 'late_cancellation' } : {}),
       });
     } catch (error) { return next(error); }
   });
-}
 
+  // ── PATCH /:id/cancel-restaurant — cancelación por el restaurante ─────────
+  router.patch('/:id/cancel-restaurant', authenticate, authorize(['restaurant']), async (req, res, next) => {
+    try {
+      const { note } = req.body || {};
+      if (!note?.trim()) return next(new AppError(400, 'El motivo de cancelación es obligatorio'));
+
+      const restCheck = await query(
+        `SELECT r.id FROM restaurants r
+         JOIN orders o ON o.restaurant_id = r.id
+         WHERE o.id = $1 AND r.owner_user_id = $2`,
+        [req.params.id, req.user.userId]
+      );
+      if (restCheck.rowCount === 0)
+        return next(new AppError(404, 'Pedido no encontrado o no pertenece a tu restaurante'));
+
+      const orderRes = await query(
+        'SELECT id, status, driver_id, customer_id, restaurant_id FROM orders WHERE id=$1',
+        [req.params.id]
+      );
+      if (orderRes.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
+
+      const order = orderRes.rows[0];
+      const cancellable = ['created', 'pending_driver', 'assigned', 'accepted', 'preparing', 'ready'];
+      if (!cancellable.includes(order.status))
+        return next(new AppError(409, 'El pedido ya no puede cancelarse en este estado'));
+
+      await query(
+        `UPDATE orders SET status='cancelled', restaurant_note=$2, cancelled_at=NOW(), updated_at=NOW()
+         WHERE id=$1`,
+        [req.params.id, `[CANCELADO POR RESTAURANTE] ${note.trim()}`]
+      );
+
+      await notifyOrderParties(req.params.id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
+
+      // Notificar al cliente
+      sseHub.sendToUser(order.customer_id, 'order_cancelled_preparing', {
+        orderId: req.params.id,
+        prevStatus: order.status,
+        note: note.trim(),
+        cancelledBy: 'restaurant',
+      });
+
+      // Liberar al driver
+      if (order.driver_id) {
+        await query('UPDATE orders SET driver_id=NULL, last_driver_id=driver_id WHERE id=$1', [req.params.id]).catch(() => {});
+        sseHub.sendToUser(order.driver_id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
+      }
+
+      console.log(`[pedido.cancelado] id=${req.params.id.slice(0,8)} por restaurante`);
+      return res.json({ ok: true });
+    } catch (error) { return next(error); }
+  });
+}

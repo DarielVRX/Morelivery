@@ -54,27 +54,27 @@ router.get('/', async (_req, res, next) => {
   try {
     const result = await query(
       `SELECT r.id, r.name, r.category, r.is_open,
-      COALESCE(u.address, r.address) AS address,
-                               r.profile_photo,
-                               COALESCE(u.home_lat, r.lat) AS lat,
-                               COALESCE(u.home_lng, r.lng) AS lng,
-                               r.rating_avg, r.rating_count
-                               FROM restaurants r
-                               LEFT JOIN users u ON u.id = r.owner_user_id
-                               WHERE r.is_active = true
-                               ORDER BY r.name`
+              COALESCE(u.address, r.address) AS address,
+              r.profile_photo,
+              COALESCE(u.home_lat, r.lat) AS lat,
+              COALESCE(u.home_lng, r.lng) AS lng,
+              r.rating_avg, r.rating_count
+       FROM restaurants r
+       LEFT JOIN users u ON u.id = r.owner_user_id
+       WHERE r.is_active = true
+       ORDER BY r.name`
     ).catch(() =>
-    query(
-      `SELECT r.id, r.name, r.category, r.is_open,
-      COALESCE(u.address, r.address) AS address,
-          r.profile_photo,
-          COALESCE(u.home_lat, r.lat) AS lat,
-          COALESCE(u.home_lng, r.lng) AS lng
-          FROM restaurants r
-          LEFT JOIN users u ON u.id = r.owner_user_id
-          WHERE r.is_active = true
-          ORDER BY r.name`
-    )
+      query(
+        `SELECT r.id, r.name, r.category, r.is_open,
+                COALESCE(u.address, r.address) AS address,
+                r.profile_photo,
+                COALESCE(u.home_lat, r.lat) AS lat,
+                COALESCE(u.home_lng, r.lng) AS lng
+         FROM restaurants r
+         LEFT JOIN users u ON u.id = r.owner_user_id
+         WHERE r.is_active = true
+         ORDER BY r.name`
+      )
     );
     const restaurants = await Promise.all(
       result.rows.map(async r => ({ ...r, is_open: await computeIsOpen(r.id) }))
@@ -91,15 +91,15 @@ router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next
   try {
     const result = await query(
       `SELECT r.id, r.name, r.category, r.is_open,
-      COALESCE(u.address, r.address) AS address,
-                               r.manual_open_override, r.profile_photo,
-                               COALESCE(u.home_lat, r.lat) AS lat,
-                               COALESCE(u.home_lng, r.lng) AS lng,
-                               r.max_cash_cents, r.allow_frequent_customers, r.prep_time_estimate_s
-                               FROM restaurants r
-                               LEFT JOIN users u ON u.id = r.owner_user_id
-                               WHERE r.owner_user_id=$1 LIMIT 1`,
-                               [req.user.userId]
+              COALESCE(u.address, r.address) AS address,
+              r.manual_open_override, r.profile_photo,
+              COALESCE(u.home_lat, r.lat) AS lat,
+              COALESCE(u.home_lng, r.lng) AS lng,
+              r.max_cash_cents, r.allow_frequent_customers, r.prep_time_estimate_s
+       FROM restaurants r
+       LEFT JOIN users u ON u.id = r.owner_user_id
+       WHERE r.owner_user_id=$1 LIMIT 1`,
+      [req.user.userId]
     );
     if (result.rowCount === 0) return res.json({ restaurant: null });
     const rest = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
@@ -109,14 +109,14 @@ router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next
       try {
         const result = await query(
           `SELECT r.id, r.name, r.category, r.is_open,
-          COALESCE(u.address, r.address) AS address,
-                                   r.manual_open_override, r.profile_photo,
-                                   COALESCE(u.home_lat, r.lat) AS lat,
-                                   COALESCE(u.home_lng, r.lng) AS lng
-                                   FROM restaurants r
-                                   LEFT JOIN users u ON u.id = r.owner_user_id
-                                   WHERE r.owner_user_id=$1 LIMIT 1`,
-                                   [req.user.userId]
+                  COALESCE(u.address, r.address) AS address,
+                  r.manual_open_override, r.profile_photo,
+                  COALESCE(u.home_lat, r.lat) AS lat,
+                  COALESCE(u.home_lng, r.lng) AS lng
+           FROM restaurants r
+           LEFT JOIN users u ON u.id = r.owner_user_id
+           WHERE r.owner_user_id=$1 LIMIT 1`,
+          [req.user.userId]
         );
         if (result.rowCount === 0) return res.json({ restaurant: null });
         const rest = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
@@ -134,8 +134,8 @@ router.get('/my/menu', authenticate, authorize(['restaurant']), async (req, res,
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
     const result = await query(
       `SELECT id, name, description, price_cents, is_available, image_url,
-      pkg_units, pkg_volume_liters
-      FROM menu_items WHERE restaurant_id=$1 ORDER BY name`,
+              pkg_units, pkg_volume_liters
+       FROM menu_items WHERE restaurant_id=$1 ORDER BY name`,
       [restaurantId]
     );
     return res.json({ menu: result.rows });
@@ -180,14 +180,14 @@ router.put('/my/schedule', authenticate, authorize(['restaurant']), async (req, 
     for (const day of schedule) {
       await query(
         `INSERT INTO restaurant_schedules(restaurant_id, day_of_week, opens_at, closes_at, is_closed)
-        VALUES($1,$2,$3,$4,$5)
-        ON CONFLICT(restaurant_id, day_of_week)
-        DO UPDATE SET opens_at=$3, closes_at=$4, is_closed=$5`,
+         VALUES($1,$2,$3,$4,$5)
+         ON CONFLICT(restaurant_id, day_of_week)
+         DO UPDATE SET opens_at=$3, closes_at=$4, is_closed=$5`,
         [
           restaurantId, day.day_of_week,
           day.is_closed ? null : (day.opens_at  || '09:00'),
-                  day.is_closed ? null : (day.closes_at || '22:00'),
-                  Boolean(day.is_closed),
+          day.is_closed ? null : (day.closes_at || '22:00'),
+          Boolean(day.is_closed),
         ]
       );
     }
@@ -279,7 +279,7 @@ router.patch('/my/cover-photo', authenticate, authorize(['restaurant']), async (
     const { url } = req.body;
     if (!url) return next(new AppError(400, 'url requerida'));
     await query('UPDATE restaurants SET cover_photo=$1 WHERE id=$2', [url, restaurantId]).catch(() =>
-    query('UPDATE restaurants SET profile_photo=$1 WHERE id=$2', [url, restaurantId])
+      query('UPDATE restaurants SET profile_photo=$1 WHERE id=$2', [url, restaurantId])
     );
     return res.json({ ok: true });
   } catch (error) { return next(error); }
@@ -292,26 +292,26 @@ router.post('/menu-items', authenticate, authorize(['restaurant']), async (req, 
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
 
     const { name, description, price_cents, is_available = true, image_url,
-      pkg_units = 1, pkg_volume_liters = 0 } = req.body;
+            pkg_units = 1, pkg_volume_liters = 0 } = req.body;
 
-      if (!name || name.trim().length < 2) return next(new AppError(400, 'Nombre requerido (mín 2 caracteres)'));
-      if (!Number.isInteger(Number(price_cents)) || Number(price_cents) <= 0)
-        return next(new AppError(400, 'price_cents debe ser entero positivo'));
+    if (!name || name.trim().length < 2) return next(new AppError(400, 'Nombre requerido (mín 2 caracteres)'));
+    if (!Number.isInteger(Number(price_cents)) || Number(price_cents) <= 0)
+      return next(new AppError(400, 'price_cents debe ser entero positivo'));
 
     const result = await query(
       `INSERT INTO menu_items
-      (restaurant_id, name, description, price_cents, is_available, image_url, pkg_units, pkg_volume_liters)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-      RETURNING *`,
+         (restaurant_id, name, description, price_cents, is_available, image_url, pkg_units, pkg_volume_liters)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       RETURNING *`,
       [
         restaurantId,
         name.trim(),
-                               description?.trim() || null,
-                               Number(price_cents),
-                               Boolean(is_available),
-                               image_url || null,
-                               Number(pkg_units) || 1,
-                               Number(pkg_volume_liters) || 0,
+        description?.trim() || null,
+        Number(price_cents),
+        Boolean(is_available),
+        image_url || null,
+        Number(pkg_units) || 1,
+        Number(pkg_volume_liters) || 0,
       ]
     );
     return res.status(201).json({ item: result.rows[0] });
@@ -325,30 +325,30 @@ router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), async (
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
 
     const { name, description, price_cents, is_available, image_url,
-      pkg_units, pkg_volume_liters } = req.body;
+            pkg_units, pkg_volume_liters } = req.body;
 
-      const updates = [], vals = [];
-      let i = 1;
-      const push = (col, val) => {
-        if (val !== undefined) { updates.push(`${col}=$${i++}`); vals.push(val); }
-      };
-      push('name',              name?.trim());
-      push('description',       description?.trim() ?? undefined);
-      push('price_cents',       price_cents !== undefined ? Number(price_cents) : undefined);
-      push('is_available',      is_available !== undefined ? Boolean(is_available) : undefined);
-      push('image_url',         image_url);
-      push('pkg_units',         pkg_units !== undefined ? Number(pkg_units) : undefined);
-      push('pkg_volume_liters', pkg_volume_liters !== undefined ? Number(pkg_volume_liters) : undefined);
+    const updates = [], vals = [];
+    let i = 1;
+    const push = (col, val) => {
+      if (val !== undefined) { updates.push(`${col}=$${i++}`); vals.push(val); }
+    };
+    push('name',              name?.trim());
+    push('description',       description?.trim() ?? undefined);
+    push('price_cents',       price_cents !== undefined ? Number(price_cents) : undefined);
+    push('is_available',      is_available !== undefined ? Boolean(is_available) : undefined);
+    push('image_url',         image_url);
+    push('pkg_units',         pkg_units !== undefined ? Number(pkg_units) : undefined);
+    push('pkg_volume_liters', pkg_volume_liters !== undefined ? Number(pkg_volume_liters) : undefined);
 
-      if (!updates.length) return res.json({ ok: true });
+    if (!updates.length) return res.json({ ok: true });
 
-      vals.push(req.params.id, restaurantId);
-      const result = await query(
-        `UPDATE menu_items SET ${updates.join(',')} WHERE id=$${i++} AND restaurant_id=$${i} RETURNING *`,
-                                 vals
-      );
-      if (result.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
-      return res.json({ item: result.rows[0] });
+    vals.push(req.params.id, restaurantId);
+    const result = await query(
+      `UPDATE menu_items SET ${updates.join(',')} WHERE id=$${i++} AND restaurant_id=$${i} RETURNING *`,
+      vals
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
+    return res.json({ item: result.rows[0] });
   } catch (error) { return next(error); }
 });
 
@@ -377,22 +377,23 @@ router.delete('/menu-items/:id', authenticate, authorize(['restaurant']), async 
   } catch (error) { return next(error); }
 });
 
-// ── PATCH /orders/:orderId/confirm ────────────────────────────────────────────
-router.patch('/orders/:orderId/confirm', authenticate, authorize(['restaurant']), async (req, res, next) => {
+// ── PATCH + POST /orders/:orderId/confirm ─────────────────────────────────────
+// El frontend llama POST, mantenemos PATCH por compatibilidad
+async function handleConfirmOrder(req, res, next) {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
 
     const result = await query(
       `UPDATE orders
-      SET restaurant_confirmed = true,
-      restaurant_confirmed_at = NOW(),
-                               updated_at = NOW()
-                               WHERE id = $1
-                               AND restaurant_id = $2
-                               AND status NOT IN ('delivered', 'cancelled')
-                               RETURNING id, driver_id, customer_id, status`,
-                               [req.params.orderId, restaurantId]
+       SET restaurant_confirmed = true,
+           restaurant_confirmed_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $1
+         AND restaurant_id = $2
+         AND status NOT IN ('delivered', 'cancelled')
+       RETURNING id, driver_id, customer_id, status`,
+      [req.params.orderId, restaurantId]
     );
 
     if (result.rowCount === 0)
@@ -410,7 +411,10 @@ router.patch('/orders/:orderId/confirm', authenticate, authorize(['restaurant'])
       return next(new AppError(503, 'Migración pendiente: ejecuta migration_confirmation_flow.sql'));
     return next(error);
   }
-});
+}
+
+router.patch('/orders/:orderId/confirm', authenticate, authorize(['restaurant']), handleConfirmOrder);
+router.post('/orders/:orderId/confirm',  authenticate, authorize(['restaurant']), handleConfirmOrder);
 
 // ── GET /:id — detalle público ────────────────────────────────────────────────
 // IMPORTANTE: debe ir AL FINAL para no interceptar /my, /menu-items, etc.
@@ -418,14 +422,14 @@ router.get('/:id', async (req, res, next) => {
   try {
     const result = await query(
       `SELECT r.id, r.name, r.category, r.is_open, r.profile_photo,
-      r.rating_avg, r.rating_count, r.prep_time_estimate_s,
-      COALESCE(u.address, r.address) AS address,
-                               COALESCE(u.home_lat, r.lat) AS lat,
-                               COALESCE(u.home_lng, r.lng) AS lng
-                               FROM restaurants r
-                               LEFT JOIN users u ON u.id = r.owner_user_id
-                               WHERE r.id = $1 AND r.is_active = true`,
-                               [req.params.id]
+              r.rating_avg, r.rating_count, r.prep_time_estimate_s,
+              COALESCE(u.address, r.address) AS address,
+              COALESCE(u.home_lat, r.lat) AS lat,
+              COALESCE(u.home_lng, r.lng) AS lng
+       FROM restaurants r
+       LEFT JOIN users u ON u.id = r.owner_user_id
+       WHERE r.id = $1 AND r.is_active = true`,
+      [req.params.id]
     );
     if (result.rowCount === 0) return next(new AppError(404, 'Restaurante no encontrado'));
     const restaurant = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
@@ -438,7 +442,7 @@ router.get('/:id/menu', async (req, res, next) => {
   try {
     const result = await query(
       `SELECT id, name, description, price_cents, is_available, image_url
-      FROM menu_items WHERE restaurant_id = $1 ORDER BY name`,
+       FROM menu_items WHERE restaurant_id = $1 ORDER BY name`,
       [req.params.id]
     );
     return res.json({ menu: result.rows });
