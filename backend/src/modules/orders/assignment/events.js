@@ -11,7 +11,8 @@
 // Todas las rutas que re-enquelan pedidos pasan por serializedOffer de queue.js.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { OFFER_TIMEOUT_SECONDS, COOLDOWN_SECONDS, REBALANCE_COOLDOWN_SECONDS, REBALANCE_DISPUTE_TIMEOUT_S, SESSION_REBALANCE_LIMIT, log, logWarn } from './constants.js';
+import { REBALANCE_COOLDOWN_SECONDS, REBALANCE_DISPUTE_TIMEOUT_S, SESSION_REBALANCE_LIMIT, log, logWarn } from './constants.js';
+import { getParam } from '../../../engine/params.js';
 import {
   assignDriverToOrder, unassignDriverFromOrder,
   acceptPendingOffer, expireCompetingOffers,
@@ -75,7 +76,7 @@ export async function acceptOffer(orderId, driverId) {
 export async function rejectOffer(orderId, driverId, onOffer) {
   log(orderId, `rejectOffer driver=${driverId} cooldown=${COOLDOWN_SECONDS}s`);
 
-  await rejectDriverOffer(orderId, driverId, COOLDOWN_SECONDS);
+  await rejectDriverOffer(orderId, driverId, getParam('cooldown_s', 300));
 
   // Liberar otros pedidos que el driver tenía bloqueados con pending offer
   const freedOrderIds = await expireAllPendingForDriver(driverId, orderId);
@@ -102,7 +103,7 @@ export async function rejectOffer(orderId, driverId, onOffer) {
 export async function releaseOrder(orderId, driverId, onOffer) {
   log(orderId, `releaseOrder driver=${driverId} cooldown=${COOLDOWN_SECONDS}s`);
 
-  await releaseDriverOffer(orderId, driverId, COOLDOWN_SECONDS);
+  await releaseDriverOffer(orderId, driverId, getParam('cooldown_s', 300));
   await unassignDriverFromOrder(orderId, driverId);
 
   // Liberar otros pedidos bloqueados por el driver
@@ -125,7 +126,7 @@ export async function releaseOrder(orderId, driverId, onOffer) {
  * sin respuesta del driver, y re-encola esos pedidos.
  */
 export async function expireTimedOutOffers(onOffer) {
-  const expired = await expireTimedOutOffersInDB(OFFER_TIMEOUT_SECONDS, COOLDOWN_SECONDS);
+  const expired = await expireTimedOutOffersInDB(getParam('offer_timeout_s', 60), getParam('cooldown_s', 300));
 
   if (expired.length > 0) {
     console.log(

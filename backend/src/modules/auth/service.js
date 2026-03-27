@@ -6,7 +6,7 @@ import { env }       from '../../config/env.js';
 import { AppError }  from '../../utils/errors.js';
 import { logEvent }  from '../../utils/logger.js';
 import { randomUUID } from 'crypto';
-import { sendGmailSafe, verificationEmail, resendVerificationEmail, resetPasswordEmail } from './emailService.js';
+import { sendGmailSafe, verificationEmail, resendVerificationEmail as resendVerificationEmailTemplate, resetPasswordEmail } from './emailService.js';
 import {
   normalizeUsername, pseudoEmailFromUsername, resolveUniqueUsername,
   checkAndSaveFingerprint, insertUser, findUserForLogin,
@@ -201,7 +201,7 @@ export async function verifyEmail(token) {
   return updated ? { ok: true } : { alreadyVerified: true };
 }
 
-export async function resendVerificationEmail_(email) {
+export async function resendVerificationEmail(email) {
   const realEmail = email.trim().toLowerCase();
   const user      = await findUnverifiedCustomer(realEmail);
   if (!user || user.email_verified) return;
@@ -211,7 +211,7 @@ export async function resendVerificationEmail_(email) {
   await updateVerifyToken(user.id, verifyToken, verifyExpires);
 
   const name          = user.alias || user.full_name || 'usuario';
-  const { subject, html } = resendVerificationEmail(name, verifyToken);
+  const { subject, html } = resendVerificationEmailTemplate(name, verifyToken);
   sendGmailSafe({ to: realEmail, subject, html });
 }
 
