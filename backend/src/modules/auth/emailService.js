@@ -46,7 +46,7 @@ export async function sendGmailSafe(opts) {
 const FRONT = () => process.env.FRONTEND_URL || 'http://localhost:5173';
 
 export function verificationEmail(name, verifyToken) {
-  const url = `${FRONT()}/verify-email?token=${verifyToken}`;
+  const url = `${process.env.BACKEND_URL || 'https://morelivery.onrender.com'}/api/auth/verify-email?token=${verifyToken}`;
   return {
     subject: 'Confirma tu correo en Morelivery',
     html: `
@@ -69,7 +69,7 @@ export function verificationEmail(name, verifyToken) {
 }
 
 export function resendVerificationEmail(name, verifyToken) {
-  const url = `${FRONT()}/verify-email?token=${verifyToken}`;
+  const url = `${process.env.BACKEND_URL || 'https://morelivery.onrender.com'}/api/auth/verify-email?token=${verifyToken}`;
   return {
     subject: 'Tu enlace de verificacion - Morelivery',
     html: `
