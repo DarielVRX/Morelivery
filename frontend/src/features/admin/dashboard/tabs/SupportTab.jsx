@@ -1,28 +1,18 @@
 // frontend/src/features/admin/dashboard/tabs/SupportTab.jsx
-// Panel de soporte en el admin dashboard.
-// Reutiliza SupportChat que ya existe — el admin ve TODOS los tickets abiertos.
-// Agrega push al admin cuando llega un mensaje nuevo via SSE support_message.
-
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiFetch, API_BASE  } from '../../../../api/client';
-import { useAuth } from '../../../../contexts/AuthContext';
+import { API_BASE } from '../../../../api/client';
 import SupportChat from '../../../support/SupportChat';
 
 export default function SupportTab({ token }) {
-  // refreshTick se incrementa cuando llega un nuevo mensaje via SSE
-  // para que SupportChat recargue sin necesitar polling
   const [refreshTick, setRefreshTick] = useState(0);
   const [unread,      setUnread]      = useState(0);
-  const esRef         = useRef(null);
-  const mountedRef    = useRef(true);
+  const esRef      = useRef(null);
+  const mountedRef = useRef(true);
 
-  // SSE listener dedicado para support_message
   const connect = useCallback(() => {
     if (!token || !mountedRef.current) return;
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
 
-    // Reusar la conexión SSE global si está disponible
-    // En su defecto, abrir una conexión propia solo para este tab
     const url = `${API_BASE}/api/events?token=${encodeURIComponent(token)}`;
     const es  = new EventSource(url);
     esRef.current = es;
@@ -47,13 +37,7 @@ export default function SupportTab({ token }) {
     };
   }, [connect]);
 
-  // Limpiar contador al enfocar el tab
-  useEffect(() => {
-    setUnread(0);
-  }, []);
-
-  // Enviar push al admin cuando responde a un ticket
-  // (ya está implementado en el backend via SSE — este hook solo maneja el frontend)
+  useEffect(() => { setUnread(0); }, []);
 
   return (
     <div style={{

@@ -10,8 +10,6 @@ services:
         value: production
       - key: ALLOWED_ORIGINS
         sync: false
-      - key: JWT_SECRET
-        sync: false
       - key: DATABASE_URL
         sync: false
       - key: STRIPE_SECRET_KEY
@@ -30,6 +28,15 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: RESET_TOKEN_SECRET
+        sync: false
+
 
   - type: static
     name: morelivery-web

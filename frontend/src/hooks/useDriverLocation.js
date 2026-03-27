@@ -1,8 +1,6 @@
 // frontend/src/hooks/useDriverLocation.js
-// GPS activo cuando: driver disponible OR tiene pedido activo
-// Se detiene solo cuando AMBAS condiciones son falsas.
-// Map matching: acumula posiciones en buffer → envía a /nav/map-match cada 8 puntos
-// La posición matcheada se usa para actualizar el estado visible (snap to road).
+// GPS activo cuando: driver disponible OR tiene pedido activo.
+// Background sync: acumula posiciones offline y las envía al recuperar señal.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api/client';
@@ -10,8 +8,10 @@ import { apiFetch } from '../api/client';
 const MIN_SEND_INTERVAL_MS  = 4000;
 const MIN_DISTANCE_METERS   = 15;
 const MIN_RENDER_METERS     = 5;
-const MAP_MATCH_BUFFER_SIZE = 8;   // puntos acumulados antes de hacer match
-const MAP_MATCH_MAX_MS      = 30000; // forzar match cada 30s aunque no haya 8 puntos
+const MAP_MATCH_BUFFER_SIZE = 8;
+const MAP_MATCH_MAX_MS      = 30000;
+const BATTERY_ALERT_PCT     = 15;   // notificar admin cuando batería < 15%
+const OFFLINE_FLUSH_MAX     = 50;   // max posiciones acumuladas offline
 
 function haversineMeters(lat1, lng1, lat2, lng2) {
   const R    = 6371000;
@@ -22,16 +22,44 @@ function haversineMeters(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/**
- * @param token         JWT del driver
- * @param isAvailable   driver marcó disponibilidad
- * @param hasActiveOrder driver tiene pedido activo
- * GPS activo si isAvailable OR hasActiveOrder
- * Retorna { position, matchedPosition, error }
- * - position:        posición GPS raw (para lógica interna)
- * - matchedPosition: posición snap-to-road (para mostrar en mapa)
- */
-export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
+// ── Background sync helpers ───────────────────────────────────────────────────
+function postToSW(type, data) {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.ready
+    .then(reg => reg.active?.postMessage({ type, ...data }))
+    .catch(() => {});
+}
+
+function enqueueLocationBatch(driverId, positions, token) {
+  postToSW('SYNC_LOCATION_BATCH', { driverId, positions, token });
+}
+
+// ── Battery monitoring ────────────────────────────────────────────────────────
+async function watchBattery(driverId, token) {
+  if (!('getBattery' in navigator)) return;
+  try {
+    const battery = await navigator.getBattery();
+    let alerted   = false;
+
+    const check = () => {
+      const low = !battery.charging && battery.level * 100 <= BATTERY_ALERT_PCT;
+      if (low && !alerted) {
+        alerted = true;
+        apiFetch(`/sync/drivers/${driverId}/battery-alert`, {
+          method: 'POST',
+          body: JSON.stringify({ level: Math.round(battery.level * 100), charging: battery.charging }),
+        }, token).catch(() => {});
+      }
+      if (!low) alerted = false;
+    };
+
+    battery.addEventListener('levelchange',   check);
+    battery.addEventListener('chargingchange', check);
+    check();
+  } catch (_) {}
+}
+
+export function useDriverLocation(token, isAvailable, hasActiveOrder = false, driverId = null) {
   const [position,        setPosition]        = useState(null);
   const [matchedPosition, setMatchedPosition] = useState(null);
   const [error,           setError]           = useState(null);
@@ -40,15 +68,44 @@ export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
   const lastSentAtRef    = useRef(0);
   const watchRef         = useRef(null);
   const posRef           = useRef(null);
+  const offlineBufferRef = useRef([]);   // posiciones acumuladas sin red
+  const isOnlineRef      = useRef(navigator.onLine);
+  const batteryWatchRef  = useRef(false);
 
-  // Buffer para map matching
   const matchBufferRef   = useRef([]);
   const lastMatchAtRef   = useRef(0);
-  const matchingRef      = useRef(false); // evitar llamadas simultáneas
+  const matchingRef      = useRef(false);
 
   const shouldTrack = Boolean(token && (isAvailable || hasActiveOrder));
 
-  // ── Map matching ──────────────────────────────────────────────────────────
+  // ── Online/offline listeners ───────────────────────────────────────────────
+  useEffect(() => {
+    function onOnline() {
+      isOnlineRef.current = true;
+      // Flush buffered positions via background sync when connection returns
+      if (offlineBufferRef.current.length > 0 && driverId) {
+        enqueueLocationBatch(driverId, [...offlineBufferRef.current], token);
+        offlineBufferRef.current = [];
+      }
+    }
+    function onOffline() { isOnlineRef.current = false; }
+
+    window.addEventListener('online',  onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online',  onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, [driverId, token]);
+
+  // ── Battery watch (once per session) ──────────────────────────────────────
+  useEffect(() => {
+    if (!shouldTrack || !driverId || batteryWatchRef.current) return;
+    batteryWatchRef.current = true;
+    watchBattery(driverId, token);
+  }, [shouldTrack, driverId, token]);
+
+  // ── Map matching ───────────────────────────────────────────────────────────
   const runMapMatch = useCallback(async (force = false) => {
     if (matchingRef.current) return;
     const buf = matchBufferRef.current;
@@ -60,10 +117,10 @@ export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
 
     if (!force && !hasEnough && !tooOld) return;
 
-    matchingRef.current = true;
+    matchingRef.current    = true;
     lastMatchAtRef.current = now;
     const coords = [...buf];
-    matchBufferRef.current = []; // limpiar buffer
+    matchBufferRef.current = [];
 
     try {
       const data = await apiFetch('/nav/map-match', {
@@ -73,9 +130,7 @@ export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
 
       if (data?.geometry?.length > 0) {
         const last = data.geometry[data.geometry.length - 1];
-        if (last?.lat && last?.lng) {
-          setMatchedPosition({ lat: last.lat, lng: last.lng });
-        }
+        if (last?.lat && last?.lng) setMatchedPosition({ lat: last.lat, lng: last.lng });
       }
     } catch (_) {
       // Degraded: usar última posición raw
@@ -92,6 +147,7 @@ export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
       lastSentRef.current    = null;
       lastSentAtRef.current  = 0;
       matchBufferRef.current = [];
+      offlineBufferRef.current = [];
       setPosition(null);
       setMatchedPosition(null);
       setError(null);
@@ -114,8 +170,23 @@ export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
 
       lastSentRef.current   = current;
       lastSentAtRef.current = Date.now();
-      apiFetch('/drivers/location', { method: 'PATCH', body: JSON.stringify(current) }, token)
-        .catch(() => {});
+
+      if (!isOnlineRef.current) {
+        // Sin red: acumular para enviar cuando vuelva la conexión
+        offlineBufferRef.current.push({ lat: current.lat, lng: current.lng, ts: Date.now() });
+        if (offlineBufferRef.current.length > OFFLINE_FLUSH_MAX) {
+          offlineBufferRef.current = offlineBufferRef.current.slice(-OFFLINE_FLUSH_MAX);
+        }
+        return;
+      }
+
+      apiFetch('/drivers/location', {
+        method: 'PATCH',
+        body: JSON.stringify(current),
+      }, token).catch(() => {
+        // Falló el envío — guardar en buffer offline
+        offlineBufferRef.current.push({ lat: current.lat, lng: current.lng, ts: Date.now() });
+      });
     }
 
     watchRef.current = navigator.geolocation.watchPosition(
@@ -131,8 +202,7 @@ export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
           accuracy: Math.round(pos.coords.accuracy),
         };
 
-        // Solo re-renderizar si el driver se movió más de MIN_RENDER_METERS
-        const prev = posRef.current;
+        const prev  = posRef.current;
         const moved = !prev || haversineMeters(prev.lat, prev.lng, p.lat, p.lng) >= MIN_RENDER_METERS;
 
         posRef.current = p;
@@ -140,8 +210,6 @@ export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
         if (moved) {
           setPosition(p);
           setError(null);
-
-          // Acumular en buffer de map matching
           matchBufferRef.current.push({ lat: p.lat, lng: p.lng });
           runMapMatch();
         }
@@ -152,10 +220,7 @@ export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
       { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 }
     );
 
-    // Timer de seguridad: forzar map match si pasaron 30s sin suficientes puntos
-    const matchTimer = setInterval(() => {
-      runMapMatch(true);
-    }, MAP_MATCH_MAX_MS);
+    const matchTimer = setInterval(() => runMapMatch(true), MAP_MATCH_MAX_MS);
 
     function onVisible() {
       if (!document.hidden && posRef.current) sendLocation(posRef.current, true);
@@ -170,4 +235,23 @@ export function useDriverLocation(token, isAvailable, hasActiveOrder = false) {
   }, [shouldTrack, token, runMapMatch]);
 
   return { position, matchedPosition, error };
+}
+
+// ── Marcar entregado con fallback offline ─────────────────────────────────────
+// Llamar desde el componente de órdenes del driver en lugar de apiFetch directo.
+export async function markOrderDelivered(orderId, token) {
+  if (navigator.onLine) {
+    return apiFetch(`/orders/${orderId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'delivered' }),
+    }, token);
+  }
+  // Sin red: encolar en SW para envío automático al reconectar
+  postToSW('SYNC_STATUS_UPDATE', {
+    orderId,
+    status: 'delivered',
+    token,
+  });
+  // Lanzar error suave para que la UI muestre aviso
+  throw Object.assign(new Error('Sin conexión — se enviará automáticamente al recuperar señal.'), { offline: true });
 }

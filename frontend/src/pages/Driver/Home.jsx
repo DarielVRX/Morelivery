@@ -95,7 +95,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
   }, []);
 
   const { position: myPosition, matchedPosition, error: gpsError } = useDriverLocation(
-    auth.token, order.availability, order.hasActiveOrder
+    auth.token, order.availability, order.hasActiveOrder, auth.user?.id
   );
 
   const displayPosition = matchedPosition || myPosition;
