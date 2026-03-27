@@ -6,6 +6,7 @@ import { env }       from '../../config/env.js';
 import { AppError }  from '../../utils/errors.js';
 import { logEvent }  from '../../utils/logger.js';
 import { randomUUID } from 'crypto';
+import { checkName } from '../../utils/nameFilter.js';
 import { sendGmailSafe, verificationEmail, resendVerificationEmail as resendVerificationEmailTemplate, resetPasswordEmail } from './emailService.js';
 import {
   normalizeUsername, pseudoEmailFromUsername, resolveUniqueUsername,
@@ -36,6 +37,11 @@ export async function registerUser(payload) {
   if (payload.role === 'customer' && !payload.phone?.trim()) {
     throw new AppError(400, 'El número de teléfono es obligatorio para registrarse como cliente.');
   }
+
+  const nameCheckFull  = checkName(payload.fullName);
+  const nameCheckAlias = checkName(payload.alias);
+  if (!nameCheckFull.ok)  throw new AppError(400, nameCheckFull.reason);
+  if (!nameCheckAlias.ok) throw new AppError(400, nameCheckAlias.reason);
 
   try {
     const existing = await import('../../config/db.js').then(({ query }) =>
