@@ -1,5 +1,5 @@
 // frontend/src/pages/Customer/Payments.jsx
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { readPendingOrder, clearPendingOrder, savePendingOrder } from '../../utils/pendingOrder';
 import { useCart } from '../../hooks/useCart';
