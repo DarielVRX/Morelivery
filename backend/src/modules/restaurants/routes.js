@@ -92,6 +92,40 @@ router.get('/', async (_req, res, next) => {
   }
 });
 
+/* ── GET /:id — detalle público de un restaurante ── */
+router.get('/:id', async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT r.id, r.name, r.category, r.is_open, r.profile_photo,
+      r.rating_avg, r.rating_count, r.prep_time_estimate_s,
+      COALESCE(u.address, r.address) AS address,
+                               COALESCE(u.home_lat, r.lat) AS lat,
+                               COALESCE(u.home_lng, r.lng) AS lng
+                               FROM restaurants r
+                               LEFT JOIN users u ON u.id = r.owner_user_id
+                               WHERE r.id = $1 AND r.is_active = true`,
+                               [req.params.id]
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Restaurante no encontrado'));
+    const restaurant = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
+    return res.json({ restaurant });
+  } catch (error) { return next(error); }
+});
+
+/* ── GET /:id/menu — menú público de un restaurante ── */
+router.get('/:id/menu', async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT id, name, description, price_cents, is_available, image_url
+      FROM menu_items
+      WHERE restaurant_id = $1
+      ORDER BY name`,
+      [req.params.id]
+    );
+    return res.json({ menu: result.rows });
+  } catch (error) { return next(error); }
+});
+
 /* ── GET /my ── */
 router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
