@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from 'react';
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // apiFetch se importa desde el cliente compartido del proyecto
-import { apiFetch } from '../../../../api/client';
+import { apiFetch } from '../../../api/client';
 
 const fmt = (cents) =>
   cents != null ? `$${(cents / 100).toFixed(2)}` : '—';
@@ -128,8 +128,12 @@ export default function EmergencyTab({ token }) {
   const [restaurants, setRestaurants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedOrder, setExpandedOrder] = useState(null);
+  // Fast register extendido — paso 9
+  const [fastRegRole, setFastRegRole] = useState('driver'); // 'driver' | 'restaurant' | 'customer'
   const [fastRegForm, setFastRegForm] = useState({ fullName: '', alias: '', email: '', password: '' });
+  const [fastRegExtra, setFastRegExtra] = useState({ businessName: '', address: '', lat: '', lng: '' });
   const [fastRegLoading, setFastRegLoading] = useState(false);
+  const [fastRegPickingMap, setFastRegPickingMap] = useState(false);
   const [orderStatusOverride, setOrderStatusOverride] = useState({});
   const [orderNoteOverride, setOrderNoteOverride] = useState({});
 
@@ -199,20 +203,60 @@ export default function EmergencyTab({ token }) {
     await load();
   };
 
-  const fastRegisterDriver = async () => {
+  const fastRegister = async () => {
     const { fullName, alias, email, password } = fastRegForm;
     if (!fullName || !alias || !email || !password) {
-      notify('Todos los campos son requeridos', 'warn');
-      return;
+      notify('Todos los campos base son requeridos', 'warn'); return;
+    }
+    if (fastRegRole === 'restaurant' && !fastRegExtra.businessName) {
+      notify('El nombre del negocio es requerido', 'warn'); return;
     }
     setFastRegLoading(true);
     try {
-      await apiFetch('/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({ fullName, alias, username: alias, email, password, role: 'driver' }),
+      // 1. Registrar usuario con el rol correspondiente
+      const regBody = {
+        fullName, alias, username: alias, email, password,
+        role: fastRegRole,
+        skipEmailVerification: true,
+      };
+      const regRes = await apiFetch('/auth/register', {
+        method: 'POST', body: JSON.stringify(regBody),
       }, token);
-      notify(`✓ Driver "${alias}" registrado. Ya puede hacer login.`, 'ok');
+
+      const userId = regRes?.user?.id || regRes?.userId;
+
+      // 2. Si es restaurante: crear el perfil con nombre + ubicación
+      if (fastRegRole === 'restaurant' && userId) {
+        const restBody = {
+          name: fastRegExtra.businessName,
+          address: fastRegExtra.address || '',
+          lat: fastRegExtra.lat ? Number(fastRegExtra.lat) : null,
+          lng: fastRegExtra.lng ? Number(fastRegExtra.lng) : null,
+          is_open: false,
+          is_verified: false,
+        };
+        try {
+          await apiFetch(`/admin/users/${userId}/create-restaurant`, {
+            method: 'POST', body: JSON.stringify(restBody),
+          }, token);
+        } catch (e) {
+          notify(`Usuario creado pero error al crear restaurante: ${e.message}`, 'warn');
+        }
+      }
+
+      // 3. Si es driver: marcar is_available=false (require activación manual)
+      if (fastRegRole === 'driver' && userId) {
+        try {
+          await apiFetch(`/admin/drivers/${userId}/force-unavailable`, {
+            method: 'POST', body: JSON.stringify({}),
+          }, token).catch(() => {}); // no crítico
+        } catch (_) {}
+      }
+
+      const roleLabel = { driver: 'Driver', restaurant: 'Restaurante', customer: 'Cliente' }[fastRegRole];
+      notify(`✓ ${roleLabel} "${alias}" registrado. Ya puede hacer login.`, 'ok');
       setFastRegForm({ fullName: '', alias: '', email: '', password: '' });
+      setFastRegExtra({ businessName: '', address: '', lat: '', lng: '' });
     } catch (e) {
       notify(e.message, 'error');
     } finally {
@@ -536,15 +580,42 @@ export default function EmergencyTab({ token }) {
             ))}
           </div>
 
-          {/* ── 5. FAST REGISTER DRIVER ────────────────────────────────────── */}
+          {/* ── 5. FAST REGISTER — MULTI-ROL ──────────────────────────────── */}
           <div style={styles.card}>
-            <SectionHeader label="Fast register — nuevo driver" />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <SectionHeader label="Fast register — nuevo usuario" />
+
+            {/* Selector de rol */}
+            <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
               {[
-                { key: 'fullName', placeholder: 'Nombre completo' },
-                { key: 'alias', placeholder: 'Username / alias' },
-                { key: 'email', placeholder: 'Correo real' },
-                { key: 'password', placeholder: 'Contraseña temporal', type: 'password' },
+                { key: 'driver',     label: '🏍 Driver' },
+                { key: 'restaurant', label: '🏪 Restaurante' },
+                { key: 'customer',   label: '👤 Cliente' },
+              ].map(({ key, label }) => (
+                <button key={key} onClick={() => setFastRegRole(key)} style={{
+                  flex: 1,
+                  padding: '5px 0',
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  border: '1px solid',
+                  borderRadius: 3,
+                  cursor: 'pointer',
+                  background: fastRegRole === key ? '#22c55e' : '#1f2937',
+                  color:      fastRegRole === key ? '#0d1117' : '#9ca3af',
+                  borderColor:fastRegRole === key ? '#22c55e' : '#374151',
+                }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {/* Campos base */}
+              {[
+                { key: 'fullName',  placeholder: 'Nombre completo' },
+                { key: 'alias',     placeholder: 'Username / alias' },
+                { key: 'email',     placeholder: 'Correo' },
+                { key: 'password',  placeholder: 'Contraseña temporal', type: 'password' },
               ].map(({ key, placeholder, type }) => (
                 <input
                   key={key}
@@ -553,19 +624,101 @@ export default function EmergencyTab({ token }) {
                   style={styles.input}
                   value={fastRegForm[key]}
                   onChange={(e) => setFastRegForm(f => ({ ...f, [key]: e.target.value }))}
-                  onKeyDown={(e) => e.key === 'Enter' && fastRegisterDriver()}
+                  onKeyDown={(e) => e.key === 'Enter' && fastRegister()}
                 />
               ))}
+
+              {/* Campos extra para restaurante */}
+              {fastRegRole === 'restaurant' && (
+                <>
+                  <div style={{ borderTop: '1px solid #374151', paddingTop: 8, marginTop: 2 }}>
+                    <span style={{ color: '#9ca3af', fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.08em' }}>
+                      DATOS DEL NEGOCIO
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Nombre del negocio *"
+                    style={{ ...styles.input, borderColor: '#22c55e33' }}
+                    value={fastRegExtra.businessName}
+                    onChange={(e) => setFastRegExtra(f => ({ ...f, businessName: e.target.value }))}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Dirección (texto)"
+                    style={styles.input}
+                    value={fastRegExtra.address}
+                    onChange={(e) => setFastRegExtra(f => ({ ...f, address: e.target.value }))}
+                  />
+                  {/* Coords lat/lng — entrada manual o via GPS */}
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      type="number"
+                      placeholder="Lat"
+                      style={{ ...styles.input, flex: 1 }}
+                      value={fastRegExtra.lat}
+                      onChange={(e) => setFastRegExtra(f => ({ ...f, lat: e.target.value }))}
+                      step="0.000001"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Lng"
+                      style={{ ...styles.input, flex: 1 }}
+                      value={fastRegExtra.lng}
+                      onChange={(e) => setFastRegExtra(f => ({ ...f, lng: e.target.value }))}
+                      step="0.000001"
+                    />
+                    <button
+                      title="Obtener coordenadas actuales del dispositivo"
+                      style={{
+                        ...styles.input,
+                        flex: 'none', width: 36, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 14, padding: 0, border: '1px solid #374151',
+                        borderRadius: 3, background: '#1f2937',
+                      }}
+                      onClick={() => {
+                        if (!navigator.geolocation) return;
+                        navigator.geolocation.getCurrentPosition(
+                          (pos) => setFastRegExtra(f => ({
+                            ...f,
+                            lat: pos.coords.latitude.toFixed(6),
+                            lng: pos.coords.longitude.toFixed(6),
+                          })),
+                          () => {}
+                        );
+                      }}>
+                      📍
+                    </button>
+                  </div>
+                  {(fastRegExtra.lat && fastRegExtra.lng) && (
+                    <div style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace' }}>
+                      ✓ Coords: {Number(fastRegExtra.lat).toFixed(5)}, {Number(fastRegExtra.lng).toFixed(5)}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace', lineHeight: 1.4 }}>
+                    Se crea con is_open=false, is_verified=false.
+                    El admin debe verificar manualmente antes de aparecer en la app.
+                  </div>
+                </>
+              )}
+
+              {fastRegRole === 'driver' && (
+                <div style={{ fontSize: 10, color: '#4b5563', fontFamily: 'monospace', lineHeight: 1.4 }}>
+                  Se crea con is_available=false. El driver debe activarse manualmente
+                  desde la app o desde el panel de drivers.
+                </div>
+              )}
+
               <Btn
-                label={fastRegLoading ? 'Registrando...' : '⚡ Registrar driver ahora'}
+                label={fastRegLoading
+                  ? 'Registrando...'
+                  : `⚡ Registrar ${fastRegRole === 'driver' ? 'driver' : fastRegRole === 'restaurant' ? 'restaurante' : 'cliente'}`}
                 color="#22c55e"
                 textColor="#0d1117"
                 disabled={fastRegLoading}
-                onClick={fastRegisterDriver}
+                onClick={fastRegister}
               />
-              <span style={{ color: '#4b5563', fontSize: 10 }}>
-                El driver puede iniciar sesión inmediatamente. Sin verificación de email.
-              </span>
             </div>
           </div>
 

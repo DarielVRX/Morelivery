@@ -1,3 +1,4 @@
+// frontend/src/pages/Restaurant/Orders.jsx
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -9,7 +10,6 @@ import { IconChat, OrderChat } from '../../features/customer/orders/components';
 
 function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
 
-// ── Iconos SVG ────────────────────────────────────────────────────────────────
 function IconOrders() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{ display:'block' }}>
@@ -20,10 +20,9 @@ function IconOrders() {
   );
 }
 
-// ── Desglose para Tienda ──────────────────────────────────────────────────────
 function FeeBreakdown({ order }) {
-  const sub    = order.total_cents           || 0;
-  const resFee = order.restaurant_fee_cents  || 0;
+  const sub    = order.total_cents          || 0;
+  const resFee = order.restaurant_fee_cents || 0;
   const neto   = sub - resFee;
   if (!sub) return null;
   return (
@@ -53,17 +52,11 @@ var STATUS_COLOR = {
   delivered:'#16a34a', cancelled:'#dc2626', pending_driver:'#ef4444',
 };
 
-// ── Control de tiempo de preparación ─────────────────────────────────────────
 function PrepTimeControl({ value, onChange, onSave, saving }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap',
-      padding: '0.5rem 0.75rem',
-      background: 'rgba(255,255,255,0.12)',
-      borderRadius: 8,
-      border: '1px solid rgba(255,255,255,0.2)',
-      marginBottom: '0.5rem',
-    }}>
+    <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap',
+      padding:'0.5rem 0.75rem', background:'rgba(255,255,255,0.12)', borderRadius:8,
+      border:'1px solid rgba(255,255,255,0.2)', marginBottom:'0.5rem' }}>
       <span style={{ display:'inline-flex', alignItems:'center', gap:'0.3rem', color:'rgba(255,255,255,0.9)', fontSize:'0.78rem', fontWeight:700, flexShrink:0 }}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}>
           <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
@@ -76,17 +69,11 @@ function PrepTimeControl({ value, onChange, onSave, saving }) {
             background:'rgba(255,255,255,0.15)', color:'#fff', cursor:'pointer',
             display:'flex', alignItems:'center', justifyContent:'center',
             fontSize:'1rem', fontWeight:700, minHeight:'unset', flexShrink:0 }}>−</button>
-        <input
-          type="text" inputMode="numeric"
-          value={value}
+        <input type="text" inputMode="numeric" value={value}
           onChange={e => { const n = parseInt(e.target.value, 10); if (!isNaN(n) && n > 0) onChange(n); }}
-          style={{
-            width:44, textAlign:'center', background:'rgba(255,255,255,0.15)',
+          style={{ width:44, textAlign:'center', background:'rgba(255,255,255,0.15)',
             border:'1px solid rgba(255,255,255,0.35)', borderRadius:6,
-            color:'#fff', fontWeight:700, fontSize:'0.88rem',
-            padding:'0.2rem 0', minHeight:'unset',
-          }}
-        />
+            color:'#fff', fontWeight:700, fontSize:'0.88rem', padding:'0.2rem 0', minHeight:'unset' }} />
         <span style={{ color:'rgba(255,255,255,0.8)', fontSize:'0.75rem', flexShrink:0 }}>min</span>
         <button onClick={() => onChange(value + 1)}
           style={{ width:28, height:28, borderRadius:6, border:'1px solid rgba(255,255,255,0.35)',
@@ -95,18 +82,26 @@ function PrepTimeControl({ value, onChange, onSave, saving }) {
             fontSize:'1rem', fontWeight:700, minHeight:'unset', flexShrink:0 }}>+</button>
       </div>
       <button onClick={onSave} disabled={saving}
-        style={{
-          padding: '0.2rem 0.65rem', border: '1px solid rgba(255,255,255,0.4)',
-          borderRadius: 6, cursor: saving ? 'default' : 'pointer',
-          fontSize: '0.72rem', fontWeight: 700,
+        style={{ padding:'0.2rem 0.65rem', border:'1px solid rgba(255,255,255,0.4)',
+          borderRadius:6, cursor: saving ? 'default' : 'pointer', fontSize:'0.72rem', fontWeight:700,
           background: saving ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.22)',
-          color: '#fff', minHeight: 'unset', flexShrink: 0,
-          opacity: saving ? 0.6 : 1,
-        }}>
+          color:'#fff', minHeight:'unset', flexShrink:0, opacity: saving ? 0.6 : 1 }}>
         {saving ? '…' : 'Aplicar'}
       </button>
     </div>
   );
+}
+
+// ── Confirmación del restaurante — paso 7 ─────────────────────────────────────
+async function confirmOrder(orderId, token) {
+  await apiFetch(`/restaurants/orders/${orderId}/confirm`, { method: 'POST' }, token);
+  // Cancelar timer de repetición push en el SW
+  if ('serviceWorker' in navigator) {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      reg?.active?.postMessage({ type: 'CANCEL_ORDER_REPEAT', orderId });
+    } catch (_) {}
+  }
 }
 
 export default function RestaurantOrders() {
@@ -115,42 +110,33 @@ export default function RestaurantOrders() {
   const [products, setProducts] = useState([]);
   const [tab, setTab]           = useState('active');
   const [msg, setMsg]           = useState('');
-  const [reportingId, setReportingId] = useState(null);
-  const [reportText, setReportText]   = useState('');
+  const [reportingId, setReportingId]   = useState(null);
+  const [reportText, setReportText]     = useState('');
   const [ratingOrder,   setRatingOrder]   = useState(null);
   const [ratingStars,   setRatingStars]   = useState(0);
   const [ratingComment, setRatingComment] = useState('');
   const [ratingLoading, setRatingLoading] = useState(false);
   const [ratedOrders,   setRatedOrders]   = useState(new Set());
-  const [reportMsg, setReportMsg]     = useState('');
-  const [expanded, setExpanded]       = useState(null);
-  const [chatOpen, setChatOpen]       = useState(null); // orderId | null
+  const [reportMsg, setReportMsg]   = useState('');
+  const [expanded, setExpanded]     = useState(null);
+  const [chatOpen, setChatOpen]     = useState(null);
   const [suggestionFor, setSuggestionFor]   = useState('');
   const [readyCooldown, setReadyCooldown]   = useState({});
   const [suggDrafts, setSuggDrafts]         = useState({});
-  // ── Banners del motor de cocina ───────────────────────────────────────────
+  const [confirmingId, setConfirmingId]     = useState(null); // paso 7
   const [kitchenBanners, setKitchenBanners] = useState([]);
-  // ── Tiempo de preparación (sesión) ───────────────────────────────────────
-  // prepMins es el valor "hoy" que se muestra en PrepTimeControl.
-  // Se inicializa desde el servidor al cargar y se actualiza cuando:
-  //   1. El restaurante lo guarda desde Schedule (valor default) → se recibe via SSE prep_estimate_updated
-  //   2. El motor lo ajusta automáticamente → también llega como prep_estimate_updated
-  const [prepMins, setPrepMins]     = useState(15);
+  const [prepMins,  setPrepMins]  = useState(15);
   const [prepSaving, setPrepSaving] = useState(false);
   const loadDataRef = useRef(null);
 
   const handleKitchenEvent = useCallback((data) => {
-    // ── Sincronizar prepMins cuando el motor o Schedule cambian el estimado ──
     if (data.type === 'prep_estimate_updated' && data.newEstimate) {
       setPrepMins(Math.round(data.newEstimate / 60));
     }
-
     const bannerId = `${data.type}-${Date.now()}`;
     const duration = data.type === 'order_cancelled_preparing' ? 30_000 : 12_000;
     setKitchenBanners(prev => [...prev, { ...data, bannerId }]);
-    setTimeout(() => {
-      setKitchenBanners(prev => prev.filter(b => b.bannerId !== bannerId));
-    }, duration);
+    setTimeout(() => setKitchenBanners(prev => prev.filter(b => b.bannerId !== bannerId)), duration);
     loadDataRef.current?.();
   }, []);
 
@@ -176,53 +162,39 @@ export default function RestaurantOrders() {
       ]);
       setOrders(od.orders || []);
       setProducts(md.menu || []);
-      // Sincronizar prepMins con el valor del servidor en la carga inicial
-      if (od.prepEstimateS) {
-        setPrepMins(Math.round(od.prepEstimateS / 60));
-      }
+      if (od.prepEstimateS) setPrepMins(Math.round(od.prepEstimateS / 60));
     } catch (e) { setMsg(e.message); }
   }
 
-  // Carga inicial del estimado desde /restaurants/my
   useEffect(() => {
     if (!auth.token) return;
     apiFetch('/restaurants/my', {}, auth.token)
       .then(d => {
-        if (d.restaurant?.prep_time_estimate_s) {
+        if (d.restaurant?.prep_time_estimate_s)
           setPrepMins(Math.round(d.restaurant.prep_time_estimate_s / 60));
-        }
-      })
-      .catch(() => {});
+      }).catch(() => {});
   }, [auth.token]);
 
   useEffect(() => { loadDataRef.current = loadData; });
-
-  // Solo carga inicial — el SSE se encarga de las actualizaciones
-  useEffect(() => { loadData(); }, [auth.token]);
-
-  // ── Polling eliminado: el SSE dispara loadData en cada evento de orden ────
-  // (antes: setInterval cada 5s sobre /orders/my y /restaurants/my/menu)
+  useEffect(() => { loadData(); }, [auth.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [chatTick, setChatTick] = useState(0);
 
   useRealtimeOrders(
     auth.token,
     () => loadDataRef.current?.(),
-                    () => {},
-                    undefined,
-                    (data) => {
-                      if (data.orderId === chatOpen) setChatTick(t => t + 1);
-                    },
-                    undefined,
-                    handleKitchenEvent,
+    () => {},
+    undefined,
+    (data) => { if (data.orderId === chatOpen) setChatTick(t => t + 1); },
+    undefined,
+    handleKitchenEvent,
   );
 
   async function savePrepTime() {
     setPrepSaving(true);
-    const secs = Math.round(prepMins * 60);
     try {
       await apiFetch('/restaurants/my/prep-estimate',
-        { method: 'PATCH', body: JSON.stringify({ prep_time_estimate_s: secs }) },
+        { method:'PATCH', body: JSON.stringify({ prep_time_estimate_s: Math.round(prepMins * 60) }) },
         auth.token);
     } catch (e) { setMsg(e.message); }
     finally { setPrepSaving(false); }
@@ -232,8 +204,7 @@ export default function RestaurantOrders() {
     const secs = Math.round(minutes * 60);
     try {
       await apiFetch('/restaurants/my/prep-estimate',
-        { method: 'PATCH', body: JSON.stringify({ prep_time_estimate_s: secs }) },
-        auth.token);
+        { method:'PATCH', body: JSON.stringify({ prep_time_estimate_s: secs }) }, auth.token);
       setPrepMins(minutes);
       loadData();
     } catch (e) { setMsg(e.message); }
@@ -245,7 +216,7 @@ export default function RestaurantOrders() {
       orders.forEach(o => { next[o.id] = prev[o.id] || buildSuggestionDraft(o.items); });
       return next;
     });
-  }, [orders.length]);
+  }, [orders.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function changeStatus(orderId, status) {
     try {
@@ -306,9 +277,25 @@ export default function RestaurantOrders() {
     } catch (e) { setReportMsg(e.message); }
   }
 
+  // ── Confirmar pedido — paso 7 ─────────────────────────────────────────────
+  async function handleConfirm(orderId) {
+    setConfirmingId(orderId);
+    try {
+      await confirmOrder(orderId, auth.token);
+      loadData();
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setConfirmingId(null);
+    }
+  }
+
   const { active, past } = useMemo(() => splitOrdersByTerminalStatus(orders), [orders]);
 
-  useAppBadge(active.filter(o => ['created','pending_driver'].includes(o.status)).length);
+  const unconfirmedCount = active.filter(o => !o.restaurant_confirmed).length;
+  useAppBadge(
+    active.filter(o => ['created','pending_driver'].includes(o.status)).length + unconfirmedCount
+  );
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
@@ -322,9 +309,7 @@ export default function RestaurantOrders() {
             padding:'1.5rem', width:'100%', maxWidth:480,
             boxShadow:'0 -4px 32px rgba(0,0,0,0.2)',
             paddingBottom:'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}>
-            <h3 style={{ fontSize:'1rem', fontWeight:800, color:'var(--text-primary)', marginBottom:'0.25rem' }}>
-              Calificar conductor
-            </h3>
+            <h3 style={{ fontSize:'1rem', fontWeight:800, marginBottom:'0.25rem' }}>Calificar conductor</h3>
             <div style={{ fontSize:'0.82rem', color:'var(--text-tertiary)', marginBottom:'1rem' }}>
               {ratingOrder.driver_first_name || 'Conductor'} — {ratingOrder.restaurant_name}
             </div>
@@ -336,9 +321,7 @@ export default function RestaurantOrders() {
                 {[1,2,3,4,5].map(s => (
                   <button key={s} onClick={() => setRatingStars(s)}
                     style={{ fontSize:'1.6rem', background:'none', border:'none', cursor:'pointer',
-                      minHeight:'unset', color: s <= ratingStars ? '#f59e0b' : 'var(--border)', padding:0, lineHeight:1 }}>
-                    ★
-                  </button>
+                      minHeight:'unset', color: s <= ratingStars ? '#f59e0b' : 'var(--border)', padding:0, lineHeight:1 }}>★</button>
                 ))}
               </div>
             </div>
@@ -356,15 +339,10 @@ export default function RestaurantOrders() {
         </div>
       )}
 
-      {/* ── Encabezado con banner estilo RestaurantPage ──────────────────── */}
-      <div style={{
-        flexShrink: 0,
-        background: 'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)',
-        padding: '0.75rem 1rem 0',
-        zIndex: 30,
-        color: '#fff',
-      }}>
-        {/* Título + subtítulo */}
+      {/* Encabezado */}
+      <div style={{ flexShrink:0,
+        background:'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)',
+        padding:'0.75rem 1rem 0', zIndex:30, color:'#fff' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.45rem' }}>
           <div>
             <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', color:'#fff' }}>
@@ -375,346 +353,382 @@ export default function RestaurantOrders() {
               {active.length > 0 ? `${active.length} pedido${active.length !== 1 ? 's' : ''} activo${active.length !== 1 ? 's' : ''}` : 'Sin pedidos activos'}
             </div>
           </div>
-          {active.filter(o => ['created','pending_driver'].includes(o.status)).length > 0 && (
-            <span style={{ fontWeight:700, fontSize:'0.82rem', padding:'0.2rem 0.65rem',
-              background:'rgba(255,255,255,0.2)', borderRadius:20,
-              border:'1px solid rgba(255,255,255,0.3)', color:'#fff' }}>
-              ● {active.filter(o => ['created','pending_driver'].includes(o.status)).length} nuevo{active.filter(o => ['created','pending_driver'].includes(o.status)).length !== 1 ? 's' : ''}
-            </span>
-          )}
+          <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:3 }}>
+            {active.filter(o => ['created','pending_driver'].includes(o.status)).length > 0 && (
+              <span style={{ fontWeight:700, fontSize:'0.82rem', padding:'0.2rem 0.65rem',
+                background:'rgba(255,255,255,0.2)', borderRadius:20,
+                border:'1px solid rgba(255,255,255,0.3)', color:'#fff' }}>
+                ● {active.filter(o => ['created','pending_driver'].includes(o.status)).length} nuevo{active.filter(o => ['created','pending_driver'].includes(o.status)).length !== 1 ? 's' : ''}
+              </span>
+            )}
+            {/* Indicador pedidos sin confirmar — paso 7 */}
+            {unconfirmedCount > 0 && (
+              <span style={{ fontWeight:700, fontSize:'0.75rem', padding:'0.15rem 0.55rem',
+                background:'rgba(251,191,36,0.3)', borderRadius:20,
+                border:'1px solid rgba(251,191,36,0.5)', color:'#fef9c3' }}>
+                ⏳ {unconfirmedCount} sin confirmar
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Control de tiempo de preparación (hoy) */}
-        <PrepTimeControl
-          value={prepMins}
-          onChange={setPrepMins}
-          onSave={savePrepTime}
-          saving={prepSaving}
-        />
+        <PrepTimeControl value={prepMins} onChange={setPrepMins} onSave={savePrepTime} saving={prepSaving} />
 
-        {/* Tabs */}
         <div style={{ display:'flex', gap:0, borderTop:'1px solid rgba(255,255,255,0.2)' }}>
           {[['active','Activos'],['past','Historial']].map(([val, label]) => (
             <button key={val} onClick={() => setTab(val)}
-              style={{
-                flex:1, background:'none', border:'none', cursor:'pointer',
+              style={{ flex:1, background:'none', border:'none', cursor:'pointer',
                 padding:'0.4rem 0.5rem', fontSize:'0.78rem', fontWeight: tab===val ? 800 : 500,
                 color: tab===val ? '#fff' : 'rgba(255,255,255,0.6)',
                 borderBottom: tab===val ? '2px solid #fff' : '2px solid transparent',
-                marginBottom: '-1px', transition:'color 0.15s',
-              }}>
+                marginBottom:'-1px', transition:'color 0.15s' }}>
               {label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* ── Contenido scrolleable ─────────────────────────────────── */}
-      <div style={{ flex:1, overflowY:'auto', padding:'0.75rem 1rem', paddingBottom:'calc(var(--nav-h-mobile) + 2.5rem)' }}>
+      {/* Contenido */}
+      <div style={{ flex:1, overflowY:'auto', padding:'0.75rem 1rem',
+        paddingBottom:'calc(var(--nav-h-mobile) + 2.5rem)' }}>
 
-      {reportMsg && <p className="flash flash-ok" style={{ marginBottom:'0.5rem' }}>{reportMsg}</p>}
-      {msg && <p className="flash flash-error">{msg}</p>}
+        {reportMsg && <p className="flash flash-ok" style={{ marginBottom:'0.5rem' }}>{reportMsg}</p>}
+        {msg && <p className="flash flash-error">{msg}</p>}
 
-      {/* ── Banners del motor de cocina ─────────────────────────────────── */}
-      {kitchenBanners.map(banner => {
-        const isCancel   = banner.type === 'order_cancelled_preparing';
-        const isArrival  = banner.type === 'driver_arrival';
-        const isEstimate = banner.type === 'prep_estimate_updated';
-        const bg   = isCancel ? 'var(--danger-bg)' : isArrival ? 'var(--success-bg)' : isEstimate ? 'var(--warn-bg)' : 'var(--success-bg)';
-        const bdr  = isCancel ? 'var(--danger-border)' : isArrival ? 'var(--success-border)' : isEstimate ? 'var(--warn-border)' : 'var(--success-border)';
-        const icon = isCancel ? '⚠️' : isArrival ? '🛵' : isEstimate ? '⏱️' : '🍳';
-        const title = isCancel  ? 'Pedido cancelado mientras preparabas'
-                    : isArrival ? `Conductor llegó — ${banner.driverName || 'Driver'} recogió`
-                    : isEstimate ? 'Estimado de preparación actualizado'
-                    : 'Pedido marcado como listo automáticamente';
-        return (
-          <div key={banner.bannerId} style={{
-            background: bg, border: `1px solid ${bdr}`,
-            borderLeft: isCancel ? '4px solid var(--danger)' : undefined,
-            borderRadius: 8, padding: '0.65rem 0.875rem', marginBottom: '0.5rem',
-            fontSize: '0.82rem', lineHeight: 1.4, position: 'relative',
-          }}>
-            <div style={{ fontWeight:700, marginBottom:'0.2rem', color:'var(--text-primary)', paddingRight:'1.5rem' }}>
-              {icon} {title}
+        {/* Banners del motor de cocina */}
+        {kitchenBanners.map(banner => {
+          const isCancel   = banner.type === 'order_cancelled_preparing';
+          const isArrival  = banner.type === 'driver_arrival';
+          const isEstimate = banner.type === 'prep_estimate_updated';
+          const bg   = isCancel ? 'var(--danger-bg)' : isArrival ? 'var(--success-bg)' : isEstimate ? 'var(--warn-bg)' : 'var(--success-bg)';
+          const bdr  = isCancel ? 'var(--danger-border)' : isArrival ? 'var(--success-border)' : isEstimate ? 'var(--warn-border)' : 'var(--success-border)';
+          const icon = isCancel ? '⚠️' : isArrival ? '🛵' : isEstimate ? '⏱️' : '🍳';
+          const title = isCancel  ? 'Pedido cancelado mientras preparabas'
+                      : isArrival ? `Conductor llegó — ${banner.driverName || 'Driver'} recogió`
+                      : isEstimate ? 'Estimado de preparación actualizado'
+                      : 'Pedido marcado como listo automáticamente';
+          return (
+            <div key={banner.bannerId} style={{ background:bg, border:`1px solid ${bdr}`,
+              borderLeft: isCancel ? '4px solid var(--danger)' : undefined,
+              borderRadius:8, padding:'0.65rem 0.875rem', marginBottom:'0.5rem',
+              fontSize:'0.82rem', lineHeight:1.4, position:'relative' }}>
+              <div style={{ fontWeight:700, marginBottom:'0.2rem', paddingRight:'1.5rem' }}>
+                {icon} {title}
+              </div>
+              {banner.message && <div style={{ color:'var(--text-secondary)' }}>{banner.message}</div>}
+              {isCancel && banner.note && (
+                <div style={{ marginTop:'0.3rem', fontSize:'0.78rem', color:'var(--text-secondary)' }}>
+                  Motivo: <em>{banner.note}</em>
+                </div>
+              )}
+              {isEstimate && banner.newEstimate && (
+                <div style={{ marginTop:'0.4rem', display:'flex', gap:'0.5rem', alignItems:'center' }}>
+                  <span style={{ fontSize:'0.75rem', color:'var(--text-secondary)' }}>
+                    Nuevo estimado: <strong>{Math.round(banner.newEstimate / 60)} min</strong>
+                  </span>
+                  <button className="btn-sm" style={{ fontSize:'0.72rem' }}
+                    onClick={() => updatePrepEstimate(Math.round(banner.newEstimate / 60))}>
+                    Confirmar
+                  </button>
+                  <button className="btn-sm" style={{ fontSize:'0.72rem' }}
+                    onClick={() => {
+                      const mins = window.prompt('Corregir estimado (minutos):', String(Math.round(banner.newEstimate / 60)));
+                      if (mins && Number(mins) > 0) updatePrepEstimate(Number(mins));
+                    }}>
+                    Corregir
+                  </button>
+                </div>
+              )}
+              <button onClick={() => setKitchenBanners(prev => prev.filter(b => b.bannerId !== banner.bannerId))}
+                style={{ position:'absolute', top:8, right:8, background:'none', border:'none',
+                  cursor:'pointer', fontSize:'0.85rem', color:'var(--text-tertiary)', minHeight:'unset' }}>✕</button>
             </div>
-            {banner.message && <div style={{ color:'var(--text-secondary)' }}>{banner.message}</div>}
-            {isCancel && banner.note && (
-              <div style={{ marginTop:'0.3rem', fontSize:'0.78rem', color:'var(--text-secondary)' }}>
-                Motivo: <em>{banner.note}</em>
-              </div>
-            )}
-            {isEstimate && banner.newEstimate && (
-              <div style={{ marginTop:'0.4rem', display:'flex', gap:'0.5rem', alignItems:'center' }}>
-                <span style={{ fontSize:'0.75rem', color:'var(--text-secondary)' }}>
-                  Nuevo estimado: <strong>{Math.round(banner.newEstimate / 60)} min</strong>
-                </span>
-                <button className="btn-sm" style={{ fontSize:'0.72rem' }}
-                  onClick={() => updatePrepEstimate(Math.round(banner.newEstimate / 60))}>
-                  Confirmar
-                </button>
-                <button className="btn-sm" style={{ fontSize:'0.72rem' }}
-                  onClick={() => {
-                    const mins = window.prompt('Corregir estimado (minutos):', String(Math.round(banner.newEstimate / 60)));
-                    if (mins && Number(mins) > 0) updatePrepEstimate(Number(mins));
-                  }}>
-                  Corregir
-                </button>
-              </div>
-            )}
-            <button onClick={() => setKitchenBanners(prev => prev.filter(b => b.bannerId !== banner.bannerId))}
-              style={{ position:'absolute', top:8, right:8, background:'none', border:'none',
-                cursor:'pointer', fontSize:'0.85rem', color:'var(--text-tertiary)', minHeight:'unset' }}>✕</button>
-          </div>
-        );
-      })}
+          );
+        })}
 
-      {/* Activos */}
-      {tab === 'active' && (
-        active.length === 0
-          ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos activos.</p>
-          : (
-            <ul className="orders-tab-panel" style={{ listStyle:'none', padding:0 }}>
-              {active.map(order => {
-                const color = STATUS_COLOR[order.status] || '#9ca3af';
-                const isExp = expanded === order.id;
-                const isChatOpen = chatOpen === order.id;
-                return (
-                  <li key={order.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden' }}>
-                    <div onClick={() => setExpanded(isExp ? null : order.id)}
-                      style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.75rem', cursor:'pointer', gap:'0.5rem' }}>
-                      <div>
-                        <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15`, marginRight:'0.5rem' }}>
-                          {STATUS_LABELS[order.status]}
-                        </span>
-                        <span style={{ fontWeight:600, fontSize:'0.875rem' }}>{order.customer_first_name || '—'}</span>
-                      </div>
-                      <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
-                        <span style={{ fontWeight:700 }}>{fmt(order.total_cents)}</span>
-                        <span style={{ color:'var(--text-tertiary)', fontSize:'0.8rem' }}>{isExp?'▲':'▼'}</span>
-                      </div>
-                    </div>
-                    {isExp && (
-                    <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
-                    <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>
-                      {order.customer_address && <div>Dirección: <strong>{order.customer_address}</strong></div>}
-                      Conductor: <strong>{order.driver_first_name || 'Pendiente'}</strong>
-                    </div>
-                    {(order.items || []).length > 0 && (
-                      <ul style={{ margin:'0.25rem 0 0.5rem 1rem', fontSize:'0.83rem', color:'var(--text-primary)' }}>
-                        {order.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
-                      </ul>
-                    )}
-                    {order.payment_method && (
-                      <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)', marginBottom:'0.3rem' }}>
-                        Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[order.payment_method]||order.payment_method}</strong>
-                      </div>
-                    )}
-                    <FeeBreakdown order={order} />
-                    <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginTop:'0.4rem' }}>
-                      {!['preparing','ready','on_the_way','delivered','cancelled'].includes(order.status) && (
-                        <button className="btn-sm" onClick={() => changeStatus(order.id, 'preparing')}>En preparación</button>
-                      )}
-                      {order.status !== 'ready' && !['on_the_way','delivered','cancelled'].includes(order.status) && (() => {
-                        const cd = readyCooldown[order.id] || 0;
-                        return (
-                          <button className="btn-sm"
-                            style={{ background: cd > 0 ? 'var(--gray-200)' : 'var(--success)', color: cd > 0 ? 'var(--gray-500)' : '#fff', borderColor: cd > 0 ? 'var(--gray-300)' : 'var(--success)' }}
-                            disabled={cd > 0}
-                            title={cd > 0 ? `Espera ${Math.floor(cd/60)}:${String(cd%60).padStart(2,'0')} min antes de marcar Listo` : ''}
-                            onClick={() => changeStatus(order.id, 'ready')}>
-                            {cd > 0 ? `Listo (${Math.floor(cd/60)}:${String(cd%60).padStart(2,'0')})` : 'Listo'}
+        {/* Activos */}
+        {tab === 'active' && (
+          active.length === 0
+            ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos activos.</p>
+            : (
+              <ul className="orders-tab-panel" style={{ listStyle:'none', padding:0 }}>
+                {active.map(order => {
+                  const color = STATUS_COLOR[order.status] || '#9ca3af';
+                  const isExp = expanded === order.id;
+                  const isChatOpen = chatOpen === order.id;
+                  const isConfirmed = order.restaurant_confirmed !== false;
+                  return (
+                    <li key={order.id} className="card"
+                      style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden' }}>
+
+                      {/* Banner de confirmación pendiente — paso 7 */}
+                      {!isConfirmed && (
+                        <div style={{ background:'#fffbeb', borderBottom:'1px solid #fde68a',
+                          padding:'0.35rem 0.75rem', display:'flex', alignItems:'center',
+                          justifyContent:'space-between', gap:'0.5rem' }}>
+                          <span style={{ fontSize:'0.75rem', color:'#92400e', fontWeight:600 }}>
+                            ⏳ Pendiente de tu confirmación
+                          </span>
+                          <button
+                            onClick={() => handleConfirm(order.id)}
+                            disabled={confirmingId === order.id}
+                            style={{ padding:'0.25rem 0.75rem', borderRadius:6, fontWeight:800,
+                              fontSize:'0.78rem', border:'none', cursor:'pointer',
+                              background:'#22c55e', color:'#fff',
+                              opacity: confirmingId === order.id ? 0.6 : 1 }}>
+                            {confirmingId === order.id ? '…' : '✓ Confirmar'}
                           </button>
-                        );
-                      })()}
-                      {!['ready','on_the_way','delivered','cancelled'].includes(order.status) && (
-                        <button className="btn-sm"
-                          onClick={() => setSuggestionFor(s => s === order.id ? '' : order.id)}
-                          style={{ background: suggestionFor === order.id ? 'var(--brand-light)' : undefined }}>
-                          Sugerir cambio
-                        </button>
+                        </div>
                       )}
-                      {!['delivered','cancelled','on_the_way'].includes(order.status) && (
-                        <button className="btn-sm btn-danger" onClick={() => cancelOrder(order.id)}>
-                          Cancelar
-                        </button>
-                      )}
-                    </div>
 
-                    {/* ── Chat ── */}
-                    <button
-                      onClick={() => setChatOpen(isChatOpen ? null : order.id)}
-                      style={{ marginTop:'0.5rem', display:'flex', alignItems:'center', gap:'0.35rem',
-                        background:'none', border:'1px solid var(--border)', borderRadius:6,
-                        padding:'0.25rem 0.65rem', fontSize:'0.78rem', cursor:'pointer',
-                        color:'var(--text-secondary)', fontWeight:600 }}>
-                      <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Chat del pedido'}
-                    </button>
-                    {isChatOpen && <OrderChat
-                      orderId={order.id}
-                      token={auth.token}
-                      refreshTick={chatTick}  // nuevo prop
-                      />}
-
-                    {/* Panel sugerencia */}
-                    {suggestionFor === order.id && (
-                      <div style={{ marginTop:'0.75rem', background:'var(--gray-50)', border:'1px solid var(--border)', borderRadius:8, padding:'0.875rem' }}>
-                        <p style={{ fontWeight:700, fontSize:'0.875rem', marginBottom:'0.5rem' }}>Proponer cambio al cliente</p>
-                        {order.suggestion_status === 'pending_customer' && (
-                          <p style={{ fontSize:'0.8rem', color:'#92400e', background:'#fffbeb', border:'1px solid #f59e0b', borderRadius:6, padding:'0.4rem 0.6rem', marginBottom:'0.5rem' }}>
-                            Ya hay una sugerencia pendiente de respuesta.
-                          </p>
-                        )}
-                        <p style={{ fontSize:'0.75rem', color:'var(--text-tertiary)', marginBottom:'0.35rem' }}>
-                          Nota: al marcar el pedido como Listo debes esperar al menos 5 minutos despues de enviar una sugerencia.
-                        </p>
-                        <p style={{ fontSize:'0.75rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>Pedido original:</p>
-                        <div style={{ background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:6, padding:'0.4rem 0.75rem', marginBottom:'0.65rem' }}>
-                          {(order.items || []).map(i => (
-                            <div key={i.menuItemId} style={{ display:'flex', justifyContent:'space-between', fontSize:'0.83rem', padding:'0.1rem 0' }}>
-                              <span>{i.name}</span><span style={{ color:'var(--text-tertiary)' }}>× {i.quantity}</span>
-                            </div>
-                          ))}
+                      <div onClick={() => setExpanded(isExp ? null : order.id)}
+                        style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                          padding:'0.75rem', cursor:'pointer', gap:'0.5rem' }}>
+                        <div>
+                          <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15`, marginRight:'0.5rem' }}>
+                            {STATUS_LABELS[order.status]}
+                          </span>
+                          <span style={{ fontWeight:600, fontSize:'0.875rem' }}>{order.customer_first_name || '—'}</span>
                         </div>
-                        <p style={{ fontSize:'0.75rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>Sugerencia:</p>
-                        {(() => {
-                          const draft = suggDrafts[order.id] || {};
-                          const total = products.reduce((s, p) => s + (draft[p.id] || 0) * p.price_cents, 0);
-                          return total > 0 ? (
-                            <div style={{ fontWeight:700, fontSize:'0.88rem', color:'var(--brand)', marginBottom:'0.4rem', textAlign:'right' }}>
-                              Total sugerencia: {fmt(total)}
-                            </div>
-                          ) : null;
-                        })()}
-                        <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginBottom:'0.65rem' }}>
-                          {products.map(p => {
-                            const qty = (suggDrafts[order.id] || {})[p.id] ?? 0;
-                            return (
-                              <div key={p.id} style={{
-                                display:'flex', alignItems:'center', gap:'0.5rem',
-                                background: qty > 0 ? 'var(--brand-light)' : '#fff',
-                                border: `1px solid ${qty > 0 ? '#bfdbfe' : 'var(--gray-200)'}`,
-                                borderRadius:6, padding:'0.4rem 0.75rem',
-                              }}>
-                                <span style={{ flex:1, fontSize:'0.875rem', fontWeight: qty > 0 ? 600 : 400 }}>{p.name}</span>
-                                <span style={{ fontSize:'0.75rem', color:'var(--text-tertiary)' }}>{fmt(p.price_cents)}</span>
-                                <div className="qty-control">
-                                  <button className="qty-btn" disabled={qty===0} onClick={() => adjustSugg(order.id, p.id, -1)}>−</button>
-                                  <span className="qty-num">{qty}</span>
-                                  <button className="qty-btn add" onClick={() => adjustSugg(order.id, p.id, 1)}>+</button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div style={{ display:'flex', gap:'0.4rem' }}>
-                          <button className="btn-primary btn-sm" onClick={() => sendSuggestion(order)}>Enviar al cliente</button>
-                          <button className="btn-sm" onClick={() => setSuggestionFor('')}>Cancelar</button>
+                        <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
+                          <span style={{ fontWeight:700 }}>{fmt(order.total_cents)}</span>
+                          <span style={{ color:'var(--text-tertiary)', fontSize:'0.8rem' }}>{isExp?'▲':'▼'}</span>
                         </div>
                       </div>
-                    )}
-                    </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )
-      )}
 
-      {/* Historial */}
-      {tab === 'past' && (
-        past.length === 0
-          ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
-          : (
-            <ul className="orders-tab-panel reverse" style={{ listStyle:'none', padding:0 }}>
-              {past.slice(0, 50).map(o => {
-                const color    = STATUS_COLOR[o.status] || '#9ca3af';
-                const isPastExp = expanded === ('h_'+o.id);
-                const isChatOpen = chatOpen === o.id;
-                return (
-                  <li key={o.id} className="card" style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden' }}>
-                    <div onClick={() => setExpanded(isPastExp ? null : 'h_'+o.id)}
-                      style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.75rem', cursor:'pointer', gap:'0.5rem' }}>
-                      <div>
-                        <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15`, marginRight:'0.5rem', fontSize:'0.7rem' }}>
-                          {STATUS_LABELS[o.status]}
-                        </span>
-                        <span style={{ fontWeight:600, fontSize:'0.875rem' }}>{o.customer_first_name || '—'}</span>
-                      </div>
-                      <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
-                        <span style={{ fontWeight:700 }}>{fmt(o.total_cents)}</span>
-                        <span style={{ color:'var(--text-tertiary)', fontSize:'0.8rem' }}>{isPastExp?'▲':'▼'}</span>
-                      </div>
-                    </div>
-                    {isPastExp && (
-                      <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
-                        <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>
-                          Conductor: <strong>{o.driver_first_name || '—'}</strong>
-                        </div>
-                        {(o.items || []).length > 0 && (
-                          <ul style={{ fontSize:'0.82rem', margin:'0.2rem 0 0.35rem 1rem' }}>
-                            {o.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
-                          </ul>
-                        )}
-                        {o.payment_method && (
-                          <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)', marginBottom:'0.2rem' }}>
-                            Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[o.payment_method]||o.payment_method}</strong>
+                      {isExp && (
+                        <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
+                          <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>
+                            {order.customer_address && <div>Dirección: <strong>{order.customer_address}</strong></div>}
+                            Conductor: <strong>{order.driver_first_name || 'Pendiente'}</strong>
                           </div>
-                        )}
-                        <FeeBreakdown order={o} />
-
-                        {/* Chat historial */}
-                        <button
-                          onClick={() => setChatOpen(isChatOpen ? null : o.id)}
-                          style={{ marginTop:'0.4rem', display:'flex', alignItems:'center', gap:'0.35rem',
-                            background:'none', border:'1px solid var(--border)', borderRadius:6,
-                            padding:'0.25rem 0.65rem', fontSize:'0.78rem', cursor:'pointer',
-                            color:'var(--text-secondary)', fontWeight:600 }}>
-                          <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Ver chat'}
-                        </button>
-                        {isChatOpen && <OrderChat
-                          orderId={o.id}
-                          token={auth.token}
-                          refreshTick={chatTick}  // nuevo prop
-                          />}
-
-                        {reportingId === o.id ? (
-                          <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginTop:'0.4rem' }}>
-                            <textarea value={reportText} onChange={e=>setReportText(e.target.value)}
-                              placeholder="Describe el problema…" rows={2}
-                              style={{ fontSize:'0.78rem', width:'100%', boxSizing:'border-box' }} />
-                            <div style={{ display:'flex', gap:'0.3rem' }}>
-                              <button className="btn-sm" style={{ fontSize:'0.75rem', background:'var(--danger)', color:'#fff', borderColor:'var(--danger)' }} onClick={() => sendReport(o.id)}>Enviar</button>
-                              <button className="btn-sm" style={{ fontSize:'0.75rem' }} onClick={() => { setReportingId(null); setReportText(''); }}>Cancelar</button>
+                          {(order.items || []).length > 0 && (
+                            <ul style={{ margin:'0.25rem 0 0.5rem 1rem', fontSize:'0.83rem' }}>
+                              {order.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
+                            </ul>
+                          )}
+                          {order.payment_method && (
+                            <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)', marginBottom:'0.3rem' }}>
+                              Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[order.payment_method]||order.payment_method}</strong>
                             </div>
-                          </div>
-                        ) : (
+                          )}
+                          <FeeBreakdown order={order} />
+
+                          {/* Botones de acción */}
                           <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginTop:'0.4rem' }}>
-                            {o.status === 'delivered' && o.driver_id && !ratedOrders.has(o.id) && (
-                              <button className="btn-sm"
-                                style={{ fontSize:'0.72rem', color:'var(--brand)', borderColor:'var(--brand)', background:'var(--brand-light)', minHeight:'unset' }}
-                                onClick={() => { setRatingOrder(o); setRatingStars(0); setRatingComment(''); }}>
-                                ⭐ Calificar conductor
+
+                            {/* Confirmar — paso 7: también disponible en el expandible */}
+                            {!isConfirmed && (
+                              <button
+                                className="btn-sm"
+                                style={{ background:'#22c55e', color:'#fff', borderColor:'#16a34a', fontWeight:800 }}
+                                disabled={confirmingId === order.id}
+                                onClick={() => handleConfirm(order.id)}>
+                                {confirmingId === order.id ? '…' : '✓ Confirmar pedido'}
                               </button>
                             )}
-                            {ratedOrders.has(o.id) && (
-                              <span style={{ fontSize:'0.72rem', color:'var(--success)', fontWeight:600 }}>✓ Calificado</span>
-                            )}
-                            <button className="btn-sm" style={{ fontSize:'0.72rem', minHeight:'unset' }}
-                              onClick={() => setReportingId(o.id)}>
-                              Reportar
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )
-      )}
 
+                            {!['preparing','ready','on_the_way','delivered','cancelled'].includes(order.status) && (
+                              <button className="btn-sm" onClick={() => changeStatus(order.id, 'preparing')}>
+                                En preparación
+                              </button>
+                            )}
+                            {order.status !== 'ready' && !['on_the_way','delivered','cancelled'].includes(order.status) && (() => {
+                              const cd = readyCooldown[order.id] || 0;
+                              return (
+                                <button className="btn-sm"
+                                  style={{ background: cd > 0 ? 'var(--gray-200)' : 'var(--success)', color: cd > 0 ? 'var(--gray-500)' : '#fff', borderColor: cd > 0 ? 'var(--gray-300)' : 'var(--success)' }}
+                                  disabled={cd > 0}
+                                  title={cd > 0 ? `Espera ${Math.floor(cd/60)}:${String(cd%60).padStart(2,'0')} min` : ''}
+                                  onClick={() => changeStatus(order.id, 'ready')}>
+                                  {cd > 0 ? `Listo (${Math.floor(cd/60)}:${String(cd%60).padStart(2,'0')})` : 'Listo'}
+                                </button>
+                              );
+                            })()}
+                            {!['ready','on_the_way','delivered','cancelled'].includes(order.status) && (
+                              <button className="btn-sm"
+                                onClick={() => setSuggestionFor(s => s === order.id ? '' : order.id)}
+                                style={{ background: suggestionFor === order.id ? 'var(--brand-light)' : undefined }}>
+                                Sugerir cambio
+                              </button>
+                            )}
+                            {!['delivered','cancelled','on_the_way'].includes(order.status) && (
+                              <button className="btn-sm btn-danger" onClick={() => cancelOrder(order.id)}>
+                                Cancelar
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Chat */}
+                          <button onClick={() => setChatOpen(isChatOpen ? null : order.id)}
+                            style={{ marginTop:'0.5rem', display:'flex', alignItems:'center', gap:'0.35rem',
+                              background:'none', border:'1px solid var(--border)', borderRadius:6,
+                              padding:'0.25rem 0.65rem', fontSize:'0.78rem', cursor:'pointer',
+                              color:'var(--text-secondary)', fontWeight:600 }}>
+                            <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Chat del pedido'}
+                          </button>
+                          {isChatOpen && <OrderChat orderId={order.id} token={auth.token} refreshTick={chatTick} />}
+
+                          {/* Panel sugerencia */}
+                          {suggestionFor === order.id && (
+                            <div style={{ marginTop:'0.75rem', background:'var(--gray-50)',
+                              border:'1px solid var(--border)', borderRadius:8, padding:'0.875rem' }}>
+                              <p style={{ fontWeight:700, fontSize:'0.875rem', marginBottom:'0.5rem' }}>
+                                Proponer cambio al cliente
+                              </p>
+                              {order.suggestion_status === 'pending_customer' && (
+                                <p style={{ fontSize:'0.8rem', color:'#92400e', background:'#fffbeb',
+                                  border:'1px solid #f59e0b', borderRadius:6, padding:'0.4rem 0.6rem', marginBottom:'0.5rem' }}>
+                                  Ya hay una sugerencia pendiente de respuesta.
+                                </p>
+                              )}
+                              <p style={{ fontSize:'0.75rem', color:'var(--text-tertiary)', marginBottom:'0.35rem' }}>
+                                Nota: al marcar el pedido como Listo debes esperar al menos 5 minutos después de enviar una sugerencia.
+                              </p>
+                              <p style={{ fontSize:'0.75rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>Pedido original:</p>
+                              <div style={{ background:'var(--bg-card)', border:'1px solid var(--border)',
+                                borderRadius:6, padding:'0.4rem 0.75rem', marginBottom:'0.65rem' }}>
+                                {(order.items || []).map(i => (
+                                  <div key={i.menuItemId} style={{ display:'flex', justifyContent:'space-between',
+                                    fontSize:'0.83rem', padding:'0.1rem 0' }}>
+                                    <span>{i.name}</span><span style={{ color:'var(--text-tertiary)' }}>× {i.quantity}</span>
+                                  </div>
+                                ))}
+                              </div>
+                              <p style={{ fontSize:'0.75rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>Sugerencia:</p>
+                              {(() => {
+                                const draft = suggDrafts[order.id] || {};
+                                const total = products.reduce((s, p) => s + (draft[p.id] || 0) * p.price_cents, 0);
+                                return total > 0 ? (
+                                  <div style={{ fontWeight:700, fontSize:'0.88rem', color:'var(--brand)',
+                                    marginBottom:'0.4rem', textAlign:'right' }}>
+                                    Total sugerencia: {fmt(total)}
+                                  </div>
+                                ) : null;
+                              })()}
+                              <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginBottom:'0.65rem' }}>
+                                {products.map(p => {
+                                  const qty = (suggDrafts[order.id] || {})[p.id] ?? 0;
+                                  return (
+                                    <div key={p.id} style={{ display:'flex', alignItems:'center', gap:'0.5rem',
+                                      background: qty > 0 ? 'var(--brand-light)' : '#fff',
+                                      border:`1px solid ${qty > 0 ? '#bfdbfe' : 'var(--gray-200)'}`,
+                                      borderRadius:6, padding:'0.4rem 0.75rem' }}>
+                                      <span style={{ flex:1, fontSize:'0.875rem', fontWeight: qty > 0 ? 600 : 400 }}>{p.name}</span>
+                                      <span style={{ fontSize:'0.75rem', color:'var(--text-tertiary)' }}>{fmt(p.price_cents)}</span>
+                                      <div className="qty-control">
+                                        <button className="qty-btn" disabled={qty===0} onClick={() => adjustSugg(order.id, p.id, -1)}>−</button>
+                                        <span className="qty-num">{qty}</span>
+                                        <button className="qty-btn add" onClick={() => adjustSugg(order.id, p.id, 1)}>+</button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <div style={{ display:'flex', gap:'0.4rem' }}>
+                                <button className="btn-primary btn-sm" onClick={() => sendSuggestion(order)}>Enviar al cliente</button>
+                                <button className="btn-sm" onClick={() => setSuggestionFor('')}>Cancelar</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )
+        )}
+
+        {/* Historial */}
+        {tab === 'past' && (
+          past.length === 0
+            ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin pedidos anteriores.</p>
+            : (
+              <ul className="orders-tab-panel reverse" style={{ listStyle:'none', padding:0 }}>
+                {past.slice(0, 50).map(o => {
+                  const color = STATUS_COLOR[o.status] || '#9ca3af';
+                  const isPastExp = expanded === ('h_'+o.id);
+                  const isChatOpen = chatOpen === o.id;
+                  return (
+                    <li key={o.id} className="card"
+                      style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden' }}>
+                      <div onClick={() => setExpanded(isPastExp ? null : 'h_'+o.id)}
+                        style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                          padding:'0.75rem', cursor:'pointer', gap:'0.5rem' }}>
+                        <div>
+                          <span className="badge" style={{ color, borderColor:`${color}55`, background:`${color}15`, marginRight:'0.5rem', fontSize:'0.7rem' }}>
+                            {STATUS_LABELS[o.status]}
+                          </span>
+                          <span style={{ fontWeight:600, fontSize:'0.875rem' }}>{o.customer_first_name || '—'}</span>
+                        </div>
+                        <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
+                          <span style={{ fontWeight:700 }}>{fmt(o.total_cents)}</span>
+                          <span style={{ color:'var(--text-tertiary)', fontSize:'0.8rem' }}>{isPastExp?'▲':'▼'}</span>
+                        </div>
+                      </div>
+                      {isPastExp && (
+                        <div style={{ padding:'0 0.75rem 0.75rem', borderTop:`1px solid ${color}22` }}>
+                          <div style={{ fontSize:'0.82rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>
+                            Conductor: <strong>{o.driver_first_name || '—'}</strong>
+                          </div>
+                          {(o.items || []).length > 0 && (
+                            <ul style={{ fontSize:'0.82rem', margin:'0.2rem 0 0.35rem 1rem' }}>
+                              {o.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
+                            </ul>
+                          )}
+                          {o.payment_method && (
+                            <div style={{ fontSize:'0.78rem', color:'var(--text-tertiary)', marginBottom:'0.2rem' }}>
+                              Pago: <strong>{{cash:'Efectivo',card:'Tarjeta',spei:'SPEI'}[o.payment_method]||o.payment_method}</strong>
+                            </div>
+                          )}
+                          <FeeBreakdown order={o} />
+
+                          <button onClick={() => setChatOpen(isChatOpen ? null : o.id)}
+                            style={{ marginTop:'0.4rem', display:'flex', alignItems:'center', gap:'0.35rem',
+                              background:'none', border:'1px solid var(--border)', borderRadius:6,
+                              padding:'0.25rem 0.65rem', fontSize:'0.78rem', cursor:'pointer',
+                              color:'var(--text-secondary)', fontWeight:600 }}>
+                            <IconChat /> {isChatOpen ? 'Cerrar chat' : 'Ver chat'}
+                          </button>
+                          {isChatOpen && <OrderChat orderId={o.id} token={auth.token} refreshTick={chatTick} />}
+
+                          {reportingId === o.id ? (
+                            <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginTop:'0.4rem' }}>
+                              <textarea value={reportText} onChange={e => setReportText(e.target.value)}
+                                placeholder="Describe el problema…" rows={2}
+                                style={{ fontSize:'0.78rem', width:'100%', boxSizing:'border-box' }} />
+                              <div style={{ display:'flex', gap:'0.3rem' }}>
+                                <button className="btn-sm" style={{ fontSize:'0.75rem', background:'var(--danger)', color:'#fff', borderColor:'var(--danger)' }}
+                                  onClick={() => sendReport(o.id)}>Enviar</button>
+                                <button className="btn-sm" style={{ fontSize:'0.75rem' }}
+                                  onClick={() => { setReportingId(null); setReportText(''); }}>Cancelar</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginTop:'0.4rem' }}>
+                              {o.status === 'delivered' && o.driver_id && !ratedOrders.has(o.id) && (
+                                <button className="btn-sm"
+                                  style={{ fontSize:'0.72rem', color:'var(--brand)', borderColor:'var(--brand)', background:'var(--brand-light)', minHeight:'unset' }}
+                                  onClick={() => { setRatingOrder(o); setRatingStars(0); setRatingComment(''); }}>
+                                  ⭐ Calificar conductor
+                                </button>
+                              )}
+                              {ratedOrders.has(o.id) && (
+                                <span style={{ fontSize:'0.72rem', color:'var(--success)', fontWeight:600 }}>✓ Calificado</span>
+                              )}
+                              <button className="btn-sm" style={{ fontSize:'0.72rem', minHeight:'unset' }}
+                                onClick={() => setReportingId(o.id)}>Reportar</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )
+        )}
       </div>
     </div>
   );
