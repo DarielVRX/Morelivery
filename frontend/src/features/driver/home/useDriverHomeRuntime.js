@@ -1,4 +1,7 @@
 // frontend/src/features/driver/home/useDriverHomeRuntime.js
+// FIX: openRoadRouteApi usa una ref sincronizada en el efecto de rerouting
+// para evitar referencia stale cuando confirmedOrders cambia entre renders.
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { reverseGeocode } from '../../../utils/geo';
@@ -23,8 +26,6 @@ import {
 } from './navigation';
 
 // ── Caché de rutas de oferta ──────────────────────────────────────────────────
-// Key: `${restaurantLat},${restaurantLng}-${customerLat},${customerLng}`
-// Value: { geometry, steps, summary, ts }
 const OFFER_ROUTE_CACHE_MS = 5 * 60 * 1000; // 5 minutos
 const offerRouteCache = new Map();
 
@@ -34,7 +35,7 @@ function getOfferRouteCacheKey(offer) {
 
 export function useDriverHomeRuntime({
   token, availability, activeOrder, activeOrders,
-  confirmedOrders, // solo los confirmados por restaurante
+  confirmedOrders,
   hasActiveOrder, myPosition, onMessage,
 }) {
   const [counters,       setCounters]       = useState(null);
@@ -53,10 +54,9 @@ export function useDriverHomeRuntime({
   const [navMode,        setNavMode]        = useState(null);
   const [mapInstance,    setMapInstance]    = useState(null);
 
-  // Estado de oferta preview
   const [offerRouteGeometry, setOfferRouteGeometry] = useState(null);
   const [offerRouteLoading,  setOfferRouteLoading]  = useState(false);
-  const [showFullOfferRoute, setShowFullOfferRoute]  = useState(false); // ruta total + oferta
+  const [showFullOfferRoute, setShowFullOfferRoute]  = useState(false);
 
   // Rerouting
   const lastRerouteRef   = useRef(0);
@@ -64,7 +64,7 @@ export function useDriverHomeRuntime({
   const REROUTE_COOLDOWN = 15_000;
 
   const centerModeRef      = useRef('nav');
-  const centerCycleRef     = useRef(0); // 0=nav, 1=nextStop, 2=fullRoute
+  const centerCycleRef     = useRef(0);
   const autoCenterRef      = useRef(null);
   const lastInteractionRef = useRef(Date.now());
 
@@ -132,10 +132,8 @@ export function useDriverHomeRuntime({
   }, [handleMapInteraction]);
 
   // ── Ciclo de centrado en modo navegación ──────────────────────────────────
-  // 0 = nav (centrado + pitch 50), 1 = next stop, 2 = ruta completa
   const handleCenterCycle = useCallback(() => {
     if (!routeActive || !routeGeometry?.length) {
-      // Modo libre: solo centrar
       setCenterMode('nav');
       centerModeRef.current = 'nav';
       clearTimeout(autoCenterRef.current);
@@ -148,18 +146,15 @@ export function useDriverHomeRuntime({
     clearTimeout(autoCenterRef.current);
 
     if (next === 0) {
-      // Nav centrado
       setCenterMode('nav');
       centerModeRef.current = 'nav';
       setCenterSignal('nav');
       scheduleAutoCenter();
     } else if (next === 1) {
-      // Next stop
       setCenterMode('nextStop');
       centerModeRef.current = 'nextStop';
       setCenterSignal('nextStop');
     } else {
-      // Ruta completa
       setCenterMode('overview');
       centerModeRef.current = 'overview';
       setCenterSignal('overview');
@@ -183,7 +178,6 @@ export function useDriverHomeRuntime({
   const openRoadRouteApi = useCallback(() => {
     if (!activeOrder) return;
 
-    // Usar solo pedidos confirmados por el restaurante en la ruta
     const orders = (confirmedOrders?.length ? confirmedOrders : (activeOrder?.restaurant_confirmed !== false ? [activeOrder] : []))
       .filter(o => !['delivered', 'cancelled'].includes(o.status))
       .sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at));
@@ -222,7 +216,7 @@ export function useDriverHomeRuntime({
           centerCycleRef.current = 0;
           const first = results[0];
           if (first) onMessage(formatRouteSummary(first));
-          setCenterSignal('nav'); // entrar directo en nav al activar ruta
+          setCenterSignal('nav');
         })
         .catch((error) => {
           setRouteGeometry(null);
@@ -244,6 +238,14 @@ export function useDriverHomeRuntime({
     buildRoute(waypoints[0]);
   }, [activeOrder, confirmedOrders, myPosition, onMessage, token]);
 
+  // FIX: ref siempre apunta a la versión más reciente de openRoadRouteApi.
+  // Evita stale closure en el efecto de rerouting cuando confirmedOrders cambia
+  // sin necesidad de agregarlo como dependencia (lo que causaría loops infinitos).
+  const openRoadRouteApiRef = useRef(openRoadRouteApi);
+  useEffect(() => {
+    openRoadRouteApiRef.current = openRoadRouteApi;
+  }, [openRoadRouteApi]);
+
   // ── Rerouting silencioso ───────────────────────────────────────────────────
   useEffect(() => {
     if (!routeActive || !routeGeometry?.length || !myPosition) return;
@@ -251,7 +253,6 @@ export function useDriverHomeRuntime({
     const now = Date.now();
     if (now - lastRerouteRef.current < REROUTE_COOLDOWN) return;
 
-    // Encontrar el punto más cercano de la ruta
     let minDist = Infinity;
     for (const pt of routeGeometry) {
       const d = haversineMeters(myPosition.lat, myPosition.lng, pt.lat, pt.lng);
@@ -261,9 +262,11 @@ export function useDriverHomeRuntime({
     if (minDist > REROUTE_DIST_M) {
       lastRerouteRef.current = now;
       console.log(`[reroute] desviación ${Math.round(minDist)}m — recalculando`);
-      openRoadRouteApi();
+      // FIX: usar ref en lugar de closure directo — siempre apunta a la versión fresca
+      openRoadRouteApiRef.current?.();
     }
-  }, [myPosition?.lat, myPosition?.lng, routeActive, routeGeometry, openRoadRouteApi]);
+  // FIX: openRoadRouteApi removido de las dependencias — se accede via ref
+  }, [myPosition?.lat, myPosition?.lng, routeActive, routeGeometry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleToggleRoute = useCallback(() => {
     if (routeActive) {
@@ -306,12 +309,9 @@ export function useDriverHomeRuntime({
     }
   }, [token]);
 
-  // Ruta completa (posición actual + oferta encadenada a pedidos confirmados)
   const openFullOfferRoute = useCallback(async (offer) => {
     if (!offer?.restaurantLat) return;
     setShowFullOfferRoute(v => !v);
-    // La ruta completa se calcula combinando los waypoints confirmados + los de la oferta
-    // Se dibuja en el mapa como preview temporal (no activa la ruta del driver)
   }, []);
 
   const closeOfferPreview = useCallback(() => {
@@ -391,7 +391,6 @@ export function useDriverHomeRuntime({
     handleZoneConfirm,
     handleImpassableConfirm,
     handlePreferenceConfirm,
-    // Oferta preview
     offerRouteGeometry,
     offerRouteLoading,
     showFullOfferRoute,

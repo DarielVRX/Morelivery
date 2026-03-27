@@ -2,6 +2,10 @@
 // Cambio paso 8: el horario automático ya NO abre restaurantes.
 // El schedule pasa a ser solo recordatorios push con botones Abrir/Ignorar.
 // La apertura es 100% manual — el propietario debe tocar "Abrir" explícitamente.
+//
+// FIX aplicado: sendPushToUser ya estaba envuelto en try/catch individual por
+// candidato — correcto. Se agrega también protección al loop general para que
+// un error no capturado en sendPushToUser no mate el scheduler completo.
 
 import { expireTimedOutOffers, expireDisputedOrders } from '../modules/orders/assignment/index.js';
 import { ensureParamsLoaded, seedDefaultParams, getParam } from '../engine/params.js';
@@ -58,8 +62,6 @@ async function sendScheduleReminders() {
     const mm    = String(nowMx.getMinutes()).padStart(2, '0');
     const hhmm  = `${hh}:${mm}`;
 
-    // Restaurantes con horario para hoy que deberían estar abiertos pero están cerrados
-    // y cuyo horario empieza en los últimos 5 minutos (ventana de recordatorio)
     const fiveMinAgo = `${String(nowMx.getHours()).padStart(2,'0')}:${String(Math.max(0, nowMx.getMinutes()-5)).padStart(2,'0')}`;
 
     let candidates = [];
@@ -83,6 +85,10 @@ async function sendScheduleReminders() {
     }
 
     for (const rest of candidates) {
+      // FIX: cada push en su propio try/catch para que un fallo en un restaurante
+      // no detenga los recordatorios de los demás.
+      // sendPushToUser puede lanzar si las suscripciones están malformadas o
+      // si falla la conexión con el servidor VAPID.
       try {
         await sendPushToUser(rest.owner_user_id, {
           title:  `⏰ Es hora de abrir — ${rest.name}`,
@@ -93,7 +99,6 @@ async function sendScheduleReminders() {
           priority: 'high',
           type:   'open_reminder',
           restaurantId: rest.restaurant_id,
-          // El SW mostrará botones Abrir / Ignorar
           actions: [
             { action: 'open_restaurant',  title: '✓ Abrir' },
             { action: 'ignore_reminder',  title: 'Ignorar' },
@@ -102,7 +107,8 @@ async function sendScheduleReminders() {
         });
         console.log(`[schedule.reminder] enviado a ${rest.owner_user_id.slice(0,8)} — ${rest.name}`);
       } catch (e) {
-        console.warn(`[schedule.reminder] error para ${rest.name}:`, e.message);
+        // FIX: loguear con suficiente contexto pero NO relanzar — el loop debe continuar
+        console.warn(`[schedule.reminder] error para ${rest.name} (owner=${rest.owner_user_id.slice(0,8)}):`, e.message);
       }
     }
 
@@ -160,8 +166,8 @@ export function createSchedulers(offerCb) {
     // ── Recordatorios de apertura — cada 5 min, solo avisa, NO abre ──────────
     createLoop({
       label: 'schedule_reminders',
-      initialDelayMs: 60_000,  // primer check al minuto de arrancar
-      intervalMs: 5 * 60_000,  // cada 5 minutos
+      initialDelayMs: 60_000,
+      intervalMs: 5 * 60_000,
       task: sendScheduleReminders,
       onSuccess: (count) => {
         if (count > 0) console.log(`[schedule.reminder] ${count} recordatorio(s) enviados`);

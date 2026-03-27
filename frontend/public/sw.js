@@ -1,13 +1,9 @@
 // frontend/public/sw.js
-// ─────────────────────────────────────────────────────────────────────────────
-// Service Worker de Morelivery
-// Cambios v5:
-// - Evento new_order dedicado para restaurante (con repetición cada 3 min)
-// - Llamada simulada: notificación estilo llamada con Speech al abrir
-// - Grupos estandarizados: orders, driver, kitchen, customer, support
-// - Patrones de vibración diferenciados por grupo
-// - Botones de acción en notificaciones de oferta y nuevo pedido
-// ─────────────────────────────────────────────────────────────────────────────
+// FIX aplicado:
+//   - Acción 'open_restaurant' manejada en notificationclick.
+//     Antes el SW nunca la procesaba — el restaurante tocaba "Abrir"
+//     y no pasaba nada. Ahora envía NOTIFICATION_ACTION al cliente
+//     para que el listener en React llame PATCH /restaurants/my/toggle.
 
 const SHELL_VERSION = 'v5';
 const SHELL_CACHE   = `morelivery-shell-${SHELL_VERSION}`;
@@ -29,13 +25,13 @@ const orderRepeatTimers = new Map(); // orderId → intervalId
 
 // ── Patrones de vibración por tipo ───────────────────────────────────────────
 const VIBRATE = {
-  offer:     [300, 100, 300, 100, 300, 100, 300],  // driver nueva oferta
-  new_order: [500, 150, 500, 150, 500],             // restaurante pedido nuevo
-  call:      [500,300,500,300,500,300,500,300,500], // llamada simulada
-  cancel:    [200, 100, 200],                        // cancelación / reasignación
-  eta:       [150, 80, 150],                         // driver cerca
-  arrived:   [300, 100, 100, 100, 300],             // driver arrived
-  support:   [200, 100, 200],                        // soporte
+  offer:     [300, 100, 300, 100, 300, 100, 300],
+  new_order: [500, 150, 500, 150, 500],
+  call:      [500,300,500,300,500,300,500,300,500],
+  cancel:    [200, 100, 200],
+  eta:       [150, 80, 150],
+  arrived:   [300, 100, 100, 100, 300],
+  support:   [200, 100, 200],
   normal:    [200, 100, 200],
 };
 
@@ -272,7 +268,6 @@ self.addEventListener('message', (event) => {
   if (type === 'APP_FOCUSED') {
     Object.keys(notifCounts).forEach(k => { notifCounts[k].count = 0; });
     if ('clearAppBadge' in self) self.clearAppBadge().catch(() => {});
-    // Cancelar todos los timers de repetición (usuario ya vio la app)
     for (const [id, timer] of orderRepeatTimers) {
       clearInterval(timer);
       orderRepeatTimers.delete(id);
@@ -340,13 +335,11 @@ self.addEventListener('push', (event) => {
   } = payload;
 
   event.waitUntil((async () => {
-    // Llamada simulada — notificación especial
     if (pushType === 'simulated_call') {
       await showCallNotification({ orderId, driverName, url });
       return;
     }
 
-    // Pedido nuevo para restaurante — con repetición cada 3 min
     if (pushType === 'new_order' && orderId) {
       await showGroupedNotification({
         group: 'kitchen', title, body, url, priority: 'high',
@@ -354,15 +347,12 @@ self.addEventListener('push', (event) => {
         actions: [{ action: 'confirm', title: '✓ Confirmar' }],
       });
 
-      // Cancelar timer previo si existe
       const existing = orderRepeatTimers.get(orderId);
       if (existing) clearInterval(existing);
 
-      // Repetir cada 3 min si no se confirma
       const timer = setInterval(async () => {
         const notifs = await self.registration.getNotifications({ tag: `new_order_${orderId}` });
         if (notifs.length === 0) {
-          // Ya fue confirmado / cerrado
           clearInterval(timer);
           orderRepeatTimers.delete(orderId);
           return;
@@ -379,7 +369,6 @@ self.addEventListener('push', (event) => {
       return;
     }
 
-    // Oferta al driver
     if (group === 'driver' || pushType === 'new_offer') {
       await showGroupedNotification({
         group: 'driver', title, body, url, priority: 'high',
@@ -392,7 +381,6 @@ self.addEventListener('push', (event) => {
       return;
     }
 
-    // Cancelación / reasignación
     if (pushType === 'cancelled' || pushType === 'reassigned') {
       await showGroupedNotification({
         group: 'driver', title, body, url, priority: 'high',
@@ -401,7 +389,6 @@ self.addEventListener('push', (event) => {
       return;
     }
 
-    // ETA alert
     if (pushType === 'driver_eta_alert') {
       await showGroupedNotification({
         group: 'customer', title, body, url, priority: 'normal',
@@ -411,7 +398,6 @@ self.addEventListener('push', (event) => {
       return;
     }
 
-    // Driver arrived
     if (pushType === 'driver_arrived') {
       await showGroupedNotification({
         group: 'customer', title, body, url, priority: 'high',
@@ -421,7 +407,6 @@ self.addEventListener('push', (event) => {
       return;
     }
 
-    // Default
     await showGroupedNotification({ group, title, body, url, priority, tag: group, vibrate, actions });
   })());
 });
@@ -437,9 +422,37 @@ self.addEventListener('notificationclick', (event) => {
   if (group && notifCounts[group]) notifCounts[group].count = 0;
   if ('clearAppBadge' in self) self.clearAppBadge().catch(() => {});
 
-  // Acciones de botones — solo manejar sin abrir app salvo que esté definido
+  // FIX: acción 'open_restaurant' — antes no se manejaba, el botón no hacía nada.
+  // Ahora envía NOTIFICATION_ACTION al cliente. El listener en React
+  // (Schedule.jsx o hook global) debe llamar PATCH /restaurants/my/toggle { override: true }.
+  if (action === 'open_restaurant') {
+    event.waitUntil(
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+        const messageData = {
+          type: 'NOTIFICATION_ACTION',
+          action: 'open_restaurant',
+          data: event.notification.data,
+        };
+        const existing = clients.find(c => c.url.includes(self.location.origin));
+        if (existing) {
+          existing.postMessage(messageData);
+          return existing.focus();
+        }
+        return self.clients.openWindow(event.notification.data?.url || '/restaurant/horario').then(client => {
+          if (client) {
+            setTimeout(() => client.postMessage(messageData), 1200);
+          }
+        });
+      })
+    );
+    return;
+  }
+
+  // 'ignore_reminder' — cerrar sin acción
+  if (action === 'ignore_reminder') return;
+
+  // Acciones existentes — accept, reject, confirm
   if (action === 'accept' || action === 'reject' || action === 'confirm') {
-    // Reenviar a la app para que maneje la acción
     event.waitUntil(
       self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
         const existing = clients.find(c => c.url.includes(self.location.origin));
@@ -447,7 +460,6 @@ self.addEventListener('notificationclick', (event) => {
           existing.postMessage({ type: 'NOTIFICATION_ACTION', action, data: event.notification.data });
           return existing.focus();
         }
-        // Si la app no está abierta, abrir y enviar la acción
         return self.clients.openWindow(event.notification.data?.url || '/').then(client => {
           if (client) {
             setTimeout(() => client.postMessage({ type: 'NOTIFICATION_ACTION', action, data: event.notification.data }), 1000);
@@ -462,7 +474,6 @@ self.addEventListener('notificationclick', (event) => {
   const targetUrl = event.notification?.data?.url || '/';
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
-      // Si es llamada simulada, hablar al abrir
       if (isCall) {
         const driverName = event.notification.data?.driverName || 'Tu repartidor';
         const client = clients.find(c => c.url.includes(self.location.origin));

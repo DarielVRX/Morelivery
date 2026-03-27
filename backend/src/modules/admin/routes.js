@@ -660,5 +660,89 @@ router.post('/restaurants/:userId/silent-open', authenticate, authorize(['admin'
   } catch (error) { return next(error); }
 });
 
-export default router;
 
+// ── POST /admin/users/:id/create-restaurant ───────────────────────────────────
+// FIX: endpoint faltante referenciado en EmergencyTab.jsx fast-register.
+// Antes el admin veía ✓ pero el restaurante nunca se creaba.
+router.post('/users/:id/create-restaurant', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const { name, address, lat, lng, is_open = false } = req.body || {};
+    if (!name) return next(new AppError(400, 'El campo name es requerido'));
+
+    const userCheck = await query('SELECT id, role FROM users WHERE id = $1', [req.params.id]);
+    if (userCheck.rowCount === 0) return next(new AppError(404, 'Usuario no encontrado'));
+
+    // Si ya tiene restaurante, actualizar en lugar de duplicar
+    const existingRest = await query(
+      'SELECT id FROM restaurants WHERE owner_user_id = $1 LIMIT 1',
+      [req.params.id]
+    );
+    if (existingRest.rowCount > 0) {
+      const updated = await query(
+        `UPDATE restaurants
+         SET name=$1, address=COALESCE($2, address),
+             lat=COALESCE($3, lat), lng=COALESCE($4, lng),
+             updated_at=NOW()
+         WHERE owner_user_id=$5
+         RETURNING id, name`,
+        [name, address || null, lat ? Number(lat) : null, lng ? Number(lng) : null, req.params.id]
+      );
+      console.log(`[admin.emergency] update-restaurant user=${req.params.id.slice(0,8)} restaurant=${updated.rows[0].id.slice(0,8)}`);
+      return res.json({ ok: true, restaurant: updated.rows[0], updated: true });
+    }
+
+    const result = await query(
+      `INSERT INTO restaurants (owner_user_id, name, address, lat, lng, is_open, is_active, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, true, NOW(), NOW())
+       RETURNING id, name`,
+      [req.params.id, name, address || '', lat ? Number(lat) : null, lng ? Number(lng) : null, Boolean(is_open)]
+    );
+
+    await query(
+      `UPDATE users SET role='restaurant', updated_at=NOW() WHERE id=$1 AND role != 'restaurant'`,
+      [req.params.id]
+    ).catch(() => {});
+
+    console.log(`[admin.emergency] create-restaurant user=${req.params.id.slice(0,8)} restaurant=${result.rows[0].id.slice(0,8)}`);
+    return res.status(201).json({ ok: true, restaurant: result.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+// ── POST /admin/drivers/:id/force-unavailable ─────────────────────────────────
+// FIX: endpoint faltante referenciado en EmergencyTab.jsx fast-register.
+// Antes el driver quedaba available=true por defecto y recibía ofertas inmediatamente.
+router.post('/drivers/:id/force-unavailable', authenticate, authorize(['admin']), async (req, res, next) => {
+  try {
+    const driverId = req.params.id;
+
+    const result = await query(
+      `UPDATE driver_profiles SET is_available=false, updated_at=NOW()
+       WHERE user_id=$1 RETURNING user_id`,
+      [driverId]
+    );
+
+    // Si el perfil aún no existe (driver recién creado), crearlo con is_available=false
+    if (result.rowCount === 0) {
+      try {
+        await query(
+          `INSERT INTO driver_profiles (user_id, is_available, vehicle_type, created_at, updated_at)
+           VALUES ($1, false, 'motorcycle', NOW(), NOW())
+           ON CONFLICT (user_id) DO UPDATE SET is_available=false, updated_at=NOW()`,
+          [driverId]
+        );
+      } catch (insertErr) {
+        console.warn(`[admin.emergency] force-unavailable: no se pudo crear perfil driver=${driverId.slice(0,8)}:`, insertErr.message);
+        return res.json({ ok: true, skipped: true });
+      }
+    }
+
+    sseHub.sendToUser(driverId, 'forced_unavailable', {
+      message: 'Tu cuenta está pendiente de activación por el administrador.',
+    });
+
+    console.log(`[admin.emergency] force-unavailable driver=${driverId.slice(0,8)}`);
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+
+export default router;
