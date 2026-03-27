@@ -68,7 +68,7 @@ function CheckoutForm({ grandTotal, onSuccess, onError }) {
 
       <PaymentElement
         onReady={() => setReady(true)}
-        options={{ layout: 'tabs', fields: { billingDetails: { address: 'never' } } }}
+        options={{ layout: 'tabs' }}
       />
 
       {!ready && (
