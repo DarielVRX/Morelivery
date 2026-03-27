@@ -1,12 +1,19 @@
 // frontend/src/pages/Customer/Payments.jsx
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { loadStripe } from '@stripe/stripe-js';
 import { readPendingOrder, clearPendingOrder, savePendingOrder } from '../../utils/pendingOrder';
 import { useCart } from '../../hooks/useCart';
 import { readSessionDelivery, saveSessionDelivery } from '../../utils/sessionDelivery';
 import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
+
+// ── Stripe singleton — cargado a nivel de módulo ──────────────────────────────
+const stripePromise = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
+  ? loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY)
+  : Promise.resolve(null);
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 function IconPin()     { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>; }
@@ -16,82 +23,19 @@ function IconCash()    { return <svg width="20" height="20" viewBox="0 0 24 24" 
 function IconCard()    { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>; }
 function IconLock()    { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>; }
 
-const VITE_STRIPE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+// ── CheckoutForm — dentro del contexto Elements ───────────────────────────────
+function CheckoutForm({ grandTotal, onSuccess, onError }) {
+  const stripe   = useStripe();
+  const elements = useElements();
+  const [ready,  setReady]  = useState(false);
+  const [paying, setPaying] = useState(false);
+  const fmt = cents => `$${((cents ?? 0) / 100).toFixed(2)}`;
 
-// ── Stripe loader (singleton) ─────────────────────────────────────────────────
-let stripePromise = null;
-function getStripe() {
-  if (!VITE_STRIPE_KEY) return Promise.resolve(null);
-  if (!stripePromise) {
-    stripePromise = import('@stripe/stripe-js')
-      .then(({ loadStripe }) => loadStripe(VITE_STRIPE_KEY))
-      .catch(() => null);
-  }
-  return stripePromise;
-}
-
-// ── StripeForm — usa @stripe/react-stripe-js para manejar el ciclo de vida ────
-function StripeForm({ clientSecret, onSuccess, onError }) {
-  const [Elements,      setElements]      = useState(null);
-  const [PaymentElement, setPaymentElement] = useState(null);
-  const [useElements,   setUseElements]   = useState(null);
-  const [stripeInst,    setStripeInst]    = useState(null);
-  const [libLoaded,     setLibLoaded]     = useState(false);
-  const [ready,         setReady]         = useState(false);
-  const [paying,        setPaying]        = useState(false);
-
-  // Cargar librería React de Stripe dinámicamente
-  useEffect(() => {
-    if (!clientSecret) return;
-    Promise.all([
-      import('@stripe/stripe-js'),
-      import('@stripe/react-stripe-js'),
-    ]).then(([stripeJs, reactStripe]) => {
-      stripeJs.loadStripe(VITE_STRIPE_KEY).then(s => {
-        setStripeInst(s);
-        setElements(reactStripe.Elements);
-        setPaymentElement(() => reactStripe.PaymentElement);
-        setUseElements(() => reactStripe.useElements);
-        setLibLoaded(true);
-      });
-    }).catch(() => {
-      onError('No se pudo cargar el procesador de pagos. Intenta de nuevo.');
-    });
-  }, [clientSecret]); // eslint-disable-line
-
-  if (!libLoaded || !Elements || !PaymentElement) {
-    return (
-      <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)', fontSize:'0.82rem' }}>
-        Cargando formulario de pago…
-      </div>
-    );
-  }
-
-  return (
-    <Elements stripe={stripeInst} options={{ clientSecret, locale: 'es' }}>
-      <InnerForm
-        PaymentElement={PaymentElement}
-        useElementsHook={useElements}
-        stripeInst={stripeInst}
-        onSuccess={onSuccess}
-        onError={onError}
-        paying={paying}
-        setPaying={setPaying}
-        ready={ready}
-        setReady={setReady}
-      />
-    </Elements>
-  );
-}
-
-function InnerForm({ PaymentElement, useElementsHook, stripeInst, onSuccess, onError, paying, setPaying, ready, setReady }) {
-  const elements = useElementsHook();
-
-  async function pay() {
-    if (!stripeInst || !elements) return;
+  async function handlePay() {
+    if (!stripe || !elements) return;
     setPaying(true);
     try {
-      const { error, paymentIntent } = await stripeInst.confirmPayment({
+      const { error, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: { return_url: window.location.href },
         redirect: 'if_required',
@@ -100,7 +44,7 @@ function InnerForm({ PaymentElement, useElementsHook, stripeInst, onSuccess, onE
       else if (paymentIntent?.status === 'succeeded') onSuccess(paymentIntent);
       else onError('Estado de pago inesperado. Contacta a soporte.');
     } catch (e) {
-      onError(e.message || 'Error inesperado');
+      onError(e.message || 'Error inesperado al procesar el pago');
     } finally { setPaying(false); }
   }
 
@@ -127,6 +71,12 @@ function InnerForm({ PaymentElement, useElementsHook, stripeInst, onSuccess, onE
         options={{ layout: 'tabs', fields: { billingDetails: { address: 'never' } } }}
       />
 
+      {!ready && (
+        <div style={{ padding:'1rem', textAlign:'center', color:'var(--text-tertiary)', fontSize:'0.82rem' }}>
+          Cargando formulario de pago…
+        </div>
+      )}
+
       <div style={{ display:'flex', alignItems:'center', gap:'0.35rem', fontSize:'0.72rem',
         color:'var(--text-tertiary)', margin:'0.75rem 0', justifyContent:'center' }}>
         <IconLock /> Pago procesado de forma segura por Stripe
@@ -134,9 +84,9 @@ function InnerForm({ PaymentElement, useElementsHook, stripeInst, onSuccess, onE
 
       <button className="btn-primary"
         style={{ width:'100%', padding:'0.75rem', fontSize:'0.95rem' }}
-        disabled={!ready || paying}
-        onClick={pay}>
-        {paying ? 'Procesando…' : 'Pagar con tarjeta'}
+        disabled={!ready || paying || !stripe}
+        onClick={handlePay}>
+        {paying ? 'Procesando…' : `Pagar ${fmt(grandTotal)}`}
       </button>
     </div>
   );
@@ -157,7 +107,6 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
   const [msgType,         setMsgType]         = useState('ok');
   const [tipCents,        setTipCents]        = useState(0);
   const [clientSecret,    setClientSecret]    = useState(null);
-  const [paymentIntentId, setPaymentIntentId] = useState(null);
   const [stripeStep,      setStripeStep]      = useState('idle'); // idle | creating | paying | done
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryLat,     setDeliveryLat]     = useState(null);
@@ -216,7 +165,7 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
       .then(d => setMethods((d.methods || []).filter(m => m.id !== 'spei' && m.id !== 'bank')))
       .catch(() => setMethods([
         { id: 'cash', label: 'Efectivo al entregar',      available: true },
-        { id: 'card', label: 'Tarjeta de crédito/débito', available: !!VITE_STRIPE_KEY },
+        { id: 'card', label: 'Tarjeta de crédito/débito', available: !!import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY },
       ]))
       .finally(() => setLoading(false));
   }, [auth.token]);
@@ -282,7 +231,7 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
 
   async function handleCardStart() {
     if (!draft) { flash('No hay un pedido pendiente.', 'error'); return; }
-    if (!VITE_STRIPE_KEY) { flash('Pago con tarjeta no disponible en este momento.', 'error'); return; }
+    if (!import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY) { flash('Pago con tarjeta no disponible.', 'error'); return; }
     const { lat, lng } = resolveCoords();
     if (!lat || !lng) { flash('Selecciona una dirección de entrega antes de continuar.', 'error'); return; }
     if (grandTotal < 1000) { flash('El monto mínimo para pago con tarjeta es $10.00 MXN.', 'error'); return; }
@@ -295,7 +244,6 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
       }, auth.token);
       if (!intentRes.clientSecret) throw new Error('No se recibió clientSecret de Stripe');
       setClientSecret(intentRes.clientSecret);
-      setPaymentIntentId(intentRes.paymentIntentId);
       setStripeStep('paying');
     } catch (e) {
       flash(e.message || 'Error al iniciar el pago.', 'error');
@@ -323,7 +271,7 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
     } catch (e) {
       flash(
         `Pago exitoso pero error al crear el pedido: ${e.message}. ` +
-        `Guarda tu referencia: ${paymentIntent.id} y contacta a soporte.`,
+        `Referencia de pago: ${paymentIntent.id}. Contacta a soporte.`,
         'error'
       );
       setStripeStep('idle');
@@ -334,7 +282,6 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
     flash(errorMsg, 'error');
     setStripeStep('idle');
     setClientSecret(null);
-    setPaymentIntentId(null);
   }
 
   if (loading) return (
@@ -441,7 +388,7 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
         </div>
       )}
 
-      {/* Selector método + confirmar */}
+      {/* Selector de método + botón */}
       {stripeStep === 'idle' && (
         <>
           <h2 style={{ fontSize:'1.05rem', fontWeight:800, marginBottom:'0.25rem',
@@ -482,14 +429,25 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
         </>
       )}
 
-      {/* Stripe Elements via react-stripe-js */}
+      {/* Spinner — creando intent o pedido */}
+      {stripeStep === 'creating' && (
+        <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)' }}>
+          <div style={{ width:36, height:36, border:'3px solid var(--brand)',
+            borderTopColor:'transparent', borderRadius:'50%',
+            animation:'spin 0.8s linear infinite', margin:'0 auto 1rem' }} />
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+          Preparando pago…
+        </div>
+      )}
+
+      {/* Stripe Elements — envuelto en Elements provider */}
       {stripeStep === 'paying' && clientSecret && (
         <div>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1rem' }}>
             <h2 style={{ fontSize:'1.05rem', fontWeight:800, display:'flex', alignItems:'center', gap:'0.5rem' }}>
               <IconLock /> Pago seguro
             </h2>
-            <button onClick={() => { setStripeStep('idle'); setClientSecret(null); setPaymentIntentId(null); }}
+            <button onClick={() => { setStripeStep('idle'); setClientSecret(null); }}
               style={{ background:'none', border:'none', cursor:'pointer', fontSize:'0.8rem',
                 color:'var(--text-tertiary)', minHeight:'unset' }}>
               ← Volver
@@ -500,22 +458,13 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
             Total a cobrar: <strong>{fmt(grandTotal)}</strong>
             {tipCents > 0 && <span style={{ color:'var(--success)', marginLeft:6 }}>(incl. {fmt(tipCents)} de agradecimiento)</span>}
           </div>
-          <StripeForm
-            clientSecret={clientSecret}
-            onSuccess={handlePaymentSuccess}
-            onError={handlePaymentError}
-          />
-        </div>
-      )}
-
-      {/* Spinner creando pedido post-pago */}
-      {stripeStep === 'creating' && (
-        <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)' }}>
-          <div style={{ width:36, height:36, border:'3px solid var(--brand)',
-            borderTopColor:'transparent', borderRadius:'50%',
-            animation:'spin 0.8s linear infinite', margin:'0 auto 1rem' }} />
-          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-          Creando tu pedido…
+          <Elements stripe={stripePromise} options={{ clientSecret, locale: 'es' }}>
+            <CheckoutForm
+              grandTotal={grandTotal}
+              onSuccess={handlePaymentSuccess}
+              onError={handlePaymentError}
+            />
+          </Elements>
         </div>
       )}
 
