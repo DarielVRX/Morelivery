@@ -153,6 +153,67 @@ router.post('/preference', authenticate, async (req, res, next) => {
   } catch (error) { return next(error); }
 });
 
+// ── POST /payments/process-card ──────────────────────────────────────────────
+// Recibe los datos del Card Brick y crea el pago en MP.
+// El Brick envía: token, payment_method_id, installments, issuer_id, payer, etc.
+router.post('/process-card', authenticate, async (req, res, next) => {
+  try {
+    if (!env.mpAccessToken)
+      return next(new AppError(503, 'Pago con tarjeta no configurado.'));
+
+    const cardData = req.body || {};
+    if (!cardData.token)
+      return next(new AppError(400, 'Token de tarjeta requerido'));
+
+    // Obtener el amount desde el payment_intent guardado o del body
+    const amountCents = cardData.transaction_amount
+      ? Math.round(cardData.transaction_amount * 100)
+      : null;
+    if (!amountCents || amountCents < 1000)
+      return next(new AppError(400, 'Monto inválido'));
+
+    const payment = await mpFetch('/v1/payments', {
+      method: 'POST',
+      body: {
+        transaction_amount: amountCents / 100,
+        token:              cardData.token,
+        payment_method_id:  cardData.payment_method_id,
+        installments:       cardData.installments || 1,
+        issuer_id:          cardData.issuer_id,
+        payer: {
+          email:          cardData.payer?.email || 'cliente@morelivery.app',
+          identification: cardData.payer?.identification,
+        },
+        metadata: { customer_id: req.user.userId },
+        statement_descriptor: 'MORELIVERY',
+      },
+      idempotencyKey: `card-${req.user.userId}-${Date.now()}`,
+    });
+
+    // Guardar intent en DB
+    await query(
+      `INSERT INTO payment_intents (
+         user_id, provider, provider_intent_id,
+         amount_cents, currency, status, metadata, updated_at
+       ) VALUES ($1,'mercadopago',$2,$3,'MXN',$4,$5,NOW())
+       ON CONFLICT (provider_intent_id) DO UPDATE SET
+         status=EXCLUDED.status, updated_at=NOW()`,
+      [
+        req.user.userId, String(payment.id),
+        amountCents, payment.status,
+        JSON.stringify({ customer_id: req.user.userId, amount_cents: amountCents }),
+      ]
+    ).catch(e => console.warn('[process-card] insert:', e.message));
+
+    return res.json({
+      ok:            true,
+      payment_id:    payment.id,
+      status:        payment.status,
+      status_detail: payment.status_detail,
+    });
+  } catch (error) { return next(error); }
+});
+
 // ── POST /payments/verify ─────────────────────────────────────────────────────
 // Verifica que un pago de MP fue aprobado.
 // Llamado por creation.js antes de crear el pedido.
