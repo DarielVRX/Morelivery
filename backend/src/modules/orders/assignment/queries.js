@@ -1,7 +1,8 @@
-// backend/src/modules/orders/assignment/queries.js
+  // backend/src/modules/orders/assignment/queries.js
 // Capa de acceso a datos. Sin lógica de negocio.
 import { query } from '../../../config/db.js';
-import { ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER, OFFER_TIMEOUT_SECONDS } from './constants.js';
+import { ACTIVE_STATUSES } from './constants.js';
+import { getParam } from '../../../engine/params.js';
 
 // ─── Pedidos ──────────────────────────────────────────────────────────────────
 
@@ -54,7 +55,7 @@ export async function getQueuedOrders(driverId = null) {
       SELECT 1 FROM order_driver_offers od
       WHERE od.order_id=o.id AND od.status='pending')
     ORDER BY has_candidates DESC, o.created_at ASC`,
-    [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
+    [ACTIVE_STATUSES, getParam('max_active_orders_per_driver', 4)]
   );
   return r.rows; // [{id, created_at, has_candidates}]
 }
@@ -118,7 +119,7 @@ export async function getFirstAvailableOrderForDriver(driverId) {
     has_candidates DESC,
     o.created_at ASC
     LIMIT 1`,
-    [driverId, ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER]
+    [driverId, ACTIVE_STATUSES, getParam('max_active_orders_per_driver', 4)]
   );
   return r.rows[0] ?? null;
 }
@@ -193,7 +194,7 @@ export async function getEligibleDrivers(orderId) {
       AND od.status IN ('rejected','released','expired')
       AND od.wait_until > NOW())
     ORDER BY dp.driver_number ASC`,
-    [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER, orderId]
+    [ACTIVE_STATUSES, getParam('max_active_orders_per_driver', 4), orderId]
   );
   return r.rows; // [{user_id, driver_number}]
 }
@@ -225,7 +226,7 @@ export async function getEligibleIdleDrivers(orderId) {
       SELECT 1 FROM order_driver_offers od
       WHERE od.driver_id=dp.user_id AND od.status='pending')
     ORDER BY dp.driver_number ASC`,
-    [ACTIVE_STATUSES, MAX_ACTIVE_ORDERS_PER_DRIVER, orderId]
+    [ACTIVE_STATUSES, getParam('max_active_orders_per_driver', 4), orderId]
   );
   return r.rows;
 }
@@ -365,7 +366,7 @@ export async function getOfferPayload(orderId, driverId) {
                         JOIN users c       ON c.id=o.customer_id
                         JOIN order_driver_offers od ON od.order_id=o.id AND od.driver_id=$2
                         WHERE o.id=$1`,
-                        [orderId, driverId, OFFER_TIMEOUT_SECONDS]
+                        [orderId, driverId, getParam('offer_timeout_s', 60)]
   );
   return r.rows[0] ?? null;
 }

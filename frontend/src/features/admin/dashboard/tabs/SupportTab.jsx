@@ -4,7 +4,7 @@
 // Agrega push al admin cuando llega un mensaje nuevo via SSE support_message.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiFetch } from '../../../../api/client';
+import { apiFetch, API_BASE  } from '../../../../api/client';
 import { useAuth } from '../../../../contexts/AuthContext';
 import SupportChat from '../../../support/SupportChat';
 
@@ -23,7 +23,6 @@ export default function SupportTab({ token }) {
 
     // Reusar la conexión SSE global si está disponible
     // En su defecto, abrir una conexión propia solo para este tab
-    const { API_BASE } = require('../../../../api/client');
     const url = `${API_BASE}/api/events?token=${encodeURIComponent(token)}`;
     const es  = new EventSource(url);
     esRef.current = es;
