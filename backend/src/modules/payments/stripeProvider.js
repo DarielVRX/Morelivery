@@ -24,9 +24,9 @@ export async function createStripePaymentIntent({ amountCents, currency = 'mxn',
   }
 
   const payload = {
-    amount: amountCents,
+    amount:   amountCents,
     currency,
-    automatic_payment_methods: 'enabled',
+    'automatic_payment_methods[enabled]': 'true',  // formato form-encoded correcto
   };
 
   for (const [k, v] of Object.entries(metadata || {})) {
