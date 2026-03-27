@@ -4,26 +4,11 @@
 import { useEffect, useState } from 'react';
 import PullToRefresh from './PullToRefresh';
 
-export default function SplitLayout({
-  homeContent,
-  ordersContent,
-  alertsContent,
-  ordersLabel = 'Pedidos',
-  alertsLabel = 'Alertas',
-  totalAlerts = 0,
-  onRefresh,
-  onCloseMobileDrawerRef,
-}) {
+export default function SplitLayout({ homeContent, ordersContent, alertsContent, ordersLabel = '📦 Pedidos', alertsLabel = '🚨 Alertas', totalAlerts = 0, onRefresh, onCloseMobileDrawerRef }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [activeTab,  setActiveTab]  = useState('orders');
+  const [activeTab, setActiveTab]   = useState('orders');
 
-  const hasAlerts = Boolean(alertsContent);
-
-  // Si se quita alertsContent, volver a la pestaña de pedidos
-  useEffect(() => {
-    if (!hasAlerts) setActiveTab('orders');
-  }, [hasAlerts]);
-
+  // Exponer función de cierre para que componentes hijos puedan cerrar el drawer
   if (onCloseMobileDrawerRef) onCloseMobileDrawerRef.current = () => setMobileOpen(false);
 
   useEffect(() => {
@@ -37,8 +22,7 @@ export default function SplitLayout({
 
     {/* ── Orders/Alerts: una sola instancia — desktop col + mobile drawer ── */}
     <aside className={`split-orders-col${mobileOpen ? ' mobile-open' : ''}`}>
-
-      {/* Header de pestañas — solo muestra alertas si hay contenido */}
+      {/* Header de pestañas */}
       <div style={{
         display: 'flex', flexShrink: 0,
         borderBottom: '1px solid var(--border-light)',
@@ -52,63 +36,60 @@ export default function SplitLayout({
         }}>
           {ordersLabel}
         </button>
-
-        {hasAlerts && (
-          <button onClick={() => setActiveTab('alerts')} style={{
-            flex: 1, padding: '0.6rem 0', fontSize: '0.78rem', fontWeight: 700,
-            cursor: 'pointer', border: 'none', background: 'none',
-            borderBottom: activeTab === 'alerts' ? '2px solid var(--brand)' : '2px solid transparent',
-            color: activeTab === 'alerts' ? 'var(--brand)' : 'var(--text-secondary)',
-            position: 'relative',
-          }}>
-            {alertsLabel}
-            {totalAlerts > 0 && (
-              <span style={{
-                marginLeft: 4, fontSize: '0.65rem',
-                background: '#ef4444', color: '#fff',
-                borderRadius: 10, padding: '0 5px',
-              }}>{totalAlerts}</span>
-            )}
-          </button>
+        {alertsContent && (
+        <button onClick={() => setActiveTab('alerts')} style={{
+          flex: 1, padding: '0.6rem 0', fontSize: '0.78rem', fontWeight: 700,
+          cursor: 'pointer', border: 'none', background: 'none',
+          borderBottom: activeTab === 'alerts' ? '2px solid var(--brand)' : '2px solid transparent',
+          color: activeTab === 'alerts' ? 'var(--brand)' : 'var(--text-secondary)',
+          position: 'relative',
+        }}>
+          {alertsLabel}
+          {totalAlerts > 0 && (
+            <span style={{
+              marginLeft: 4, fontSize: '0.65rem',
+              background: '#ef4444', color: '#fff',
+              borderRadius: 10, padding: '0 5px',
+            }}>{totalAlerts}</span>
+          )}
+        </button>
         )}
       </div>
 
       {/* Contenido de pestañas — ambos montados, solo uno visible */}
-      <div style={{ flex:1, minHeight:0, display: activeTab === 'orders' ? 'flex' : 'none', flexDirection:'column', overflow:'hidden' }}>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'orders' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
         {ordersContent}
       </div>
-      {hasAlerts && (
-        <div style={{ flex:1, minHeight:0, display: activeTab === 'alerts' ? 'flex' : 'none', flexDirection:'column', overflow:'hidden' }}>
-          {alertsContent}
-        </div>
-      )}
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'alerts' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
+        {alertsContent}
+      </div>
     </aside>
 
-    {/* ── Columna Home ─────────────────────────────────────────────────── */}
+    {/* ── Columna Home ──────────────────────────────────────────────── */}
     <section className="split-home-col">
-      {homeContent}
+    {homeContent}
     </section>
 
-    {/* ── Mobile: botón tab fijo ────────────────────────────────────────── */}
+    {/* ── Mobile: botón tab fijo ────────────────────────────────────── */}
     <button
-      className={`orders-tab-trigger${mobileOpen ? ' open' : ''}`}
-      onClick={() => setMobileOpen(v => !v)}
-      aria-label={mobileOpen ? 'Cerrar pedidos' : 'Ver pedidos'}
-      style={{
-        right: mobileOpen ? 'min(85vw, 360px)' : 0,
-        transition: 'right 0.28s cubic-bezier(0.4,0,0.2,1), background 0.2s',
-      }}
+    className={`orders-tab-trigger${mobileOpen ? ' open' : ''}`}
+    onClick={() => setMobileOpen(v => !v)}
+    aria-label={mobileOpen ? 'Cerrar pedidos' : 'Ver pedidos'}
+    style={{
+      right: mobileOpen ? 'min(85vw, 360px)' : 0,
+          transition:'right 0.28s cubic-bezier(0.4,0,0.2,1), background 0.2s'
+    }}
     >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points={mobileOpen ? '15 18 9 12 15 6' : '9 18 15 12 9 6'}/>
-      </svg>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points={mobileOpen ? '15 18 9 12 15 6' : '9 18 15 12 9 6'}/>
+    </svg>
     </button>
 
     {/* Overlay */}
     <div
-      className={`orders-overlay${mobileOpen ? ' visible' : ''}`}
-      onClick={() => setMobileOpen(false)}
+    className={`orders-overlay${mobileOpen ? ' visible' : ''}`}
+    onClick={() => setMobileOpen(false)}
     />
 
     <style>{`
@@ -121,6 +102,7 @@ export default function SplitLayout({
         overflow: hidden;
       }
 
+      /* ════════ Desktop ≥768px ══════════════════════════════════ */
       @media (min-width: 768px) {
         .split-orders-col {
           width: 33%;
@@ -139,15 +121,22 @@ export default function SplitLayout({
           overflow-y: auto;
           overflow-x: hidden;
         }
-        .split-home-col:has(.driver-map-root) { overflow: hidden; }
+        .split-home-col:has(.driver-map-root) {
+          overflow: hidden;
+        }
         .orders-overlay     { display: none !important; }
         .orders-tab-trigger { display: none !important; }
       }
 
+      /* ════════ Mobile <768px ═══════════════════════════════════ */
       @media (max-width: 767px) {
+
+        /* Orders col = drawer: hidden off-screen by default */
         .split-orders-col {
           position: fixed;
-          top: 0; right: 0; bottom: 0;
+          top: 0;
+          right: 0;
+          bottom: 0;
           width: 85vw;
           max-width: 360px;
           z-index: 320;
@@ -157,10 +146,18 @@ export default function SplitLayout({
           background: #fff;
           box-shadow: -4px 0 24px rgba(0,0,0,0.14);
           transform: translateX(100%);
-          transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+          transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        .split-orders-col.mobile-open { transform: translateX(0); }
-        .split-home-col { flex: 1; min-width: 0; overflow-x: hidden; }
+        .split-orders-col.mobile-open {
+          transform: translateX(0);
+        }
+
+        .split-home-col {
+          flex: 1;
+          min-width: 0;
+          overflow-x: hidden;
+        }
+
         .orders-overlay {
           display: none;
           position: fixed;
@@ -170,6 +167,7 @@ export default function SplitLayout({
           touch-action: none;
         }
         .orders-overlay.visible { display: block; }
+
         .orders-tab-trigger {
           position: fixed;
           right: 0;
@@ -190,10 +188,13 @@ export default function SplitLayout({
           padding: 0;
           transition: background 0.2s;
         }
-        .orders-tab-trigger.open { background: var(--gray-500); }
+        .orders-tab-trigger.open {
+          background: var(--gray-500);
+        }
       }
-    `}</style>
+      `}</style>
     </div>
     </PullToRefresh>
   );
 }
+

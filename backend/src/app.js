@@ -8,13 +8,7 @@ import pushRoutes from './modules/push/routes.js';
 export function createApp() {
   const app = express();
 
-  // Solo aplicar express.raw() exactamente al webhook, no a todo /api/payments/
-  app.use((req, res, next) => {
-    if (req.path === '/api/payments/webhook' && req.method === 'POST') {
-      return express.raw({ type: 'application/json' })(req, res, next);
-    }
-    next();
-  });
+  app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 
   applyCoreMiddleware(app);
   registerHealthEndpoints(app);

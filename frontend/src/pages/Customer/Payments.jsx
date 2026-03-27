@@ -1,6 +1,8 @@
 // frontend/src/pages/Customer/Payments.jsx
-import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { loadStripe } from '@stripe/stripe-js';
 import { readPendingOrder, clearPendingOrder, savePendingOrder } from '../../utils/pendingOrder';
 import { useCart } from '../../hooks/useCart';
 import { readSessionDelivery, saveSessionDelivery } from '../../utils/sessionDelivery';
@@ -8,96 +10,47 @@ import { apiFetch } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import AddressSearchBar from '../../features/customer/AddressSearchBar.jsx';
 
+// ── Stripe singleton — cargado a nivel de módulo ──────────────────────────────
+const stripePromise = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
+  ? loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY)
+  : Promise.resolve(null);
+
 // ── Icons ─────────────────────────────────────────────────────────────────────
 function IconPin()     { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>; }
 function IconPackage() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>; }
 function IconWarning() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>; }
 function IconCash()    { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></svg>; }
 function IconCard()    { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>; }
-function IconMP()      { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg>; }
 function IconLock()    { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>; }
 
-const fmt = cents => `$${((cents ?? 0) / 100).toFixed(2)}`;
-const MP_PUBLIC_KEY = import.meta.env.VITE_MP_PUBLIC_KEY;
+// ── CheckoutForm — dentro del contexto Elements ───────────────────────────────
+function CheckoutForm({ grandTotal, onSuccess, onError }) {
+  const stripe   = useStripe();
+  const elements = useElements();
+  const [ready,  setReady]  = useState(false);
+  const [paying, setPaying] = useState(false);
+  const fmt = cents => `$${((cents ?? 0) / 100).toFixed(2)}`;
 
-// ── MP Card Brick ─────────────────────────────────────────────────────────────
-function MPCardBrick({ preferenceId, amountCents, onSuccess, onError, token }) {
-  const brickRef   = useRef(null);
-  const mpRef      = useRef(null);
-  const [ready,    setReady]    = useState(false);
-  const [paying,   setPaying]   = useState(false);
-
-  useEffect(() => {
-    if (!preferenceId || !MP_PUBLIC_KEY) return;
-    let cancelled = false;
-
-    // Cargar SDK de MP dinámicamente
-    const script = document.createElement('script');
-    script.src = 'https://sdk.mercadopago.com/js/v2';
-    script.async = true;
-    script.onload = () => {
-      if (cancelled) return;
-      const mp = new window.MercadoPago(MP_PUBLIC_KEY, { locale: 'es-MX' });
-      mpRef.current = mp;
-
-      const bricks = mp.bricks();
-      bricks.create('cardPayment', 'mp-card-brick', {
-        initialization: {
-          amount: amountCents / 100,
-          preferenceId,
-        },
-        customization: {
-          visual: { style: { theme: 'default' } },
-          paymentMethods: { types: { excluded: [] } },
-        },
-        callbacks: {
-          onReady: () => { if (!cancelled) setReady(true); },
-          onSubmit: async (cardFormData) => {
-            console.log('token disponible:', !!token, token?.slice(0,20));
-            console.log('cardFormData:', JSON.stringify(cardFormData));
-            if (cancelled) return;
-            setPaying(true);
-            try {
-              // Enviar al backend para crear el pago
-              const res = await apiFetch('/payments/process-card', {
-                method: 'POST',
-                body: JSON.stringify(cardFormData),
-              }, token);
-              if (res?.status === 'approved') {
-                onSuccess(res.payment_id);
-              } else {
-                onError(`Pago no aprobado: ${res?.status_detail || res?.status || 'intenta de nuevo'}`);
-              }
-            } catch (e) {
-              onError(e.message || 'Error al procesar el pago');
-            } finally {
-              if (!cancelled) setPaying(false);
-            }
-          },
-          onError: (err) => {
-            console.error('[mp-brick]', err);
-            if (!cancelled) onError('Error en el formulario de pago');
-          },
-        },
-      }).catch(e => {
-        if (!cancelled) onError('No se pudo cargar el formulario de pago');
+  async function handlePay() {
+    if (!stripe || !elements) return;
+    setPaying(true);
+    try {
+      const { error, paymentIntent } = await stripe.confirmPayment({
+        elements,
+        confirmParams: { return_url: window.location.href },
+        redirect: 'if_required',
       });
-    };
-    script.onerror = () => {
-      if (!cancelled) onError('No se pudo cargar el SDK de Mercado Pago');
-    };
-    document.head.appendChild(script);
-
-    return () => {
-      cancelled = true;
-      // Limpiar el brick
-      try { mpRef.current?.bricks()?.unmount?.('mp-card-brick'); } catch (_) {}
-      if (document.head.contains(script)) document.head.removeChild(script);
-    };
-  }, [preferenceId]); // eslint-disable-line
+      if (error) onError(error.message || 'Pago rechazado');
+      else if (paymentIntent?.status === 'succeeded') onSuccess(paymentIntent);
+      else onError('Estado de pago inesperado. Contacta a soporte.');
+    } catch (e) {
+      onError(e.message || 'Error inesperado al procesar el pago');
+    } finally { setPaying(false); }
+  }
 
   return (
     <div>
+      {/* Overlay bloqueante mientras Stripe procesa */}
       {paying && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:9999,
           display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -113,111 +66,28 @@ function MPCardBrick({ preferenceId, amountCents, onSuccess, onError, token }) {
         </div>
       )}
 
+      <PaymentElement
+        onReady={() => setReady(true)}
+        options={{ layout: 'tabs' }}
+      />
+
       {!ready && (
-        <div style={{ padding:'1.5rem', textAlign:'center', color:'var(--text-tertiary)', fontSize:'0.82rem' }}>
+        <div style={{ padding:'1rem', textAlign:'center', color:'var(--text-tertiary)', fontSize:'0.82rem' }}>
           Cargando formulario de pago…
         </div>
       )}
 
-      <div id="mp-card-brick" ref={brickRef} />
-
       <div style={{ display:'flex', alignItems:'center', gap:'0.35rem', fontSize:'0.72rem',
         color:'var(--text-tertiary)', margin:'0.75rem 0', justifyContent:'center' }}>
-        <IconLock /> Pago procesado de forma segura por Mercado Pago
+        <IconLock /> Pago procesado de forma segura por Stripe
       </div>
-    </div>
-  );
-}
 
-// ── Resultado de pago (retorno desde checkout MP para OXXO/SPEI) ──────────────
-function PaymentResult({ onRetry, auth, clearCart }) {
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const status    = searchParams.get('status');
-  const paymentId = searchParams.get('payment_id');
-  const [creating, setCreating] = useState(false);
-  const [msg,      setMsg]      = useState('');
-
-  useEffect(() => {
-    if (status === 'approved' && paymentId) createOrder();
-  }, []); // eslint-disable-line
-
-  async function createOrder() {
-    const draft = readPendingOrder();
-    if (!draft) { setMsg('No se encontró el pedido. Contacta a soporte con tu ID: ' + paymentId); return; }
-    setCreating(true);
-    try {
-      let lat = draft.delivery_lat ?? null, lng = draft.delivery_lng ?? null, addr = draft.delivery_address || '';
-      if (!lat || !lng) {
-        const sp = readSessionDelivery(auth.token);
-        if (sp?.lat) { lat = sp.lat; lng = sp.lng; addr = addr || sp.label || ''; }
-      }
-      await apiFetch('/orders', { method: 'POST', body: JSON.stringify({
-        restaurantId: draft.restaurantId, items: draft.items || [],
-        payment_method: 'card', tip_cents: draft.tip_cents || 0,
-        mp_payment_id: paymentId,
-        ...(addr?.trim() ? { delivery_address: addr } : {}),
-        ...(lat != null  ? { delivery_lat: lat }       : {}),
-        ...(lng != null  ? { delivery_lng: lng }       : {}),
-      })}, auth.token);
-      clearPendingOrder(); clearCart();
-      navigate('/customer', { replace: true });
-    } catch (e) {
-      setMsg(`Pago exitoso pero error al crear el pedido: ${e.message}. ID de pago: ${paymentId}`);
-      setCreating(false);
-    }
-  }
-
-  if (status === 'approved') {
-    if (creating) return (
-      <div style={{ padding:'2rem', textAlign:'center' }}>
-        <div style={{ width:36, height:36, border:'3px solid var(--brand)',
-          borderTopColor:'transparent', borderRadius:'50%',
-          animation:'spin 0.8s linear infinite', margin:'0 auto 1rem' }} />
-        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-        <div style={{ fontWeight:700 }}>Pago aprobado. Creando tu pedido…</div>
-      </div>
-    );
-    if (msg) return (
-      <div style={{ padding:'1rem' }}>
-        <div className="flash flash-error">{msg}</div>
-        <button className="btn-primary" style={{ marginTop:'1rem', width:'100%' }}
-          onClick={() => navigate('/customer')}>Ir a mis pedidos</button>
-      </div>
-    );
-  }
-
-  if (status === 'pending') return (
-    <div style={{ padding:'2rem', textAlign:'center' }}>
-      <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="var(--warn)"
-        strokeWidth="2" strokeLinecap="round" style={{ margin:'0 auto 0.75rem', display:'block' }}>
-        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-      </svg>
-      <div style={{ fontWeight:700, fontSize:'1.1rem', color:'var(--warn)' }}>Pago pendiente</div>
-      <div style={{ fontSize:'0.85rem', color:'var(--text-tertiary)', marginTop:'0.4rem', marginBottom:'1.5rem' }}>
-        Tu pago está siendo procesado. Te notificaremos cuando sea confirmado.
-      </div>
-      <button className="btn-primary" style={{ width:'100%' }} onClick={() => navigate('/customer')}>
-        Ir a mis pedidos
+      <button className="btn-primary"
+        style={{ width:'100%', padding:'0.75rem', fontSize:'0.95rem' }}
+        disabled={!ready || paying || !stripe}
+        onClick={handlePay}>
+        {paying ? 'Procesando…' : `Pagar ${fmt(grandTotal)}`}
       </button>
-    </div>
-  );
-
-  return (
-    <div style={{ padding:'2rem', textAlign:'center' }}>
-      <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="var(--danger)"
-        strokeWidth="2" strokeLinecap="round" style={{ margin:'0 auto 0.75rem', display:'block' }}>
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-      </svg>
-      <div style={{ fontWeight:700, fontSize:'1.1rem', color:'var(--danger)' }}>Pago rechazado</div>
-      <div style={{ fontSize:'0.85rem', color:'var(--text-tertiary)', marginTop:'0.4rem', marginBottom:'1.5rem' }}>
-        No se pudo procesar tu pago. Intenta con otro método.
-      </div>
-      <div style={{ display:'flex', flexDirection:'column', gap:'0.5rem' }}>
-        <button className="btn-primary" style={{ width:'100%' }} onClick={onRetry}>Intentar de nuevo</button>
-        <button className="btn-sm" style={{ width:'100%' }} onClick={() => navigate('/customer')}>Cancelar</button>
-      </div>
     </div>
   );
 }
@@ -226,7 +96,6 @@ function PaymentResult({ onRetry, auth, clearCart }) {
 export default function CustomerPayments({ onOrderUpdate } = {}) {
   const { auth }  = useAuth();
   const navigate  = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const { cart, clearCart } = useCart();
 
   const [draft,           setDraft]           = useState(null);
@@ -237,20 +106,13 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
   const [msg,             setMsg]             = useState('');
   const [msgType,         setMsgType]         = useState('ok');
   const [tipCents,        setTipCents]        = useState(0);
+  const [clientSecret,    setClientSecret]    = useState(null);
+  const [stripeStep,      setStripeStep]      = useState('idle'); // idle | creating | paying | done
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryLat,     setDeliveryLat]     = useState(null);
   const [deliveryLng,     setDeliveryLng]     = useState(null);
   const [fromGps,         setFromGps]         = useState(false);
   const [gpsPos,          setGpsPos]          = useState(null);
-
-  // Brick state
-  const [brickStep,     setBrickStep]     = useState('idle'); // idle | creating | paying | done
-  const [preferenceId,  setPreferenceId]  = useState(null);
-
-  const mpStatus  = searchParams.get('status');
-  const [showResult, setShowResult] = useState(Boolean(mpStatus));
-
-  function handleRetry() { setSearchParams({}); setShowResult(false); }
 
   const initialPos = deliveryLat
     ? { lat: deliveryLat, lng: deliveryLng }
@@ -284,7 +146,8 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
     }
     if (d) {
       setDraft(d);
-      const lat = d.delivery_lat ?? null, lng = d.delivery_lng ?? null;
+      const lat = d.delivery_lat ?? null;
+      const lng = d.delivery_lng ?? null;
       if (!lat || !lng) {
         const sp = readSessionDelivery(auth.token);
         if (sp) { setDeliveryAddress(sp.label || ''); setDeliveryLat(sp.lat); setDeliveryLng(sp.lng); }
@@ -301,9 +164,8 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
     apiFetch('/payments/methods', {}, auth.token)
       .then(d => setMethods((d.methods || []).filter(m => m.id !== 'spei' && m.id !== 'bank')))
       .catch(() => setMethods([
-        { id: 'cash', label: 'Efectivo al entregar',            available: true },
-        { id: 'card', label: 'Tarjeta de crédito/débito (MP)',  available: true },
-        { id: 'oxxo', label: 'OXXO / Transferencia',            available: true },
+        { id: 'cash', label: 'Efectivo al entregar',      available: true },
+        { id: 'card', label: 'Tarjeta de crédito/débito', available: !!import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY },
       ]))
       .finally(() => setLoading(false));
   }, [auth.token]);
@@ -346,8 +208,8 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
   const serviceFee  = Math.round(subtotal * 0.05);
   const deliveryFee = Math.round(subtotal * 0.10);
   const grandTotal  = subtotal + serviceFee + deliveryFee + tipCents;
+  const fmt         = cents => `$${((cents ?? 0) / 100).toFixed(2)}`;
 
-  // ── Flujo efectivo ────────────────────────────────────────────────────────
   async function handleCash() {
     if (!draft) { flash('No hay un pedido pendiente.', 'error'); return; }
     const { lat, lng, addr } = resolveCoords();
@@ -361,105 +223,69 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
         ...(lng != null  ? { delivery_lng: lng }       : {}),
       })}, auth.token);
       clearPendingOrder(); clearCart();
-      flash('¡Pedido confirmado!');
+      flash('¡Pedido confirmado! Puedes seguirlo en Mis Pedidos.');
       setTimeout(() => navigate('/customer'), 1800);
     } catch (e) { flash(e.message || 'Error al crear el pedido.', 'error'); }
     finally { setSending(false); }
   }
 
-  // ── Flujo tarjeta — crear preferencia y mostrar Brick ────────────────────
   async function handleCardStart() {
     if (!draft) { flash('No hay un pedido pendiente.', 'error'); return; }
+    if (!import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY) { flash('Pago con tarjeta no disponible.', 'error'); return; }
     const { lat, lng } = resolveCoords();
-    if (!lat || !lng) { flash('Selecciona una dirección de entrega.', 'error'); return; }
-    if (grandTotal < 1000) { flash('El monto mínimo es $10.00 MXN.', 'error'); return; }
+    if (!lat || !lng) { flash('Selecciona una dirección de entrega antes de continuar.', 'error'); return; }
+    if (grandTotal < 1000) { flash('El monto mínimo para pago con tarjeta es $10.00 MXN.', 'error'); return; }
 
-    setBrickStep('creating'); setSending(true);
+    setStripeStep('creating'); setSending(true);
     try {
-      const { addr } = resolveCoords();
-      savePendingOrder({ ...draft, delivery_lat: lat, delivery_lng: lng, delivery_address: addr, tip_cents: tipCents });
-
-      const res = await apiFetch('/payments/preference', {
+      const intentRes = await apiFetch('/payments/intent', {
         method: 'POST',
-        body: JSON.stringify({ amount_cents: grandTotal, description: `Pedido Morelivery` }),
+        body: JSON.stringify({ amount_cents: grandTotal, method: 'card' }),
       }, auth.token);
-
-      if (!res.preferenceId) throw new Error('No se recibió preferencia de Mercado Pago');
-      setPreferenceId(res.preferenceId);
-      setBrickStep('paying');
+      if (!intentRes.clientSecret) throw new Error('No se recibió clientSecret de Stripe');
+      setClientSecret(intentRes.clientSecret);
+      setStripeStep('paying');
     } catch (e) {
       flash(e.message || 'Error al iniciar el pago.', 'error');
-      setBrickStep('idle');
+      setStripeStep('idle');
     } finally { setSending(false); }
   }
 
-  // ── Flujo OXXO/SPEI — redirigir a checkout MP ────────────────────────────
-  async function handleOxxo() {
-    if (!draft) { flash('No hay un pedido pendiente.', 'error'); return; }
-    const { lat, lng } = resolveCoords();
-    if (!lat || !lng) { flash('Selecciona una dirección de entrega.', 'error'); return; }
-    if (grandTotal < 1000) { flash('El monto mínimo es $10.00 MXN.', 'error'); return; }
-
-    setSending(true);
-    try {
-      const { addr } = resolveCoords();
-      savePendingOrder({ ...draft, delivery_lat: lat, delivery_lng: lng, delivery_address: addr, tip_cents: tipCents });
-
-      const res = await apiFetch('/payments/preference', {
-        method: 'POST',
-        body: JSON.stringify({ amount_cents: grandTotal, description: 'Pedido Morelivery' }),
-      }, auth.token);
-
-      if (!res.initPoint) throw new Error('No se recibió URL de pago');
-      window.location.href = res.initPoint;
-    } catch (e) {
-      flash(e.message || 'Error al iniciar el pago.', 'error');
-      setSending(false);
-    }
-  }
-
-  // ── Brick: pago exitoso → crear pedido ───────────────────────────────────
-  async function handleBrickSuccess(mpPaymentId) {
-    setBrickStep('creating');
+  async function handlePaymentSuccess(paymentIntent) {
+    setStripeStep('creating');
     const { lat, lng, addr } = resolveCoords();
     try {
       await apiFetch('/orders', { method: 'POST', body: JSON.stringify({
-        restaurantId:   draft.restaurantId,
-        items:          draft.items || [],
-        payment_method: 'card',
-        tip_cents:      tipCents,
-        mp_payment_id:  mpPaymentId,
+        restaurantId:             draft.restaurantId,
+        items:                    draft.items || [],
+        payment_method:           'card',
+        tip_cents:                tipCents,
+        stripe_payment_intent_id: paymentIntent.id,
         ...(addr?.trim() ? { delivery_address: addr } : {}),
         ...(lat != null  ? { delivery_lat: lat }       : {}),
         ...(lng != null  ? { delivery_lng: lng }       : {}),
       })}, auth.token);
       clearPendingOrder(); clearCart();
-      setBrickStep('done');
+      setStripeStep('done');
       setTimeout(() => navigate('/customer'), 2000);
     } catch (e) {
       flash(
         `Pago exitoso pero error al crear el pedido: ${e.message}. ` +
-        `ID de pago: ${mpPaymentId}. Contacta a soporte.`,
+        `Referencia de pago: ${paymentIntent.id}. Contacta a soporte.`,
         'error'
       );
-      setBrickStep('idle');
+      setStripeStep('idle');
     }
   }
 
-  function handleBrickError(errorMsg) {
+  function handlePaymentError(errorMsg) {
     flash(errorMsg, 'error');
-    setBrickStep('idle');
-    setPreferenceId(null);
+    setStripeStep('idle');
+    setClientSecret(null);
   }
 
   if (loading) return (
     <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)' }}>Cargando…</div>
-  );
-
-  if (showResult) return (
-    <div style={{ padding:'1rem', maxWidth:480, margin:'0 auto' }}>
-      <PaymentResult onRetry={handleRetry} auth={auth} clearCart={clearCart} />
-    </div>
   );
 
   return (
@@ -483,7 +309,7 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
             <div style={{ background:'var(--warn-bg)', border:'1px solid var(--warn-border)',
               borderRadius:8, padding:'0.5rem 0.65rem', marginBottom:'0.5rem',
               fontSize:'0.78rem', color:'var(--warn)', display:'flex', alignItems:'flex-start', gap:'0.4rem' }}>
-              <span style={{ flexShrink:0 }}><IconWarning /></span>
+              <span style={{ flexShrink:0, display:'flex' }}><IconWarning /></span>
               <span>Dirección detectada por GPS. Confirma que es correcta.</span>
             </div>
           )}
@@ -492,7 +318,7 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
               fontWeight: deliveryAddress ? 400 : 600, flex:1, minWidth:0 }}>
               {deliveryAddress
                 ? <span style={{ display:'flex', alignItems:'center', gap:'0.3rem' }}><IconPin />{deliveryAddress}</span>
-                : <span style={{ display:'flex', alignItems:'center', gap:'0.3rem' }}><IconWarning />Sin dirección</span>
+                : <span style={{ display:'flex', alignItems:'center', gap:'0.3rem' }}><IconWarning />Sin dirección de entrega</span>
               }
             </div>
             <AddressSearchBar variant="default" userPos={gpsPos}
@@ -504,7 +330,7 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
       )}
 
       {/* Desglose — solo en idle */}
-      {draft?.items_detail?.length > 0 && brickStep === 'idle' && (
+      {draft?.items_detail?.length > 0 && stripeStep === 'idle' && (
         <div style={{ background:'var(--bg-sunken)', border:'1px solid var(--border)',
           borderRadius:10, padding:'0.75rem', marginBottom:'1.25rem' }}>
           <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
@@ -519,7 +345,7 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
             ))}
           </ul>
 
-          {/* Propina */}
+          {/* Propina — disponible para ambos métodos */}
           <p style={{ fontSize:'0.72rem', fontWeight:700, color:'var(--text-tertiary)',
             textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'0.4rem' }}>
             Agradecimiento al conductor
@@ -562,67 +388,66 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
         </div>
       )}
 
-      {/* Selector método */}
-      {brickStep === 'idle' && (
+      {/* Selector de método + botón */}
+      {stripeStep === 'idle' && (
         <>
-          <h2 style={{ fontSize:'1.05rem', fontWeight:800, marginBottom:'1rem',
+          <h2 style={{ fontSize:'1.05rem', fontWeight:800, marginBottom:'0.25rem',
             display:'flex', alignItems:'center', gap:'0.5rem' }}>
             <IconCard /> Método de pago
           </h2>
           <div style={{ display:'flex', flexDirection:'column', gap:'0.5rem', marginBottom:'1.5rem' }}>
-            {[
-              { id:'cash', label:'Efectivo al entregar',           icon:<IconCash />,  desc:null },
-              { id:'card', label:'Tarjeta de crédito/débito',      icon:<IconCard />,  desc:'Pago seguro sin salir de la app' },
-              { id:'oxxo', label:'OXXO / Transferencia SPEI',      icon:<IconMP />,    desc:'Te redirigiremos a Mercado Pago' },
-            ].map(m => (
+            {methods.map(m => (
               <label key={m.id} style={{ display:'flex', alignItems:'center', gap:'0.75rem',
-                padding:'0.75rem 1rem', borderRadius:10, cursor:'pointer',
+                padding:'0.75rem 1rem', borderRadius:10,
+                cursor: m.available ? 'pointer' : 'not-allowed',
                 border:`2px solid ${method===m.id ? 'var(--brand)' : 'var(--border)'}`,
-                background: method===m.id ? 'var(--brand-light)' : 'var(--bg-card)' }}>
+                background: method===m.id ? 'var(--brand-light)' : 'var(--bg-card)',
+                opacity: m.available ? 1 : 0.5 }}>
                 <input type="radio" name="method" value={m.id}
-                  checked={method===m.id} onChange={() => setMethod(m.id)}
+                  checked={method===m.id} disabled={!m.available}
+                  onChange={() => m.available && setMethod(m.id)}
                   style={{ accentColor:'var(--brand)', flexShrink:0, width:16, height:16 }} />
-                <span style={{ fontSize:'1.1rem', flexShrink:0 }}>{m.icon}</span>
+                <span style={{ fontSize:'1.1rem', flexShrink:0 }}>
+                  {m.id === 'cash' ? <IconCash /> : <IconCard />}
+                </span>
                 <div>
                   <span style={{ fontWeight:700, fontSize:'0.875rem' }}>{m.label}</span>
-                  {m.desc && <div style={{ fontSize:'0.68rem', color:'var(--text-tertiary)', marginTop:2 }}>{m.desc}</div>}
+                  {m.coming_soon && <span style={{ fontSize:'0.7rem', color:'var(--text-tertiary)', marginLeft:6 }}>Próximamente</span>}
                 </div>
               </label>
             ))}
           </div>
-
           <button className="btn-primary"
             style={{ width:'100%', padding:'0.75rem', fontSize:'0.95rem' }}
             disabled={sending || !draft}
-            onClick={method === 'cash' ? handleCash : method === 'card' ? handleCardStart : handleOxxo}>
+            onClick={method === 'cash' ? handleCash : handleCardStart}>
             {sending ? 'Procesando…'
               : !draft ? 'Sin pedido pendiente'
               : method === 'cash' ? 'Confirmar pedido — Efectivo'
-              : method === 'card' ? `Pagar ${fmt(grandTotal)} con tarjeta`
-              : `Pagar ${fmt(grandTotal)} con OXXO/SPEI`}
+              : 'Continuar con tarjeta'}
           </button>
         </>
       )}
 
-      {/* Creando preferencia */}
-      {brickStep === 'creating' && (
+      {/* Spinner — creando intent o pedido */}
+      {stripeStep === 'creating' && (
         <div style={{ padding:'2rem', textAlign:'center', color:'var(--text-tertiary)' }}>
           <div style={{ width:36, height:36, border:'3px solid var(--brand)',
             borderTopColor:'transparent', borderRadius:'50%',
             animation:'spin 0.8s linear infinite', margin:'0 auto 1rem' }} />
           <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-          Preparando formulario de pago…
+          Preparando pago…
         </div>
       )}
 
-      {/* MP Card Brick */}
-      {brickStep === 'paying' && preferenceId && (
+      {/* Stripe Elements — envuelto en Elements provider */}
+      {stripeStep === 'paying' && clientSecret && (
         <div>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1rem' }}>
             <h2 style={{ fontSize:'1.05rem', fontWeight:800, display:'flex', alignItems:'center', gap:'0.5rem' }}>
-              <IconLock /> Pago con tarjeta
+              <IconLock /> Pago seguro
             </h2>
-            <button onClick={() => { setBrickStep('idle'); setPreferenceId(null); }}
+            <button onClick={() => { setStripeStep('idle'); setClientSecret(null); }}
               style={{ background:'none', border:'none', cursor:'pointer', fontSize:'0.8rem',
                 color:'var(--text-tertiary)', minHeight:'unset' }}>
               ← Volver
@@ -633,18 +458,18 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
             Total a cobrar: <strong>{fmt(grandTotal)}</strong>
             {tipCents > 0 && <span style={{ color:'var(--success)', marginLeft:6 }}>(incl. {fmt(tipCents)} de agradecimiento)</span>}
           </div>
-          <MPCardBrick
-            preferenceId={preferenceId}
-            amountCents={grandTotal}
-            token={auth.token}
-            onSuccess={handleBrickSuccess}
-            onError={handleBrickError}
-          />
+          <Elements stripe={stripePromise} options={{ clientSecret, locale: 'es' }}>
+            <CheckoutForm
+              grandTotal={grandTotal}
+              onSuccess={handlePaymentSuccess}
+              onError={handlePaymentError}
+            />
+          </Elements>
         </div>
       )}
 
       {/* Éxito */}
-      {brickStep === 'done' && (
+      {stripeStep === 'done' && (
         <div style={{ padding:'2rem', textAlign:'center' }}>
           <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="var(--success)"
             strokeWidth="2" strokeLinecap="round" style={{ margin:'0 auto 0.75rem', display:'block' }}>
@@ -655,7 +480,7 @@ export default function CustomerPayments({ onOrderUpdate } = {}) {
         </div>
       )}
 
-      {!draft && brickStep === 'idle' && (
+      {!draft && stripeStep === 'idle' && (
         <p style={{ fontSize:'0.8rem', color:'var(--text-tertiary)', marginTop:'0.5rem', textAlign:'center' }}>
           Selecciona productos en una tienda antes de pagar.
         </p>
