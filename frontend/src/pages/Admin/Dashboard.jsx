@@ -19,6 +19,7 @@ import RatingsTab from '../../features/admin/dashboard/tabs/RatingsTab';
 import FeedTab from '../../features/admin/dashboard/tabs/FeedTab';
 import SystemTab from '../../features/admin/dashboard/tabs/SystemTab';
 import EmergencyTab from '../../features/admin/dashboard/tabs/EmergencyTab';
+import SupportTab from '../../features/admin/dashboard/tabs/SupportTab';
 
 
 export default function AdminDashboard() {
@@ -114,7 +115,8 @@ export default function AdminDashboard() {
     ratings: loadRatings,
     system: () => Promise.resolve(),  // ← devuelve promesa resuelta
     feed: () => Promise.resolve(),
-    emergency: () => Promise.resolve(), // EmergencyTab carga sus propios datos internamente
+    emergency: () => Promise.resolve(),
+    support:   () => Promise.resolve(), // SupportTab carga sus datos internamente
   };
 
   const debouncedLoad = useCallback((force = false) => {
@@ -292,6 +294,7 @@ export default function AdminDashboard() {
     )}
     {tab === 'system' && <SystemTab onMessage={setMsg} />}
     {tab === 'emergency' && <EmergencyTab token={auth.token} />}
+    {tab === 'support'   && <SupportTab   token={auth.token} />}
     </div>
     </PullToRefresh>
   );

@@ -116,20 +116,23 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     registerRef.current.notifyAlertsUpdate?.();
   }, [home.activeZones, home.activeImpassable, home.myPreferences]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // FAB de soporte — posicionado según handMode
+  // FAB de soporte — posicionado encima de todos los NavFABs
+  // NavFABs ocupa: center(60) + gap(12) + more(52) + gap(12) + report(52) = 188px desde bottomOffset
+  // bottomOffset = panelHeight + 8, así que el tope de NavFABs ≈ panelHeight + 8 + 188 = panelHeight + 196
+  const NAVFABS_HEIGHT = 200; // margen generoso
   const supportFabStyle = {
     position: 'absolute',
-    bottom: panelHeight + 80,
+    bottom: panelHeight + 8 + NAVFABS_HEIGHT + 12, // encima del último FAB
     [handMode === 'right' ? 'left' : 'right']: 14,
     zIndex: 401,
-    width: 48, height: 48,
+    width: 44, height: 44,
     borderRadius: '50%',
     background: showSupport ? 'var(--brand)' : '#fff',
     border: '1.5px solid var(--border)',
     boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
     cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: '1.2rem',
+    fontSize: '1.1rem',
     color: showSupport ? '#fff' : 'var(--text-secondary)',
     transition: 'all 0.15s',
   };
@@ -220,7 +223,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
       {showSupport && (
         <div style={{
           position: 'absolute',
-          bottom: panelHeight + 136,
+          bottom: panelHeight + 8 + NAVFABS_HEIGHT + 12 + 52, // encima del FAB de soporte
           [handMode === 'right' ? 'left' : 'right']: 14,
           width: 320, height: 480,
           background: 'var(--bg-card)',

@@ -1,0 +1,1531 @@
+===== ./backend/src/bootstrap/schedulers.js =====
+import { expireTimedOutOffers, expireDisputedOrders } from '../modules/orders/assignment/index.js';
+import { ensureParamsLoaded, seedDefaultParams, getParam } from '../engine/params.js';
+import { tickKitchen } from '../engine/kitchen.js';
+import { cleanStaleEntities } from '../engine/stale.js';
+import { runRebalancer } from '../engine/rebalancer.js';
+
+function createLoop({ label, initialDelayMs, intervalMs, task, onSuccess, onError }) {
+  let timer = null;
+  let currentDelayMs = initialDelayMs;
+
+  async function run() {
+    try {
+      const result = await task();
+      if (onSuccess) onSuccess(result);
+      currentDelayMs = typeof intervalMs === 'function' ? intervalMs() : intervalMs;
+    } catch (error) {
+      if (onError) onError(error, currentDelayMs);
+      currentDelayMs = typeof intervalMs === 'function' ? intervalMs() : currentDelayMs;
+    } finally {
+      timer = setTimeout(run, currentDelayMs);
+    }
+  }
+
+  return {
+    label,
+    start() {
+      timer = setTimeout(run, initialDelayMs);
+    },
+    stop() {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    },
+  };
+}
+
+export function bootstrapEngineParams() {
+  ensureParamsLoaded().catch((error) => {
+    console.warn('[server] pre-carga de engine_params falló (usando defaults):', error.message);
+  });
+
+  seedDefaultParams().catch((error) => {
+    console.warn('[server] seedDefaultParams falló (no crítico):', error.message);
+  });
+}
+
+export function createSchedulers(offerCb) {
+  let assignmentDelayMs = 2_000;
+
+  return [
+    createLoop({
+      label: 'assignment',
+      initialDelayMs: 2_000,
+      intervalMs: () => assignmentDelayMs,
+      task: async () => {
+        await expireTimedOutOffers(offerCb);
+        await expireDisputedOrders();
+      },
+      onSuccess: () => {
+        assignmentDelayMs = 2_000;
+      },
+      onError: (error) => {
+        assignmentDelayMs = Math.min(assignmentDelayMs * 2, 15_000);
+        console.error('[assign.scheduler] error:', error.message);
+      },
+    }),
+    createLoop({
+      label: 'kitchen',
+      initialDelayMs: 5_000,
+      intervalMs: 30_000,
+      task: tickKitchen,
+      onError: (error) => {
+        console.error('[kitchen.scheduler] error:', error.message);
+      },
+    }),
+    createLoop({
+      label: 'stale',
+      initialDelayMs: 10_000,
+      intervalMs: 60_000,
+      task: () => cleanStaleEntities(offerCb),
+      onSuccess: (result) => {
+        if (result.cancelled > 0 || result.reassigned > 0) {
+          console.log(`[stale.scheduler] cancelled=${result.cancelled} reassigned=${result.reassigned} requeued=${result.requeued}`);
+        }
+      },
+      onError: (error) => {
+        console.error('[stale.scheduler] error:', error.message);
+      },
+    }),
+    createLoop({
+      label: 'rebalancer',
+      initialDelayMs: 15_000,
+      intervalMs: () => getParam('rebalancer_interval_s', 300) * 1000,
+      task: () => runRebalancer(offerCb),
+      onError: (error) => {
+        console.error('[rebalancer.scheduler] error:', error.message);
+      },
+    }),
+  ];
+}
+
+export function startSchedulers(schedulers) {
+  schedulers.forEach((scheduler) => scheduler.start());
+}
+
+export function stopSchedulers(schedulers) {
+  schedulers.forEach((scheduler) => scheduler.stop());
+}
+
+===== ./backend/src/modules/restaurants/routes.js =====
+// backend/modules/restaurants/routes.js
+import { Router } from 'express';
+import { query } from '../../config/db.js';
+import { authenticate, authorize } from '../../middlewares/auth.js';
+import { validate } from '../../middlewares/validate.js';
+import { resetPrepEstimateOnOpen, recordManualCorrection } from '../../engine/kitchen.js';
+import { createMenuItemSchema, updateMenuItemSchema } from './schemas.js';
+import { AppError } from '../../utils/errors.js';
+
+const router = Router();
+
+function isMissingColumn(e) { return e?.code === '42703'; }
+function isMissingRelation(e) { return e?.code === '42P01'; }
+
+async function getRestaurantIdByOwner(userId) {
+  const r = await query('SELECT id FROM restaurants WHERE owner_user_id = $1 LIMIT 1', [userId]);
+  return r.rows[0]?.id || null;
+}
+
+/**
+ * Determina si el restaurante está abierto AHORA:
+ *   1. manual_open_override !== NULL  →  usar ese valor directamente
+ *   2. Buscar el horario del día actual en restaurant_schedules
+ *   3. Fallback: valor de is_open guardado en la tabla
+ */
+async function computeIsOpen(restaurantId) {
+  try {
+    const r = await query('SELECT is_open, manual_open_override FROM restaurants WHERE id = $1', [restaurantId]);
+    if (r.rowCount === 0) return false;
+    const { is_open, manual_open_override } = r.rows[0];
+    if (manual_open_override !== null && manual_open_override !== undefined) return Boolean(manual_open_override);
+
+    // Usar timezone de México — el servidor puede correr en UTC
+    const tz  = 'America/Mexico_City';
+    const now = new Date();
+    // getDay() equivalente en Mexico_City: restar el offset al momento UTC
+    const nowMx   = new Date(now.toLocaleString('en-US', { timeZone: tz }));
+    const dow     = nowMx.getDay();   // 0=Dom … 6=Sab
+    const hh      = String(nowMx.getHours()).padStart(2, '0');
+    const mm      = String(nowMx.getMinutes()).padStart(2, '0');
+    const hhmm    = `${hh}:${mm}`;
+
+    try {
+      const s = await query(
+        'SELECT opens_at, closes_at, is_closed FROM restaurant_schedules WHERE restaurant_id=$1 AND day_of_week=$2',
+        [restaurantId, dow]
+      );
+      if (s.rowCount === 0) return Boolean(is_open);
+      const { opens_at, closes_at, is_closed } = s.rows[0];
+      if (is_closed || !opens_at || !closes_at) return false;
+      return hhmm >= opens_at.slice(0,5) && hhmm < closes_at.slice(0,5);
+    } catch (e) {
+      if (isMissingRelation(e)) return Boolean(is_open);
+      throw e;
+    }
+  } catch (_) { return false; }
+}
+
+/* ── GET / — lista pública con is_open calculado en tiempo real ── */
+router.get('/', async (_req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT r.id, r.name, r.category, r.is_open,
+              COALESCE(u.address, r.address) AS address,
+              r.profile_photo, COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng,
+              r.rating_avg, r.rating_count
+       FROM restaurants r
+       LEFT JOIN users u ON u.id = r.owner_user_id
+       WHERE r.is_active = true
+       ORDER BY r.name`
+    ).catch(() =>
+      query(
+        `SELECT r.id, r.name, r.category, r.is_open,
+                COALESCE(u.address, r.address) AS address,
+                r.profile_photo, COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
+         FROM restaurants r
+         LEFT JOIN users u ON u.id = r.owner_user_id
+         WHERE r.is_active = true
+         ORDER BY r.name`
+      )
+    );
+    const restaurants = await Promise.all(result.rows.map(async r => ({ ...r, is_open: await computeIsOpen(r.id) })));
+    return res.json({ restaurants });
+  } catch (error) {
+    if (isMissingRelation(error)) return res.json({ restaurants: [] });
+    return next(error);
+  }
+});
+
+/* ── GET /my ── */
+router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT r.id, r.name, r.category, r.is_open,
+              COALESCE(u.address, r.address) AS address,
+              r.manual_open_override, r.profile_photo,
+              COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng,
+              r.max_cash_cents,
+              r.allow_frequent_customers
+       FROM restaurants r
+       LEFT JOIN users u ON u.id = r.owner_user_id
+       WHERE r.owner_user_id=$1 LIMIT 1`,
+      [req.user.userId]
+    );
+    if (result.rowCount === 0) return res.json({ restaurant: null });
+    const rest = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
+    return res.json({ restaurant: rest });
+  } catch (error) {
+    // Si max_cash_cents no existe aún, reintentar sin esa columna
+    if (isMissingColumn(error)) {
+      try {
+        const result = await query(
+          `SELECT r.id, r.name, r.category, r.is_open,
+                  COALESCE(u.address, r.address) AS address,
+                  r.manual_open_override, r.profile_photo,
+                  COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
+           FROM restaurants r
+           LEFT JOIN users u ON u.id = r.owner_user_id
+           WHERE r.owner_user_id=$1 LIMIT 1`,
+          [req.user.userId]
+        );
+        if (result.rowCount === 0) return res.json({ restaurant: null });
+        const rest = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
+        return res.json({ restaurant: rest });
+      } catch (e2) { return next(e2); }
+    }
+    return next(error);
+  }
+});
+
+/* ── GET /my/menu ── */
+router.get('/my/menu', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    const result = await query(
+      'SELECT id, name, description, price_cents, is_available, image_url FROM menu_items WHERE restaurant_id=$1 ORDER BY name',
+      [restaurantId]
+    );
+    return res.json({ menu: result.rows });
+  } catch (error) { return next(error); }
+});
+
+/* ── GET /my/schedule — horario guardado de los 7 días ── */
+router.get('/my/schedule', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    let rows = [];
+    try {
+      const result = await query(
+        'SELECT day_of_week, opens_at, closes_at, is_closed FROM restaurant_schedules WHERE restaurant_id=$1 ORDER BY day_of_week',
+        [restaurantId]
+      );
+      rows = result.rows;
+    } catch (e) { if (!isMissingRelation(e)) throw e; }
+
+    const scheduleMap = new Map(rows.map(r => [r.day_of_week, r]));
+    const schedule = Array.from({ length: 7 }, (_, i) => scheduleMap.get(i) || {
+      day_of_week: i, opens_at: '09:00:00', closes_at: '22:00:00', is_closed: false
+    });
+
+    const restInfo = await query('SELECT manual_open_override FROM restaurants WHERE id=$1', [restaurantId]);
+    return res.json({ schedule, manual_open_override: restInfo.rows[0]?.manual_open_override ?? null });
+  } catch (error) { return next(error); }
+});
+
+/* ── PUT /my/schedule — guardar horario semanal completo ── */
+router.put('/my/schedule', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    const { schedule } = req.body;
+    if (!Array.isArray(schedule) || schedule.length !== 7) return next(new AppError(400, 'Se requieren los 7 días'));
+
+    for (const day of schedule) {
+      await query(
+        `INSERT INTO restaurant_schedules(restaurant_id, day_of_week, opens_at, closes_at, is_closed)
+         VALUES($1,$2,$3,$4,$5)
+         ON CONFLICT(restaurant_id, day_of_week)
+         DO UPDATE SET opens_at=$3, closes_at=$4, is_closed=$5`,
+        [restaurantId, day.day_of_week,
+         day.is_closed ? null : (day.opens_at || '09:00'),
+         day.is_closed ? null : (day.closes_at || '22:00'),
+         Boolean(day.is_closed)]
+      );
+    }
+
+    // Recalcular y persistir is_open
+    const isOpen = await computeIsOpen(restaurantId);
+    await query('UPDATE restaurants SET is_open=$1 WHERE id=$2', [isOpen, restaurantId]);
+
+    return res.json({ ok: true, is_open: isOpen });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /my/toggle — override manual de apertura/cierre ── */
+router.patch('/my/toggle', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    // override: true | false | null (null = volver al horario automático)
+    const { override } = req.body;
+    const value = override === null || override === undefined ? null : Boolean(override);
+    await query('UPDATE restaurants SET manual_open_override=$1 WHERE id=$2', [value, restaurantId]);
+
+    const isOpen = await computeIsOpen(restaurantId);
+    await query('UPDATE restaurants SET is_open=$1 WHERE id=$2', [isOpen, restaurantId]);
+
+    // Al abrir el restaurante, registrar hora de apertura para el ciclo de prep
+    if (isOpen) {
+      resetPrepEstimateOnOpen(restaurantId).catch(() => {});
+    }
+
+    return res.json({ is_open: isOpen, manual_open_override: value });
+  } catch (error) { return next(error); }
+});
+
+router.get('/:id', async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT r.id, r.name, r.category, r.is_open,
+      COALESCE(u.address, r.address) AS address,
+                               r.profile_photo,
+                               COALESCE(u.home_lat, r.lat)   AS lat,
+                               COALESCE(u.home_lng, r.lng)   AS lng,
+                               r.rating_avg, r.rating_count
+                               FROM restaurants r
+                               LEFT JOIN users u ON u.id = r.owner_user_id
+                               WHERE r.id = $1 AND r.is_active = true`,
+                               [req.params.id]
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Restaurante no encontrado'));
+    const restaurant = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
+    return res.json({ restaurant });
+  } catch (error) { return next(error); }
+});
+
+/* ── GET /:id/menu ── */
+router.get('/:id/menu', async (req, res, next) => {
+  try {
+    const result = await query(
+      'SELECT id, name, description, price_cents, is_available, image_url FROM menu_items WHERE restaurant_id=$1 ORDER BY name',
+      [req.params.id]
+    );
+    return res.json({ menu: result.rows });
+  } catch (error) {
+    if (isMissingRelation(error)) return res.json({ menu: [] });
+    return next(error);
+  }
+});
+
+/* ── POST /menu-items ── */
+
+/* ── PATCH /restaurants/my/profile-photo ── */
+router.patch('/my/profile-photo', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    // Acepta base64 (data:image/...) o URL o null para eliminar
+    const { photoUrl } = req.body || {};
+    const val = (photoUrl === null || photoUrl === '') ? null
+      : (typeof photoUrl === 'string' ? photoUrl : null);
+    try {
+      await query(
+        `UPDATE restaurants SET profile_photo=$1 WHERE owner_user_id=$2`,
+        [val, req.user.userId]
+      );
+    } catch (e) {
+      // Columna puede no existir si la migration no se corrió
+      if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_v11.sql primero'));
+      throw e;
+    }
+    return res.json({ ok: true, photoUrl: val });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /my/cover-photo — foto de fachada/portada (almacena, no se muestra aún) ── */
+router.patch('/my/cover-photo', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const { photoUrl } = req.body || {};
+    const val = (photoUrl === null || photoUrl === '') ? null
+    : (typeof photoUrl === 'string' ? photoUrl : null);
+    try {
+      await query(
+        `UPDATE restaurants SET cover_photo=$1 WHERE owner_user_id=$2`,
+        [val, req.user.userId]
+      );
+    } catch (e) {
+      if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_cover_photo.sql primero'));
+      throw e;
+    }
+    return res.json({ ok: true, coverPhoto: val });
+  } catch (error) { return next(error); }
+});
+
+router.post('/menu-items', authenticate, authorize(['restaurant']), validate(createMenuItemSchema), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    const { name, description, priceCents, pkgUnits, pkgVolumeLiters } = req.validatedBody;
+    // priceCents validado: entero entre $1 y $10,000
+    if (!Number.isInteger(priceCents) || priceCents < 100 || priceCents > 1_000_000) {
+      return next(new AppError(400, 'El precio debe estar entre $1.00 y $10,000.00'));
+    }
+    const safeUnits  = pkgUnits        != null ? Math.max(1, Math.round(Number(pkgUnits)))  : 1;
+    const safeVolume = pkgVolumeLiters != null ? Math.max(0, Number(pkgVolumeLiters))        : 0;
+    const result = await query(
+      `INSERT INTO menu_items(restaurant_id, name, description, price_cents, is_available, pkg_units, pkg_volume_liters)
+       VALUES($1,$2,$3,$4,true,$5,$6) RETURNING *`,
+      [restaurantId, name, description, priceCents, safeUnits, safeVolume]
+    );
+    return res.status(201).json({ menuItem: result.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /menu-items/:id ── */
+router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  // No usar updateMenuItemSchema porque bloquea peticiones que solo traen imageUrl
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    const item = await query('SELECT * FROM menu_items WHERE id=$1 AND restaurant_id=$2', [req.params.id, restaurantId]);
+    if (item.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
+    const cur = item.rows[0];
+    const p = req.body || {};
+    // imageUrl: acepta base64 (data:image/...) o null para eliminar imagen
+    let imageUrl = cur.image_url;
+    if (req.body.imageUrl !== undefined) {
+      if (req.body.imageUrl === null || req.body.imageUrl === '') {
+        imageUrl = null;
+      } else if (typeof req.body.imageUrl === 'string') {
+        // base64 o URL — aceptar sin restricción de formato
+        imageUrl = req.body.imageUrl;
+      }
+    }
+    const result = await query(
+      `UPDATE menu_items
+       SET name=$1, description=$2, price_cents=$3, is_available=$4, image_url=$5,
+           pkg_units=$6, pkg_volume_liters=$7
+       WHERE id=$8 RETURNING *`,
+      [
+        p.name        ?? cur.name,
+        p.description ?? cur.description ?? '',
+        (p.priceCents != null ? Math.round(Number(p.priceCents)) : null) ?? cur.price_cents,
+        p.isAvailable ?? cur.is_available,
+        imageUrl,
+        p.pkgUnits        != null ? Math.max(1, Math.round(Number(p.pkgUnits)))       : (cur.pkg_units         ?? 1),
+        p.pkgVolumeLiters != null ? Math.max(0, Number(p.pkgVolumeLiters))            : (cur.pkg_volume_liters ?? 0),
+        req.params.id,
+      ]
+    );
+    return res.json({ menuItem: result.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+
+/* ── DELETE /menu-items/:id — eliminar producto ── */
+router.delete('/menu-items/:id', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    // Verificar que el item pertenece a este restaurante
+    const check = await query(
+      `SELECT mi.id FROM menu_items mi
+       JOIN restaurants r ON r.id = mi.restaurant_id
+       WHERE mi.id = $1 AND r.owner_user_id = $2`,
+      [req.params.id, req.user.userId]
+    );
+    if (check.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
+
+    // Preservar historial: limpiar referencia en order_items antes de borrar
+    try {
+      await query(`UPDATE order_items SET menu_item_id = NULL WHERE menu_item_id = $1`, [req.params.id]);
+    } catch (_) {}
+    await query(`DELETE FROM menu_items WHERE id = $1`, [req.params.id]);
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+/* ── PATCH /my/prep-estimate — restaurante actualiza su estimado de preparación ── */
+router.patch('/my/prep-estimate', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    const val = Number(req.body.prep_time_estimate_s);
+    if (!Number.isFinite(val) || val < 30 || val > 7200) {
+      return next(new AppError(400, 'El estimado debe estar entre 30 segundos y 2 horas'));
+    }
+
+    // Leer estimado actual para la marca de corrección
+    const prev = await query(
+      'SELECT prep_time_estimate_s FROM restaurants WHERE id = $1',
+      [restaurantId]
+    );
+    const previousS = prev.rows[0]?.prep_time_estimate_s ?? null;
+
+    const r = await query(
+      `UPDATE restaurants
+       SET prep_time_estimate_s = $1, prep_estimate_updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, prep_time_estimate_s`,
+      [val, restaurantId]
+    );
+
+    // Registrar marca de corrección manual (fire-and-forget, no bloquea)
+    if (previousS !== null && previousS !== val) {
+      recordManualCorrection(restaurantId, previousS, val).catch(() => {});
+    }
+
+    return res.json({ restaurant: r.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /my/frequent-customers — permitir clientes frecuentes ── */
+router.patch('/my/frequent-customers', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    const value = Boolean(req.body?.allow);
+    try {
+      await query(
+        'UPDATE restaurants SET allow_frequent_customers = $1 WHERE id = $2',
+        [value, restaurantId]
+      );
+    } catch (e) {
+      if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_allow_frequent_customers.sql primero'));
+      throw e;
+    }
+    return res.json({ ok: true, allow_frequent_customers: value });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /my/cash-limit — configurar límite de pago en efectivo ── */
+router.patch('/my/cash-limit', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    const raw = req.body?.max_cash_cents;
+    // Acepta null o 0 para quitar el límite; de lo contrario entero positivo en centavos
+    let value;
+    if (raw === null || raw === 0 || raw === '0') {
+      value = 0;
+    } else {
+      value = Math.round(Number(raw));
+      if (!Number.isFinite(value) || value < 0) {
+        return next(new AppError(400, 'El límite debe ser un monto positivo en centavos o 0 para desactivar'));
+      }
+    }
+
+    try {
+      await query(
+        'UPDATE restaurants SET max_cash_cents = $1 WHERE id = $2',
+        [value, restaurantId]
+      );
+    } catch (e) {
+      if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_maxcashcents_and_disputes.sql primero'));
+      throw e;
+    }
+
+    return res.json({ ok: true, max_cash_cents: value });
+  } catch (error) { return next(error); }
+});
+
+export default router;
+
+
+===== ./frontend/src/pages/Restaurant/Menu.jsx =====
+import { useEffect, useRef, useState } from 'react';
+import { apiFetch } from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
+
+function fmt(cents) { return `$${((cents ?? 0) / 100).toFixed(2)}`; }
+
+// ── VolumeHelper ──────────────────────────────────────────────────────────────
+// Regla métrica real: muestra una regla en pantalla con marcas de centímetro.
+// El restaurantero puede poner el empaque junto al teléfono y medir directamente.
+//
+// CSS px ≠ píxeles físicos. Para cm reales:
+//   1 pulgada física = 96 CSS px (definición W3C baseline para 96 DPI)
+//   1 cm = 96/2.54 ≈ 37.795 CSS px
+//   Con zoom del navegador estos px se escalan — por eso usamos:
+//     window.devicePixelRatio para compensar en pantallas retina
+//     zoom:1 + transform en el contenedor para aislar del zoom del navegador
+//
+// La regla mide 10 cm (ancho mínimo de una charola estándar).
+// Marcas cada 1 cm, números cada 2 cm.
+
+var PRESETS = [
+  { label: 'Salsa / aderezo',     vol: 0.05,  emoji: '🫙',  example: 'Sobre, mini cup'            },
+  { label: 'Charola (8 tacos)',   vol: 0.45,  emoji: '🫱',  example: 'Charola desechable estándar' },
+  { label: 'Torta / burger',      vol: 0.6,   emoji: '🍔',  example: 'Caja mediana'                },
+  { label: 'Pizza personal',      vol: 1.2,   emoji: '🍕',  example: 'Caja 20×20 cm'              },
+  { label: 'Pizza mediana',       vol: 2.5,   emoji: '🍕',  example: 'Caja 30×30 cm'              },
+  { label: 'Pizza grande',        vol: 4.0,   emoji: '🍕',  example: 'Caja 40×40 cm'              },
+  { label: 'Combo familiar',      vol: 6.0,   emoji: '🛍',  example: 'Bolsa grande + bebida'       },
+];
+
+// Mochila referencia = 25L (para guías)
+var BAG_LITERS = 25;
+
+
+function VolumeHelper({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handler(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('touchstart', handler, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('touchstart', handler);
+    };
+  }, [open]);
+
+  const vol = parseFloat(String(value).replace(',', '.')) || 0;
+
+  return (
+    <div ref={ref} style={{ marginTop: 6 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          background: 'none', border: 'none', padding: 0,
+          fontSize: 12, color: 'var(--brand)', cursor: 'pointer',
+          fontWeight: 600, minHeight: 'unset', textDecoration: 'underline',
+          textUnderlineOffset: 2,
+        }}>
+        📐 {open ? 'Ocultar guías' : 'Ver guías de volumen'}
+      </button>
+
+      {open && (
+        <div style={{
+          marginTop: 8, padding: '10px 12px',
+          background: 'var(--bg-raised)',
+          border: '1px solid var(--border)',
+          borderRadius: 10,
+        }}>
+          <div style={{
+            fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)',
+            textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5,
+          }}>
+            Referencias de volumen
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {PRESETS.map(p => {
+              const isActive = Math.abs(vol - p.vol) < 0.001;
+              return (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => { onChange(String(p.vol)); setOpen(false); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    gap: 8,
+                    background: isActive ? 'var(--brand-light)' : 'transparent',
+                    border: `1px solid ${isActive ? 'var(--brand)' : 'transparent'}`,
+                    borderRadius: 5, padding: '4px 7px', cursor: 'pointer',
+                    textAlign: 'left', width: '100%', minHeight: 'unset',
+                  }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>
+                    {p.emoji} {p.label}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>
+                    {p.vol}L — {p.example}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductImagePlaceholder({ size = 68 }) {
+  return (
+    <div style={{ width:size, height:size, borderRadius:6, background:'var(--gray-100)', border:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+      <svg width={size*0.5} height={size*0.5} viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="1.5">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
+        <circle cx="12" cy="10" r="2"/>
+      </svg>
+    </div>
+  );
+}
+
+function ProductImage({ src, size = 68 }) {
+  const [err, setErr] = useState(false);
+  if (!src || err) return <ProductImagePlaceholder size={size} />;
+  return (
+    <img src={src} alt="" width={size} height={size} onError={() => setErr(true)}
+      style={{ width:size, height:size, borderRadius:6, objectFit:'cover', border:'1px solid var(--border)', flexShrink:0 }} />
+  );
+}
+
+// Convierte archivo local a data-URL base64
+function useLocalImage() {
+  const [preview, setPreview] = useState(null);
+  const [dataUrl, setDataUrl]  = useState(null);
+  function pick(file) {
+    if (!file) { setPreview(null); setDataUrl(null); return; }
+    const reader = new FileReader();
+    reader.onload = e => { setPreview(e.target.result); setDataUrl(e.target.result); };
+    reader.readAsDataURL(file);
+  }
+  function clear() { setPreview(null); setDataUrl(null); }
+  return { preview, dataUrl, pick, clear };
+}
+
+export default function RestaurantMenu() {
+  const { auth } = useAuth();
+  const [products, setProducts] = useState([]);
+  const [name, setName]         = useState('');
+  const [description, setDesc]  = useState('');
+  const [price, setPrice]       = useState('');
+  const [pkgUnits, setPkgUnits]           = useState('1');
+  const [pkgVolume, setPkgVolume]         = useState('0');
+  const [msg, setMsg]           = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [editingIsAvailable, setEditingIsAvailable] = useState(true);
+  const [formOpen, setFormOpen]   = useState(false); // colapsado por defecto
+  // Imagen
+  const [editingImg, setEditingImg] = useState(null);
+  const [imgUrl, setImgUrl]         = useState('');
+  const [savingImg, setSavingImg]   = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [restaurantData, setRestaurantData] = useState(null);
+  const { preview, dataUrl, pick, clear } = useLocalImage();
+  const fileRef = useRef(null);
+
+  // ─── Foto de perfil de la tienda ─────────────────────────────────────────
+  const [profilePhoto, setProfilePhoto]     = useState(null);
+  const [editingProfilePhoto, setEditingPP] = useState(false);
+  const [savingPP, setSavingPP]             = useState(false);
+  const {
+    preview: ppPreview, dataUrl: ppDataUrl, pick: ppPick, clear: ppClear
+  } = useLocalImage();
+  const ppFileRef = useRef(null);
+
+  // ─── Foto de fachada/portada (se almacena, no se muestra aún) ────────────
+  const [editingCover, setEditingCover] = useState(false);
+  const [savingCover, setSavingCover]   = useState(false);
+  const [coverSaved,  setCoverSaved]    = useState(false);
+  const {
+    preview: cvPreview, dataUrl: cvDataUrl, pick: cvPick, clear: cvClear
+  } = useLocalImage();
+  const cvFileRef = useRef(null);
+
+  async function saveProfilePhoto() {
+    if (!ppDataUrl) return;
+    setSavingPP(true);
+    try {
+      await apiFetch('/restaurants/my/profile-photo', {
+        method: 'PATCH', body: JSON.stringify({ photoUrl: ppDataUrl })
+      }, auth.token);
+      setProfilePhoto(ppDataUrl);
+      setEditingPP(false); ppClear();
+    } catch (e) { setMsg(e.message); }
+    finally { setSavingPP(false); }
+  }
+
+  async function saveCoverPhoto() {
+    if (!cvDataUrl) return;
+    setSavingCover(true);
+    try {
+      await apiFetch('/restaurants/my/cover-photo', {
+        method: 'PATCH', body: JSON.stringify({ photoUrl: cvDataUrl })
+      }, auth.token);
+      setCoverSaved(true);
+      setTimeout(() => setCoverSaved(false), 2500);
+      setEditingCover(false); cvClear();
+    } catch (e) { setMsg(e.message); }
+    finally { setSavingCover(false); }
+  }
+
+  async function load() {
+    try {
+      const [menuData, myData] = await Promise.all([
+        apiFetch('/restaurants/my/menu', {}, auth.token),
+        apiFetch('/restaurants/my', {}, auth.token),
+      ]);
+      setProducts(menuData.menu || []);
+      if (myData?.restaurant?.profile_photo) setProfilePhoto(myData.restaurant.profile_photo);
+      if (myData?.restaurant) setRestaurantData(myData.restaurant);
+    } catch (_) {}
+  }
+
+  useEffect(() => { load(); }, [auth.token]);
+
+  async function handleSubmit() {
+    if (!name.trim()) return setMsg('El nombre es requerido');
+    const cents = Math.round(parseFloat(price.toString().replace(',', '.')) * 100);
+    if (isNaN(cents) || cents <= 0) return setMsg('Precio inválido');
+    try {
+      const payload = {
+        name: name.trim(),
+        description: description.trim(),
+        priceCents: cents,
+        pkgUnits:        Math.max(1, parseInt(pkgUnits,  10) || 1),
+        pkgVolumeLiters: Math.max(0, parseFloat(pkgVolume.toString().replace(',', '.')) || 0),
+      };
+      if (editingId) {
+        payload.isAvailable = editingIsAvailable;
+        await apiFetch(`/restaurants/menu-items/${editingId}`, { method:'PATCH', body: JSON.stringify(payload) }, auth.token);
+      } else {
+        await apiFetch('/restaurants/menu-items', { method:'POST', body: JSON.stringify(payload) }, auth.token);
+      }
+      resetForm();
+      load();
+    } catch (e) { setMsg(e.message); }
+  }
+
+  function startEdit(product) {
+    setEditingId(product.id);
+    setEditingIsAvailable(product.is_available ?? true);
+    setName(product.name);
+    setDesc(product.description || '');
+    setPrice((product.price_cents / 100).toFixed(2));
+    setPkgUnits(String(product.pkg_units ?? 1));
+    setPkgVolume(String(product.pkg_volume_liters ?? 0));
+    setMsg('');
+  }
+
+  function resetForm() {
+    setEditingId(null); setEditingIsAvailable(true);
+    setName(''); setDesc(''); setPrice('');
+    setPkgUnits('1'); setPkgVolume('0');
+    setMsg(''); setFormOpen(false);
+  }
+
+  async function toggleAvailable(product) {
+    try {
+      await apiFetch(`/restaurants/menu-items/${product.id}`, {
+        method:'PATCH',
+        body: JSON.stringify({ name: product.name, description: product.description, priceCents: product.price_cents, isAvailable: !product.is_available })
+      }, auth.token);
+      load();
+    } catch (e) { setMsg(e.message); }
+  }
+
+  async function saveImage(productId) {
+    setSavingImg(true);
+    try {
+      // Solo imagen local (base64)
+      const imageToSave = dataUrl || null;
+      await apiFetch(`/restaurants/menu-items/${productId}`, {
+        method:'PATCH', body: JSON.stringify({ imageUrl: imageToSave })
+      }, auth.token);
+      setEditingImg(null); setImgUrl(''); clear();
+      load();
+    } catch (e) { setMsg(e.message); }
+    finally { setSavingImg(false); }
+  }
+
+  async function deleteProduct(productId) {
+    try {
+      await apiFetch(`/restaurants/menu-items/${productId}`, { method:'DELETE' }, auth.token);
+      setMsg('');
+      setConfirmDelete(null);
+      load();
+    } catch (e) { setMsg(e.message); }
+  }
+
+  return (
+    <div style={{ backgroundColor: 'var(--bg-base)', minHeight:'100vh', padding:'1rem' }}>
+      {/* ── Encabezado Gestión de menú ─────────────────────────────────── */}
+      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)', color:'#fff' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{display:'block',flexShrink:0}}>
+            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
+            <rect x="9" y="3" width="6" height="4" rx="1"/>
+            <path d="M9 12h6M9 16h4"/>
+          </svg>
+          Gestión de menú
+        </div>
+        <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>Productos, precios e imagen de tu tienda</div>
+      </div>
+
+      {/* ── Alerta coordenadas faltantes ─────────────────────────────────── */}
+      {restaurantData && (() => {
+        const _mLat = Number(restaurantData.lat), _mLng = Number(restaurantData.lng);
+        const _mOk = Number.isFinite(_mLat) && Number.isFinite(_mLng)
+          && _mLat > 19.5 && _mLat < 20.0 && _mLng > -101.6 && _mLng < -100.8;
+        return !_mOk;
+      })() && (
+        <div style={{
+          display:'flex', alignItems:'flex-start', gap:'0.6rem',
+          background:'#fffbeb', border:'1px solid #fde68a',
+          borderRadius:8, padding:'0.7rem 0.875rem', marginBottom:'1rem',
+        }}>
+          <span style={{ fontSize:'1.1rem', flexShrink:0 }}>⚠️</span>
+          <div style={{ flex:1, fontSize:'0.82rem', color:'#92400e' }}>
+            <strong>Tu tienda no tiene ubicación configurada.</strong>
+            <span> Los clientes a más de 5 km no podrán hacerte pedidos.</span>
+            <br />
+            <a href="/profile" style={{ color:'#b45309', fontWeight:700, textDecoration:'underline' }}>
+              Ir a Perfil → configurar ubicación
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* ── Foto de perfil + nombre + portada ── */}
+      <div style={{ display:'flex', alignItems:'center', gap:'0.875rem', marginBottom:'1.25rem',
+        padding:'0.875rem 1rem', background:'var(--bg-card)', borderRadius:10, border:'1px solid var(--border)' }}>
+        {/* Avatar con botón de edición */}
+        <div style={{ position:'relative', flexShrink:0 }}>
+          {profilePhoto
+            ? <img src={profilePhoto} alt="Foto de tienda"
+                style={{ width:64, height:64, borderRadius:'50%', objectFit:'cover', border:'2px solid #e3aaaa' }} />
+            : <div style={{ width:64, height:64, borderRadius:'50%', background:'var(--gray-100)',
+                border:'2px solid #e3aaaa', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#e3aaaa" strokeWidth="1.5">
+                  <circle cx="12" cy="12" r="9"/><path d="M7 16c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
+                  <circle cx="12" cy="10" r="2"/>
+                </svg>
+              </div>
+          }
+          <button onClick={() => { setEditingPP(e => !e); ppClear(); }}
+            style={{ position:'absolute', bottom:-4, right:-4, width:24, height:24, borderRadius:'50%',
+              background:'var(--brand)', border:'2px solid #fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:0 }}>
+            <span style={{ color:'#fff', fontSize:'1rem', lineHeight:1, fontWeight:300, marginTop:'-1px' }}>+</span>
+          </button>
+        </div>
+        {/* Nombre */}
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontWeight:800, fontSize:'1.15rem', color:'var(--text-primary)', letterSpacing:'-0.01em', lineHeight:1.2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+            {auth.user?.restaurant?.name || restaurantData?.name || 'Mi tienda'}
+          </div>
+          <div style={{ fontSize:'0.75rem', color:'var(--text-tertiary)', marginTop:'0.15rem' }}>Perfil de tienda</div>
+        </div>
+        {/* Portada */}
+        <button
+          onClick={() => { setEditingCover(e => !e); cvClear(); }}
+          title="Subir foto de portada o fachada"
+          style={{
+            flexShrink:0, display:'flex', flexDirection:'column', alignItems:'center', gap:'0.2rem',
+            background:'var(--bg-raised)', border:'1px dashed var(--border)', borderRadius:8,
+            padding:'0.5rem 0.65rem', cursor:'pointer', minHeight:'unset',
+            color:'var(--text-secondary)',
+            transition:'background 0.15s',
+          }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <circle cx="8.5" cy="8.5" r="1.5"/>
+            <polyline points="21 15 16 10 5 21"/>
+          </svg>
+          <span style={{ fontSize:'0.65rem', fontWeight:600, textAlign:'center', lineHeight:1.2 }}>Foto fachada</span>
+        </button>
+      </div>
+
+      {/* Editor de foto de perfil */}
+      {editingProfilePhoto && (
+        <div style={{ marginBottom:'1rem', padding:'0.875rem 1rem', background:'var(--bg-card)',
+          borderRadius:10, border:'1px solid #e3aaaa' }}>
+          <p style={{ fontWeight:700, fontSize:'0.85rem', color:'#8a5e5e', marginBottom:'0.5rem' }}>
+            Cambiar foto de perfil
+          </p>
+          <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+            <button className="btn-sm" style={{ borderColor:'#e3aaaa', color:'#8a5e5e' }}
+              onClick={() => ppFileRef.current?.click()}>
+              Seleccionar archivo
+            </button>
+            <input ref={ppFileRef} type="file" accept="image/*" style={{ display:'none' }}
+              onChange={e => ppPick(e.target.files?.[0])} />
+            {ppPreview && (
+              <img src={ppPreview} alt="Preview"
+                style={{ width:44, height:44, borderRadius:'50%', objectFit:'cover', border:'2px solid #e3aaaa' }} />
+            )}
+            <button className="btn-primary btn-sm"
+              style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}
+              disabled={savingPP || !ppPreview}
+              onClick={saveProfilePhoto}>
+              {savingPP ? 'Guardando…' : 'Guardar foto'}
+            </button>
+            <button className="btn-sm"
+              onClick={() => { setEditingPP(false); ppClear(); }}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+
+      {/* Editor de foto de fachada */}
+      {editingCover && (
+        <div style={{ marginBottom:'1rem', padding:'0.875rem 1rem', background:'var(--bg-card)',
+          borderRadius:10, border:'1px solid var(--border)' }}>
+          <p style={{ fontWeight:700, fontSize:'0.85rem', color:'var(--text-primary)', marginBottom:'0.25rem' }}>
+            Foto de fachada / portada
+          </p>
+          <p style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginBottom:'0.5rem', lineHeight:1.4 }}>
+            Sube una foto que ayude a identificar físicamente tu establecimiento. Se almacenará para uso futuro.
+            {coverSaved && <span style={{ color:'var(--success)', fontWeight:700, marginLeft:'0.5rem' }}>✓ Guardada</span>}
+          </p>
+          <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+            <button className="btn-sm" onClick={() => cvFileRef.current?.click()}>
+              Seleccionar archivo
+            </button>
+            <input ref={cvFileRef} type="file" accept="image/*" style={{ display:'none' }}
+              onChange={e => cvPick(e.target.files?.[0])} />
+            {cvPreview && (
+              <img src={cvPreview} alt="Preview fachada"
+                style={{ width:60, height:48, borderRadius:6, objectFit:'cover', border:'1px solid var(--border)' }} />
+            )}
+            <button className="btn-primary btn-sm"
+              disabled={savingCover || !cvPreview}
+              onClick={saveCoverPhoto}>
+              {savingCover ? 'Guardando…' : 'Guardar fachada'}
+            </button>
+            <button className="btn-sm" onClick={() => { setEditingCover(false); cvClear(); }}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Lista de productos */}
+      {products.length === 0
+        ? <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem' }}>Sin productos en el menú.</p>
+        : (
+          <ul style={{ listStyle:'none', padding:0, marginBottom:'1rem' }}>
+            {products.map(product => (
+              <li key={product.id} className="card" style={{ marginBottom:'0.5rem', padding:'0.75rem',
+                border: editingId===product.id ? '2px solid #e3aaaa' : '1px solid var(--gray-200)' }}>
+                {/* ── Modo edición inline ── */}
+                {editingId === product.id ? (
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:'0.82rem', color:'var(--brand)', marginBottom:'0.6rem' }}>
+                      ✏️ Editando: <span style={{ color:'var(--gray-700)' }}>{product.name}</span>
+                    </div>
+                    <div className="row">
+                      <label>Nombre<input value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre del producto" /></label>
+                      <label>Descripción<input value={description} onChange={e=>setDesc(e.target.value)} placeholder="Descripción (opcional)" /></label>
+                      <label>Precio (MXN)<input type="number" value={price} onChange={e=>setPrice(e.target.value)} step="0.01" min="0" placeholder="0.00" /></label>
+                    </div>
+                    <div style={{ display:'flex', gap:'0.5rem', marginTop:'0.4rem' }}>
+                      <label style={{ flex:1 }}>
+                        Unidades por empaque
+                        <input type="text" inputMode="numeric" value={pkgUnits} onChange={e=>setPkgUnits(e.target.value)}
+                          placeholder="1"
+                          title="Cuántas unidades incluye un empaque (ej: 6 nuggets = 6)" />
+                      </label>
+                      <label style={{ flex:1 }}>
+                        Volumen empaque (L)
+                        <input type="text" inputMode="decimal" value={pkgVolume} onChange={e=>setPkgVolume(e.target.value)}
+                          placeholder="0.00"
+                          title="Litros que ocupa un empaque en la mochila (ej: 0.5 = medio litro)" />
+                      </label>
+                    </div>
+                    <VolumeHelper value={pkgVolume} onChange={setPkgVolume} />
+                    <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
+                      <button className="btn-primary btn-sm" onClick={handleSubmit} disabled={!name.trim()||!price}>
+                        Guardar cambios
+                      </button>
+                      <button className="btn-sm" onClick={resetForm}>Cancelar</button>
+                    </div>
+                    {msg && <p className="flash flash-error" style={{ marginTop:'0.4rem' }}>{msg}</p>}
+                  </div>
+                ) : (
+                <div style={{ display:'flex', gap:'0.75rem', alignItems:'flex-start' }}>
+                  <ProductImage src={product.image_url} size={68} />
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'0.5rem', flexWrap:'wrap' }}>
+                      <span style={{ fontWeight:700, fontSize:'0.95rem' }}>{product.name}</span>
+                      <span style={{ fontWeight:700, color:'#8a5e5e', flexShrink:0 }}>{fmt(product.price_cents)}</span>
+                    </div>
+                    {product.description && (
+                      <p style={{ fontSize:'0.82rem', color:'var(--text-secondary)', margin:'0.15rem 0 0' }}>{product.description}</p>
+                    )}
+                    <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.5rem', flexWrap:'wrap' }}>
+                      <button className="btn-sm" onClick={() => startEdit(product)}>Editar</button>
+                      <button className="btn-sm" onClick={() => {
+                        setEditingImg(product.id);
+                        setImgUrl(product.image_url && !product.image_url.startsWith('data:') ? product.image_url : '');
+                        clear();
+                      }}>
+                        {product.image_url ? 'Cambiar imagen' : 'Agregar imagen'}
+                      </button>
+                      <button className="btn-sm" onClick={() => toggleAvailable(product)}
+                        style={product.is_available
+                          ? { borderColor:'#86a87a', color:'#4a7a40' }
+                          : { borderColor:'#c0877a', color:'#8a4a40' }
+                        }>
+                        {product.is_available ? 'Desactivar' : 'Activar'}
+                      </button>
+                      {confirmDelete === product.id ? (
+                        <div style={{ display:'flex', gap:'0.3rem', alignItems:'center' }}>
+                          <span style={{ fontSize:'0.72rem', color:'var(--danger)', fontWeight:700 }}>¿Eliminar?</span>
+                          <button className="btn-sm" onClick={() => deleteProduct(product.id)}
+                            style={{ background:'var(--danger)', color:'#fff', borderColor:'var(--danger)', fontSize:'0.72rem' }}>
+                            Sí
+                          </button>
+                          <button className="btn-sm" onClick={() => setConfirmDelete(null)}
+                            style={{ fontSize:'0.72rem' }}>No</button>
+                        </div>
+                      ) : (
+                        <button className="btn-sm" onClick={() => setConfirmDelete(product.id)}
+                          style={{ color:'var(--danger)', borderColor:'var(--danger)' }}>
+                          Eliminar
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Editor de imagen */}
+                    {editingImg === product.id && (
+                      <div style={{ marginTop:'0.5rem', display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+                        {/* Opción 1: desde local */}
+                        <div style={{ display:'flex', alignItems:'center', gap:'0.4rem' }}>
+                          <button className="btn-sm" onClick={() => fileRef.current?.click()}>
+                            Seleccionar archivo
+                          </button>
+                          <input
+                            ref={fileRef} type="file" accept="image/*"
+                            style={{ display:'none' }}
+                            onChange={e => pick(e.target.files?.[0])}
+                          />
+                          {preview && (
+                            <img src={preview} alt="Preview"
+                              style={{ width:40, height:40, borderRadius:4, objectFit:'cover', border:'1px solid var(--border)' }} />
+                          )}
+                        </div>
+                        <div style={{ display:'flex', gap:'0.4rem' }}>
+                          <button className="btn-primary btn-sm" disabled={savingImg || !preview}
+                            onClick={() => saveImage(product.id)}
+                            style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}>
+                            {savingImg ? '...' : 'Guardar'}
+                          </button>
+                          <button className="btn-sm" onClick={() => { setEditingImg(null); setImgUrl(''); clear(); }}>
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <span style={{ fontSize:'0.72rem', fontWeight:700, color: product.is_available ? 'var(--success)':'var(--gray-400)', flexShrink:0 }}>
+                    {product.is_available ? 'Activo':'Inactivo'}
+                  </span>
+                </div>
+                )}{/* fin ternario edición */}
+              </li>
+            ))}
+          </ul>
+        )
+      }
+
+      {/* Formulario colapsable al fondo */}
+      <div className="card" style={{ border: formOpen ? '2px solid #e3aaaa' : '1px solid var(--gray-200)', padding:0, overflow:'hidden' }}>
+        <button
+          onClick={() => { setFormOpen(o => !o); if (editingId) resetForm(); }}
+          style={{ width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'0.85rem 1rem', background:'none', border:'none', cursor:'pointer', fontWeight:700, fontSize:'0.88rem', borderBottom: formOpen ? '1px solid var(--gray-200)':'none' }}
+        >
+          <span>{editingId ? 'Modo Edición' : '+ Agregar producto'}</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            style={{ transform: formOpen ? 'rotate(180deg)':'rotate(0)', transition:'transform 0.2s' }}>
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </button>
+        {formOpen && (
+          <div style={{ padding:'1rem' }}>
+            <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem', marginBottom:'0.65rem' }}>
+              <label>Nombre del producto<input value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Taco de pastor" /></label>
+              <label>Descripción (opcional)<input value={description} onChange={e => setDesc(e.target.value)} placeholder="Ej: Con cebolla y cilantro" /></label>
+              <label>Precio (pesos)<input value={price} onChange={e => setPrice(e.target.value)} placeholder="Ej: 35.00" inputMode="decimal" /></label>
+              <div style={{ display:'flex', gap:'0.5rem' }}>
+                <label style={{ flex:1 }}>
+                  Unidades por empaque
+                  <input type="text" inputMode="numeric" value={pkgUnits} onChange={e => setPkgUnits(e.target.value)}
+                    placeholder="1"
+                    title="Cuántas unidades incluye un empaque" />
+                </label>
+                <label style={{ flex:1 }}>
+                  Volumen empaque (L)
+                  <input type="text" inputMode="decimal" value={pkgVolume} onChange={e => setPkgVolume(e.target.value)}
+                    placeholder="0.00"
+                    title="Litros que ocupa un empaque en la mochila" />
+                </label>
+              </div>
+              <VolumeHelper value={pkgVolume} onChange={setPkgVolume} />
+            </div>
+            {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
+            <div style={{ display:'flex', gap:'0.5rem' }}>
+              <button className="btn-primary btn-sm" onClick={handleSubmit}
+                style={{ backgroundColor:'#e3aaaa', borderColor:'#e3aaaa' }}>
+                {editingId ? 'Guardar cambios' : 'Agregar'}
+              </button>
+              {editingId && <button className="btn-sm" onClick={resetForm}>Cancelar</button>}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+===== ./frontend/src/pages/Restaurant/Schedule.jsx =====
+import { useAuth } from '../../contexts/AuthContext';
+import ScheduleEditor from '../../components/ScheduleEditor';
+import { useEffect, useState } from 'react';
+import { apiFetch } from '../../api/client';
+
+// ── Iconos SVG ────────────────────────────────────────────────────────────────
+function IconSchedule() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{ display:'block' }}>
+      <rect x="3" y="4" width="18" height="18" rx="2"/>
+      <line x1="16" y1="2" x2="16" y2="6"/>
+      <line x1="8" y1="2" x2="8" y2="6"/>
+      <line x1="3" y1="10" x2="21" y2="10"/>
+      <circle cx="12" cy="16" r="3"/>
+      <polyline points="12 14.5 12 16 13 17"/>
+    </svg>
+  );
+}
+function IconClock() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display:'block' }}>
+      <circle cx="12" cy="12" r="10"/>
+      <polyline points="12 6 12 12 16 14"/>
+    </svg>
+  );
+}
+
+// ── Control de tiempo de preparación predeterminado ─────────────────────────
+function PrepTimeDefault({ value, onChange, onSave, saving, saved }) {
+  return (
+    <div style={{
+      background: 'var(--bg-card)',
+      border: '1px solid var(--border)',
+      borderRadius: 10,
+      padding: '0.875rem 1rem',
+      marginBottom: '1.25rem',
+    }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', marginBottom:'0.6rem' }}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'block',flexShrink:0}}>
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        </svg>
+        <span style={{ fontWeight:700, fontSize:'0.88rem', color:'var(--text-primary)' }}>
+          Tiempo de preparación predeterminado
+        </span>
+        {saved && (
+          <span style={{ fontSize:'0.72rem', color:'var(--success)', fontWeight:700, marginLeft:'auto' }}>
+            ✓ Guardado
+          </span>
+        )}
+      </div>
+      <p style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginBottom:'0.65rem', lineHeight:1.4 }}>
+        Estimado inicial al comenzar el día. El motor lo puede ajustar automáticamente según el historial.
+      </p>
+      <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', marginBottom:'0.65rem' }}>
+        <button onClick={() => onChange(Math.max(1, value - 1))}
+          style={{ width:36, height:36, borderRadius:8, border:'1px solid var(--border)',
+            background:'var(--bg-raised)', color:'var(--text-primary)', cursor:'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            fontSize:'1.1rem', fontWeight:700, minHeight:'unset', flexShrink:0 }}>−</button>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.3rem' }}>
+          <input
+            type="text" inputMode="numeric"
+            value={value}
+            onChange={e => { const n = parseInt(e.target.value, 10); if (!isNaN(n) && n > 0) onChange(n); }}
+            style={{
+              width:56, textAlign:'center',
+              fontWeight:800, fontSize:'1.1rem',
+              border:'1px solid var(--border)', borderRadius:8,
+              padding:'0.3rem 0', color:'var(--text-primary)',
+            }}
+          />
+          <span style={{ fontSize:'0.85rem', color:'var(--text-secondary)' }}>min</span>
+        </div>
+        <button onClick={() => onChange(value + 1)}
+          style={{ width:36, height:36, borderRadius:8, border:'1px solid var(--border)',
+            background:'var(--bg-raised)', color:'var(--text-primary)', cursor:'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            fontSize:'1.1rem', fontWeight:700, minHeight:'unset', flexShrink:0 }}>+</button>
+      </div>
+      <button onClick={onSave} disabled={saving}
+        className="btn-primary btn-sm"
+        style={{ opacity: saving ? 0.65 : 1 }}>
+        {saving ? 'Guardando…' : 'Guardar como predeterminado'}
+      </button>
+      {/* ── Clientes frecuentes ──────────────────────────────────────── */}
+      <div style={{
+        marginTop: '1rem',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+        borderRadius: 10,
+        padding: '0.875rem 1rem',
+      }}>
+        <p style={{
+          fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-tertiary)',
+          textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem',
+        }}>
+          Clientes frecuentes
+        </p>
+        <label style={{
+          display: 'flex', alignItems: 'flex-start', gap: '0.65rem', cursor: 'pointer',
+        }}>
+          <input
+            type="checkbox"
+            checked={allowFrequent}
+            disabled={allowFrequentSaving}
+            onChange={e => saveAllowFrequent(e.target.checked)}
+            style={{ marginTop: 3, accentColor: 'var(--brand)', flexShrink: 0 }}
+          />
+          <div>
+            <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
+              Permitir que clientes frecuentes superen el límite de 1 pedido activo
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+              Por defecto los clientes solo pueden tener 1 pedido activo a la vez.
+              Activar esto elimina esa restricción para quienes ya tienen 5+ pedidos en efectivo o 10+ en total.
+              {allowFrequentSaving && <span style={{ color: 'var(--text-tertiary)', marginLeft: '0.5rem' }}>Guardando…</span>}
+            </div>
+          </div>
+        </label>
+        {allowFrequentMsg && (
+          <p style={{
+            fontSize: '0.78rem', marginTop: '0.4rem',
+            color: allowFrequentMsg.startsWith('Error') ? 'var(--error)' : 'var(--success)',
+          }}>
+            {allowFrequentMsg.startsWith('Error') ? '' : '✓ '}{allowFrequentMsg}
+          </p>
+        )}
+      </div>
+
+    </div>
+  );
+}
+
+export default function RestaurantSchedule() {
+  const { auth } = useAuth();
+  const [isOpen,    setIsOpen]    = useState(null);
+  const [prepMins,  setPrepMins]  = useState(15);
+  const [prepSaving, setPrepSaving] = useState(false);
+  const [prepSaved,  setPrepSaved]  = useState(false);
+
+  // Límite de efectivo
+  const [cashLimit,       setCashLimit]       = useState('');
+
+  // Clientes frecuentes
+  const [allowFrequent,       setAllowFrequent]       = useState(false);
+  const [allowFrequentSaving, setAllowFrequentSaving] = useState(false);
+  const [allowFrequentMsg,    setAllowFrequentMsg]    = useState('');
+  const [cashLimitSaving, setCashLimitSaving] = useState(false);
+  const [cashLimitMsg,    setCashLimitMsg]    = useState('');
+
+  useEffect(() => {
+    if (!auth.token) return;
+    apiFetch('/restaurants/my', {}, auth.token)
+      .then(d => {
+        if (d.restaurant) {
+          setIsOpen(d.restaurant.is_open);
+          if (d.restaurant.prep_time_estimate_s) {
+            setPrepMins(Math.round(d.restaurant.prep_time_estimate_s / 60));
+          }
+          // Cargar límite de efectivo si está configurado
+          const maxCash = d.restaurant.max_cash_cents;
+          if (maxCash && maxCash > 0) {
+            setCashLimit(String(maxCash / 100));
+          }
+          if (d.restaurant.allow_frequent_customers != null) {
+            setAllowFrequent(Boolean(d.restaurant.allow_frequent_customers));
+          }
+        }
+      })
+      .catch(() => {});
+  }, [auth.token]);
+
+  async function savePrepDefault() {
+    setPrepSaving(true);
+    try {
+      await apiFetch('/restaurants/my/prep-estimate',
+        { method: 'PATCH', body: JSON.stringify({ prep_time_estimate_s: Math.round(prepMins * 60) }) },
+        auth.token);
+      setPrepSaved(true);
+      setTimeout(() => setPrepSaved(false), 2500);
+    } catch (_) {}
+    finally { setPrepSaving(false); }
+  }
+
+  async function saveAllowFrequent(val) {
+    setAllowFrequentSaving(true);
+    setAllowFrequentMsg('');
+    try {
+      await apiFetch('/restaurants/my/frequent-customers',
+        { method: 'PATCH', body: JSON.stringify({ allow: val }) },
+        auth.token);
+      setAllowFrequent(val);
+      setAllowFrequentMsg(val ? 'Activado.' : 'Desactivado.');
+      setTimeout(() => setAllowFrequentMsg(''), 2500);
+    } catch (e) {
+      setAllowFrequentMsg(e.message || 'Error al guardar');
+    } finally {
+      setAllowFrequentSaving(false);
+    }
+  }
+
+  async function saveCashLimit() {
+    setCashLimitSaving(true);
+    setCashLimitMsg('');
+    try {
+      const pesos = parseFloat(cashLimit);
+      const cents = (!cashLimit.trim() || isNaN(pesos) || pesos <= 0) ? 0 : Math.round(pesos * 100);
+      await apiFetch('/restaurants/my/cash-limit',
+        { method: 'PATCH', body: JSON.stringify({ max_cash_cents: cents }) },
+        auth.token);
+      setCashLimitMsg(cents === 0 ? 'Límite eliminado.' : `Guardado: $${(cents / 100).toFixed(2)}`);
+      setTimeout(() => setCashLimitMsg(''), 3000);
+    } catch (e) {
+      setCashLimitMsg(e.message || 'Error al guardar');
+    } finally {
+      setCashLimitSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ backgroundColor:'var(--bg-base)', minHeight:'100vh', padding:'1rem' }}>
+
+      {/* ── Encabezado Horario ─────────────────────────────────────────── */}
+      <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem', background:'linear-gradient(135deg, #c97b7b 0%, #b56060 60%, #9e4f4f 100%)', color:'#fff' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div>
+            <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>
+              <IconSchedule />
+              Horario de atención
+            </div>
+            <div style={{ fontSize:'0.75rem', opacity:0.85, marginTop:'0.1rem' }}>
+              Configura cuándo recibes pedidos
+            </div>
+          </div>
+          {isOpen !== null && (
+            <span style={{ fontWeight:700, fontSize:'0.82rem', padding:'0.2rem 0.65rem',
+              background: isOpen ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)',
+              borderRadius:20, border:'1px solid rgba(255,255,255,0.3)' }}>
+              {isOpen ? '● Abierto' : '● Cerrado'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── Control de tiempo de preparación default ─────────────────── */}
+      <PrepTimeDefault
+        value={prepMins}
+        onChange={setPrepMins}
+        onSave={savePrepDefault}
+        saving={prepSaving}
+        saved={prepSaved}
+      />
+
+      <ScheduleEditor
+        token={auth.token}
+        isOpen={isOpen}
+        onIsOpenChange={setIsOpen}
+      />
+
+      {/* ── Límite de pago en efectivo ──────────────────────────────── */}
+      <div style={{
+        marginTop: '1.25rem',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+        borderRadius: 10,
+        padding: '0.875rem 1rem',
+      }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', marginBottom:'0.5rem' }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display:'block', flexShrink:0 }}>
+            <rect x="2" y="6" width="20" height="12" rx="2"/>
+            <circle cx="12" cy="12" r="2"/>
+            <path d="M6 12h.01M18 12h.01"/>
+          </svg>
+          <span style={{ fontWeight:700, fontSize:'0.88rem', color:'var(--text-primary)' }}>
+            Límite de pago en efectivo
+          </span>
+        </div>
+        <p style={{ fontSize:'0.78rem', color:'var(--text-secondary)', marginBottom:'0.65rem', lineHeight:1.4 }}>
+          Pedidos en efectivo que superen este monto serán rechazados. Deja vacío o en 0 para no tener límite.
+        </p>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
+          <div style={{ position:'relative', flex:1 }}>
+            <span style={{
+              position:'absolute', left:'0.65rem', top:'50%', transform:'translateY(-50%)',
+              fontSize:'0.9rem', color:'var(--text-secondary)', pointerEvents:'none', userSelect:'none',
+            }}>$</span>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={cashLimit}
+              onChange={e => setCashLimit(e.target.value)}
+              placeholder="0 = sin límite"
+              style={{ width:'100%', paddingLeft:'1.5rem', boxSizing:'border-box' }}
+            />
+          </div>
+          <button
+            className="btn-primary btn-sm"
+            style={{ flexShrink:0, opacity: cashLimitSaving ? 0.65 : 1 }}
+            disabled={cashLimitSaving}
+            onClick={saveCashLimit}>
+            {cashLimitSaving ? 'Guardando…' : 'Guardar'}
+          </button>
+        </div>
+        {cashLimitMsg && (
+          <p style={{
+            fontSize:'0.78rem', marginTop:'0.4rem',
+            color: cashLimitMsg.startsWith('Error') ? 'var(--error)' : 'var(--success)',
+          }}>
+            {cashLimitMsg.startsWith('Error') ? '' : '✓ '}{cashLimitMsg}
+          </p>
+        )}
+      </div>
+
+    </div>
+  );
+}
+
