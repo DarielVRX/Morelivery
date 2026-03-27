@@ -293,6 +293,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         onRebalance={() => order.doRebalance(setMsg)}
         onCancelDispute={() => order.doCancelDispute(setMsg)}
         onRoute={home.handleToggleRoute}
+        // FIX: retornar la promesa para que ActiveOrderPanel pueda capturar el error
         onSimulatedCall={(target) => order.doSimulatedCall(target, setMsg)}
         routeActive={home.routeActive}
         handMode={handMode}

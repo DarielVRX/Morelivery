@@ -1,10 +1,11 @@
 // frontend/src/hooks/useOrderManager.js
-// Cambios:
-// - notifyOrdersPanel() llamado después de accept, reject, changeStatus, release, rebalance, cancelDispute, expire
-// - Sync omnidireccional Home ↔ DriverOrders sin recarga manual
-// - doSimulatedCall agregado
-// - Geo-fence 200m
-// - confirmedOrders / pendingConfirmationOrders separados
+// FIX aplicado:
+//   - doSimulatedCall ahora RELANZA el error en lugar de tragárselo con onError.
+//     Antes: el panel llamaba onSimulatedCall, el error iba a setMsg en Home
+//     y el panel nunca sabía si falló → sin feedback visual.
+//     Ahora: doSimulatedCall lanza, handleNotify en ActiveOrderPanel lo captura
+//     y muestra feedback directamente en el panel.
+//   - onError se mantiene como parámetro opcional para compatibilidad hacia atrás.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api/client';
@@ -47,7 +48,6 @@ export function useOrderManager(token, patchUser, userDriver) {
   const registerOrdersReconnect = useCallback((fn) => { ordersReconnectListenerRef.current = fn; }, []);
   const registerOrdersChat      = useCallback((fn) => { ordersChatListenerRef.current      = fn; }, []);
 
-  // Notifica al panel de pedidos (DriverOrders) para sync sin recarga manual
   const notifyOrdersPanel = useCallback(() => {
     ordersUpdateListenerRef.current?.();
   }, []);
@@ -152,7 +152,7 @@ export function useOrderManager(token, patchUser, userDriver) {
 
   const handleOrderUpdate = useCallback(() => {
     scheduleLoad();
-    ordersUpdateListenerRef.current?.(); // sync DriverOrders
+    ordersUpdateListenerRef.current?.();
   }, []);
 
   const handleReconnect = useCallback(() => {
@@ -191,7 +191,7 @@ export function useOrderManager(token, patchUser, userDriver) {
       await apiFetch(`/drivers/offers/${pendingOffer.id}/accept`, { method:'POST' }, token);
       setPendingOffer(null); setOfferMinimized(false); setOrderExpanded(false);
       loadData();
-      notifyOrdersPanel(); // sync DriverOrders ← aceptar oferta en Home actualiza panel
+      notifyOrdersPanel();
     } catch (e) { onError?.(e.message); }
     finally { setLoadingOffer(false); }
   }
@@ -211,13 +211,13 @@ export function useOrderManager(token, patchUser, userDriver) {
       await apiFetch(`/drivers/offers/${pendingOffer.id}/reject`, { method:'POST' }, token);
       setPendingOffer(null);
       loadData();
-      notifyOrdersPanel(); // sync DriverOrders
+      notifyOrdersPanel();
     } catch (e) { onError?.(e.message); }
     finally { setLoadingOffer(false); }
   }
 
   const GRACE_MS     = 3 * 60 * 1000;
-  const MAX_RADIUS_M = 200; // 100m → 200m
+  const MAX_RADIUS_M = 200;
 
   async function changeStatus(orderId, status, onError) {
     setLoadingStatus(status);
@@ -251,7 +251,7 @@ export function useOrderManager(token, patchUser, userDriver) {
       }
       await apiFetch(`/orders/${orderId}/status`, { method:'PATCH', body: JSON.stringify(body) }, token);
       loadData();
-      notifyOrdersPanel(); // sync DriverOrders ← cambiar estado actualiza panel
+      notifyOrdersPanel();
     } catch (e) { onError?.(e.message); }
     finally { setLoadingStatus(''); }
   }
@@ -264,7 +264,7 @@ export function useOrderManager(token, patchUser, userDriver) {
         { method:'POST', body: JSON.stringify({ note: releaseNote }) }, token);
       setShowRelease(false); setReleaseNote('');
       loadData();
-      notifyOrdersPanel(); // sync DriverOrders
+      notifyOrdersPanel();
     } catch (e) { onError?.(e.message); }
   }
 
@@ -286,18 +286,29 @@ export function useOrderManager(token, patchUser, userDriver) {
     } catch (e) { onError?.(e.message); }
   }
 
+  // FIX: doSimulatedCall ahora RELANZA el error en lugar de pasarlo a onError.
+  // Esto permite que ActiveOrderPanel capture el error y muestre feedback visual
+  // directamente en el panel sin depender de setMsg en Home.
+  // onError se mantiene como parámetro opcional para compatibilidad.
   async function doSimulatedCall(target, onError) {
-    if (!activeOrder) return;
+    if (!activeOrder) {
+      const err = new Error('No hay pedido activo');
+      onError?.(err.message);
+      throw err; // FIX: relanzar para que el caller pueda capturarlo
+    }
     try {
       await apiFetch(`/drivers/orders/${activeOrder.id}/notify-call`,
         { method:'POST', body: JSON.stringify({ target }) }, token);
-    } catch (e) { onError?.(e.message); }
+    } catch (e) {
+      onError?.(e.message); // compatibilidad hacia atrás (Home.jsx setMsg)
+      throw e;              // FIX: relanzar para ActiveOrderPanel
+    }
   }
 
   function handleOfferExpired() {
     setPendingOffer(null); setRouteBagPct(null);
     loadData();
-    notifyOrdersPanel(); // sync DriverOrders
+    notifyOrdersPanel();
     consecutiveTimeouts.current += 1;
     if (consecutiveTimeouts.current >= 3) {
       consecutiveTimeouts.current = 0;

@@ -1,5 +1,12 @@
 // frontend/src/components/ActiveOrderPanel.jsx
-import { useState } from 'react';
+// FIX aplicado:
+//   1. Botón "Notificar" muestra estado de carga y feedback de éxito/error
+//      directamente en el panel — antes fallaba silenciosamente.
+//   2. showCallSelector se cierra al colapsar el panel (useEffect).
+//   3. onSimulatedCall ahora recibe un callback de resultado para mostrar
+//      confirmación visual sin depender solo de setMsg en Home.
+
+import { useState, useEffect } from 'react';
 import { getDriverEarningCents, getOrderGrandTotalCents, isCashPayment } from '../features/driver/shared/orderUtils';
 import { fmt } from '../utils/format';
 import FeeBreakdown from './FeeBreakdown';
@@ -87,6 +94,21 @@ export default function ActiveOrderPanel({
   panelRef,
 }) {
   const [showCallSelector, setShowCallSelector] = useState(false);
+  // FIX: estado de carga y feedback por target ('customer' | 'restaurant' | null)
+  const [callingTarget,  setCallingTarget]  = useState(null);   // target en vuelo
+  const [callFeedback,   setCallFeedback]   = useState(null);   // { ok, msg }
+
+  // FIX: cerrar selector cuando el panel se colapsa
+  useEffect(() => {
+    if (!expanded) setShowCallSelector(false);
+  }, [expanded]);
+
+  // Limpiar feedback después de 3 segundos
+  useEffect(() => {
+    if (!callFeedback) return;
+    const t = setTimeout(() => setCallFeedback(null), 3000);
+    return () => clearTimeout(t);
+  }, [callFeedback]);
 
   if (!order) return null;
 
@@ -102,8 +124,25 @@ export default function ActiveOrderPanel({
 
   const isRight = handMode === 'right';
 
-  // Indicador de confirmación de restaurante
   const restaurantConfirmed = order.restaurant_confirmed !== false;
+
+  // FIX: handler con feedback visual — antes onSimulatedCall fallaba silenciosamente
+  const handleNotify = async (target) => {
+    setShowCallSelector(false);
+    setCallingTarget(target);
+    setCallFeedback(null);
+    try {
+      await onSimulatedCall?.(target);
+      setCallFeedback({
+        ok: true,
+        msg: target === 'customer' ? '✓ Cliente notificado' : '✓ Tienda notificada',
+      });
+    } catch (e) {
+      setCallFeedback({ ok: false, msg: e?.message || 'Error al notificar' });
+    } finally {
+      setCallingTarget(null);
+    }
+  };
 
   return (
     <div ref={panelRef} style={{
@@ -236,21 +275,43 @@ export default function ActiveOrderPanel({
             borderTop:'1px solid var(--border-light)',
             display:'flex', flexDirection:'column', gap:'0.4rem' }}>
 
-            {/* Botón llamada simulada */}
+            {/* Botón llamada simulada — FIX: con feedback visual */}
             <div style={{ position:'relative' }}>
               <button
                 onClick={() => setShowCallSelector(v => !v)}
+                disabled={!!callingTarget}
                 style={{
                   display:'flex', alignItems:'center', gap:6,
                   padding:'0.45rem 0.75rem', borderRadius:8, fontWeight:700,
                   fontSize:'0.78rem', border:'1.5px solid #3b82f6',
-                  background:'#eff6ff', color:'#1d4ed8', cursor:'pointer', width:'100%',
+                  background: callingTarget ? '#dbeafe' : '#eff6ff',
+                  color:'#1d4ed8', cursor: callingTarget ? 'not-allowed' : 'pointer',
+                  width:'100%', opacity: callingTarget ? 0.7 : 1,
+                  transition:'all 0.15s',
                 }}>
-                <IconPhone /> Notificar
+                <IconPhone />
+                {callingTarget ? 'Notificando…' : 'Notificar'}
                 <span style={{ marginLeft:'auto', fontSize:'0.7rem', opacity:0.7 }}>
                   {showCallSelector ? '▲' : '▼'}
                 </span>
               </button>
+
+              {/* FIX: feedback de éxito o error visible en el panel */}
+              {callFeedback && (
+                <div style={{
+                  marginTop: 4,
+                  padding: '0.3rem 0.6rem',
+                  borderRadius: 6,
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  background: callFeedback.ok ? '#f0fdf4' : '#fef2f2',
+                  color:      callFeedback.ok ? '#15803d' : '#dc2626',
+                  border: `1px solid ${callFeedback.ok ? '#bbf7d0' : '#fecaca'}`,
+                }}>
+                  {callFeedback.msg}
+                </div>
+              )}
+
               {showCallSelector && (
                 <div style={{
                   position:'absolute', bottom:'110%', left:0, right:0,
@@ -258,15 +319,16 @@ export default function ActiveOrderPanel({
                   borderRadius:8, boxShadow:'0 4px 16px rgba(0,0,0,0.15)',
                   zIndex:50, overflow:'hidden',
                 }}>
+                  {/* FIX: llamar handleNotify en lugar de onSimulatedCall directamente */}
                   <button
-                    onClick={() => { onSimulatedCall?.('customer'); setShowCallSelector(false); }}
+                    onClick={() => handleNotify('customer')}
                     style={{ width:'100%', padding:'0.6rem 0.75rem', textAlign:'left',
                       background:'none', border:'none', borderBottom:'1px solid var(--border-light)',
                       cursor:'pointer', fontSize:'0.82rem', fontWeight:600 }}>
                     📱 Notificar al cliente
                   </button>
                   <button
-                    onClick={() => { onSimulatedCall?.('restaurant'); setShowCallSelector(false); }}
+                    onClick={() => handleNotify('restaurant')}
                     style={{ width:'100%', padding:'0.6rem 0.75rem', textAlign:'left',
                       background:'none', border:'none', cursor:'pointer',
                       fontSize:'0.82rem', fontWeight:600 }}>
