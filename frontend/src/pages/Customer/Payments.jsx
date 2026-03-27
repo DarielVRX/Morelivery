@@ -53,6 +53,8 @@ function MPCardBrick({ preferenceId, amountCents, onSuccess, onError, token }) {
         callbacks: {
           onReady: () => { if (!cancelled) setReady(true); },
           onSubmit: async (cardFormData) => {
+            console.log('token disponible:', !!token, token?.slice(0,20));
+            console.log('cardFormData:', JSON.stringify(cardFormData));
             if (cancelled) return;
             setPaying(true);
             try {
