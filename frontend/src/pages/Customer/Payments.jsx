@@ -96,12 +96,12 @@ function StripeCardForm({ clientSecret, onSuccess, onError }) {
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       )}
-      <div id="stripe-payment-element" style={{ minHeight:120 }}>
-        {!ready && (
-          <div style={{ padding:'1.5rem', textAlign:'center', color:'var(--text-tertiary)', fontSize:'0.82rem' }}>
-            Cargando formulario de pago…
-          </div>
-        )}
+      <div ref={containerRef} style={{ minHeight: 120 }}>
+      {!ready && (
+        <div style={{ padding:'1.5rem', textAlign:'center', color:'var(--text-tertiary)', fontSize:'0.82rem' }}>
+        Cargando formulario de pago…
+        </div>
+      )}
       </div>
       <div style={{ display:'flex', alignItems:'center', gap:'0.35rem', fontSize:'0.72rem',
         color:'var(--text-tertiary)', margin:'0.75rem 0', justifyContent:'center' }}>
