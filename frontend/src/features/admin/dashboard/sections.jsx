@@ -40,17 +40,17 @@ export function DashboardTabsBar({
     }}
     >
     {tabBtn('assignment', `🛵 Asignaciones${unassignedCount ? ` (${unassignedCount})` : ''}`)}
-    {tabBtn('orders', '📦 Pedidos')}
-    {tabBtn('metrics', '📊 Métricas')}
-    {tabBtn('users', '👥 Usuarios')}
-    {tabBtn('engine', '⚙️ Motor')}
-    {tabBtn('reports', `🚨 Reportes${reportsCount > 0 ? ` (${reportsCount})` : ''}`)}
-    {tabBtn('notes', '📝 Notas')}
-    {tabBtn('ratings', '⭐ Ratings')}
-    {tabBtn('feed', `📡 Feed${feedCount > 0 ? ` (${feedCount})` : ''}`)}
-    {tabBtn('system', '🔧 Sistema')}
-    {tabBtn('emergency', '⚡ Emergencias')}
-    {tabBtn('support', `🛟 Soporte${reportsCount > 0 ? ` (${reportsCount})` : ''}`)}
+    {tabBtn('orders', 'Pedidos')}
+    {tabBtn('metrics', 'Métricas')}
+    {tabBtn('users', 'Usuarios')}
+    {tabBtn('engine', 'Motor')}
+    {tabBtn('reports', `Reportes${reportsCount > 0 ? ` (${reportsCount})` : ''}`)}
+    {tabBtn('notes', 'Notas')}
+    {tabBtn('ratings', 'Ratings')}
+    {tabBtn('feed', `Feed${feedCount > 0 ? ` (${feedCount})` : ''}`)}
+    {tabBtn('system', 'Sistema')}
+    {tabBtn('emergency', 'Emergencias')}
+    {tabBtn('support', `Soporte${reportsCount > 0 ? ` (${reportsCount})` : ''}`)}
     <button
     onClick={onReload}
     style={{
@@ -155,7 +155,7 @@ export function AssignmentTab({ liveData, tick }) {
           borderBottom: '1px solid var(--border)',
     }}
     >
-    👥 Estado de todos los drivers
+    Estado de todos los drivers
     </div>
     {liveData.drivers.length === 0 ? (
       <div style={{ padding: '1rem', color: 'var(--text-tertiary)', fontSize: '0.85rem' }}>Sin drivers registrados.</div>
@@ -248,3 +248,4 @@ export function AssignmentTab({ liveData, tick }) {
     </div>
   );
 }
+

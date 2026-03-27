@@ -294,7 +294,7 @@ export default function CustomerHome({ onOrderUpdate } = {}) {
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'14px' }}>
           <div>
             <div style={{ fontSize:'12px', color:'rgba(255,255,255,0.75)', fontWeight:600 }}>
-              {auth.user?.alias ? `Hola, ${auth.user.alias.split(' ')[0] || auth.user.alias} 👋` : 'Bienvenido 👋'}
+              {auth.user?.alias ? `Hola, ${auth.user.alias.split(' ')[0] || auth.user.alias}` : 'Bienvenido'}
             </div>
             <div style={{ fontSize:'22px', fontWeight:900, color:'#fff', lineHeight:1.1, marginTop:2 }}>
               ¿Qué se te antoja?
@@ -393,4 +393,5 @@ export default function CustomerHome({ onOrderUpdate } = {}) {
     </div>
   );
 }
+
 
