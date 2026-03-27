@@ -313,11 +313,15 @@ export default function RestaurantSchedule() {
 
       {/* Control de prep time */}
       <PrepTimeDefault
-        value={prepMins}
-        onChange={setPrepMins}
-        onSave={savePrepDefault}
-        saving={prepSaving}
-        saved={prepSaved}
+      value={prepMins}
+      onChange={setPrepMins}
+      onSave={savePrepDefault}
+      saving={prepSaving}
+      saved={prepSaved}
+      allowFrequent={allowFrequent}
+      allowFrequentSaving={allowFrequentSaving}
+      onToggleAllowFrequent={saveAllowFrequent}
+      allowFrequentMsg={allowFrequentMsg}
       />
 
       {/* Editor de horario — solo para recordatorios */}
