@@ -10,7 +10,13 @@ services:
         value: production
       - key: ALLOWED_ORIGINS
         sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: RESET_TOKEN_SECRET
+        sync: false
       - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_URL
         sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
@@ -24,19 +30,16 @@ services:
         sync: false
       - key: VAPID_EMAIL
         sync: false
-      - key: FRONTEND_URL
-        sync: false
-      - key: JWT_SECRET
-        sync: false
       - key: GMAIL_CLIENT_ID
         sync: false
       - key: GMAIL_CLIENT_SECRET
         sync: false
       - key: GMAIL_REFRESH_TOKEN
         sync: false
-      - key: RESET_TOKEN_SECRET
+      - key: GOOGLE_CLIENT_ID
         sync: false
-
+      - key: OSRM_URL
+        sync: false
 
   - type: static
     name: morelivery-web
@@ -45,4 +48,10 @@ services:
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
+        sync: false
+      - key: VITE_VAPID_PUBLIC_KEY
+        sync: false
+      - key: VITE_STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: VITE_GOOGLE_CLIENT_ID
         sync: false
