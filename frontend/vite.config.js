@@ -2,7 +2,11 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const API_TARGET = 'https://morelivery.onrender.com';
-const API_PATHS  = ['/nav', '/orders', '/drivers', '/auth', '/restaurants', '/users', '/admin', '/events'];
+const API_PATHS  = [
+  '/nav', '/orders', '/drivers', '/auth', '/restaurants',
+  '/users', '/admin', '/events', '/payments', '/support',
+  '/push', '/sync', '/voice',
+];
 
 export default defineConfig({
   plugins: [react()],

@@ -38,7 +38,7 @@ function ensureSelectionLayer(map) {
 
 function updateSelectionLayer(selectedKeys, impassable, preferences) {
   const map = window.__map;
-  if (!map) return;
+  if (!map || !map.style) return;
   if (!map.getSource(SEL_SRC)) {
     if (!map.isStyleLoaded()) {
       map.once('load', () => updateSelectionLayer(selectedKeys, impassable, preferences));
@@ -71,16 +71,16 @@ function updateSelectionLayer(selectedKeys, impassable, preferences) {
 }
 
 function clearSelectionLayer() {
-  try { window.__map?.getSource(SEL_SRC)?.setData({ type: 'FeatureCollection', features: [] }); } catch (_) {}
+  try { if (window.__map?.style) window.__map.getSource(SEL_SRC)?.setData({ type: 'FeatureCollection', features: [] }); } catch (_) {}
 }
 
 function flyToOne(lat, lng) {
-  window.__map?.flyTo({ center: [lng, lat], zoom: 17, pitch: 0, bearing: 0, duration: 500, essential: true });
+  if (window.__map?.style) window.__map.flyTo({ center: [lng, lat], zoom: 17, pitch: 0, bearing: 0, duration: 500, essential: true });
 }
 
 function fitBoundsMultiple(points) {
   const map = window.__map;
-  if (!map || !points.length) return;
+  if (!map || !map.style || !points.length) return;
   if (points.length === 1) { flyToOne(points[0][0], points[0][1]); return; }
   const ml = window.__maplibregl;
   if (!ml) { flyToOne(points[0][0], points[0][1]); return; }

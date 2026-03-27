@@ -30,7 +30,7 @@ function BagCapacityModal({ isOpen, onClose, currentLiters, onSave, token }) {
       <div style={{ background:'var(--bg-card)', borderRadius:16, padding:'1.25rem',
         width:'90%', maxWidth:320, boxShadow:'0 20px 40px rgba(0,0,0,0.3)' }}
         onClick={e => e.stopPropagation()}>
-        <div style={{ fontWeight:700, fontSize:'1rem', marginBottom:'0.5rem' }}>🎒 Capacidad de mochila</div>
+        <div style={{ fontWeight:700, fontSize:'1rem', marginBottom:'0.5rem' }}>Capacidad de mochila</div>
         <div style={{ fontSize:'0.75rem', color:'var(--text-secondary)', marginBottom:'1rem' }}>
           Define cuántos litros puedes cargar.
         </div>
@@ -290,3 +290,4 @@ export default function DriverHomeStatusBar({
     </>
   );
 }
+
