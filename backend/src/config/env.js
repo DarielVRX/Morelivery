@@ -44,4 +44,9 @@ export const env = {
   vapidEmail: process.env.VAPID_EMAIL || 'admin@morelivery.com',
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY,
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY,
+
+  // Stripe (tarjeta)
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
+  stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '',
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
 };

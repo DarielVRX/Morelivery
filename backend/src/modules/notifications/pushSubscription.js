@@ -2,11 +2,16 @@ import webpush from 'web-push';
 import { query } from '../../config/db.js';
 import { env } from '../../config/env.js';
 
-webpush.setVapidDetails(
-    `mailto:${env.vapidEmail}`,
-    env.vapidPublicKey,
-    env.vapidPrivateKey,
-);
+const hasVapidConfig = Boolean(env.vapidPublicKey && env.vapidPrivateKey);
+if (hasVapidConfig) {
+    webpush.setVapidDetails(
+        `mailto:${env.vapidEmail}`,
+        env.vapidPublicKey,
+        env.vapidPrivateKey,
+    );
+} else {
+    console.warn('[push] VAPID keys no configuradas; envío push deshabilitado.');
+}
 
 /**
  * Guarda o actualiza la suscripción push de un usuario.
@@ -29,23 +34,35 @@ export async function savePushSubscription(userId, subscription) {
  * Elimina automáticamente suscripciones expiradas (410/404).
  */
 export async function sendPushToUser(userId, payload) {
+    if (!hasVapidConfig) return [];
+
     const { rows } = await query(
         'SELECT endpoint, keys FROM push_subscriptions WHERE user_id=$1',
         [userId],
     );
     const results = await Promise.allSettled(
-        rows.map(row =>
-        webpush.sendNotification(
-            { endpoint: row.endpoint, keys: row.keys },
-            JSON.stringify(payload),
-        ).catch(async err => {
-            if (err.statusCode === 410 || err.statusCode === 404) {
-                // Suscripción expirada — limpiar
-                await query('DELETE FROM push_subscriptions WHERE endpoint=$1', [row.endpoint]);
+        rows.map(row => {
+            let parsedKeys = row.keys;
+            if (typeof row.keys === 'string') {
+                try { parsedKeys = JSON.parse(row.keys); }
+                catch { parsedKeys = null; }
             }
-            throw err;
+
+            if (!parsedKeys?.p256dh || !parsedKeys?.auth) {
+                return Promise.reject(new Error('Suscripción push inválida en base de datos'));
+            }
+
+            return webpush.sendNotification(
+                { endpoint: row.endpoint, keys: parsedKeys },
+                JSON.stringify(payload),
+            ).catch(async err => {
+                if (err.statusCode === 410 || err.statusCode === 404) {
+                    // Suscripción expirada — limpiar
+                    await query('DELETE FROM push_subscriptions WHERE endpoint=$1', [row.endpoint]);
+                }
+                throw err;
+            });
         }),
-        ),
     );
     return results;
 }
