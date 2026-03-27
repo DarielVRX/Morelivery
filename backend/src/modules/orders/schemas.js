@@ -15,6 +15,7 @@ export const createOrderSchema = z.object({
   delivery_lat:   z.number().finite().min(-90).max(90).nullish().transform(v => v ?? undefined),
   delivery_lng:   z.number().finite().min(-180).max(180).nullish().transform(v => v ?? undefined),
   delivery_address: z.string().trim().min(3).max(300).nullish().transform(v => v ?? undefined),
+  stripe_payment_intent_id: z.string().min(5).optional(),
 });
 
 export const updateOrderStatusSchema = z.object({

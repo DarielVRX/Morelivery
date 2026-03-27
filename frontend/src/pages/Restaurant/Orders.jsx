@@ -40,13 +40,13 @@ function FeeBreakdown({ order }) {
   );
 }
 
-var STATUS_LABELS = {
+const STATUS_LABELS = {
   created:'Recibido', assigned:'Asignado', accepted:'Aceptado',
   preparing:'En preparación', ready:'Listo para retiro',
   on_the_way:'En camino', delivered:'Entregado',
   cancelled:'Cancelado', pending_driver:'Sin conductor',
 };
-var STATUS_COLOR = {
+const STATUS_COLOR = {
   created:'#f59e0b', assigned:'#3b82f6', accepted:'#8b5cf6',
   preparing:'#f97316', ready:'#16a34a', on_the_way:'#0891b2',
   delivered:'#16a34a', cancelled:'#dc2626', pending_driver:'#ef4444',
@@ -92,10 +92,8 @@ function PrepTimeControl({ value, onChange, onSave, saving }) {
   );
 }
 
-// ── Confirmación del restaurante — paso 7 ─────────────────────────────────────
 async function confirmOrder(orderId, token) {
   await apiFetch(`/restaurants/orders/${orderId}/confirm`, { method: 'POST' }, token);
-  // Cancelar timer de repetición push en el SW
   if ('serviceWorker' in navigator) {
     try {
       const reg = await navigator.serviceWorker.getRegistration();
@@ -106,29 +104,31 @@ async function confirmOrder(orderId, token) {
 
 export default function RestaurantOrders() {
   const { auth } = useAuth();
-  const [orders, setOrders]     = useState([]);
+  const [orders,   setOrders]   = useState([]);
   const [products, setProducts] = useState([]);
-  const [tab, setTab]           = useState('active');
-  const [msg, setMsg]           = useState('');
-  const [reportingId, setReportingId]   = useState(null);
-  const [reportText, setReportText]     = useState('');
+  const [tab,      setTab]      = useState('active');
+  const [msg,      setMsg]      = useState('');
+  const [reportingId,   setReportingId]   = useState(null);
+  const [reportText,    setReportText]    = useState('');
   const [ratingOrder,   setRatingOrder]   = useState(null);
   const [ratingStars,   setRatingStars]   = useState(0);
   const [ratingComment, setRatingComment] = useState('');
   const [ratingLoading, setRatingLoading] = useState(false);
   const [ratedOrders,   setRatedOrders]   = useState(new Set());
-  const [reportMsg, setReportMsg]   = useState('');
-  const [expanded, setExpanded]     = useState(null);
-  const [chatOpen, setChatOpen]     = useState(null);
-  const [suggestionFor, setSuggestionFor]   = useState('');
-  const [readyCooldown, setReadyCooldown]   = useState({});
-  const [suggDrafts, setSuggDrafts]         = useState({});
-  const [confirmingId, setConfirmingId]     = useState(null); // paso 7
+  const [reportMsg,     setReportMsg]     = useState('');
+  const [expanded,      setExpanded]      = useState(null);
+  const [chatOpen,      setChatOpen]      = useState(null);
+  const [suggestionFor, setSuggestionFor] = useState('');
+  const [readyCooldown, setReadyCooldown] = useState({});
+  const [suggDrafts,    setSuggDrafts]    = useState({});
+  const [confirmingId,  setConfirmingId]  = useState(null);
   const [kitchenBanners, setKitchenBanners] = useState([]);
   const [prepMins,  setPrepMins]  = useState(15);
   const [prepSaving, setPrepSaving] = useState(false);
   const loadDataRef = useRef(null);
+  const [chatTick,  setChatTick]  = useState(0);
 
+  // ── Kitchen event handler ─────────────────────────────────────────────────
   const handleKitchenEvent = useCallback((data) => {
     if (data.type === 'prep_estimate_updated' && data.newEstimate) {
       setPrepMins(Math.round(data.newEstimate / 60));
@@ -137,6 +137,26 @@ export default function RestaurantOrders() {
     const duration = data.type === 'order_cancelled_preparing' ? 30_000 : 12_000;
     setKitchenBanners(prev => [...prev, { ...data, bannerId }]);
     setTimeout(() => setKitchenBanners(prev => prev.filter(b => b.bannerId !== bannerId)), duration);
+    // Recargar lista en tiempo real
+    loadDataRef.current?.();
+  }, []);
+
+  // ── Nuevo pedido recibido via SSE ─────────────────────────────────────────
+  const handleNewOrder = useCallback((data) => {
+    // Agregar banner de nuevo pedido
+    const bannerId = `new_order-${data.orderId}-${Date.now()}`;
+    setKitchenBanners(prev => [...prev, {
+      type: 'new_order', bannerId,
+      orderId: data.orderId,
+      message: `Pedido recibido — ${data.itemCount || ''} producto(s) — ${data.paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'}`,
+    }]);
+    setTimeout(() => setKitchenBanners(prev => prev.filter(b => b.bannerId !== bannerId)), 20_000);
+    // Recargar lista
+    loadDataRef.current?.();
+  }, []);
+
+  // ── Actualización de pedido via SSE ──────────────────────────────────────
+  const handleOrderUpdate = useCallback(() => {
     loadDataRef.current?.();
   }, []);
 
@@ -176,18 +196,20 @@ export default function RestaurantOrders() {
   }, [auth.token]);
 
   useEffect(() => { loadDataRef.current = loadData; });
-  useEffect(() => { loadData(); }, [auth.token]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadData(); }, [auth.token]); // eslint-disable-line
 
-  const [chatTick, setChatTick] = useState(0);
-
+  // ── SSE con todos los callbacks relevantes ────────────────────────────────
   useRealtimeOrders(
     auth.token,
-    () => loadDataRef.current?.(),
-    () => {},
-    undefined,
-    (data) => { if (data.orderId === chatOpen) setChatTick(t => t + 1); },
-    undefined,
-    handleKitchenEvent,
+    handleOrderUpdate,           // onOrderUpdate — cualquier cambio de pedido
+    () => {},                    // onDriverLocation
+    undefined,                   // onNewOffer
+    (data) => { if (data.orderId === chatOpen) setChatTick(t => t + 1); }, // onChatMessage
+    undefined,                   // onReconnect
+    handleKitchenEvent,          // onKitchenEvent — cancelaciones, driver arrival, etc.
+    undefined,                   // onTransferEvent
+    undefined,                   // onSupportMessage
+    handleNewOrder,              // onNewOrder — nuevo pedido recibido
   );
 
   async function savePrepTime() {
@@ -201,10 +223,9 @@ export default function RestaurantOrders() {
   }
 
   async function updatePrepEstimate(minutes) {
-    const secs = Math.round(minutes * 60);
     try {
       await apiFetch('/restaurants/my/prep-estimate',
-        { method:'PATCH', body: JSON.stringify({ prep_time_estimate_s: secs }) }, auth.token);
+        { method:'PATCH', body: JSON.stringify({ prep_time_estimate_s: Math.round(minutes * 60) }) }, auth.token);
       setPrepMins(minutes);
       loadData();
     } catch (e) { setMsg(e.message); }
@@ -216,7 +237,7 @@ export default function RestaurantOrders() {
       orders.forEach(o => { next[o.id] = prev[o.id] || buildSuggestionDraft(o.items); });
       return next;
     });
-  }, [orders.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [orders.length]); // eslint-disable-line
 
   async function changeStatus(orderId, status) {
     try {
@@ -277,7 +298,6 @@ export default function RestaurantOrders() {
     } catch (e) { setReportMsg(e.message); }
   }
 
-  // ── Confirmar pedido — paso 7 ─────────────────────────────────────────────
   async function handleConfirm(orderId) {
     setConfirmingId(orderId);
     try {
@@ -291,11 +311,8 @@ export default function RestaurantOrders() {
   }
 
   const { active, past } = useMemo(() => splitOrdersByTerminalStatus(orders), [orders]);
-
   const unconfirmedCount = active.filter(o => !o.restaurant_confirmed).length;
-  useAppBadge(
-    active.filter(o => ['created','pending_driver'].includes(o.status)).length + unconfirmedCount
-  );
+  useAppBadge(active.filter(o => ['created','pending_driver'].includes(o.status)).length + unconfirmedCount);
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
@@ -307,7 +324,6 @@ export default function RestaurantOrders() {
           onClick={e => { if (e.target === e.currentTarget) setRatingOrder(null); }}>
           <div style={{ background:'var(--bg-card)', borderRadius:'20px 20px 0 0',
             padding:'1.5rem', width:'100%', maxWidth:480,
-            boxShadow:'0 -4px 32px rgba(0,0,0,0.2)',
             paddingBottom:'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}>
             <h3 style={{ fontSize:'1rem', fontWeight:800, marginBottom:'0.25rem' }}>Calificar conductor</h3>
             <div style={{ fontSize:'0.82rem', color:'var(--text-tertiary)', marginBottom:'1rem' }}>
@@ -345,7 +361,7 @@ export default function RestaurantOrders() {
         padding:'0.75rem 1rem 0', zIndex:30, color:'#fff' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.45rem' }}>
           <div>
-            <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', color:'#fff' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
               <IconOrders />
               <span style={{ fontWeight:800, fontSize:'1.05rem', letterSpacing:'-0.01em' }}>Mis pedidos</span>
             </div>
@@ -357,16 +373,15 @@ export default function RestaurantOrders() {
             {active.filter(o => ['created','pending_driver'].includes(o.status)).length > 0 && (
               <span style={{ fontWeight:700, fontSize:'0.82rem', padding:'0.2rem 0.65rem',
                 background:'rgba(255,255,255,0.2)', borderRadius:20,
-                border:'1px solid rgba(255,255,255,0.3)', color:'#fff' }}>
+                border:'1px solid rgba(255,255,255,0.3)' }}>
                 ● {active.filter(o => ['created','pending_driver'].includes(o.status)).length} nuevo{active.filter(o => ['created','pending_driver'].includes(o.status)).length !== 1 ? 's' : ''}
               </span>
             )}
-            {/* Indicador pedidos sin confirmar — paso 7 */}
             {unconfirmedCount > 0 && (
               <span style={{ fontWeight:700, fontSize:'0.75rem', padding:'0.15rem 0.55rem',
                 background:'rgba(251,191,36,0.3)', borderRadius:20,
                 border:'1px solid rgba(251,191,36,0.5)', color:'#fef9c3' }}>
-                ⏳ {unconfirmedCount} sin confirmar
+                {unconfirmedCount} sin confirmar
               </span>
             )}
           </div>
@@ -381,7 +396,7 @@ export default function RestaurantOrders() {
                 padding:'0.4rem 0.5rem', fontSize:'0.78rem', fontWeight: tab===val ? 800 : 500,
                 color: tab===val ? '#fff' : 'rgba(255,255,255,0.6)',
                 borderBottom: tab===val ? '2px solid #fff' : '2px solid transparent',
-                marginBottom:'-1px', transition:'color 0.15s' }}>
+                marginBottom:'-1px' }}>
               {label}
             </button>
           ))}
@@ -393,27 +408,28 @@ export default function RestaurantOrders() {
         paddingBottom:'calc(var(--nav-h-mobile) + 2.5rem)' }}>
 
         {reportMsg && <p className="flash flash-ok" style={{ marginBottom:'0.5rem' }}>{reportMsg}</p>}
-        {msg && <p className="flash flash-error">{msg}</p>}
+        {msg && <p className="flash flash-error" style={{ marginBottom:'0.5rem' }}>{msg}</p>}
 
         {/* Banners del motor de cocina */}
         {kitchenBanners.map(banner => {
           const isCancel   = banner.type === 'order_cancelled_preparing';
           const isArrival  = banner.type === 'driver_arrival';
           const isEstimate = banner.type === 'prep_estimate_updated';
-          const bg   = isCancel ? 'var(--danger-bg)' : isArrival ? 'var(--success-bg)' : isEstimate ? 'var(--warn-bg)' : 'var(--success-bg)';
-          const bdr  = isCancel ? 'var(--danger-border)' : isArrival ? 'var(--success-border)' : isEstimate ? 'var(--warn-border)' : 'var(--success-border)';
-          const icon = isCancel ? '⚠️' : isArrival ? '🛵' : isEstimate ? '⏱️' : '🍳';
-          const title = isCancel  ? 'Pedido cancelado mientras preparabas'
+          const isNew      = banner.type === 'new_order';
+          const bg   = isCancel ? 'var(--danger-bg)' : isNew ? 'var(--brand-light)' : isArrival ? 'var(--success-bg)' : isEstimate ? 'var(--warn-bg)' : 'var(--success-bg)';
+          const bdr  = isCancel ? 'var(--danger-border)' : isNew ? 'var(--brand)' : isArrival ? 'var(--success-border)' : isEstimate ? 'var(--warn-border)' : 'var(--success-border)';
+          const title = isNew     ? 'Nuevo pedido recibido'
+                      : isCancel  ? 'Pedido cancelado mientras preparabas'
                       : isArrival ? `Conductor llegó — ${banner.driverName || 'Driver'} recogió`
                       : isEstimate ? 'Estimado de preparación actualizado'
                       : 'Pedido marcado como listo automáticamente';
           return (
             <div key={banner.bannerId} style={{ background:bg, border:`1px solid ${bdr}`,
-              borderLeft: isCancel ? '4px solid var(--danger)' : undefined,
+              borderLeft: isCancel ? '4px solid var(--danger)' : isNew ? '4px solid var(--brand)' : undefined,
               borderRadius:8, padding:'0.65rem 0.875rem', marginBottom:'0.5rem',
               fontSize:'0.82rem', lineHeight:1.4, position:'relative' }}>
-              <div style={{ fontWeight:700, marginBottom:'0.2rem', paddingRight:'1.5rem' }}>
-                {icon} {title}
+              <div style={{ fontWeight:700, marginBottom:'0.2rem', paddingRight:'1.5rem', color: isNew ? 'var(--brand)' : undefined }}>
+                {title}
               </div>
               {banner.message && <div style={{ color:'var(--text-secondary)' }}>{banner.message}</div>}
               {isCancel && banner.note && (
@@ -461,13 +477,13 @@ export default function RestaurantOrders() {
                     <li key={order.id} className="card"
                       style={{ borderLeft:`3px solid ${color}`, marginBottom:'0.6rem', padding:0, overflow:'hidden' }}>
 
-                      {/* Banner de confirmación pendiente — paso 7 */}
+                      {/* Banner confirmación pendiente */}
                       {!isConfirmed && (
                         <div style={{ background:'#fffbeb', borderBottom:'1px solid #fde68a',
                           padding:'0.35rem 0.75rem', display:'flex', alignItems:'center',
                           justifyContent:'space-between', gap:'0.5rem' }}>
                           <span style={{ fontSize:'0.75rem', color:'#92400e', fontWeight:600 }}>
-                            ⏳ Pendiente de tu confirmación
+                            Pendiente de tu confirmación
                           </span>
                           <button
                             onClick={() => handleConfirm(order.id)}
@@ -516,18 +532,14 @@ export default function RestaurantOrders() {
 
                           {/* Botones de acción */}
                           <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', marginTop:'0.4rem' }}>
-
-                            {/* Confirmar — paso 7: también disponible en el expandible */}
                             {!isConfirmed && (
-                              <button
-                                className="btn-sm"
+                              <button className="btn-sm"
                                 style={{ background:'#22c55e', color:'#fff', borderColor:'#16a34a', fontWeight:800 }}
                                 disabled={confirmingId === order.id}
                                 onClick={() => handleConfirm(order.id)}>
                                 {confirmingId === order.id ? '…' : '✓ Confirmar pedido'}
                               </button>
                             )}
-
                             {!['preparing','ready','on_the_way','delivered','cancelled'].includes(order.status) && (
                               <button className="btn-sm" onClick={() => changeStatus(order.id, 'preparing')}>
                                 En preparación
@@ -539,7 +551,6 @@ export default function RestaurantOrders() {
                                 <button className="btn-sm"
                                   style={{ background: cd > 0 ? 'var(--gray-200)' : 'var(--success)', color: cd > 0 ? 'var(--gray-500)' : '#fff', borderColor: cd > 0 ? 'var(--gray-300)' : 'var(--success)' }}
                                   disabled={cd > 0}
-                                  title={cd > 0 ? `Espera ${Math.floor(cd/60)}:${String(cd%60).padStart(2,'0')} min` : ''}
                                   onClick={() => changeStatus(order.id, 'ready')}>
                                   {cd > 0 ? `Listo (${Math.floor(cd/60)}:${String(cd%60).padStart(2,'0')})` : 'Listo'}
                                 </button>
@@ -582,30 +593,6 @@ export default function RestaurantOrders() {
                                   Ya hay una sugerencia pendiente de respuesta.
                                 </p>
                               )}
-                              <p style={{ fontSize:'0.75rem', color:'var(--text-tertiary)', marginBottom:'0.35rem' }}>
-                                Nota: al marcar el pedido como Listo debes esperar al menos 5 minutos después de enviar una sugerencia.
-                              </p>
-                              <p style={{ fontSize:'0.75rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>Pedido original:</p>
-                              <div style={{ background:'var(--bg-card)', border:'1px solid var(--border)',
-                                borderRadius:6, padding:'0.4rem 0.75rem', marginBottom:'0.65rem' }}>
-                                {(order.items || []).map(i => (
-                                  <div key={i.menuItemId} style={{ display:'flex', justifyContent:'space-between',
-                                    fontSize:'0.83rem', padding:'0.1rem 0' }}>
-                                    <span>{i.name}</span><span style={{ color:'var(--text-tertiary)' }}>× {i.quantity}</span>
-                                  </div>
-                                ))}
-                              </div>
-                              <p style={{ fontSize:'0.75rem', color:'var(--text-secondary)', marginBottom:'0.35rem' }}>Sugerencia:</p>
-                              {(() => {
-                                const draft = suggDrafts[order.id] || {};
-                                const total = products.reduce((s, p) => s + (draft[p.id] || 0) * p.price_cents, 0);
-                                return total > 0 ? (
-                                  <div style={{ fontWeight:700, fontSize:'0.88rem', color:'var(--brand)',
-                                    marginBottom:'0.4rem', textAlign:'right' }}>
-                                    Total sugerencia: {fmt(total)}
-                                  </div>
-                                ) : null;
-                              })()}
                               <div style={{ display:'flex', flexDirection:'column', gap:'0.3rem', marginBottom:'0.65rem' }}>
                                 {products.map(p => {
                                   const qty = (suggDrafts[order.id] || {})[p.id] ?? 0;
@@ -648,7 +635,7 @@ export default function RestaurantOrders() {
               <ul className="orders-tab-panel reverse" style={{ listStyle:'none', padding:0 }}>
                 {past.slice(0, 50).map(o => {
                   const color = STATUS_COLOR[o.status] || '#9ca3af';
-                  const isPastExp = expanded === ('h_'+o.id);
+                  const isPastExp  = expanded === ('h_'+o.id);
                   const isChatOpen = chatOpen === o.id;
                   return (
                     <li key={o.id} className="card"
@@ -711,7 +698,7 @@ export default function RestaurantOrders() {
                                 <button className="btn-sm"
                                   style={{ fontSize:'0.72rem', color:'var(--brand)', borderColor:'var(--brand)', background:'var(--brand-light)', minHeight:'unset' }}
                                   onClick={() => { setRatingOrder(o); setRatingStars(0); setRatingComment(''); }}>
-                                  ⭐ Calificar conductor
+                                  Calificar conductor
                                 </button>
                               )}
                               {ratedOrders.has(o.id) && (
