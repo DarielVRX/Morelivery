@@ -1,4 +1,9 @@
 // frontend/src/components/ScheduleEditor.jsx
+// CORRECCIONES aplicadas:
+//   1. readOnlyToggle — prop implementada. Cuando es true, los botones de toggle
+//      manual (Abrir ahora / Cerrar ahora / Seguir horario) quedan deshabilitados
+//      y visualmente opacos. El padre puede pasarla para modo de solo lectura.
+
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../api/client';
 
@@ -6,7 +11,9 @@ const DAY_NAMES = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','S
 
 const DEFAULT_DAY = (i) => ({ day_of_week: i, opens_at: '09:00', closes_at: '22:00', is_closed: false });
 
-export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChange }) {
+// FIX: se agrega readOnlyToggle a la firma de props.
+// Cuando readOnlyToggle=true los controles manuales se deshabilitan.
+export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChange, readOnlyToggle = false }) {
   const [schedule, setSchedule]   = useState(() => Array.from({ length: 7 }, (_, i) => DEFAULT_DAY(i)));
   const [override, setOverride]   = useState(null);   // null | true | false
   const [isOpen, setIsOpen]       = useState(Boolean(isOpenProp));
@@ -17,7 +24,6 @@ export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChan
   useEffect(() => {
     if (!token) return;
     apiFetch('/restaurants/my/schedule', {}, token).then(d => {
-      // Normalizar HH:MM:SS → HH:MM para el <input type="time">
       setSchedule(d.schedule.map(s => ({
         ...s,
         opens_at:  s.opens_at  ? s.opens_at.slice(0, 5)  : '09:00',
@@ -45,6 +51,8 @@ export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChan
   }
 
   async function doToggle(value) {
+    // FIX: si readOnlyToggle está activo, no hacer nada
+    if (readOnlyToggle) return;
     setToggling(true); setMsg({ text: '', ok: true });
     try {
       const d = await apiFetch('/restaurants/my/toggle', { method: 'PATCH', body: JSON.stringify({ override: value }) }, token);
@@ -59,6 +67,10 @@ export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChan
 
   const overrideLabel = override === true ? 'Abierto forzado' : override === false ? 'Cerrado forzado' : 'Automático (por horario)';
 
+  // FIX: los botones respetan readOnlyToggle — disabled y opacidad reducida si está activo
+  const toggleDisabled = readOnlyToggle || toggling;
+  const toggleStyle    = readOnlyToggle ? { opacity: 0.45, cursor: 'not-allowed' } : {};
+
   return (
     <div>
       {/* ── Estado actual + controles manuales ── */}
@@ -71,27 +83,46 @@ export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChan
           </span>
           <span style={{ color: '#9ca3af', fontSize: '0.78rem', marginLeft: '0.5rem' }}>({overrideLabel})</span>
         </div>
-        <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
-          <button onClick={() => doToggle(true)}  disabled={toggling || override === true}
-            style={{ padding:'0.3rem 0.75rem', borderRadius:6, border:'none', cursor:'pointer',
+        <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap', ...toggleStyle }}>
+          <button
+            onClick={() => doToggle(true)}
+            disabled={toggleDisabled || override === true}
+            style={{ padding:'0.3rem 0.75rem', borderRadius:6, border:'none',
+              cursor: toggleDisabled ? 'not-allowed' : 'pointer',
               background: override === true  ? '#16a34a' : 'var(--border)',
-              color:      override === true  ? 'var(--bg-card)'    : 'var(--text-primary)', fontWeight:600, fontSize:'0.82rem' }}>
+              color:      override === true  ? 'var(--bg-card)' : 'var(--text-primary)',
+              fontWeight:600, fontSize:'0.82rem' }}>
             Abrir ahora
           </button>
-          <button onClick={() => doToggle(false)} disabled={toggling || override === false}
-            style={{ padding:'0.3rem 0.75rem', borderRadius:6, border:'none', cursor:'pointer',
+          <button
+            onClick={() => doToggle(false)}
+            disabled={toggleDisabled || override === false}
+            style={{ padding:'0.3rem 0.75rem', borderRadius:6, border:'none',
+              cursor: toggleDisabled ? 'not-allowed' : 'pointer',
               background: override === false ? '#dc2626' : 'var(--border)',
-              color:      override === false ? 'var(--bg-card)'    : 'var(--text-primary)', fontWeight:600, fontSize:'0.82rem' }}>
+              color:      override === false ? 'var(--bg-card)' : 'var(--text-primary)',
+              fontWeight:600, fontSize:'0.82rem' }}>
             Cerrar ahora
           </button>
           {override !== null && (
-            <button onClick={() => doToggle(null)} disabled={toggling}
-              style={{ padding:'0.3rem 0.75rem', borderRadius:6, border:'1px solid var(--border)',
-                background:'var(--bg-card)', cursor:'pointer', fontSize:'0.82rem' }}>
+            <button
+              onClick={() => doToggle(null)}
+              disabled={toggleDisabled}
+              style={{ padding:'0.3rem 0.75rem', borderRadius:6,
+                border:'1px solid var(--border)',
+                background:'var(--bg-card)',
+                cursor: toggleDisabled ? 'not-allowed' : 'pointer',
+                fontSize:'0.82rem' }}>
               Seguir horario
             </button>
           )}
         </div>
+        {/* FIX: indicador visual si está en modo solo lectura */}
+        {readOnlyToggle && (
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+            (toggle deshabilitado en esta vista)
+          </span>
+        )}
       </div>
 
       {/* ── Horario semanal ── */}
@@ -118,15 +149,17 @@ export default function ScheduleEditor({ token, isOpen: isOpenProp, onIsOpenChan
                   <input type="time" value={day.opens_at || ''} disabled={day.is_closed}
                     onChange={e => updateDay(i, 'opens_at', e.target.value)}
                     style={{ padding:'0.2rem 0.4rem', borderRadius:4, border:'1px solid var(--border)',
-                      width:90, fontSize:'0.875rem', background: day.is_closed ? 'var(--bg-sunken)' : 'var(--bg-card)',
-                                       color: 'var(--text-primary)' }} />
+                      width:90, fontSize:'0.875rem',
+                      background: day.is_closed ? 'var(--bg-sunken)' : 'var(--bg-card)',
+                      color: 'var(--text-primary)' }} />
                 </td>
                 <td style={{ padding:'0.45rem 0.75rem', textAlign:'center' }}>
                   <input type="time" value={day.closes_at || ''} disabled={day.is_closed}
                     onChange={e => updateDay(i, 'closes_at', e.target.value)}
                     style={{ padding:'0.2rem 0.4rem', borderRadius:4, border:'1px solid var(--border)',
-                      width:90, fontSize:'0.875rem', background: day.is_closed ? 'var(--bg-sunken)' : 'var(--bg-card)',
-                                       color: 'var(--text-primary)' }} />
+                      width:90, fontSize:'0.875rem',
+                      background: day.is_closed ? 'var(--bg-sunken)' : 'var(--bg-card)',
+                      color: 'var(--text-primary)' }} />
                 </td>
               </tr>
             ))}

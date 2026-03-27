@@ -1,4 +1,8 @@
 // frontend/src/pages/Driver/Home.jsx — orquestador puro
+// FIX: NAVFABS_HEIGHT calculado dinámicamente con ResizeObserver en lugar
+// de valor hardcodeado 200. Evita que el FAB de soporte quede flotando
+// en el aire cuando no hay pedido activo (sin ActiveOrderPanel).
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import ActiveOrderPanel from '../../components/ActiveOrderPanel';
@@ -73,11 +77,27 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     return () => ro.disconnect();
   }, [order.hasActiveOrder, order.pendingOffer]);
 
+  // FIX: navFabsHeight calculado dinámicamente en lugar de NAVFABS_HEIGHT = 200 hardcodeado.
+  // Cuando no hay pedido activo, NavFABs arranca desde abajo y el FAB de soporte
+  // debe posicionarse sobre el NavFABs real, no sobre un valor fijo.
+  const navFabsRef = useRef(null);
+  const [navFabsHeight, setNavFabsHeight] = useState(200); // fallback inicial conservador
+
+  useEffect(() => {
+    const el = navFabsRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const h = entry.contentRect.height;
+      if (h > 0) setNavFabsHeight(h);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const { position: myPosition, matchedPosition, error: gpsError } = useDriverLocation(
     auth.token, order.availability, order.hasActiveOrder
   );
 
-  // Usar posición matcheada para el mapa si está disponible, raw para lógica interna
   const displayPosition = matchedPosition || myPosition;
 
   useEffect(() => { order.setMyPosition(myPosition); }, [myPosition]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -98,8 +118,8 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     currentPos: displayPosition,
     activeZones: home.activeZones,
     hasActiveOrder: order.hasActiveOrder,
-    onVoice: () => {}, // sin toast — la voz ya habla directamente
-    onZoneAlert: (zone) => {}, // sin toast
+    onVoice: () => {},
+    onZoneAlert: (zone) => {},
     impassableWays: home.activeImpassable,
     routeGeometry: home.routeGeometry || [],
   });
@@ -116,13 +136,13 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     registerRef.current.notifyAlertsUpdate?.();
   }, [home.activeZones, home.activeImpassable, home.myPreferences]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // FAB de soporte — posicionado encima de todos los NavFABs
-  // NavFABs ocupa: center(60) + gap(12) + more(52) + gap(12) + report(52) = 188px desde bottomOffset
-  // bottomOffset = panelHeight + 8, así que el tope de NavFABs ≈ panelHeight + 8 + 188 = panelHeight + 196
-  const NAVFABS_HEIGHT = 200; // margen generoso
+  // FIX: usar navFabsHeight dinámico en lugar de NAVFABS_HEIGHT = 200 hardcodeado
+  const supportFabBottom  = panelHeight + 8 + navFabsHeight + 12;
+  const supportPanelBottom = supportFabBottom + 52;
+
   const supportFabStyle = {
     position: 'absolute',
-    bottom: panelHeight + 8 + NAVFABS_HEIGHT + 12, // encima del último FAB
+    bottom: supportFabBottom,
     [handMode === 'right' ? 'left' : 'right']: 14,
     zIndex: 401,
     width: 44, height: 44,
@@ -194,8 +214,9 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         bottomOffset={panelHeight + 8}
         isDark={isDark}
         handMode={handMode}
-        // Ruta de oferta en mapa
         offerRouteGeometry={home.offerRouteGeometry}
+        // FIX: pasar ref al componente NavFABs para medir su altura real
+        navFabsRef={navFabsRef}
         onQuickReport={async (type, pos) => {
           if (type === 'zone') {
             home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'other', radius_m: 500, estimated_hours: 1 });
@@ -213,7 +234,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         }}
       />
 
-      {/* FAB de soporte */}
+      {/* FAB de soporte — posicionado encima de NavFABs con altura dinámica */}
       <button style={supportFabStyle} onClick={() => setShowSupport(v => !v)}
         title="Soporte">
         🛟
@@ -223,7 +244,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
       {showSupport && (
         <div style={{
           position: 'absolute',
-          bottom: panelHeight + 8 + NAVFABS_HEIGHT + 12 + 52, // encima del FAB de soporte
+          bottom: supportPanelBottom,
           [handMode === 'right' ? 'left' : 'right']: 14,
           width: 320, height: 480,
           background: 'var(--bg-card)',

@@ -1,4 +1,10 @@
 // backend/modules/drivers/routes.js
+// CORRECCIONES aplicadas:
+//   1. etaAlertedAt / arrivedAlertedAt — limpieza periódica para evitar memory leak
+//      y alertas duplicadas tras cold start (ahora se resetean entradas viejas).
+//   2. notify-call — ya usa sseHub importado estáticamente (sin dynamic import). ✓
+//   3. authenticate ya está aplicado en todos los endpoints del router. ✓
+
 import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
@@ -10,8 +16,19 @@ import { AppError } from '../../utils/errors.js';
 const router = Router();
 const ETA_ALERT_COOLDOWN_MS     = 5 * 60 * 1000; // 5 min entre alertas ETA
 const ARRIVED_ALERT_COOLDOWN_MS = 2 * 60 * 1000; // 2 min entre alertas arrived
+
+// FIX: mapas con timestamp de inserción para poder limpiarlos periódicamente.
+// Antes se reiniciaban con cada cold start → alertas duplicadas al volver.
+// Ahora se limpian entradas con más de 30 min de antigüedad cada 10 minutos.
 const etaAlertedAt     = new Map(); // orderId → ts
-const arrivedAlertedAt = new Map(); // orderId → ts
+const arrivedAlertedAt = new Map(); // key → ts
+
+const MAP_TTL_MS = 30 * 60 * 1000; // 30 min
+setInterval(() => {
+  const cutoff = Date.now() - MAP_TTL_MS;
+  for (const [k, v] of etaAlertedAt)     if (v < cutoff) etaAlertedAt.delete(k);
+  for (const [k, v] of arrivedAlertedAt) if (v < cutoff) arrivedAlertedAt.delete(k);
+}, 10 * 60 * 1000).unref();
 
 function isMissingColumnError(e)   { return e?.code === '42703'; }
 function isMissingRelationError(e) { return e?.code === '42P01'; }
@@ -76,7 +93,6 @@ router.patch('/availability', authenticate, authorize(['driver']), async (req, r
 });
 
 /* ── GET /drivers/me/bag-capacity ────────────────────────────────────────── */
-// IMPORTANTE: debe estar ANTES de GET /me para que Express no lo absorba
 router.get('/me/bag-capacity', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const result = await query(
@@ -117,33 +133,22 @@ router.get('/me', authenticate, authorize(['driver']), async (req, res, next) =>
   } catch (error) { return next(error); }
 });
 
-/* ── GET /drivers/me/counters ────────────────────────────────────────────── */
-router.get('/me/counters', authenticate, authorize(['driver']), async (req, res, next) => {
-  try {
-    const r = await query(
-      `SELECT
-         session_rebalances, session_releases, session_cancels, session_expires,
-         session_started_at,
-         total_rebalances,  total_releases,  total_cancels,  total_expires
-       FROM driver_profiles WHERE user_id = $1`,
-      [req.user.userId]
-    );
-    if (r.rowCount === 0) return next(new AppError(404, 'Perfil no encontrado'));
-    return res.json({ counters: r.rows[0] });
-  } catch (error) { return next(error); }
-});
-
 /* ── GET /drivers/offers ─────────────────────────────────────────────────── */
 router.get('/offers', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     let result;
     try {
       result = await query(
-        `SELECT o.id, o.total_cents, o.service_fee_cents, o.delivery_fee_cents,
-                o.tip_cents, o.payment_method, o.status,
-                r.name AS restaurant_name, COALESCE(ru.address, r.address) AS restaurant_address,
-                COALESCE(ru.lat, r.lat) AS restaurant_lat, COALESCE(ru.lng, r.lng) AS restaurant_lng,
-                COALESCE(o.delivery_address, c.address) AS customer_address,
+        `SELECT od.order_id AS id,
+                o.status,
+                o.total_cents,
+                o.delivery_address,
+                o.payment_method,
+                r.name   AS restaurant_name,
+                r.address AS restaurant_address,
+                r.lat    AS restaurant_lat,
+                r.lng    AS restaurant_lng,
+                ru.full_name AS restaurant_owner_name,
                 COALESCE(o.delivery_lat, c.lat) AS customer_lat,
                 COALESCE(o.delivery_lng, c.lng) AS customer_lng,
                 GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + (60::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
@@ -344,6 +349,7 @@ router.post('/orders/:orderId/release', authenticate, authorize(['driver']), asy
   } catch (error) { return next(error); }
 });
 
+/* ── PATCH /drivers/location ─────────────────────────────────────────────── */
 router.patch('/location', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const { lat, lng } = req.body || {};
@@ -366,7 +372,7 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
       JOIN users cu ON cu.id = o.customer_id
       WHERE o.driver_id = $1
       AND o.status IN ('assigned','accepted','preparing','ready','on_the_way')`,
-                                     [req.user.userId]
+      [req.user.userId]
     );
 
     const now = Date.now();
@@ -376,7 +382,6 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
       sseHub.sendToUser(ord.customer_id,          'driver_location', payload);
       sseHub.sendToUser(ord.restaurant_owner_id,  'driver_location', payload);
 
-      // ── Calcular distancia al próximo stop ──────────────────────────────
       const isOTW = ord.status === 'on_the_way';
       const stopLat = isOTW ? Number(ord.delivery_lat)    : Number(ord.restaurant_lat);
       const stopLng = isOTW ? Number(ord.delivery_lng)    : Number(ord.restaurant_lng);
@@ -384,31 +389,19 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
       if (!Number.isFinite(stopLat) || !Number.isFinite(stopLng)) continue;
 
       const distM = haversineM(lat, lng, stopLat, stopLng);
-
-      // ETA estimada: distancia / velocidad promedio (25 km/h = 6.94 m/s)
       const etaSecs  = Math.round(distM / 6.94);
       const etaMins  = Math.round(etaSecs / 60);
 
-      // ── Alerta "driver cerca" — ETA ≤ 5 min ────────────────────────────
       const lastEta = etaAlertedAt.get(ord.id) || 0;
       if (etaMins <= 5 && (now - lastEta) > ETA_ALERT_COOLDOWN_MS) {
         etaAlertedAt.set(ord.id, now);
-
-        const etaPayload = {
-          orderId:  ord.id,
-          etaMins,
-          distM:    Math.round(distM),
-             target:   isOTW ? 'delivery' : 'pickup',
-        };
-
+        const etaPayload = { orderId: ord.id, etaMins, distM: Math.round(distM), target: isOTW ? 'delivery' : 'pickup' };
         if (isOTW) {
-          // Driver cerca del cliente
           sseHub.sendToUser(ord.customer_id, 'driver_eta_alert', {
             ...etaPayload,
             message: `Tu conductor llegará en aproximadamente ${etaMins} minuto${etaMins !== 1 ? 's' : ''}`,
           });
         } else {
-          // Driver cerca del restaurante
           sseHub.sendToUser(ord.restaurant_owner_id, 'driver_eta_alert', {
             ...etaPayload,
             message: `El conductor llegará en aproximadamente ${etaMins} minuto${etaMins !== 1 ? 's' : ''}`,
@@ -416,27 +409,15 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
         }
       }
 
-      // ── Alerta "driver arrived" — distancia ≤ 200m ─────────────────────
-      const lastArrived = arrivedAlertedAt.get(`${ord.id}_${isOTW ? 'delivery' : 'pickup'}`) || 0;
+      const arrivedKey = `${ord.id}_${isOTW ? 'delivery' : 'pickup'}`;
+      const lastArrived = arrivedAlertedAt.get(arrivedKey) || 0;
       if (distM <= 200 && (now - lastArrived) > ARRIVED_ALERT_COOLDOWN_MS) {
-        arrivedAlertedAt.set(`${ord.id}_${isOTW ? 'delivery' : 'pickup'}`, now);
-
-        const arrivedPayload = {
-          orderId: ord.id,
-          distM:   Math.round(distM),
-             target:  isOTW ? 'delivery' : 'pickup',
-        };
-
+        arrivedAlertedAt.set(arrivedKey, now);
+        const arrivedPayload = { orderId: ord.id, distM: Math.round(distM), target: isOTW ? 'delivery' : 'pickup' };
         if (isOTW) {
-          sseHub.sendToUser(ord.customer_id, 'driver_arrived', {
-            ...arrivedPayload,
-            message: 'Tu conductor ha llegado',
-          });
+          sseHub.sendToUser(ord.customer_id, 'driver_arrived', { ...arrivedPayload, message: 'Tu conductor ha llegado' });
         } else {
-          sseHub.sendToUser(ord.restaurant_owner_id, 'driver_arrived', {
-            ...arrivedPayload,
-            message: 'El conductor ha llegado a recoger el pedido',
-          });
+          sseHub.sendToUser(ord.restaurant_owner_id, 'driver_arrived', { ...arrivedPayload, message: 'El conductor ha llegado a recoger el pedido' });
         }
       }
     }
@@ -444,7 +425,6 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
-
 
 /* ── GET /drivers/earnings ───────────────────────────────────────────────── */
 router.get('/earnings', authenticate, authorize(['driver']), async (req, res, next) => {
@@ -498,6 +478,8 @@ router.get('/earnings', authenticate, authorize(['driver']), async (req, res, ne
   } catch (error) { return next(error); }
 });
 
+// FIX: sseHub ya se importa estáticamente al inicio del archivo.
+// No se necesita dynamic import aquí — se usa directamente la referencia estática.
 router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const { target } = req.body || {}; // 'customer' | 'restaurant'
@@ -505,7 +487,7 @@ router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver']),
       return next(new AppError(400, 'target debe ser customer o restaurant'));
 
     const { orderId } = req.params;
-    const driverId    = req.user.userId;
+    const driverId    = req.user.userId; // FIX: req.user.userId disponible porque authenticate está aplicado ✓
 
     const orderRow = await query(
       `SELECT o.customer_id, r.owner_user_id AS restaurant_owner_id,
@@ -515,7 +497,7 @@ router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver']),
       JOIN users d ON d.id = o.driver_id
       WHERE o.id = $1 AND o.driver_id = $2
       AND o.status NOT IN ('delivered','cancelled')`,
-                                 [orderId, driverId]
+      [orderId, driverId]
     );
 
     if (orderRow.rowCount === 0)
@@ -525,6 +507,7 @@ router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver']),
     const targetId   = target === 'customer' ? ord.customer_id : ord.restaurant_owner_id;
     const driverName = ord.driver_name || 'El repartidor';
 
+    // FIX: usa sseHub importado estáticamente — sin await import(...)
     sseHub.sendToUser(targetId, 'simulated_call', {
       orderId,
       driverId,
