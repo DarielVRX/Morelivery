@@ -410,6 +410,8 @@ import navMapMatchRoutes  from '../modules/nav/map-match.js';
 // ── Nuevos módulos PWA ────────────────────────────────────────────────────────
 import syncRoutes        from '../modules/sync/routes.js';
 import voiceRoutes       from '../modules/voice/routes.js';
+// FIX: support no estaba registrado → POST /api/support/tickets devolvía 404
+import supportRoutes     from '../modules/support/routes.js';
 
 const routeRegistry = [
   ['auth',           authRoutes],
@@ -428,6 +430,9 @@ const routeRegistry = [
                                     // POST /api/sync/drivers/:id/location-batch
                                     // POST /api/sync/drivers/:id/battery-alert
   ['voice',          voiceRoutes],  // POST /api/voice/transcribe
+  ['support',        supportRoutes], // GET/POST /api/support/tickets
+                                     // GET/POST /api/support/tickets/:id/messages
+                                     // PATCH    /api/support/tickets/:id/status
 ];
 
 export function registerApplicationRoutes(app) {
@@ -711,6 +716,11 @@ export const env = {
   vapidEmail: process.env.VAPID_EMAIL || 'admin@morelivery.com',
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY,
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY,
+
+  // Stripe (tarjeta)
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
+  stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '',
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
 };
 
 === FILE: backend/src/config/redis.js ===
@@ -6078,11 +6088,16 @@ import webpush from 'web-push';
 import { query } from '../../config/db.js';
 import { env } from '../../config/env.js';
 
-webpush.setVapidDetails(
-    `mailto:${env.vapidEmail}`,
-    env.vapidPublicKey,
-    env.vapidPrivateKey,
-);
+const hasVapidConfig = Boolean(env.vapidPublicKey && env.vapidPrivateKey);
+if (hasVapidConfig) {
+    webpush.setVapidDetails(
+        `mailto:${env.vapidEmail}`,
+        env.vapidPublicKey,
+        env.vapidPrivateKey,
+    );
+} else {
+    console.warn('[push] VAPID keys no configuradas; envío push deshabilitado.');
+}
 
 /**
  * Guarda o actualiza la suscripción push de un usuario.
@@ -6105,23 +6120,35 @@ export async function savePushSubscription(userId, subscription) {
  * Elimina automáticamente suscripciones expiradas (410/404).
  */
 export async function sendPushToUser(userId, payload) {
+    if (!hasVapidConfig) return [];
+
     const { rows } = await query(
         'SELECT endpoint, keys FROM push_subscriptions WHERE user_id=$1',
         [userId],
     );
     const results = await Promise.allSettled(
-        rows.map(row =>
-        webpush.sendNotification(
-            { endpoint: row.endpoint, keys: row.keys },
-            JSON.stringify(payload),
-        ).catch(async err => {
-            if (err.statusCode === 410 || err.statusCode === 404) {
-                // Suscripción expirada — limpiar
-                await query('DELETE FROM push_subscriptions WHERE endpoint=$1', [row.endpoint]);
+        rows.map(row => {
+            let parsedKeys = row.keys;
+            if (typeof row.keys === 'string') {
+                try { parsedKeys = JSON.parse(row.keys); }
+                catch { parsedKeys = null; }
             }
-            throw err;
+
+            if (!parsedKeys?.p256dh || !parsedKeys?.auth) {
+                return Promise.reject(new Error('Suscripción push inválida en base de datos'));
+            }
+
+            return webpush.sendNotification(
+                { endpoint: row.endpoint, keys: parsedKeys },
+                JSON.stringify(payload),
+            ).catch(async err => {
+                if (err.statusCode === 410 || err.statusCode === 404) {
+                    // Suscripción expirada — limpiar
+                    await query('DELETE FROM push_subscriptions WHERE endpoint=$1', [row.endpoint]);
+                }
+                throw err;
+            });
         }),
-        ),
     );
     return results;
 }
@@ -8644,71 +8671,218 @@ export const sharedDeps = {
 };
 
 === FILE: backend/src/modules/payments/routes.js ===
-// ── Pagos — rutas placeholder (sin procesador real conectado) ─────────────────
-// TODO: conectar Stripe (card) o Conekta (card + SPEI + efectivo) cuando sea necesario.
-// Endpoints estructurados para no requerir cambios en el frontend al activarlos.
-
 import { Router } from 'express';
 import { authenticate } from '../../middlewares/auth.js';
 import { AppError } from '../../utils/errors.js';
+import { createStripePaymentIntent, getStripePublicConfig } from './stripeProvider.js';
+import { query } from '../../config/db.js';
 
 const router = Router();
 
 /* ── GET /payments/methods ── métodos disponibles ── */
 router.get('/methods', authenticate, async (_req, res) => {
+  const stripe = getStripePublicConfig();
   return res.json({
     methods: [
       { id: 'cash', label: 'Efectivo al entregar', available: true },
-      { id: 'card', label: 'Tarjeta de crédito/débito', available: false, coming_soon: true },
+      { id: 'card', label: 'Tarjeta de crédito/débito', available: stripe.configured, provider: 'stripe', coming_soon: !stripe.configured },
       { id: 'spei', label: 'SPEI / Transferencia', available: false, coming_soon: true },
     ],
+    providers: { stripe },
   });
 });
 
 /* ── POST /payments/intent ── crear intención de pago ── */
 // body: { orderId, amount_cents, method: 'card'|'spei' }
-router.post('/intent', authenticate, async (_req, res, next) => {
-  return next(new AppError(501, 'Pagos en línea no disponibles aún. Usa efectivo al entregar.'));
+router.post('/intent', authenticate, async (req, res, next) => {
+  try {
+    const { orderId, amount_cents: amountCents, method = 'card' } = req.body || {};
+    if (method !== 'card') {
+      return next(new AppError(400, 'Por ahora solo se soporta method=card (Stripe).'));
+    }
+    if (!orderId) return next(new AppError(400, 'orderId es requerido'));
+
+    const orderResult = await query(
+      `SELECT id, customer_id, total_cents, status
+         FROM orders
+        WHERE id = $1
+        LIMIT 1`,
+      [orderId],
+    );
+    const order = orderResult.rows[0];
+    if (!order) return next(new AppError(404, 'Pedido no encontrado'));
+    if (order.customer_id !== req.user.userId) {
+      return next(new AppError(403, 'No puedes pagar un pedido de otro usuario'));
+    }
+    if (order.status === 'cancelled' || order.status === 'delivered') {
+      return next(new AppError(409, 'No se puede iniciar pago para un pedido cerrado'));
+    }
+
+    const normalizedAmount = Number.isInteger(amountCents) ? amountCents : Number(order.total_cents);
+    const intent = await createStripePaymentIntent({
+      amountCents: normalizedAmount,
+      currency: 'mxn',
+      metadata: {
+        order_id: orderId,
+        customer_id: req.user.userId,
+      },
+    });
+
+    await query(
+      `INSERT INTO payment_intents (
+         order_id, user_id, provider, provider_intent_id,
+         amount_cents, currency, status, client_secret, metadata, updated_at
+       ) VALUES ($1,$2,'stripe',$3,$4,$5,$6,$7,$8,NOW())
+       ON CONFLICT (provider_intent_id)
+       DO UPDATE SET
+         amount_cents = EXCLUDED.amount_cents,
+         status = EXCLUDED.status,
+         client_secret = EXCLUDED.client_secret,
+         metadata = EXCLUDED.metadata,
+         updated_at = NOW()`,
+      [
+        orderId,
+        req.user.userId,
+        intent.paymentIntentId,
+        normalizedAmount,
+        intent.currency,
+        intent.status,
+        intent.clientSecret,
+        JSON.stringify({ method, order_id: orderId, customer_id: req.user.userId }),
+      ],
+    );
+
+    return res.json({
+      ok: true,
+      method: 'card',
+      provider: 'stripe',
+      orderId,
+      amount_cents: normalizedAmount,
+      ...intent,
+    });
+  } catch (error) { return next(error); }
 });
 
 /* ── POST /payments/confirm ── confirmar pago ── */
 router.post('/confirm', authenticate, async (_req, res, next) => {
-  return next(new AppError(501, 'Pagos en línea no disponibles aún.'));
+  return next(new AppError(501, 'Confirmación manual no disponible. Stripe confirma vía webhook.'));
 });
 
 /* ── POST /payments/webhook ── webhook procesador (verificar firma antes de activar) ── */
 router.post('/webhook', async (_req, res) => {
-  // TODO: verificar HMAC signature + actualizar orders.payment_status
+  // Arquitectura lista para recibir eventos Stripe:
+  // - payment_intent.succeeded
+  // - payment_intent.payment_failed
+  // Pendiente: verificación de firma + persistencia de estado de pago por orden.
   return res.json({ received: true });
 });
 
 export default router;
 
+=== FILE: backend/src/modules/payments/stripeProvider.js ===
+import { env } from '../../config/env.js';
+import { AppError } from '../../utils/errors.js';
+
+const STRIPE_API_BASE = 'https://api.stripe.com/v1';
+
+function isStripeConfigured() {
+  return Boolean(env.stripeSecretKey && env.stripePublishableKey);
+}
+
+function encodeForm(data) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined && value !== null) params.append(key, String(value));
+  }
+  return params.toString();
+}
+
+export async function createStripePaymentIntent({ amountCents, currency = 'mxn', metadata = {} }) {
+  if (!isStripeConfigured()) {
+    throw new AppError(503, 'Stripe no configurado en servidor (faltan claves STRIPE_*).');
+  }
+  if (!Number.isInteger(amountCents) || amountCents <= 0) {
+    throw new AppError(400, 'Monto inválido para payment intent.');
+  }
+
+  const payload = {
+    amount: amountCents,
+    currency,
+    automatic_payment_methods: 'enabled',
+  };
+
+  for (const [k, v] of Object.entries(metadata || {})) {
+    payload[`metadata[${k}]`] = v;
+  }
+
+  const res = await fetch(`${STRIPE_API_BASE}/payment_intents`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.stripeSecretKey}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: encodeForm(payload),
+  });
+
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = body?.error?.message || `Stripe error ${res.status}`;
+    throw new AppError(502, msg);
+  }
+
+  return {
+    provider: 'stripe',
+    paymentIntentId: body.id,
+    clientSecret: body.client_secret,
+    status: body.status,
+    amount: body.amount,
+    currency: body.currency,
+  };
+}
+
+export function getStripePublicConfig() {
+  return {
+    configured: isStripeConfigured(),
+    publishableKey: env.stripePublishableKey || null,
+  };
+}
+
 === FILE: backend/src/modules/push/routes.js ===
 import { Router } from 'express';
 import { authenticate } from '../../middlewares/auth.js';
 import { query } from '../../config/db.js';
+import { AppError } from '../../utils/errors.js';
+import { savePushSubscription } from '../notifications/pushSubscription.js';
 
 const router = Router();
 
 // POST /api/push/subscribe
 router.post('/subscribe', authenticate, async (req, res, next) => {
     try {
-        const { endpoint, keys } = req.body;
-        const userId = req.user.userId;
-
-        await query(
-            `INSERT INTO push_subscriptions (user_id, endpoint, keys)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (endpoint) DO UPDATE
-            SET keys = EXCLUDED.keys, updated_at = NOW()`,
-                    [userId, endpoint, keys]
-        );
-
+        const sub = req.body || {};
+        if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) {
+            return next(new AppError(400, 'Suscripción push inválida — faltan campos requeridos'));
+        }
+        await savePushSubscription(req.user.userId, sub);
         res.json({ ok: true });
     } catch (error) {
         console.error('Error en push/subscribe:', error);
         next(error);
+    }
+});
+
+// DELETE /api/push/subscribe
+router.delete('/subscribe', authenticate, async (req, res, next) => {
+    try {
+        const { endpoint } = req.body || {};
+        if (!endpoint) return next(new AppError(400, 'endpoint requerido'));
+        await query(
+            'DELETE FROM push_subscriptions WHERE endpoint=$1 AND user_id=$2',
+            [endpoint, req.user.userId]
+        );
+        return res.json({ ok: true });
+    } catch (error) {
+        return next(error);
     }
 });
 
@@ -9871,6 +10045,40 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
+=== FILE: database/migration_stripe_payments.sql ===
+-- Arquitectura de pagos con tarjeta (Stripe)
+-- Ejecutar después del schema base.
+
+CREATE TABLE IF NOT EXISTS payment_intents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL CHECK (provider IN ('stripe')),
+  provider_intent_id TEXT NOT NULL UNIQUE,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  currency TEXT NOT NULL DEFAULT 'mxn',
+  status TEXT NOT NULL DEFAULT 'requires_payment_method',
+  client_secret TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_intents_order_id ON payment_intents(order_id);
+CREATE INDEX IF NOT EXISTS idx_payment_intents_user_id ON payment_intents(user_id);
+CREATE INDEX IF NOT EXISTS idx_payment_intents_status ON payment_intents(status);
+
+CREATE TABLE IF NOT EXISTS payment_webhook_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider TEXT NOT NULL CHECK (provider IN ('stripe')),
+  provider_event_id TEXT NOT NULL UNIQUE,
+  event_type TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  processed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  processed_at TIMESTAMPTZ
+);
+
 === FILE: database/migration_support.sql ===
 -- Migration: support chat (tickets independientes de pedidos)
 -- Run once. Safe to re-run (IF NOT EXISTS).
@@ -10350,6 +10558,50 @@ INSERT INTO engine_params (key, value, description) VALUES
   ('transfer_max_route_eta_s', 180, 'ETA de ruta máximo para disparar rebalanceo automático'),
   ('default_bag_capacity_liters', 25, 'Litros de capacidad de mochila si el driver no especificó la suya')
 ON CONFLICT (key) DO NOTHING;
+
+=== FILE: docs/stripe-setup.md ===
+# Stripe (tarjeta) — configuración inicial
+
+## 1) Variables de entorno del backend
+
+Configura en tu entorno de backend:
+
+- `STRIPE_SECRET_KEY=sk_test_...`
+- `STRIPE_PUBLISHABLE_KEY=pk_test_...`
+- `STRIPE_WEBHOOK_SECRET=whsec_...` (cuando actives webhook real)
+
+También conserva:
+
+- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_EMAIL` para push web.
+
+## 2) Migración de base de datos
+
+Ejecuta:
+
+```sql
+\i database/migration_stripe_payments.sql
+```
+
+Esto crea:
+
+- `payment_intents` para rastrear intents por orden.
+- `payment_webhook_events` para idempotencia y auditoría de webhooks.
+
+## 3) Flujo backend habilitado
+
+Con `STRIPE_*` configuradas:
+
+1. `GET /api/payments/methods` marcará `card.available=true`.
+2. `POST /api/payments/intent` crea un PaymentIntent en Stripe y persiste la referencia local.
+3. `POST /api/payments/webhook` queda como endpoint listo para completar verificación de firma y reconciliación.
+
+## 4) Próximos pasos para cerrar E2E
+
+1. Integrar Stripe.js en frontend (`@stripe/stripe-js` + Elements/PaymentElement).
+2. Consumir `clientSecret` de `/api/payments/intent`.
+3. Confirmar pago del lado cliente con Stripe.js.
+4. Activar webhook con firma y actualizar estado de orden (`paid`, `failed`, etc).
+5. Bloquear despacho si método `card` y pago no confirmado.
 
 === FILE: frontend/index.html ===
 <!doctype html>
@@ -11487,7 +11739,14 @@ export async function apiFetch(path, options = {}, token = null) {
 
 === FILE: frontend/src/components/ActiveOrderPanel.jsx ===
 // frontend/src/components/ActiveOrderPanel.jsx
-import { useState } from 'react';
+// FIX aplicado:
+//   1. Botón "Notificar" muestra estado de carga y feedback de éxito/error
+//      directamente en el panel — antes fallaba silenciosamente.
+//   2. showCallSelector se cierra al colapsar el panel (useEffect).
+//   3. onSimulatedCall ahora recibe un callback de resultado para mostrar
+//      confirmación visual sin depender solo de setMsg en Home.
+
+import { useState, useEffect } from 'react';
 import { getDriverEarningCents, getOrderGrandTotalCents, isCashPayment } from '../features/driver/shared/orderUtils';
 import { fmt } from '../utils/format';
 import FeeBreakdown from './FeeBreakdown';
@@ -11575,6 +11834,21 @@ export default function ActiveOrderPanel({
   panelRef,
 }) {
   const [showCallSelector, setShowCallSelector] = useState(false);
+  // FIX: estado de carga y feedback por target ('customer' | 'restaurant' | null)
+  const [callingTarget,  setCallingTarget]  = useState(null);   // target en vuelo
+  const [callFeedback,   setCallFeedback]   = useState(null);   // { ok, msg }
+
+  // FIX: cerrar selector cuando el panel se colapsa
+  useEffect(() => {
+    if (!expanded) setShowCallSelector(false);
+  }, [expanded]);
+
+  // Limpiar feedback después de 3 segundos
+  useEffect(() => {
+    if (!callFeedback) return;
+    const t = setTimeout(() => setCallFeedback(null), 3000);
+    return () => clearTimeout(t);
+  }, [callFeedback]);
 
   if (!order) return null;
 
@@ -11590,8 +11864,25 @@ export default function ActiveOrderPanel({
 
   const isRight = handMode === 'right';
 
-  // Indicador de confirmación de restaurante
   const restaurantConfirmed = order.restaurant_confirmed !== false;
+
+  // FIX: handler con feedback visual — antes onSimulatedCall fallaba silenciosamente
+  const handleNotify = async (target) => {
+    setShowCallSelector(false);
+    setCallingTarget(target);
+    setCallFeedback(null);
+    try {
+      await onSimulatedCall?.(target);
+      setCallFeedback({
+        ok: true,
+        msg: target === 'customer' ? '✓ Cliente notificado' : '✓ Tienda notificada',
+      });
+    } catch (e) {
+      setCallFeedback({ ok: false, msg: e?.message || 'Error al notificar' });
+    } finally {
+      setCallingTarget(null);
+    }
+  };
 
   return (
     <div ref={panelRef} style={{
@@ -11724,21 +12015,43 @@ export default function ActiveOrderPanel({
             borderTop:'1px solid var(--border-light)',
             display:'flex', flexDirection:'column', gap:'0.4rem' }}>
 
-            {/* Botón llamada simulada */}
+            {/* Botón llamada simulada — FIX: con feedback visual */}
             <div style={{ position:'relative' }}>
               <button
                 onClick={() => setShowCallSelector(v => !v)}
+                disabled={!!callingTarget}
                 style={{
                   display:'flex', alignItems:'center', gap:6,
                   padding:'0.45rem 0.75rem', borderRadius:8, fontWeight:700,
                   fontSize:'0.78rem', border:'1.5px solid #3b82f6',
-                  background:'#eff6ff', color:'#1d4ed8', cursor:'pointer', width:'100%',
+                  background: callingTarget ? '#dbeafe' : '#eff6ff',
+                  color:'#1d4ed8', cursor: callingTarget ? 'not-allowed' : 'pointer',
+                  width:'100%', opacity: callingTarget ? 0.7 : 1,
+                  transition:'all 0.15s',
                 }}>
-                <IconPhone /> Notificar
+                <IconPhone />
+                {callingTarget ? 'Notificando…' : 'Notificar'}
                 <span style={{ marginLeft:'auto', fontSize:'0.7rem', opacity:0.7 }}>
                   {showCallSelector ? '▲' : '▼'}
                 </span>
               </button>
+
+              {/* FIX: feedback de éxito o error visible en el panel */}
+              {callFeedback && (
+                <div style={{
+                  marginTop: 4,
+                  padding: '0.3rem 0.6rem',
+                  borderRadius: 6,
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  background: callFeedback.ok ? '#f0fdf4' : '#fef2f2',
+                  color:      callFeedback.ok ? '#15803d' : '#dc2626',
+                  border: `1px solid ${callFeedback.ok ? '#bbf7d0' : '#fecaca'}`,
+                }}>
+                  {callFeedback.msg}
+                </div>
+              )}
+
               {showCallSelector && (
                 <div style={{
                   position:'absolute', bottom:'110%', left:0, right:0,
@@ -11746,15 +12059,16 @@ export default function ActiveOrderPanel({
                   borderRadius:8, boxShadow:'0 4px 16px rgba(0,0,0,0.15)',
                   zIndex:50, overflow:'hidden',
                 }}>
+                  {/* FIX: llamar handleNotify en lugar de onSimulatedCall directamente */}
                   <button
-                    onClick={() => { onSimulatedCall?.('customer'); setShowCallSelector(false); }}
+                    onClick={() => handleNotify('customer')}
                     style={{ width:'100%', padding:'0.6rem 0.75rem', textAlign:'left',
                       background:'none', border:'none', borderBottom:'1px solid var(--border-light)',
                       cursor:'pointer', fontSize:'0.82rem', fontWeight:600 }}>
                     📱 Notificar al cliente
                   </button>
                   <button
-                    onClick={() => { onSimulatedCall?.('restaurant'); setShowCallSelector(false); }}
+                    onClick={() => handleNotify('restaurant')}
                     style={{ width:'100%', padding:'0.6rem 0.75rem', textAlign:'left',
                       background:'none', border:'none', cursor:'pointer',
                       fontSize:'0.82rem', fontWeight:600 }}>
@@ -24481,12 +24795,13 @@ export function useOfferCountdown(initialSecondsLeft) {
 
 === FILE: frontend/src/hooks/useOrderManager.js ===
 // frontend/src/hooks/useOrderManager.js
-// Cambios:
-// - notifyOrdersPanel() llamado después de accept, reject, changeStatus, release, rebalance, cancelDispute, expire
-// - Sync omnidireccional Home ↔ DriverOrders sin recarga manual
-// - doSimulatedCall agregado
-// - Geo-fence 200m
-// - confirmedOrders / pendingConfirmationOrders separados
+// FIX aplicado:
+//   - doSimulatedCall ahora RELANZA el error en lugar de tragárselo con onError.
+//     Antes: el panel llamaba onSimulatedCall, el error iba a setMsg en Home
+//     y el panel nunca sabía si falló → sin feedback visual.
+//     Ahora: doSimulatedCall lanza, handleNotify en ActiveOrderPanel lo captura
+//     y muestra feedback directamente en el panel.
+//   - onError se mantiene como parámetro opcional para compatibilidad hacia atrás.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api/client';
@@ -24529,7 +24844,6 @@ export function useOrderManager(token, patchUser, userDriver) {
   const registerOrdersReconnect = useCallback((fn) => { ordersReconnectListenerRef.current = fn; }, []);
   const registerOrdersChat      = useCallback((fn) => { ordersChatListenerRef.current      = fn; }, []);
 
-  // Notifica al panel de pedidos (DriverOrders) para sync sin recarga manual
   const notifyOrdersPanel = useCallback(() => {
     ordersUpdateListenerRef.current?.();
   }, []);
@@ -24634,7 +24948,7 @@ export function useOrderManager(token, patchUser, userDriver) {
 
   const handleOrderUpdate = useCallback(() => {
     scheduleLoad();
-    ordersUpdateListenerRef.current?.(); // sync DriverOrders
+    ordersUpdateListenerRef.current?.();
   }, []);
 
   const handleReconnect = useCallback(() => {
@@ -24673,7 +24987,7 @@ export function useOrderManager(token, patchUser, userDriver) {
       await apiFetch(`/drivers/offers/${pendingOffer.id}/accept`, { method:'POST' }, token);
       setPendingOffer(null); setOfferMinimized(false); setOrderExpanded(false);
       loadData();
-      notifyOrdersPanel(); // sync DriverOrders ← aceptar oferta en Home actualiza panel
+      notifyOrdersPanel();
     } catch (e) { onError?.(e.message); }
     finally { setLoadingOffer(false); }
   }
@@ -24693,13 +25007,13 @@ export function useOrderManager(token, patchUser, userDriver) {
       await apiFetch(`/drivers/offers/${pendingOffer.id}/reject`, { method:'POST' }, token);
       setPendingOffer(null);
       loadData();
-      notifyOrdersPanel(); // sync DriverOrders
+      notifyOrdersPanel();
     } catch (e) { onError?.(e.message); }
     finally { setLoadingOffer(false); }
   }
 
   const GRACE_MS     = 3 * 60 * 1000;
-  const MAX_RADIUS_M = 200; // 100m → 200m
+  const MAX_RADIUS_M = 200;
 
   async function changeStatus(orderId, status, onError) {
     setLoadingStatus(status);
@@ -24733,7 +25047,7 @@ export function useOrderManager(token, patchUser, userDriver) {
       }
       await apiFetch(`/orders/${orderId}/status`, { method:'PATCH', body: JSON.stringify(body) }, token);
       loadData();
-      notifyOrdersPanel(); // sync DriverOrders ← cambiar estado actualiza panel
+      notifyOrdersPanel();
     } catch (e) { onError?.(e.message); }
     finally { setLoadingStatus(''); }
   }
@@ -24746,7 +25060,7 @@ export function useOrderManager(token, patchUser, userDriver) {
         { method:'POST', body: JSON.stringify({ note: releaseNote }) }, token);
       setShowRelease(false); setReleaseNote('');
       loadData();
-      notifyOrdersPanel(); // sync DriverOrders
+      notifyOrdersPanel();
     } catch (e) { onError?.(e.message); }
   }
 
@@ -24768,18 +25082,29 @@ export function useOrderManager(token, patchUser, userDriver) {
     } catch (e) { onError?.(e.message); }
   }
 
+  // FIX: doSimulatedCall ahora RELANZA el error en lugar de pasarlo a onError.
+  // Esto permite que ActiveOrderPanel capture el error y muestre feedback visual
+  // directamente en el panel sin depender de setMsg en Home.
+  // onError se mantiene como parámetro opcional para compatibilidad.
   async function doSimulatedCall(target, onError) {
-    if (!activeOrder) return;
+    if (!activeOrder) {
+      const err = new Error('No hay pedido activo');
+      onError?.(err.message);
+      throw err; // FIX: relanzar para que el caller pueda capturarlo
+    }
     try {
       await apiFetch(`/drivers/orders/${activeOrder.id}/notify-call`,
         { method:'POST', body: JSON.stringify({ target }) }, token);
-    } catch (e) { onError?.(e.message); }
+    } catch (e) {
+      onError?.(e.message); // compatibilidad hacia atrás (Home.jsx setMsg)
+      throw e;              // FIX: relanzar para ActiveOrderPanel
+    }
   }
 
   function handleOfferExpired() {
     setPendingOffer(null); setRouteBagPct(null);
     loadData();
-    notifyOrdersPanel(); // sync DriverOrders
+    notifyOrdersPanel();
     consecutiveTimeouts.current += 1;
     if (consecutiveTimeouts.current >= 3) {
       consecutiveTimeouts.current = 0;
@@ -25742,19 +26067,20 @@ async function trySubscribePush() {
     const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
     if (!vapidKey) return; // No hay key configurada aún
     const reg = await navigator.serviceWorker.ready;
-    const existing = await reg.pushManager.getSubscription();
-    if (existing) return; // Ya suscrito
-    const sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapidKey),
-    });
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      });
+    }
     // Enviar suscripción al backend
     const token = JSON.parse(localStorage.getItem('morelivery_auth_v1') || '{}')?.token;
     if (!token) return;
     await fetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${token}` },
-      body: JSON.stringify(sub),
+      body: JSON.stringify(sub.toJSON()),
     });
   } catch (_) {}
 }
@@ -29800,6 +30126,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         onRebalance={() => order.doRebalance(setMsg)}
         onCancelDispute={() => order.doCancelDispute(setMsg)}
         onRoute={home.handleToggleRoute}
+        // FIX: retornar la promesa para que ActiveOrderPanel pueda capturar el error
         onSimulatedCall={(target) => order.doSimulatedCall(target, setMsg)}
         routeActive={home.routeActive}
         handMode={handMode}

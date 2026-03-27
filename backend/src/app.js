@@ -1,4 +1,4 @@
-import express from 'express';
+  import express from 'express';
 
 import { applyCoreMiddleware, registerHealthEndpoints } from './bootstrap/middleware.js';
 import { registerApplicationRoutes } from './bootstrap/routes.js';
@@ -7,6 +7,8 @@ import pushRoutes from './modules/push/routes.js';
 
 export function createApp() {
   const app = express();
+
+  app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 
   applyCoreMiddleware(app);
   registerHealthEndpoints(app);
