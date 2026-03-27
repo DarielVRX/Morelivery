@@ -273,6 +273,69 @@ router.patch('/orders/:orderId/confirm', authenticate, authorize(['restaurant'])
   }
 });
 
+/* ── POST /restaurants/menu-items — crear producto ── */
+router.post('/menu-items', authenticate, authorize(['restaurant']), validate(createMenuItemSchema), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    const { name, description, price_cents, is_available = true, image_url, pkg_units = 1, pkg_volume_liters = 0 } = req.validatedBody;
+    const result = await query(
+      `INSERT INTO menu_items (restaurant_id, name, description, price_cents, is_available, image_url, pkg_units, pkg_volume_liters)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+                               [restaurantId, name, description || null, price_cents, is_available, image_url || null, pkg_units, pkg_volume_liters]
+    );
+    return res.status(201).json({ item: result.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /restaurants/menu-items/:id — editar producto ── */
+router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), validate(updateMenuItemSchema), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    const { name, description, price_cents, is_available, image_url, pkg_units, pkg_volume_liters } = req.validatedBody;
+    const updates = [], vals = [];
+    let i = 1;
+    const push = (col, val) => { if (val !== undefined) { updates.push(`${col}=$${i++}`); vals.push(val); } };
+    push('name', name); push('description', description); push('price_cents', price_cents);
+    push('is_available', is_available); push('image_url', image_url);
+    push('pkg_units', pkg_units); push('pkg_volume_liters', pkg_volume_liters);
+    if (!updates.length) return res.json({ ok: true });
+    vals.push(req.params.id, restaurantId);
+    const result = await query(
+      `UPDATE menu_items SET ${updates.join(',')} WHERE id=$${i++} AND restaurant_id=$${i} RETURNING *`,
+                               vals
+    );
+    if (result.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
+    return res.json({ item: result.rows[0] });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /restaurants/menu-items/:id/availability — toggle disponibilidad ── */
+router.patch('/menu-items/:id/availability', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    const { is_available } = req.body;
+    if (typeof is_available !== 'boolean') return next(new AppError(400, 'is_available debe ser boolean'));
+    await query(
+      'UPDATE menu_items SET is_available=$1 WHERE id=$2 AND restaurant_id=$3',
+      [is_available, req.params.id, restaurantId]
+    );
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+
+/* ── DELETE /restaurants/menu-items/:id — eliminar producto ── */
+router.delete('/menu-items/:id', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    await query('DELETE FROM menu_items WHERE id=$1 AND restaurant_id=$2', [req.params.id, restaurantId]);
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+
 /* ── GET /:id — detalle público de un restaurante ── */
 router.get('/:id', async (req, res, next) => {
   try {
