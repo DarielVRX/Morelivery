@@ -112,7 +112,51 @@ async function sendScheduleReminders() {
       }
     }
 
-    return candidates.length;
+    // ── Recordatorio de cierre ────────────────────────────────────────────────
+    let closingCandidates = [];
+    try {
+      const rc = await query(
+        `SELECT rs.restaurant_id, r.name, r.owner_user_id, rs.closes_at
+        FROM restaurant_schedules rs
+        JOIN restaurants r ON r.id = rs.restaurant_id
+        WHERE rs.day_of_week = $1
+        AND rs.is_closed = false
+        AND rs.closes_at IS NOT NULL
+        AND rs.closes_at::time >= $2::time
+        AND rs.closes_at::time <= $3::time
+        AND r.is_open = true
+        AND (r.manual_open_override IS NULL OR r.manual_open_override = true)`,
+                             [dow, fiveMinAgo, hhmm]
+      );
+      closingCandidates = rc.rows;
+    } catch (e) {
+      if (e?.code !== '42P01') throw e;
+    }
+
+    for (const rest of closingCandidates) {
+      try {
+        await sendPushToUser(rest.owner_user_id, {
+          title:  `⏰ Hora de cerrar — ${rest.name}`,
+          body:   `Tu horario indica cierre ahora. ¿Cierras hoy?`,
+          tag:    `close_reminder_${rest.restaurant_id}`,
+          group:  'kitchen',
+          url:    '/restaurant/horario',
+          priority: 'high',
+          type:   'close_reminder',
+          restaurantId: rest.restaurant_id,
+          actions: [
+            { action: 'close_restaurant', title: '✓ Cerrar' },
+            { action: 'ignore_reminder',  title: 'Ignorar' },
+          ],
+          vibrate: [300, 100, 300],
+        });
+        console.log(`[schedule.reminder] cierre enviado a ${rest.owner_user_id.slice(0,8)} — ${rest.name}`);
+      } catch (e) {
+        console.warn(`[schedule.reminder] error cierre para ${rest.name}:`, e.message);
+      }
+    }
+
+    return candidates.length + closingCandidates.length;
   } catch (e) {
     console.error('[schedule.reminder] error general:', e.message);
     return 0;

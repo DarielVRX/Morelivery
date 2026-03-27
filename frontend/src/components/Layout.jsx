@@ -1,47 +1,44 @@
+// frontend/src/components/Layout.jsx
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { apiFetch } from '../api/client';
 
-const ROLE_LABELS = { customer:'Cliente', restaurant:'Tienda', driver:'Conductor', admin:'Administrador' };
+const ROLE_LABELS = { customer: 'Cliente', restaurant: 'Tienda', driver: 'Conductor', admin: 'Administrador' };
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 function IconHome()     { return <svg viewBox="0 0 36 36" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>; }
 function IconSchedule() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>; }
 function IconClock()    { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>; }
 function IconProfile()  { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>; }
-function IconAlert()    { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>; }
 export function IconSun() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-  strokeLinecap="round" strokeLinejoin="round" width="18" height="18"
-  style={{display:'block', overflow:'visible'}}>
-  <circle cx="12" cy="12" r="4"/>
-  <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+    strokeLinecap="round" strokeLinejoin="round" width="18" height="18" style={{ display: 'block', overflow: 'visible' }}>
+    <circle cx="12" cy="12" r="4"/>
+    <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
   </svg>;
 }
 export function IconMoon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-  strokeLinecap="round" strokeLinejoin="round" width="18" height="18"
-  style={{display:'block', overflow:'visible'}}>
-  <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+    strokeLinecap="round" strokeLinejoin="round" width="18" height="18" style={{ display: 'block', overflow: 'visible' }}>
+    <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
   </svg>;
 }
 
 function getNavItems(role) {
-  if (role === 'customer')   return [{ to:'/customer', label:'Inicio', Icon:IconHome }];
-  if (role === 'restaurant') return [{ to:'/restaurant', label:'Inicio', Icon:IconHome },{ to:'/restaurant/horario', label:'Horario', Icon:IconSchedule }];
-  if (role === 'driver')     return [{ to:'/driver', label:'Inicio', Icon:IconHome },{ to:'/driver/ganancias', label:'Ganancias', Icon:IconClock }];
+  if (role === 'customer')   return [{ to: '/customer',    label: 'Inicio',   Icon: IconHome }];
+  if (role === 'restaurant') return [{ to: '/restaurant',  label: 'Inicio',   Icon: IconHome }, { to: '/restaurant/horario', label: 'Horario', Icon: IconSchedule }];
+  if (role === 'driver')     return [{ to: '/driver',      label: 'Inicio',   Icon: IconHome }, { to: '/driver/ganancias',   label: 'Ganancias', Icon: IconClock }];
   return [];
 }
 
 function isActive(to, pathname) {
   if (to === '/restaurant') return pathname === '/restaurant';
-  if (['/customer','/driver'].includes(to)) return pathname === to;
+  if (['/customer', '/driver'].includes(to)) return pathname === to;
   return pathname.startsWith(to);
 }
 
-// ── Layout ────────────────────────────────────────────────────────────────────
 export default function Layout({ children }) {
   const { auth, logout, patchUser } = useAuth();
   const { toggle, isDark } = useTheme();
@@ -53,15 +50,17 @@ export default function Layout({ children }) {
   const items = getNavItems(role);
   const displayName = auth.user?.alias || auth.user?.full_name || auth.user?.username || '';
 
+  // Banner de dirección solo para restaurantes — clientes la configuran desde el home
   const shouldAskAddress = Boolean(
-    auth.user && ['customer','restaurant'].includes(role) &&
+    auth.user &&
+    role === 'restaurant' &&
     (!auth.user.address || auth.user.address === 'address-pending')
   );
 
   async function saveAddress() {
     if (!auth.token || !address.trim()) return;
     try {
-      const data = await apiFetch('/auth/profile', { method:'PATCH', body: JSON.stringify({ address: address.trim() }) }, auth.token);
+      const data = await apiFetch('/auth/profile', { method: 'PATCH', body: JSON.stringify({ address: address.trim() }) }, auth.token);
       patchUser({ address: data.profile.address });
       setAddress('');
     } catch (e) { console.error(e); }
@@ -70,12 +69,12 @@ export default function Layout({ children }) {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <Link to={auth.user ? `/${role}` : '/'} className="brand-block" style={{ textDecoration:'none' }}>
+        <Link to={auth.user ? `/${role}` : '/'} className="brand-block" style={{ textDecoration: 'none' }}>
           <img className="brand-logo" src="/logo.svg" alt="Morelivery" />
           <div>
-            <h1 style={{ color:'inherit' }}>
-              <span style={{ color:'#e3aaaa' }}>More</span>
-              <span style={{ color:'var(--text-primary)' }}>livery</span>
+            <h1 style={{ color: 'inherit' }}>
+              <span style={{ color: '#e3aaaa' }}>More</span>
+              <span style={{ color: 'var(--text-primary)' }}>livery</span>
             </h1>
             {role && <span className="role-pill">{ROLE_LABELS[role] || role}</span>}
           </div>
@@ -90,18 +89,13 @@ export default function Layout({ children }) {
           </nav>
         )}
 
-        <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', flexShrink:0 }}>
-            <button
-              className="header-icon-btn"
-              onClick={toggle}
-              title={isDark ? 'Tema claro' : 'Tema oscuro'}
-              aria-label="Tema">
-              {isDark ? <IconSun /> : <IconMoon />}
-            </button>
-
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
+          <button className="header-icon-btn" onClick={toggle}
+            title={isDark ? 'Tema claro' : 'Tema oscuro'} aria-label="Tema">
+            {isDark ? <IconSun /> : <IconMoon />}
+          </button>
           {auth.user && (
-            <button
-              onClick={() => navigate('/profile')}
+            <button onClick={() => navigate('/profile')}
               className={`user-name-btn${location.pathname === '/profile' ? ' active' : ''}`}
               title="Mi perfil">
               {displayName}
@@ -110,16 +104,17 @@ export default function Layout({ children }) {
         </div>
       </header>
 
+      {/* Banner de dirección — solo restaurantes sin dirección configurada */}
       {shouldAskAddress && (
-        <div style={{ background:'var(--warn-bg)', borderBottom:'1px solid var(--warn-border)', padding:'0.75rem 1.25rem' }}>
-          <p style={{ fontSize:'0.85rem', fontWeight:600, color:'var(--warn)', marginBottom:'0.5rem' }}>
-            Agrega tu dirección para poder hacer pedidos
+        <div style={{ background: 'var(--warn-bg)', borderBottom: '1px solid var(--warn-border)', padding: '0.75rem 1.25rem' }}>
+          <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--warn)', marginBottom: '0.5rem' }}>
+            Agrega la dirección de tu tienda para que los clientes puedan encontrarte
           </p>
-          <div style={{ display:'flex', gap:'0.5rem', maxWidth:420 }}>
+          <div style={{ display: 'flex', gap: '0.5rem', maxWidth: 420 }}>
             <input value={address} onChange={e => setAddress(e.target.value)}
-              placeholder="Tu dirección de entrega"
+              placeholder="Dirección de tu tienda"
               onKeyDown={e => e.key === 'Enter' && saveAddress()} />
-            <button className="btn-primary" onClick={saveAddress} style={{ whiteSpace:'nowrap' }}>Guardar</button>
+            <button className="btn-primary" onClick={saveAddress} style={{ whiteSpace: 'nowrap' }}>Guardar</button>
           </div>
         </div>
       )}

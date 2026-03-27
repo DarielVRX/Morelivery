@@ -470,6 +470,27 @@ self.addEventListener('notificationclick', (event) => {
     return;
   }
 
+  if (action === 'close_restaurant') {
+    event.waitUntil(
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+        const messageData = {
+          type: 'NOTIFICATION_ACTION',
+          action: 'close_restaurant',
+          data: event.notification.data,
+        };
+        const existing = clients.find(c => c.url.includes(self.location.origin));
+        if (existing) {
+          existing.postMessage(messageData);
+          return existing.focus();
+        }
+        return self.clients.openWindow(event.notification.data?.url || '/restaurant/horario').then(client => {
+          if (client) setTimeout(() => client.postMessage(messageData), 1200);
+        });
+      })
+    );
+    return;
+  }
+
   // Toque en la notificación (no en un botón) — abrir la app
   const targetUrl = event.notification?.data?.url || '/';
   event.waitUntil(
