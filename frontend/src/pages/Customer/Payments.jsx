@@ -30,32 +30,36 @@ function getStripe() {
   return stripePromise;
 }
 
-// ── Stripe Elements form ──────────────────────────────────────────────────────
 function StripeCardForm({ clientSecret, onSuccess, onError }) {
+  const containerRef = useRef(null);  // ← ref estable
   const [ready,    setReady]    = useState(false);
   const [paying,   setPaying]   = useState(false);
   const [stripe,   setStripe]   = useState(null);
   const [elements, setElements] = useState(null);
 
   useEffect(() => {
-    if (!clientSecret) return;
+    if (!clientSecret || !containerRef.current) return;
+    let payEl = null;
     let cancelled = false;
+
     getStripe().then(s => {
-      if (!s || cancelled) return;
+      if (!s || cancelled || !containerRef.current) return;
       setStripe(s);
       const els = s.elements({ clientSecret, locale: 'es' });
-      const el  = els.create('payment', {
+      payEl = els.create('payment', {
         layout: 'tabs',
         fields: { billingDetails: { address: 'never' } },
       });
-      const container = document.getElementById('stripe-payment-element');
-      if (container && !cancelled) {
-        el.mount(container);
-        el.on('ready', () => { if (!cancelled) setReady(true); });
-        setElements(els);
-      }
+      payEl.mount(containerRef.current);
+      payEl.on('ready', () => { if (!cancelled) setReady(true); });
+      setElements(els);
     });
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+      // Desmontar antes de que React elimine el nodo
+      try { payEl?.unmount(); } catch (_) {}
+    };
   }, [clientSecret]);
 
   async function pay() {
