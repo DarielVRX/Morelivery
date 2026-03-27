@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from 'react';
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // apiFetch se importa desde el cliente compartido del proyecto
-import { apiFetch } from '../../../api/client';
+import { apiFetch } from '../../../../api/client';
 
 const fmt = (cents) =>
   cents != null ? `$${(cents / 100).toFixed(2)}` : '—';
