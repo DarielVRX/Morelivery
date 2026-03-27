@@ -229,6 +229,56 @@ router.patch('/my/toggle', authenticate, authorize(['restaurant']), async (req, 
   } catch (error) { return next(error); }
 });
 
+/* ── PATCH /my/frequent-customers ── */
+router.patch('/my/frequent-customers', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    const { allow } = req.body;
+    if (typeof allow !== 'boolean') return next(new AppError(400, 'allow debe ser boolean'));
+    await query('UPDATE restaurants SET allow_frequent_customers=$1 WHERE id=$2', [allow, restaurantId]);
+    return res.json({ ok: true, allow_frequent_customers: allow });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /my/prep-estimate ── */
+router.patch('/my/prep-estimate', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    const { prep_time_estimate_s } = req.body;
+    if (!Number.isInteger(prep_time_estimate_s) || prep_time_estimate_s < 60)
+      return next(new AppError(400, 'prep_time_estimate_s debe ser al menos 60 segundos'));
+    await query('UPDATE restaurants SET prep_time_estimate_s=$1 WHERE id=$2', [prep_time_estimate_s, restaurantId]);
+    return res.json({ ok: true, prep_time_estimate_s });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /my/cash-limit ── */
+router.patch('/my/cash-limit', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    const { max_cash_cents } = req.body;
+    if (!Number.isInteger(max_cash_cents) || max_cash_cents < 0)
+      return next(new AppError(400, 'max_cash_cents debe ser entero >= 0'));
+    await query('UPDATE restaurants SET max_cash_cents=$1 WHERE id=$2', [max_cash_cents, restaurantId]);
+    return res.json({ ok: true, max_cash_cents });
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /my/profile-photo ── */
+router.patch('/my/profile-photo', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+    const { url } = req.body;
+    if (!url) return next(new AppError(400, 'url requerida'));
+    await query('UPDATE restaurants SET profile_photo=$1 WHERE id=$2', [url, restaurantId]);
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+
 // ── PATCH /orders/:orderId/confirm — confirmación del restaurante ─────────────
 // NOTA CRÍTICA: este endpoint requiere que la columna restaurant_confirmed exista.
 // Ejecutar migration_confirmation_flow.sql ANTES de deployar.
