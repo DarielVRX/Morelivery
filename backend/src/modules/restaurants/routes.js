@@ -1,17 +1,12 @@
 // backend/src/modules/restaurants/routes.js
-// FIX aplicado:
-//   - sseHub importado estáticamente al inicio (era await import(...) dentro del handler)
-//   - NOTA CRÍTICA: ejecutar migration_confirmation_flow.sql ANTES de deployar este archivo
-//     o el UPDATE fallará con "column restaurant_confirmed does not exist"
 
 import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
-import { resetPrepEstimateOnOpen, recordManualCorrection } from '../../engine/kitchen.js';
+import { resetPrepEstimateOnOpen } from '../../engine/kitchen.js';
 import { createMenuItemSchema, updateMenuItemSchema } from './schemas.js';
 import { AppError } from '../../utils/errors.js';
-// FIX: import estático — ya no se usa await import(...) dentro de handlers
 import { sseHub } from '../events/hub.js';
 
 const router = Router();
@@ -24,12 +19,6 @@ async function getRestaurantIdByOwner(userId) {
   return r.rows[0]?.id || null;
 }
 
-/**
- * computeIsOpen — apertura manual estricta (paso 8)
- * Con el horario 100% manual, manual_open_override siempre tiene un valor
- * (true o false). Se mantiene el fallback al horario automático por
- * retrocompatibilidad, pero ya no se usará en producción.
- */
 async function computeIsOpen(restaurantId) {
   try {
     const r = await query('SELECT is_open, manual_open_override FROM restaurants WHERE id = $1', [restaurantId]);
@@ -37,7 +26,6 @@ async function computeIsOpen(restaurantId) {
     const { is_open, manual_open_override } = r.rows[0];
     if (manual_open_override !== null && manual_open_override !== undefined) return Boolean(manual_open_override);
 
-    // Fallback: horario automático (retrocompat)
     const tz    = 'America/Mexico_City';
     const nowMx = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
     const dow   = nowMx.getDay();
@@ -61,30 +49,36 @@ async function computeIsOpen(restaurantId) {
   } catch (_) { return false; }
 }
 
-/* ── GET / — lista pública ── */
+// ── GET / — lista pública ─────────────────────────────────────────────────────
 router.get('/', async (_req, res, next) => {
   try {
     const result = await query(
       `SELECT r.id, r.name, r.category, r.is_open,
-              COALESCE(u.address, r.address) AS address,
-              r.profile_photo, COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng,
-              r.rating_avg, r.rating_count
-       FROM restaurants r
-       LEFT JOIN users u ON u.id = r.owner_user_id
-       WHERE r.is_active = true
-       ORDER BY r.name`
+      COALESCE(u.address, r.address) AS address,
+                               r.profile_photo,
+                               COALESCE(u.home_lat, r.lat) AS lat,
+                               COALESCE(u.home_lng, r.lng) AS lng,
+                               r.rating_avg, r.rating_count
+                               FROM restaurants r
+                               LEFT JOIN users u ON u.id = r.owner_user_id
+                               WHERE r.is_active = true
+                               ORDER BY r.name`
     ).catch(() =>
-      query(
-        `SELECT r.id, r.name, r.category, r.is_open,
-                COALESCE(u.address, r.address) AS address,
-                r.profile_photo, COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
-         FROM restaurants r
-         LEFT JOIN users u ON u.id = r.owner_user_id
-         WHERE r.is_active = true
-         ORDER BY r.name`
-      )
+    query(
+      `SELECT r.id, r.name, r.category, r.is_open,
+      COALESCE(u.address, r.address) AS address,
+          r.profile_photo,
+          COALESCE(u.home_lat, r.lat) AS lat,
+          COALESCE(u.home_lng, r.lng) AS lng
+          FROM restaurants r
+          LEFT JOIN users u ON u.id = r.owner_user_id
+          WHERE r.is_active = true
+          ORDER BY r.name`
+    )
     );
-    const restaurants = await Promise.all(result.rows.map(async r => ({ ...r, is_open: await computeIsOpen(r.id) })));
+    const restaurants = await Promise.all(
+      result.rows.map(async r => ({ ...r, is_open: await computeIsOpen(r.id) }))
+    );
     return res.json({ restaurants });
   } catch (error) {
     if (isMissingRelation(error)) return res.json({ restaurants: [] });
@@ -92,19 +86,20 @@ router.get('/', async (_req, res, next) => {
   }
 });
 
-/* ── GET /my ── */
+// ── GET /my ───────────────────────────────────────────────────────────────────
 router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const result = await query(
       `SELECT r.id, r.name, r.category, r.is_open,
-              COALESCE(u.address, r.address) AS address,
-              r.manual_open_override, r.profile_photo,
-              COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng,
-              r.max_cash_cents, r.allow_frequent_customers, r.prep_time_estimate_s
-       FROM restaurants r
-       LEFT JOIN users u ON u.id = r.owner_user_id
-       WHERE r.owner_user_id=$1 LIMIT 1`,
-      [req.user.userId]
+      COALESCE(u.address, r.address) AS address,
+                               r.manual_open_override, r.profile_photo,
+                               COALESCE(u.home_lat, r.lat) AS lat,
+                               COALESCE(u.home_lng, r.lng) AS lng,
+                               r.max_cash_cents, r.allow_frequent_customers, r.prep_time_estimate_s
+                               FROM restaurants r
+                               LEFT JOIN users u ON u.id = r.owner_user_id
+                               WHERE r.owner_user_id=$1 LIMIT 1`,
+                               [req.user.userId]
     );
     if (result.rowCount === 0) return res.json({ restaurant: null });
     const rest = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
@@ -114,13 +109,14 @@ router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next
       try {
         const result = await query(
           `SELECT r.id, r.name, r.category, r.is_open,
-                  COALESCE(u.address, r.address) AS address,
-                  r.manual_open_override, r.profile_photo,
-                  COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
-           FROM restaurants r
-           LEFT JOIN users u ON u.id = r.owner_user_id
-           WHERE r.owner_user_id=$1 LIMIT 1`,
-          [req.user.userId]
+          COALESCE(u.address, r.address) AS address,
+                                   r.manual_open_override, r.profile_photo,
+                                   COALESCE(u.home_lat, r.lat) AS lat,
+                                   COALESCE(u.home_lng, r.lng) AS lng
+                                   FROM restaurants r
+                                   LEFT JOIN users u ON u.id = r.owner_user_id
+                                   WHERE r.owner_user_id=$1 LIMIT 1`,
+                                   [req.user.userId]
         );
         if (result.rowCount === 0) return res.json({ restaurant: null });
         const rest = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
@@ -131,20 +127,22 @@ router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next
   }
 });
 
-/* ── GET /my/menu ── */
+// ── GET /my/menu ──────────────────────────────────────────────────────────────
 router.get('/my/menu', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
     const result = await query(
-      'SELECT id, name, description, price_cents, is_available, image_url FROM menu_items WHERE restaurant_id=$1 ORDER BY name',
+      `SELECT id, name, description, price_cents, is_available, image_url,
+      pkg_units, pkg_volume_liters
+      FROM menu_items WHERE restaurant_id=$1 ORDER BY name`,
       [restaurantId]
     );
     return res.json({ menu: result.rows });
   } catch (error) { return next(error); }
 });
 
-/* ── GET /my/schedule ── */
+// ── GET /my/schedule ──────────────────────────────────────────────────────────
 router.get('/my/schedule', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
@@ -169,25 +167,28 @@ router.get('/my/schedule', authenticate, authorize(['restaurant']), async (req, 
   } catch (error) { return next(error); }
 });
 
-/* ── PUT /my/schedule ── */
+// ── PUT /my/schedule ──────────────────────────────────────────────────────────
 router.put('/my/schedule', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
 
     const { schedule } = req.body;
-    if (!Array.isArray(schedule) || schedule.length !== 7) return next(new AppError(400, 'Se requieren los 7 días'));
+    if (!Array.isArray(schedule) || schedule.length !== 7)
+      return next(new AppError(400, 'Se requieren los 7 días'));
 
     for (const day of schedule) {
       await query(
         `INSERT INTO restaurant_schedules(restaurant_id, day_of_week, opens_at, closes_at, is_closed)
-         VALUES($1,$2,$3,$4,$5)
-         ON CONFLICT(restaurant_id, day_of_week)
-         DO UPDATE SET opens_at=$3, closes_at=$4, is_closed=$5`,
-        [restaurantId, day.day_of_week,
-         day.is_closed ? null : (day.opens_at  || '09:00'),
-         day.is_closed ? null : (day.closes_at || '22:00'),
-         Boolean(day.is_closed)]
+        VALUES($1,$2,$3,$4,$5)
+        ON CONFLICT(restaurant_id, day_of_week)
+        DO UPDATE SET opens_at=$3, closes_at=$4, is_closed=$5`,
+        [
+          restaurantId, day.day_of_week,
+          day.is_closed ? null : (day.opens_at  || '09:00'),
+                  day.is_closed ? null : (day.closes_at || '22:00'),
+                  Boolean(day.is_closed),
+        ]
       );
     }
 
@@ -196,40 +197,31 @@ router.put('/my/schedule', authenticate, authorize(['restaurant']), async (req, 
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /my/toggle — override manual estricto (paso 8) ── */
+// ── PATCH /my/toggle ──────────────────────────────────────────────────────────
 router.patch('/my/toggle', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
 
     const { override } = req.body;
-
-    if (override !== true && override !== false) {
+    if (override !== true && override !== false)
       return next(new AppError(400, 'override debe ser true (abrir) o false (cerrar)'));
-    }
 
     await query('UPDATE restaurants SET manual_open_override=$1 WHERE id=$2', [override, restaurantId]);
-
     const isOpen = await computeIsOpen(restaurantId);
     await query('UPDATE restaurants SET is_open=$1 WHERE id=$2', [isOpen, restaurantId]);
 
-    if (isOpen) {
-      resetPrepEstimateOnOpen(restaurantId).catch(() => {});
-    }
+    if (isOpen) resetPrepEstimateOnOpen(restaurantId).catch(() => {});
 
-    // FIX: notificar via SSE usando la referencia estática (sin dynamic import)
     sseHub.sendToRole('admin', 'restaurant_toggle', {
-      restaurantId,
-      isOpen,
-      override,
-      ownerId: req.user.userId,
+      restaurantId, isOpen, override, ownerId: req.user.userId,
     });
 
     return res.json({ is_open: isOpen, manual_open_override: override });
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /my/frequent-customers ── */
+// ── PATCH /my/frequent-customers ─────────────────────────────────────────────
 router.patch('/my/frequent-customers', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
@@ -241,33 +233,33 @@ router.patch('/my/frequent-customers', authenticate, authorize(['restaurant']), 
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /my/prep-estimate ── */
+// ── PATCH /my/prep-estimate ───────────────────────────────────────────────────
 router.patch('/my/prep-estimate', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
-    const { prep_time_estimate_s } = req.body;
-    if (!Number.isInteger(prep_time_estimate_s) || prep_time_estimate_s < 60)
-      return next(new AppError(400, 'prep_time_estimate_s debe ser al menos 60 segundos'));
-    await query('UPDATE restaurants SET prep_time_estimate_s=$1 WHERE id=$2', [prep_time_estimate_s, restaurantId]);
-    return res.json({ ok: true, prep_time_estimate_s });
+    const secs = Number(req.body.prep_time_estimate_s);
+    if (!Number.isInteger(secs) || secs < 60)
+      return next(new AppError(400, 'prep_time_estimate_s debe ser al menos 60'));
+    await query('UPDATE restaurants SET prep_time_estimate_s=$1 WHERE id=$2', [secs, restaurantId]);
+    return res.json({ ok: true, prep_time_estimate_s: secs });
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /my/cash-limit ── */
+// ── PATCH /my/cash-limit ─────────────────────────────────────────────────────
 router.patch('/my/cash-limit', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
-    const { max_cash_cents } = req.body;
-    if (!Number.isInteger(max_cash_cents) || max_cash_cents < 0)
+    const cents = Number(req.body.max_cash_cents);
+    if (!Number.isInteger(cents) || cents < 0)
       return next(new AppError(400, 'max_cash_cents debe ser entero >= 0'));
-    await query('UPDATE restaurants SET max_cash_cents=$1 WHERE id=$2', [max_cash_cents, restaurantId]);
-    return res.json({ ok: true, max_cash_cents });
+    await query('UPDATE restaurants SET max_cash_cents=$1 WHERE id=$2', [cents, restaurantId]);
+    return res.json({ ok: true, max_cash_cents: cents });
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /my/profile-photo ── */
+// ── PATCH /my/profile-photo ───────────────────────────────────────────────────
 router.patch('/my/profile-photo', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
@@ -279,89 +271,88 @@ router.patch('/my/profile-photo', authenticate, authorize(['restaurant']), async
   } catch (error) { return next(error); }
 });
 
-// ── PATCH /orders/:orderId/confirm — confirmación del restaurante ─────────────
-// NOTA CRÍTICA: este endpoint requiere que la columna restaurant_confirmed exista.
-// Ejecutar migration_confirmation_flow.sql ANTES de deployar.
-router.patch('/orders/:orderId/confirm', authenticate, authorize(['restaurant']), async (req, res, next) => {
+// ── PATCH /my/cover-photo ─────────────────────────────────────────────────────
+router.patch('/my/cover-photo', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
-
-    const result = await query(
-      `UPDATE orders
-       SET restaurant_confirmed = true,
-           restaurant_confirmed_at = NOW(),
-           updated_at = NOW()
-       WHERE id = $1
-         AND restaurant_id = $2
-         AND status NOT IN ('delivered', 'cancelled')
-       RETURNING id, driver_id, customer_id, status`,
-      [req.params.orderId, restaurantId]
+    const { url } = req.body;
+    if (!url) return next(new AppError(400, 'url requerida'));
+    await query('UPDATE restaurants SET cover_photo=$1 WHERE id=$2', [url, restaurantId]).catch(() =>
+    query('UPDATE restaurants SET profile_photo=$1 WHERE id=$2', [url, restaurantId])
     );
-
-    if (result.rowCount === 0)
-      return next(new AppError(404, 'Pedido no encontrado o no pertenece a este restaurante'));
-
-    const ord = result.rows[0];
-
-    // FIX: sseHub ya importado estáticamente — sin await import(...)
-    const payload = { orderId: ord.id, restaurantConfirmed: true };
-    if (ord.driver_id) sseHub.sendToUser(ord.driver_id, 'order_update', payload);
-    sseHub.sendToUser(ord.customer_id, 'order_update', payload);
-    sseHub.sendToRole('admin', 'order_update', { ...payload, restaurantId });
-
     return res.json({ ok: true });
-  } catch (error) {
-    // FIX: detectar columna faltante y dar error claro en lugar de 500 genérico
-    if (isMissingColumn(error)) {
-      return next(new AppError(503,
-        'La migración de confirmación aún no se ha ejecutado. ' +
-        'Ejecuta migration_confirmation_flow.sql antes de usar este endpoint.'
-      ));
-    }
-    return next(error);
-  }
+  } catch (error) { return next(error); }
 });
 
-/* ── POST /restaurants/menu-items — crear producto ── */
-router.post('/menu-items', authenticate, authorize(['restaurant']), validate(createMenuItemSchema), async (req, res, next) => {
+// ── POST /menu-items ──────────────────────────────────────────────────────────
+router.post('/menu-items', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
-    const { name, description, price_cents, is_available = true, image_url, pkg_units = 1, pkg_volume_liters = 0 } = req.validatedBody;
+
+    const { name, description, price_cents, is_available = true, image_url,
+      pkg_units = 1, pkg_volume_liters = 0 } = req.body;
+
+      if (!name || name.trim().length < 2) return next(new AppError(400, 'Nombre requerido (mín 2 caracteres)'));
+      if (!Number.isInteger(Number(price_cents)) || Number(price_cents) <= 0)
+        return next(new AppError(400, 'price_cents debe ser entero positivo'));
+
     const result = await query(
-      `INSERT INTO menu_items (restaurant_id, name, description, price_cents, is_available, image_url, pkg_units, pkg_volume_liters)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-                               [restaurantId, name, description || null, price_cents, is_available, image_url || null, pkg_units, pkg_volume_liters]
+      `INSERT INTO menu_items
+      (restaurant_id, name, description, price_cents, is_available, image_url, pkg_units, pkg_volume_liters)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      RETURNING *`,
+      [
+        restaurantId,
+        name.trim(),
+                               description?.trim() || null,
+                               Number(price_cents),
+                               Boolean(is_available),
+                               image_url || null,
+                               Number(pkg_units) || 1,
+                               Number(pkg_volume_liters) || 0,
+      ]
     );
     return res.status(201).json({ item: result.rows[0] });
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /restaurants/menu-items/:id — editar producto ── */
-router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), validate(updateMenuItemSchema), async (req, res, next) => {
+// ── PATCH /menu-items/:id ─────────────────────────────────────────────────────
+router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
-    const { name, description, price_cents, is_available, image_url, pkg_units, pkg_volume_liters } = req.validatedBody;
-    const updates = [], vals = [];
-    let i = 1;
-    const push = (col, val) => { if (val !== undefined) { updates.push(`${col}=$${i++}`); vals.push(val); } };
-    push('name', name); push('description', description); push('price_cents', price_cents);
-    push('is_available', is_available); push('image_url', image_url);
-    push('pkg_units', pkg_units); push('pkg_volume_liters', pkg_volume_liters);
-    if (!updates.length) return res.json({ ok: true });
-    vals.push(req.params.id, restaurantId);
-    const result = await query(
-      `UPDATE menu_items SET ${updates.join(',')} WHERE id=$${i++} AND restaurant_id=$${i} RETURNING *`,
-                               vals
-    );
-    if (result.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
-    return res.json({ item: result.rows[0] });
+
+    const { name, description, price_cents, is_available, image_url,
+      pkg_units, pkg_volume_liters } = req.body;
+
+      const updates = [], vals = [];
+      let i = 1;
+      const push = (col, val) => {
+        if (val !== undefined) { updates.push(`${col}=$${i++}`); vals.push(val); }
+      };
+      push('name',              name?.trim());
+      push('description',       description?.trim() ?? undefined);
+      push('price_cents',       price_cents !== undefined ? Number(price_cents) : undefined);
+      push('is_available',      is_available !== undefined ? Boolean(is_available) : undefined);
+      push('image_url',         image_url);
+      push('pkg_units',         pkg_units !== undefined ? Number(pkg_units) : undefined);
+      push('pkg_volume_liters', pkg_volume_liters !== undefined ? Number(pkg_volume_liters) : undefined);
+
+      if (!updates.length) return res.json({ ok: true });
+
+      vals.push(req.params.id, restaurantId);
+      const result = await query(
+        `UPDATE menu_items SET ${updates.join(',')} WHERE id=$${i++} AND restaurant_id=$${i} RETURNING *`,
+                                 vals
+      );
+      if (result.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
+      return res.json({ item: result.rows[0] });
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /restaurants/menu-items/:id/availability — toggle disponibilidad ── */
+// ── PATCH /menu-items/:id/availability ───────────────────────────────────────
 router.patch('/menu-items/:id/availability', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
@@ -376,7 +367,7 @@ router.patch('/menu-items/:id/availability', authenticate, authorize(['restauran
   } catch (error) { return next(error); }
 });
 
-/* ── DELETE /restaurants/menu-items/:id — eliminar producto ── */
+// ── DELETE /menu-items/:id ────────────────────────────────────────────────────
 router.delete('/menu-items/:id', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
@@ -386,7 +377,43 @@ router.delete('/menu-items/:id', authenticate, authorize(['restaurant']), async 
   } catch (error) { return next(error); }
 });
 
-/* ── GET /:id — detalle público de un restaurante ── */
+// ── PATCH /orders/:orderId/confirm ────────────────────────────────────────────
+router.patch('/orders/:orderId/confirm', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
+
+    const result = await query(
+      `UPDATE orders
+      SET restaurant_confirmed = true,
+      restaurant_confirmed_at = NOW(),
+                               updated_at = NOW()
+                               WHERE id = $1
+                               AND restaurant_id = $2
+                               AND status NOT IN ('delivered', 'cancelled')
+                               RETURNING id, driver_id, customer_id, status`,
+                               [req.params.orderId, restaurantId]
+    );
+
+    if (result.rowCount === 0)
+      return next(new AppError(404, 'Pedido no encontrado o no pertenece a este restaurante'));
+
+    const ord = result.rows[0];
+    const payload = { orderId: ord.id, restaurantConfirmed: true };
+    if (ord.driver_id) sseHub.sendToUser(ord.driver_id, 'order_update', payload);
+    sseHub.sendToUser(ord.customer_id, 'order_update', payload);
+    sseHub.sendToRole('admin', 'order_update', { ...payload, restaurantId });
+
+    return res.json({ ok: true });
+  } catch (error) {
+    if (isMissingColumn(error))
+      return next(new AppError(503, 'Migración pendiente: ejecuta migration_confirmation_flow.sql'));
+    return next(error);
+  }
+});
+
+// ── GET /:id — detalle público ────────────────────────────────────────────────
+// IMPORTANTE: debe ir AL FINAL para no interceptar /my, /menu-items, etc.
 router.get('/:id', async (req, res, next) => {
   try {
     const result = await query(
@@ -406,14 +433,12 @@ router.get('/:id', async (req, res, next) => {
   } catch (error) { return next(error); }
 });
 
-/* ── GET /:id/menu — menú público de un restaurante ── */
+// ── GET /:id/menu — menú público ──────────────────────────────────────────────
 router.get('/:id/menu', async (req, res, next) => {
   try {
     const result = await query(
       `SELECT id, name, description, price_cents, is_available, image_url
-      FROM menu_items
-      WHERE restaurant_id = $1
-      ORDER BY name`,
+      FROM menu_items WHERE restaurant_id = $1 ORDER BY name`,
       [req.params.id]
     );
     return res.json({ menu: result.rows });
