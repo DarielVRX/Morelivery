@@ -2,9 +2,12 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { API_BASE } from '../api/client';
 import {
-  canNotify, shouldNotifyInBackground, notificationPriority, notifyAppFocused,
-  notifyRealtime, notifyCall,
-  playUrgentAlert, playArrivalChime, playCallTone, alertOfferAttention,
+  canNotify, shouldNotifyInBackground, notificationPriority,
+  notifyAppFocused, notifyRealtime, notifyCall,
+  alertOfferAttention, alertNewOrder,
+  alertDriverArrivedCustomer, alertDriverArrivedRestaurant,
+  alertEta, alertCall,
+  playUrgentAlert, playArrivalChime, VIBRATE,
 } from './useAudio';
 
 export function useRealtimeOrders(
@@ -20,7 +23,7 @@ export function useRealtimeOrders(
   const retryCount     = useRef(0);
   const lastOfferPulse = useRef({ id: null, at: 0 });
 
-  // Stable refs for all callbacks — avoids stale closures in EventSource handlers
+  // Stable refs — evita closures stale en handlers de EventSource
   const cb = useRef({});
   useEffect(() => {
     cb.current = {
@@ -31,20 +34,20 @@ export function useRealtimeOrders(
     };
   });
 
-  // Request notification permission on first user interaction
+  // Solicitar permiso de notificaciones en primera interacción
   useEffect(() => {
     if (!token || !canNotify()) return;
     if (Notification.permission !== 'default') return;
     const request = () => {
       if (Notification.permission === 'default') Notification.requestPermission().catch(() => {});
       window.removeEventListener('pointerdown', request);
-      window.removeEventListener('keydown', request);
+      window.removeEventListener('keydown',     request);
     };
     window.addEventListener('pointerdown', request, { once: true });
     window.addEventListener('keydown',     request, { once: true });
     return () => {
       window.removeEventListener('pointerdown', request);
-      window.removeEventListener('keydown', request);
+      window.removeEventListener('keydown',     request);
     };
   }, [token]);
 
@@ -62,9 +65,12 @@ export function useRealtimeOrders(
     on('order_update', (data) => {
       cb.current.update?.(data);
       if (shouldNotifyInBackground()) {
-        notifyRealtime({ title: 'Actualización de pedido',
-          body: data?.status ? `Estado: ${data.status}` : 'Tu pedido fue actualizado',
-          tag: 'order_updates', group: 'order_updates', url: '/customer/pedidos' });
+        notifyRealtime({
+          title: 'Actualización de pedido',
+          body:  data?.status ? `Estado: ${data.status}` : 'Tu pedido fue actualizado',
+          tag: 'order_updates', group: 'order_updates', url: '/customer/pedidos',
+          vibrate: VIBRATE.normal,
+        });
       }
     });
 
@@ -80,64 +86,81 @@ export function useRealtimeOrders(
         lastOfferPulse.current = { id: data?.orderId || null, at: now };
       }
       if (shouldNotifyInBackground()) {
-        notifyRealtime({ title: '🛵 Nueva oferta', body: 'Tienes un pedido por aceptar.',
+        notifyRealtime({
+          title: '🛵 Nueva oferta', body: 'Tienes un pedido por aceptar.',
           tag: 'offers', group: 'driver', url: '/driver',
-          vibrate: [300,100,300,100,300,100,300], pushType: 'new_offer',
-          actions: [{ action: 'accept', title: '✓ Aceptar' }, { action: 'reject', title: '✕ Rechazar' }] });
+          vibrate: VIBRATE.offer, pushType: 'new_offer',
+          actions: [{ action: 'accept', title: '✓ Aceptar' }, { action: 'reject', title: '✕ Rechazar' }],
+        });
       }
     });
 
     on('new_order', (data) => {
       cb.current.newOrder?.(data);
-      playUrgentAlert();
-      navigator?.vibrate?.([500, 150, 500, 150, 500]);
+      alertNewOrder();
       if (shouldNotifyInBackground()) {
-        notifyRealtime({ title: '🆕 Nuevo pedido', body: 'Pedido recibido — confirma para preparar',
+        notifyRealtime({
+          title: '🆕 Nuevo pedido', body: 'Pedido recibido — confirma para preparar',
           tag: `new_order_${data.orderId}`, group: 'kitchen', url: '/restaurant/pedidos',
-          vibrate: [500,150,500,150,500], pushType: 'new_order', orderId: data.orderId,
-          actions: [{ action: 'confirm', title: '✓ Confirmar' }] });
+          vibrate: VIBRATE.new_order, pushType: 'new_order', orderId: data.orderId,
+          actions: [{ action: 'confirm', title: '✓ Confirmar' }],
+        });
       }
     });
 
     on('driver_eta_alert', (data) => {
       cb.current.eta?.(data);
-      playArrivalChime();
+      alertEta();
       if (shouldNotifyInBackground()) {
-        notifyRealtime({ title: '🛵 Tu repartidor se acerca',
-          body: data.message || `Llegará en aprox. ${data.etaMins} min`,
+        notifyRealtime({
+          title: '🛵 Tu repartidor se acerca',
+          body:  data.message || `Llegará en aprox. ${data.etaMins} min`,
           tag: `eta_${data.orderId}`, group: 'customer', url: '/customer/pedidos',
-          vibrate: [150,80,150], pushType: 'driver_eta_alert', orderId: data.orderId,
-          actions: [{ action: 'message', title: '💬 Mensaje' }] });
+          vibrate: VIBRATE.eta_alert, pushType: 'driver_eta_alert', orderId: data.orderId,
+          actions: [{ action: 'message', title: '💬 Mensaje' }],
+        });
       }
     });
 
     on('driver_arrived', (data) => {
       cb.current.arrived?.(data);
-      playArrivalChime();
-      navigator?.vibrate?.([300,100,100,100,300]);
+      // Diferenciar: si el target es restaurante o cliente
+      if (data.target === 'pickup') {
+        alertDriverArrivedRestaurant();
+      } else {
+        alertDriverArrivedCustomer();
+      }
       if (shouldNotifyInBackground()) {
-        notifyRealtime({ title: '📍 Tu repartidor llegó', body: data.message || 'El conductor está afuera',
-          tag: `arrived_${data.orderId}`, group: 'customer', url: '/customer/pedidos',
-          vibrate: [300,100,100,100,300], pushType: 'driver_arrived', orderId: data.orderId,
-          actions: [{ action: 'message', title: '💬 Mensaje' }] });
+        const isPickup = data.target === 'pickup';
+        notifyRealtime({
+          title: isPickup ? '🛵 Conductor llegó a recoger' : '📍 Tu repartidor llegó',
+          body:  data.message || (isPickup ? 'El conductor está en el restaurante' : 'El conductor está afuera'),
+          tag: `arrived_${data.orderId}`, group: isPickup ? 'kitchen' : 'customer',
+          url: isPickup ? '/restaurant/pedidos' : '/customer/pedidos',
+          vibrate: isPickup ? VIBRATE.driver_arrived_restaurant : VIBRATE.driver_arrived_customer,
+          pushType: 'driver_arrived', orderId: data.orderId,
+          actions: [{ action: 'message', title: '💬 Mensaje' }],
+        });
       }
     });
 
     on('simulated_call', (data) => {
       cb.current.call?.(data);
-      playCallTone();
-      navigator?.vibrate?.([500,300,500,300,500,300,500,300,500]);
+      alertCall();
       notifyCall({ orderId: data.orderId, driverName: data.driverName, url: '/' });
     });
 
-    on('offer_cancelled',  (data) => cb.current.update?.(data));
-    on('offer_assigned',   (data) => cb.current.update?.(data));
+    on('offer_cancelled', (data) => cb.current.update?.(data));
+    on('offer_assigned',  (data) => cb.current.update?.(data));
 
     on('kitchen_auto_ready', (data) => {
       cb.current.kitchen?.({ type: 'kitchen_auto_ready', ...data });
       if (shouldNotifyInBackground()) {
-        notifyRealtime({ title: 'Pedido marcado como listo', body: data.message || '',
-          tag: 'kitchen', group: 'kitchen', url: '/restaurant/pedidos' });
+        notifyRealtime({
+          title: 'Pedido listo para recoger', body: data.message || '',
+          tag: 'kitchen', group: 'kitchen', url: '/restaurant/pedidos',
+          vibrate: VIBRATE.confirm,
+        });
       }
     });
 
@@ -146,10 +169,13 @@ export function useRealtimeOrders(
     on('order_transferred_away', (data) => {
       cb.current.transfer?.({ type: 'order_transferred_away', ...data });
       cb.current.update?.(data);
-      navigator?.vibrate?.([200,100,200]);
+      navigator?.vibrate?.(VIBRATE.transfer);
       if (shouldNotifyInBackground()) {
-        notifyRealtime({ title: 'Pedido reasignado', body: 'Un pedido fue transferido a otro conductor',
-          tag: 'driver', group: 'driver', url: '/driver', vibrate: [200,100,200], pushType: 'reassigned' });
+        notifyRealtime({
+          title: 'Pedido reasignado', body: 'Un pedido fue transferido a otro conductor',
+          tag: 'driver', group: 'driver', url: '/driver',
+          vibrate: VIBRATE.transfer, pushType: 'reassigned',
+        });
       }
     });
 
@@ -157,46 +183,60 @@ export function useRealtimeOrders(
       cb.current.transfer?.({ type: 'order_transferred_in', ...data });
       cb.current.update?.(data);
       if (shouldNotifyInBackground()) {
-        notifyRealtime({ title: 'Nuevo pedido asignado', body: 'Se te asignó un pedido transferido',
-          tag: 'offers', group: 'driver', url: '/driver' });
+        notifyRealtime({
+          title: 'Nuevo pedido asignado', body: 'Se te asignó un pedido transferido',
+          tag: 'offers', group: 'driver', url: '/driver',
+          vibrate: VIBRATE.offer,
+        });
       }
     });
 
     on('chat_message', (data) => {
       cb.current.chat?.(data);
       if (shouldNotifyInBackground()) {
-        notifyRealtime({ title: `Mensaje de ${data.senderName || 'soporte'}`,
+        notifyRealtime({
+          title: `Mensaje de ${data.senderName || 'soporte'}`,
           body: data.text || 'Tienes un nuevo mensaje',
-          tag: 'chat', group: 'chat', url: '/customer/pedidos' });
+          tag: 'chat', group: 'chat', url: '/customer/pedidos',
+          vibrate: VIBRATE.support,
+        });
       }
     });
 
     on('support_message', (data) => {
       cb.current.support?.(data);
       if (shouldNotifyInBackground()) {
-        notifyRealtime({ title: '🛟 Soporte', body: data.text || 'Nuevo mensaje de soporte',
-          tag: 'support', group: 'support', url: '/profile' });
+        notifyRealtime({
+          title: '🛟 Soporte', body: data.text || 'Nuevo mensaje de soporte',
+          tag: 'support', group: 'support', url: '/profile',
+          vibrate: VIBRATE.support,
+        });
       }
     });
 
     on('driver_arrival', (data) => {
       cb.current.kitchen?.({ type: 'driver_arrival', ...data });
-      playArrivalChime();
+      alertDriverArrivedRestaurant();
       if (shouldNotifyInBackground()) {
-        notifyRealtime({ title: '🛵 Conductor llegó',
-          body: `${data.driverName || 'El conductor'} recogió el pedido`,
-          tag: 'kitchen', group: 'kitchen', url: '/restaurant' });
+        notifyRealtime({
+          title: '🛵 Conductor llegó', body: `${data.driverName || 'El conductor'} recogió el pedido`,
+          tag: 'kitchen', group: 'kitchen', url: '/restaurant',
+          vibrate: VIBRATE.driver_arrived_restaurant,
+        });
       }
     });
 
     on('order_cancelled_preparing', (data) => {
       cb.current.kitchen?.({ type: 'order_cancelled_preparing', ...data });
       playUrgentAlert();
-      navigator?.vibrate?.([500,200,500,200,500]);
+      navigator?.vibrate?.(VIBRATE.cancelled);
       if (shouldNotifyInBackground()) {
-        notifyRealtime({ title: '⚠️ Pedido cancelado',
+        notifyRealtime({
+          title: '⚠️ Pedido cancelado',
           body: 'El cliente canceló mientras estabas preparando',
-          tag: 'kitchen_cancel', group: 'kitchen', url: '/restaurant', priority: 'high' });
+          tag: 'kitchen_cancel', group: 'kitchen', url: '/restaurant',
+          vibrate: VIBRATE.cancelled, priority: 'high',
+        });
       }
     });
 

@@ -103,6 +103,21 @@ router.get('/check-username', async (req, res, next) => {
   } catch (error) { return next(error); }
 });
 
+/* ── GET /auth/check-email — verificar disponibilidad de email en tiempo real ── */
+router.get('/check-email', async (req, res, next) => {
+  try {
+    const email = String(req.query.email || '').trim().toLowerCase();
+    const role  = String(req.query.role  || 'customer');
+    if (!email || !/\S+@\S+\.\S+/.test(email)) return next(new AppError(400, 'Correo inválido'));
+    const r = await query(
+      'SELECT 1 FROM users WHERE real_email=$1 AND role=$2 LIMIT 1',
+      [email, role]
+    ).catch(() => query('SELECT 1 FROM users WHERE email=$1 LIMIT 1', [email]));
+    if (r.rowCount > 0) return next(new AppError(409, 'Este correo ya está registrado'));
+    return res.json({ available: true });
+  } catch (error) { return next(error); }
+});
+
 /* ── GET /auth/postal/:cp ────────────────────────────────────────────────── */
 router.get('/postal/:cp', async (req, res, next) => {
   try {
