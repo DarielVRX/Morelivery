@@ -1,4 +1,4 @@
-// backend/modules/restaurants/routes.js
+// backend/src/modules/restaurants/routes.js
 import { Router } from 'express';
 import { query } from '../../config/db.js';
 import { authenticate, authorize } from '../../middlewares/auth.js';
@@ -9,7 +9,7 @@ import { AppError } from '../../utils/errors.js';
 
 const router = Router();
 
-function isMissingColumn(e) { return e?.code === '42703'; }
+function isMissingColumn(e)   { return e?.code === '42703'; }
 function isMissingRelation(e) { return e?.code === '42P01'; }
 
 async function getRestaurantIdByOwner(userId) {
@@ -18,10 +18,10 @@ async function getRestaurantIdByOwner(userId) {
 }
 
 /**
- * Determina si el restaurante está abierto AHORA:
- *   1. manual_open_override !== NULL  →  usar ese valor directamente
- *   2. Buscar el horario del día actual en restaurant_schedules
- *   3. Fallback: valor de is_open guardado en la tabla
+ * computeIsOpen — apertura manual estricta (paso 8)
+ * Con el horario 100% manual, manual_open_override siempre tiene un valor
+ * (true o false). Se mantiene el fallback al horario automático por
+ * retrocompatibilidad, pero ya no se usará en producción.
  */
 async function computeIsOpen(restaurantId) {
   try {
@@ -30,15 +30,14 @@ async function computeIsOpen(restaurantId) {
     const { is_open, manual_open_override } = r.rows[0];
     if (manual_open_override !== null && manual_open_override !== undefined) return Boolean(manual_open_override);
 
-    // Usar timezone de México — el servidor puede correr en UTC
-    const tz  = 'America/Mexico_City';
-    const now = new Date();
-    // getDay() equivalente en Mexico_City: restar el offset al momento UTC
-    const nowMx   = new Date(now.toLocaleString('en-US', { timeZone: tz }));
-    const dow     = nowMx.getDay();   // 0=Dom … 6=Sab
-    const hh      = String(nowMx.getHours()).padStart(2, '0');
-    const mm      = String(nowMx.getMinutes()).padStart(2, '0');
-    const hhmm    = `${hh}:${mm}`;
+    // Fallback: horario automático (retrocompat — no se usará una vez que
+    // todos los restaurantes hayan tocado el toggle al menos una vez)
+    const tz    = 'America/Mexico_City';
+    const nowMx = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
+    const dow   = nowMx.getDay();
+    const hh    = String(nowMx.getHours()).padStart(2, '0');
+    const mm    = String(nowMx.getMinutes()).padStart(2, '0');
+    const hhmm  = `${hh}:${mm}`;
 
     try {
       const s = await query(
@@ -48,7 +47,7 @@ async function computeIsOpen(restaurantId) {
       if (s.rowCount === 0) return Boolean(is_open);
       const { opens_at, closes_at, is_closed } = s.rows[0];
       if (is_closed || !opens_at || !closes_at) return false;
-      return hhmm >= opens_at.slice(0,5) && hhmm < closes_at.slice(0,5);
+      return hhmm >= opens_at.slice(0, 5) && hhmm < closes_at.slice(0, 5);
     } catch (e) {
       if (isMissingRelation(e)) return Boolean(is_open);
       throw e;
@@ -56,7 +55,7 @@ async function computeIsOpen(restaurantId) {
   } catch (_) { return false; }
 }
 
-/* ── GET / — lista pública con is_open calculado en tiempo real ── */
+/* ── GET / — lista pública ── */
 router.get('/', async (_req, res, next) => {
   try {
     const result = await query(
@@ -95,8 +94,7 @@ router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next
               COALESCE(u.address, r.address) AS address,
               r.manual_open_override, r.profile_photo,
               COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng,
-              r.max_cash_cents,
-              r.allow_frequent_customers
+              r.max_cash_cents, r.allow_frequent_customers, r.prep_time_estimate_s
        FROM restaurants r
        LEFT JOIN users u ON u.id = r.owner_user_id
        WHERE r.owner_user_id=$1 LIMIT 1`,
@@ -106,7 +104,6 @@ router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next
     const rest = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
     return res.json({ restaurant: rest });
   } catch (error) {
-    // Si max_cash_cents no existe aún, reintentar sin esa columna
     if (isMissingColumn(error)) {
       try {
         const result = await query(
@@ -141,7 +138,7 @@ router.get('/my/menu', authenticate, authorize(['restaurant']), async (req, res,
   } catch (error) { return next(error); }
 });
 
-/* ── GET /my/schedule — horario guardado de los 7 días ── */
+/* ── GET /my/schedule ── */
 router.get('/my/schedule', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
@@ -158,7 +155,7 @@ router.get('/my/schedule', authenticate, authorize(['restaurant']), async (req, 
 
     const scheduleMap = new Map(rows.map(r => [r.day_of_week, r]));
     const schedule = Array.from({ length: 7 }, (_, i) => scheduleMap.get(i) || {
-      day_of_week: i, opens_at: '09:00:00', closes_at: '22:00:00', is_closed: false
+      day_of_week: i, opens_at: '09:00:00', closes_at: '22:00:00', is_closed: false,
     });
 
     const restInfo = await query('SELECT manual_open_override FROM restaurants WHERE id=$1', [restaurantId]);
@@ -166,7 +163,7 @@ router.get('/my/schedule', authenticate, authorize(['restaurant']), async (req, 
   } catch (error) { return next(error); }
 });
 
-/* ── PUT /my/schedule — guardar horario semanal completo ── */
+/* ── PUT /my/schedule ── */
 router.put('/my/schedule', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
@@ -182,56 +179,61 @@ router.put('/my/schedule', authenticate, authorize(['restaurant']), async (req, 
          ON CONFLICT(restaurant_id, day_of_week)
          DO UPDATE SET opens_at=$3, closes_at=$4, is_closed=$5`,
         [restaurantId, day.day_of_week,
-         day.is_closed ? null : (day.opens_at || '09:00'),
+         day.is_closed ? null : (day.opens_at  || '09:00'),
          day.is_closed ? null : (day.closes_at || '22:00'),
          Boolean(day.is_closed)]
       );
     }
 
-    // Recalcular y persistir is_open
+    // Paso 8: NO recalcular ni persistir is_open automáticamente.
+    // El horario ahora solo sirve para recordatorios push.
+    // La apertura/cierre sigue siendo manual_open_override.
     const isOpen = await computeIsOpen(restaurantId);
-    await query('UPDATE restaurants SET is_open=$1 WHERE id=$2', [isOpen, restaurantId]);
-
     return res.json({ ok: true, is_open: isOpen });
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /my/toggle — override manual de apertura/cierre ── */
+/* ── PATCH /my/toggle — override manual estricto (paso 8) ── */
 router.patch('/my/toggle', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
 
-    // override: true | false | null (null = volver al horario automático)
     const { override } = req.body;
-    const value = override === null || override === undefined ? null : Boolean(override);
-    await query('UPDATE restaurants SET manual_open_override=$1 WHERE id=$2', [value, restaurantId]);
+
+    // Paso 8: ya NO se acepta override=null (automático eliminado).
+    // Solo true (abrir) o false (cerrar).
+    if (override !== true && override !== false) {
+      return next(new AppError(400, 'override debe ser true (abrir) o false (cerrar)'));
+    }
+
+    await query('UPDATE restaurants SET manual_open_override=$1 WHERE id=$2', [override, restaurantId]);
 
     const isOpen = await computeIsOpen(restaurantId);
     await query('UPDATE restaurants SET is_open=$1 WHERE id=$2', [isOpen, restaurantId]);
 
-    // Al abrir el restaurante, registrar hora de apertura para el ciclo de prep
     if (isOpen) {
       resetPrepEstimateOnOpen(restaurantId).catch(() => {});
     }
 
-    return res.json({ is_open: isOpen, manual_open_override: value });
+    return res.json({ is_open: isOpen, manual_open_override: override });
   } catch (error) { return next(error); }
 });
 
+/* ── GET /:id ── */
 router.get('/:id', async (req, res, next) => {
   try {
     const result = await query(
       `SELECT r.id, r.name, r.category, r.is_open,
-      COALESCE(u.address, r.address) AS address,
-                               r.profile_photo,
-                               COALESCE(u.home_lat, r.lat)   AS lat,
-                               COALESCE(u.home_lng, r.lng)   AS lng,
-                               r.rating_avg, r.rating_count
-                               FROM restaurants r
-                               LEFT JOIN users u ON u.id = r.owner_user_id
-                               WHERE r.id = $1 AND r.is_active = true`,
-                               [req.params.id]
+              COALESCE(u.address, r.address) AS address,
+              r.profile_photo,
+              COALESCE(u.home_lat, r.lat) AS lat,
+              COALESCE(u.home_lng, r.lng) AS lng,
+              r.rating_avg, r.rating_count
+       FROM restaurants r
+       LEFT JOIN users u ON u.id = r.owner_user_id
+       WHERE r.id = $1 AND r.is_active = true`,
+      [req.params.id]
     );
     if (result.rowCount === 0) return next(new AppError(404, 'Restaurante no encontrado'));
     const restaurant = { ...result.rows[0], is_open: await computeIsOpen(result.rows[0].id) };
@@ -253,22 +255,14 @@ router.get('/:id/menu', async (req, res, next) => {
   }
 });
 
-/* ── POST /menu-items ── */
-
-/* ── PATCH /restaurants/my/profile-photo ── */
+/* ── PATCH /my/profile-photo ── */
 router.patch('/my/profile-photo', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
-    // Acepta base64 (data:image/...) o URL o null para eliminar
     const { photoUrl } = req.body || {};
-    const val = (photoUrl === null || photoUrl === '') ? null
-      : (typeof photoUrl === 'string' ? photoUrl : null);
+    const val = (photoUrl === null || photoUrl === '') ? null : (typeof photoUrl === 'string' ? photoUrl : null);
     try {
-      await query(
-        `UPDATE restaurants SET profile_photo=$1 WHERE owner_user_id=$2`,
-        [val, req.user.userId]
-      );
+      await query('UPDATE restaurants SET profile_photo=$1 WHERE owner_user_id=$2', [val, req.user.userId]);
     } catch (e) {
-      // Columna puede no existir si la migration no se corrió
       if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_v11.sql primero'));
       throw e;
     }
@@ -276,17 +270,13 @@ router.patch('/my/profile-photo', authenticate, authorize(['restaurant']), async
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /my/cover-photo — foto de fachada/portada (almacena, no se muestra aún) ── */
+/* ── PATCH /my/cover-photo ── */
 router.patch('/my/cover-photo', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const { photoUrl } = req.body || {};
-    const val = (photoUrl === null || photoUrl === '') ? null
-    : (typeof photoUrl === 'string' ? photoUrl : null);
+    const val = (photoUrl === null || photoUrl === '') ? null : (typeof photoUrl === 'string' ? photoUrl : null);
     try {
-      await query(
-        `UPDATE restaurants SET cover_photo=$1 WHERE owner_user_id=$2`,
-        [val, req.user.userId]
-      );
+      await query('UPDATE restaurants SET cover_photo=$1 WHERE owner_user_id=$2', [val, req.user.userId]);
     } catch (e) {
       if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_cover_photo.sql primero'));
       throw e;
@@ -295,15 +285,14 @@ router.patch('/my/cover-photo', authenticate, authorize(['restaurant']), async (
   } catch (error) { return next(error); }
 });
 
+/* ── POST /menu-items ── */
 router.post('/menu-items', authenticate, authorize(['restaurant']), validate(createMenuItemSchema), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
     const { name, description, priceCents, pkgUnits, pkgVolumeLiters } = req.validatedBody;
-    // priceCents validado: entero entre $1 y $10,000
-    if (!Number.isInteger(priceCents) || priceCents < 100 || priceCents > 1_000_000) {
+    if (!Number.isInteger(priceCents) || priceCents < 100 || priceCents > 1_000_000)
       return next(new AppError(400, 'El precio debe estar entre $1.00 y $10,000.00'));
-    }
     const safeUnits  = pkgUnits        != null ? Math.max(1, Math.round(Number(pkgUnits)))  : 1;
     const safeVolume = pkgVolumeLiters != null ? Math.max(0, Number(pkgVolumeLiters))        : 0;
     const result = await query(
@@ -317,7 +306,6 @@ router.post('/menu-items', authenticate, authorize(['restaurant']), validate(cre
 
 /* ── PATCH /menu-items/:id ── */
 router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), async (req, res, next) => {
-  // No usar updateMenuItemSchema porque bloquea peticiones que solo traen imageUrl
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
@@ -325,15 +313,10 @@ router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), async (
     if (item.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
     const cur = item.rows[0];
     const p = req.body || {};
-    // imageUrl: acepta base64 (data:image/...) o null para eliminar imagen
     let imageUrl = cur.image_url;
     if (req.body.imageUrl !== undefined) {
-      if (req.body.imageUrl === null || req.body.imageUrl === '') {
-        imageUrl = null;
-      } else if (typeof req.body.imageUrl === 'string') {
-        // base64 o URL — aceptar sin restricción de formato
-        imageUrl = req.body.imageUrl;
-      }
+      if (req.body.imageUrl === null || req.body.imageUrl === '') imageUrl = null;
+      else if (typeof req.body.imageUrl === 'string') imageUrl = req.body.imageUrl;
     }
     const result = await query(
       `UPDATE menu_items
@@ -347,7 +330,7 @@ router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), async (
         p.isAvailable ?? cur.is_available,
         imageUrl,
         p.pkgUnits        != null ? Math.max(1, Math.round(Number(p.pkgUnits)))       : (cur.pkg_units         ?? 1),
-        p.pkgVolumeLiters != null ? Math.max(0, Number(p.pkgVolumeLiters))            : (cur.pkg_volume_liters ?? 0),
+        p.pkgVolumeLiters != null ? Math.max(0, Number(p.pkgVolumeLiters))             : (cur.pkg_volume_liters ?? 0),
         req.params.id,
       ]
     );
@@ -355,11 +338,9 @@ router.patch('/menu-items/:id', authenticate, authorize(['restaurant']), async (
   } catch (error) { return next(error); }
 });
 
-
-/* ── DELETE /menu-items/:id — eliminar producto ── */
+/* ── DELETE /menu-items/:id ── */
 router.delete('/menu-items/:id', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
-    // Verificar que el item pertenece a este restaurante
     const check = await query(
       `SELECT mi.id FROM menu_items mi
        JOIN restaurants r ON r.id = mi.restaurant_id
@@ -367,62 +348,42 @@ router.delete('/menu-items/:id', authenticate, authorize(['restaurant']), async 
       [req.params.id, req.user.userId]
     );
     if (check.rowCount === 0) return next(new AppError(404, 'Producto no encontrado'));
-
-    // Preservar historial: limpiar referencia en order_items antes de borrar
-    try {
-      await query(`UPDATE order_items SET menu_item_id = NULL WHERE menu_item_id = $1`, [req.params.id]);
-    } catch (_) {}
-    await query(`DELETE FROM menu_items WHERE id = $1`, [req.params.id]);
+    try { await query('UPDATE order_items SET menu_item_id = NULL WHERE menu_item_id = $1', [req.params.id]); } catch (_) {}
+    await query('DELETE FROM menu_items WHERE id = $1', [req.params.id]);
     return res.json({ ok: true });
   } catch (error) { return next(error); }
 });
-/* ── PATCH /my/prep-estimate — restaurante actualiza su estimado de preparación ── */
+
+/* ── PATCH /my/prep-estimate ── */
 router.patch('/my/prep-estimate', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
-
     const val = Number(req.body.prep_time_estimate_s);
-    if (!Number.isFinite(val) || val < 30 || val > 7200) {
+    if (!Number.isFinite(val) || val < 30 || val > 7200)
       return next(new AppError(400, 'El estimado debe estar entre 30 segundos y 2 horas'));
-    }
-
-    // Leer estimado actual para la marca de corrección
-    const prev = await query(
-      'SELECT prep_time_estimate_s FROM restaurants WHERE id = $1',
-      [restaurantId]
-    );
+    const prev = await query('SELECT prep_time_estimate_s FROM restaurants WHERE id = $1', [restaurantId]);
     const previousS = prev.rows[0]?.prep_time_estimate_s ?? null;
-
     const r = await query(
-      `UPDATE restaurants
-       SET prep_time_estimate_s = $1, prep_estimate_updated_at = NOW()
-       WHERE id = $2
-       RETURNING id, prep_time_estimate_s`,
+      `UPDATE restaurants SET prep_time_estimate_s=$1, prep_estimate_updated_at=NOW()
+       WHERE id=$2 RETURNING id, prep_time_estimate_s`,
       [val, restaurantId]
     );
-
-    // Registrar marca de corrección manual (fire-and-forget, no bloquea)
     if (previousS !== null && previousS !== val) {
       recordManualCorrection(restaurantId, previousS, val).catch(() => {});
     }
-
     return res.json({ restaurant: r.rows[0] });
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /my/frequent-customers — permitir clientes frecuentes ── */
+/* ── PATCH /my/frequent-customers ── */
 router.patch('/my/frequent-customers', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
-
     const value = Boolean(req.body?.allow);
     try {
-      await query(
-        'UPDATE restaurants SET allow_frequent_customers = $1 WHERE id = $2',
-        [value, restaurantId]
-      );
+      await query('UPDATE restaurants SET allow_frequent_customers=$1 WHERE id=$2', [value, restaurantId]);
     } catch (e) {
       if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_allow_frequent_customers.sql primero'));
       throw e;
@@ -431,37 +392,70 @@ router.patch('/my/frequent-customers', authenticate, authorize(['restaurant']), 
   } catch (error) { return next(error); }
 });
 
-/* ── PATCH /my/cash-limit — configurar límite de pago en efectivo ── */
+/* ── PATCH /my/cash-limit ── */
 router.patch('/my/cash-limit', authenticate, authorize(['restaurant']), async (req, res, next) => {
   try {
     const restaurantId = await getRestaurantIdByOwner(req.user.userId);
     if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
-
     const raw = req.body?.max_cash_cents;
-    // Acepta null o 0 para quitar el límite; de lo contrario entero positivo en centavos
     let value;
     if (raw === null || raw === 0 || raw === '0') {
       value = 0;
     } else {
       value = Math.round(Number(raw));
-      if (!Number.isFinite(value) || value < 0) {
-        return next(new AppError(400, 'El límite debe ser un monto positivo en centavos o 0 para desactivar'));
-      }
+      if (!Number.isFinite(value) || value < 0)
+        return next(new AppError(400, 'El límite debe ser un monto positivo o 0 para desactivar'));
     }
-
     try {
-      await query(
-        'UPDATE restaurants SET max_cash_cents = $1 WHERE id = $2',
-        [value, restaurantId]
-      );
+      await query('UPDATE restaurants SET max_cash_cents=$1 WHERE id=$2', [value, restaurantId]);
     } catch (e) {
       if (e?.code === '42703') return next(new AppError(500, 'Ejecuta migration_maxcashcents_and_disputes.sql primero'));
       throw e;
     }
-
     return res.json({ ok: true, max_cash_cents: value });
   } catch (error) { return next(error); }
 });
 
-export default router;
+/* ── POST /orders/:id/confirm — paso 7: restaurante confirma el pedido ── */
+router.post('/orders/:id/confirm', authenticate, authorize(['restaurant']), async (req, res, next) => {
+  try {
+    const restaurantId = await getRestaurantIdByOwner(req.user.userId);
+    if (!restaurantId) return next(new AppError(404, 'Restaurante no encontrado'));
 
+    const result = await query(
+      `UPDATE orders
+       SET restaurant_confirmed    = true,
+           restaurant_confirmed_at = NOW(),
+           updated_at              = NOW()
+       WHERE id = $1
+         AND restaurant_id = $2
+         AND restaurant_confirmed = false
+         AND status NOT IN ('delivered', 'cancelled')
+       RETURNING id, driver_id, customer_id, status`,
+      [req.params.id, restaurantId]
+    );
+
+    // Idempotente: si ya estaba confirmado, responder ok igualmente
+    if (result.rowCount === 0) return res.json({ ok: true, already: true });
+
+    const ord = result.rows[0];
+
+    // Notificar al driver: el pedido ya entra en su ruta activa
+    if (ord.driver_id) {
+      try {
+        const { sseHub } = await import('../events/hub.js');
+        sseHub.sendToUser(ord.driver_id, 'order_update', {
+          orderId:             ord.id,
+          restaurantConfirmed: true,
+          status:              ord.status,
+          message:             'La tienda confirmó el pedido — ya está en tu ruta',
+        });
+      } catch (_) {}
+    }
+
+    console.log(`[restaurant.confirm] order=${ord.id.slice(0, 8)} rest=${restaurantId.slice(0, 8)}`);
+    return res.json({ ok: true, orderId: ord.id });
+  } catch (error) { return next(error); }
+});
+
+export default router;
