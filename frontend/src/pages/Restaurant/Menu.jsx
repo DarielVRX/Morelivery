@@ -30,7 +30,7 @@ function PriceCalculator({ onApply }) {
 
   // Precio sugerido: costo * (1 + profit/100) / (1 - fee)
   const suggested    = cost > 0 ? Math.ceil(cost * (profit / 100) / (1 - fee)) : 0;
-  const finalEarning = suggested > 0 ? Math.round(suggested * (1 - fee) - cost) : 0;
+  const finalEarning = suggested > 0 ? Math.round(suggested * (1 - fee)) : 0;
 
   if (!open) return (
     <button type="button" onClick={() => setOpen(true)}

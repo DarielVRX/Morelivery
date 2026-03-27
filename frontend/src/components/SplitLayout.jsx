@@ -36,6 +36,7 @@ export default function SplitLayout({ homeContent, ordersContent, alertsContent,
         }}>
           {ordersLabel}
         </button>
+        {alertsContent && (
         <button onClick={() => setActiveTab('alerts')} style={{
           flex: 1, padding: '0.6rem 0', fontSize: '0.78rem', fontWeight: 700,
           cursor: 'pointer', border: 'none', background: 'none',
@@ -52,6 +53,7 @@ export default function SplitLayout({ homeContent, ordersContent, alertsContent,
             }}>{totalAlerts}</span>
           )}
         </button>
+        )}
       </div>
 
       {/* Contenido de pestañas — ambos montados, solo uno visible */}
