@@ -1,349 +1,250 @@
-// frontend/src/features/profile/sections.jsx
-import { PasswordStrength } from '../../utils/passwordUtils.jsx';
-import { Collapsible, CPSearchBar, Flash, ROLE_LABELS } from './components';
+// frontend/src/features/admin/dashboard/sections.jsx
+import { Badge, CooldownBadge, OfferBar, OrderRow, Th, Td } from './shared';
 
-export function ProfileHeaderCard({ alias, avatarLetter, role }) {
+export function DashboardTabsBar({
+  tab,
+  onTabChange,
+  onReload,
+  unassignedCount,
+  reportsCount,
+  feedCount,
+}) {
+  const tabBtn = (key, label) => (
+    <button
+    key={key}
+    onClick={() => onTabChange(key)}
+    style={{
+      padding: '0.4rem 0.875rem',
+      border: 'none',
+      cursor: 'pointer',
+      borderRadius: 8,
+      fontWeight: tab === key ? 700 : 400,
+      fontSize: '0.85rem',
+      background: tab === key ? 'var(--brand)' : 'transparent',
+                                  color: tab === key ? '#fff' : 'var(--text-secondary)',
+    }}
+    >
+    {label}
+    </button>
+  );
+
   return (
-    <div className="card" style={{ marginBottom: '0.75rem', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-      <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--brand-light)', border: '2px solid var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <span style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--brand)' }}>{avatarLetter}</span>
-      </div>
-      <div>
-        <div style={{ fontWeight: 700 }}>{alias}</div>
-        <div style={{ fontSize: '0.8rem', color: 'var(--gray-600)' }}>{ROLE_LABELS[role] || role}</div>
-      </div>
+    <div
+    style={{
+      display: 'flex',
+      gap: '0.25rem',
+      marginBottom: '1.25rem',
+      borderBottom: '1px solid var(--border)',
+          paddingBottom: '0.5rem',
+          flexWrap: 'wrap',
+    }}
+    >
+    {tabBtn('assignment', `🛵 Asignaciones${unassignedCount ? ` (${unassignedCount})` : ''}`)}
+    {tabBtn('orders', '📦 Pedidos')}
+    {tabBtn('metrics', '📊 Métricas')}
+    {tabBtn('users', '👥 Usuarios')}
+    {tabBtn('engine', '⚙️ Motor')}
+    {tabBtn('reports', `🚨 Reportes${reportsCount > 0 ? ` (${reportsCount})` : ''}`)}
+    {tabBtn('notes', '📝 Notas')}
+    {tabBtn('ratings', '⭐ Ratings')}
+    {tabBtn('feed', `📡 Feed${feedCount > 0 ? ` (${feedCount})` : ''}`)}
+    {tabBtn('system', '🔧 Sistema')}
+    {tabBtn('emergency', '⚡ Emergencias')}
+    {tabBtn('support', `🛟 Soporte${reportsCount > 0 ? ` (${reportsCount})` : ''}`)}
+    <button
+    onClick={onReload}
+    style={{
+      marginLeft: 'auto',
+      padding: '0.4rem 0.75rem',
+      border: '1px solid var(--border)',
+          borderRadius: 8,
+          cursor: 'pointer',
+          fontSize: '0.8rem',
+          background: 'var(--bg-card)',
+    }}
+    >
+    ↻ Actualizar
+    </button>
     </div>
   );
 }
 
-export function PersonalInfoSection({
-  authToken, alias, setAlias,
-  homeLat, homeLng, onSelectAddress,
-  estado, setEstado, ciudad, setCiudad,
-  colonia, setColonia, coloniasList,
-  calle, setCalle, numero, setNumero,
-  onClearHomePin, onSave, message, isError,
-}) {
+export function AssignmentTab({ liveData, tick }) {
+  const unassignedOrders = liveData.orders.filter((order) => !order.driver_id);
+  const sortedDrivers = [...liveData.drivers].sort((a, b) => {
+    const score = (driver) => {
+      if (driver.active_orders > 0) return 0;
+      if (driver.is_available && !driver.pending_offer_order_id && !(driver.cooldowns || []).length) return 1;
+      if (driver.is_available && driver.pending_offer_order_id) return 2;
+      if ((driver.cooldowns || []).length > 0) return 3;
+      return 4;
+    };
+    return score(a) - score(b);
+  });
+
   return (
-    <Collapsible title="Datos personales" defaultOpen={false}>
-      <p style={{ fontSize: '0.8rem', color: 'var(--gray-500)', marginBottom: '0.65rem' }}>
-        Este nombre se muestra a otros usuarios en la plataforma.
-      </p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', marginBottom: '0.65rem' }}>
-        <label>
-          Nombre para mostrar
-          <input value={alias} onChange={e => setAlias(e.target.value)} placeholder="Ej: Juan García" />
-        </label>
+    <div>
+    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+    {[
+      { label: 'Pedidos activos', value: liveData.orders.length, color: '#60a5fa' },
+      { label: 'Sin driver', value: unassignedOrders.length, color: '#ef4444' },
+      {
+        label: 'Con oferta',
+        value: liveData.orders.filter((order) => order.pending_driver_id && !order.driver_id).length,
+          color: '#f59e0b',
+      },
+      {
+        label: 'Drivers disponibles',
+        value: liveData.drivers.filter((driver) => driver.is_available).length,
+          color: '#16a34a',
+      },
+      {
+        label: 'Drivers en entrega',
+        value: liveData.drivers.filter((driver) => driver.active_orders > 0).length,
+          color: '#8b5cf6',
+      },
+    ].map(({ label, value, color }) => (
+      <div
+      key={label}
+      style={{
+        border: '1px solid var(--border)',
+                                        borderRadius: 8,
+                                        padding: '0.6rem 1rem',
+                                        flex: '1 1 130px',
+                                        minWidth: 130,
+      }}
+      >
+      <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{label}</div>
+      <div style={{ fontSize: '1.5rem', fontWeight: 800, color, lineHeight: 1.2 }}>{value}</div>
+      </div>
+    ))}
+    </div>
 
-        <div>
-          <span style={{ fontSize: '0.875rem', fontWeight: 500, display: 'block', marginBottom: '0.3rem' }}>Código postal</span>
-          <CPSearchBar token={authToken} homeLat={homeLat} homeLng={homeLng} onSelectAddress={onSelectAddress} />
-        </div>
+    {liveData.orders.length === 0 ? (
+      <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-tertiary)' }}>No hay pedidos activos.</div>
+    ) : (
+      <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
+      <thead>
+      <tr>
+      <Th>ID</Th>
+      <Th>Estado</Th>
+      <Th>Tienda</Th>
+      <Th>Abierta</Th>
+      <Th>Hora</Th>
+      <Th>Total</Th>
+      <Th></Th>
+      </tr>
+      </thead>
+      <tbody>
+      {unassignedOrders.map((order) => (
+        <OrderRow key={order.id} order={order} drivers={liveData.drivers} tick={tick} />
+      ))}
+      </tbody>
+      </table>
+      </div>
+    )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.55rem' }}>
-          <label>Estado<input value={estado} onChange={e => setEstado(e.target.value)} placeholder="Michoacán" /></label>
-          <label>Municipio / Ciudad<input value={ciudad} onChange={e => setCiudad(e.target.value)} placeholder="Morelia" /></label>
-        </div>
-
-        <label>
-          Colonia
-          {coloniasList.length > 0 ? (
-            <select value={colonia} onChange={e => setColonia(e.target.value)}>
-              <option value="">Seleccionar colonia…</option>
-              {coloniasList.map(item => <option key={item} value={item}>{item}</option>)}
-            </select>
+    <div style={{ marginTop: '1.5rem', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+    <div
+    style={{
+      padding: '0.65rem 1rem',
+      background: 'var(--bg-sunken)',
+          fontWeight: 700,
+          fontSize: '0.875rem',
+          borderBottom: '1px solid var(--border)',
+    }}
+    >
+    👥 Estado de todos los drivers
+    </div>
+    {liveData.drivers.length === 0 ? (
+      <div style={{ padding: '1rem', color: 'var(--text-tertiary)', fontSize: '0.85rem' }}>Sin drivers registrados.</div>
+    ) : (
+      <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <thead>
+      <tr>
+      <Th>#</Th>
+      <Th>Driver</Th>
+      <Th>Disponible</Th>
+      <Th>Pedidos activos</Th>
+      <Th>Oferta activa</Th>
+      <Th>GPS</Th>
+      <Th>Cooldowns</Th>
+      </tr>
+      </thead>
+      <tbody>
+      {sortedDrivers.map((driver) => {
+        const cooldowns = driver.cooldowns || [];
+        return (
+          <tr key={driver.id}>
+          <Td>{driver.driver_number || '—'}</Td>
+          <Td>
+          <span style={{ fontWeight: 600 }}>{driver.full_name?.split('_')[0] || '—'}</span>
+          </Td>
+          <Td>
+          {driver.is_available ? (
+            <span style={{ color: 'var(--success)', fontWeight: 700, fontSize: '0.75rem' }}>● Sí</span>
           ) : (
-            <input value={colonia} onChange={e => setColonia(e.target.value)} placeholder="Ej: Col. Centro" />
+            <span style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem' }}>○ No</span>
           )}
-        </label>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.55rem', alignItems: 'end' }}>
-          <label>Calle<input value={calle} onChange={e => setCalle(e.target.value)} placeholder="Ej: Av. Revolución" /></label>
-          <label style={{ width: 90 }}>Número<input value={numero} onChange={e => setNumero(e.target.value)} placeholder="1234" /></label>
-        </div>
-
-        {homeLat && homeLng && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.75rem', color: 'var(--success)', fontWeight: 600 }}>🏠 Ubicación guardada</span>
-            <button type="button" style={{ background: 'none', border: 'none', color: 'var(--error)', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }} onClick={onClearHomePin}>
-              Borrar
-            </button>
-          </div>
-        )}
-      </div>
-      <button className="btn-primary btn-sm" onClick={onSave}>Guardar cambios</button>
-      <Flash text={message} isError={isError} />
-    </Collapsible>
-  );
-}
-
-// ── Estado visual de un permiso ───────────────────────────────────────────────
-function PermRow({ label, sub, status, statusLabel, onAction, actionLabel, disabled }) {
-  const color = status === 'granted' || status === 'active'
-    ? 'var(--success)'
-    : status === 'denied' || status === 'blocked'
-    ? 'var(--danger)'
-    : 'var(--text-tertiary)';
-
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', padding: '0.4rem 0', borderBottom: '1px solid var(--border-light)' }}>
-      <div>
-        <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)', fontWeight: 500 }}>{label}</span>
-        <span style={{ display: 'block', fontSize: '0.72rem', color, marginTop: 1 }}>
-          {statusLabel}
-        </span>
-        {sub && <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>{sub}</span>}
-      </div>
-      {onAction && (
-        <button type="button" className="btn-sm" onClick={onAction} disabled={disabled}>
-          {actionLabel}
-        </button>
-      )}
-    </div>
-  );
-}
-
-export function ProfileSettingsSection({
-  userRole,
-  permStatus,
-  permLoading,
-  permMsg,
-  notifStatus,
-  notifEnabled,
-  highPriorityNotifs,
-  notifMsg,
-  onToggleNotifEnabled,
-  onToggleHighPriority,
-  onRequestWakeLock,
-  onRequestAllPermissions,
-  theme,
-  onApplyTheme,
-  isInstalled,
-  deferredInstall,
-  onTriggerInstallPrompt,
-  onRefreshOfflineCache,
-  offlineCacheMsg,
-}) {
-  // Etiquetas legibles de estado
-  function notifLabel() {
-    if (notifStatus === 'granted') return notifEnabled ? '● Activas' : '● Pausadas temporalmente';
-    if (notifStatus === 'denied')  return '● Bloqueadas — actívalas en ajustes del navegador';
-    if (notifStatus === 'default') return '● Pendiente de activar';
-    return '● No soportadas en este navegador';
-  }
-  function geoLabel() {
-    if (permStatus.geolocation === 'granted')     return '● Activa';
-    if (permStatus.geolocation === 'denied')      return '● Bloqueada — actívala en ajustes';
-    if (permStatus.geolocation === 'unsupported') return '● No disponible';
-    return '● Pendiente';
-  }
-  function storageLabel() {
-    return permStatus.persistentStorage === 'granted'
-      ? '● Activo — el caché no se borrará automáticamente'
-      : '● Inactivo — el sistema puede limpiar el caché';
-  }
-  function wakeLockLabel() {
-    if (permStatus.wakeLock === 'active')      return '● Activa — la pantalla permanecerá encendida';
-    if (permStatus.wakeLock === 'unsupported') return '● No disponible en este dispositivo';
-    return '● Inactiva';
-  }
-
-  return (
-    <Collapsible title="Configuración">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-
-        {/* ── Permisos ── */}
-        <div>
-          <p style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
-            Permisos del sistema
-          </p>
-
-          <PermRow
-            label="Notificaciones"
-            statusLabel={notifLabel()}
-            onAction={onToggleNotifEnabled}
-            actionLabel={notifStatus === 'granted' && notifEnabled ? 'Pausar' : 'Activar'}
-            disabled={notifStatus === 'denied' || notifStatus === 'unsupported'}
-          />
-
-          {notifStatus === 'granted' && (
-            <PermRow
-              label="Alta prioridad"
-              sub="Vibración y sonido más intensos para ofertas y alertas"
-              statusLabel={highPriorityNotifs ? '● Activada' : '● Desactivada'}
-              onAction={onToggleHighPriority}
-              actionLabel={highPriorityNotifs ? 'Desactivar' : 'Activar'}
-            />
+          </Td>
+          <Td>
+          {driver.active_orders > 0 ? (
+            <Badge status="on_the_way" label={`${driver.active_orders} en entrega`} />
+          ) : (
+            <span style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem' }}>0</span>
           )}
-
-          <PermRow
-            label="Ubicación GPS"
-            sub={userRole === 'driver' ? 'Necesaria para recibir y gestionar pedidos' : 'Mejora la precisión de tu dirección de entrega'}
-            statusLabel={geoLabel()}
-          />
-
-          <PermRow
-            label="Caché persistente"
-            sub="Evita que el sistema operativo borre la app en segundo plano"
-            statusLabel={storageLabel()}
-          />
-
-          {userRole === 'driver' && permStatus.wakeLock !== 'unsupported' && (
-            <PermRow
-              label="Pantalla activa en ruta"
-              sub="Mantiene la pantalla encendida mientras repartes"
-              statusLabel={wakeLockLabel()}
-              onAction={onRequestWakeLock}
-              actionLabel={permStatus.wakeLock === 'active' ? 'Desactivar' : 'Activar'}
-            />
-          )}
-
-          <div style={{ marginTop: '0.75rem' }}>
-            <button type="button" className="btn-sm btn-primary" onClick={onRequestAllPermissions} disabled={permLoading}>
-              {permLoading ? 'Configurando…' : 'Solicitar todos los permisos'}
-            </button>
-            {(permMsg || notifMsg) && (
-              <p style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)', marginTop: '0.4rem' }}>
-                {permMsg || notifMsg}
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* ── Apariencia ── */}
-        <div>
-          <p style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
-            Apariencia
-          </p>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Tema</span>
-            <div style={{ display: 'flex', gap: '0.25rem' }}>
-              {[['system', 'Auto'], ['light', 'Claro'], ['dark', 'Oscuro']].map(([val, label]) => (
-                <button key={val} type="button" onClick={() => onApplyTheme(val)}
-                  style={{
-                    padding: '0.2rem 0.55rem', fontSize: '0.78rem', cursor: 'pointer',
-                    border: `1.5px solid ${theme === val ? 'var(--brand)' : 'var(--border)'}`,
-                    borderRadius: 6,
-                    background: theme === val ? 'var(--brand-light)' : 'var(--bg-card)',
-                    color: theme === val ? 'var(--brand)' : 'var(--text-secondary)',
-                    fontWeight: theme === val ? 700 : 400, minHeight: 'unset',
-                  }}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* ── Aplicación ── */}
-        <div>
-          <p style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
-            Aplicación
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {isInstalled ? (
-              <p style={{ fontSize: '0.82rem', color: 'var(--success)', fontWeight: 600 }}>✓ App instalada en pantalla de inicio</p>
-            ) : deferredInstall ? (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.85rem' }}>Instalar en pantalla de inicio</span>
-                <button type="button" className="btn-sm btn-primary" onClick={onTriggerInstallPrompt}>Instalar</button>
+          </Td>
+          <Td>
+          {driver.pending_offer_order_id ? (
+            <div>
+            <span style={{ fontSize: '0.75rem', color: '#60a5fa', fontWeight: 600 }}>
+            {driver.pending_offer_order_id.slice(0, 8)}
+            </span>
+            {driver.pending_offer_started_at && (
+              <div style={{ marginTop: 2 }}>
+              <OfferBar startedAt={driver.pending_offer_started_at} total={60} tick={tick} />
               </div>
-            ) : null}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.85rem' }}>Verificar actualización</span>
-              <button type="button" className="btn-sm" onClick={onRefreshOfflineCache}>Actualizar</button>
+            )}
             </div>
-            {offlineCacheMsg && <p style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)' }}>{offlineCacheMsg}</p>}
-          </div>
-        </div>
-
+          ) : (
+            <span style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem' }}>—</span>
+          )}
+          </Td>
+          <Td>
+          {driver.last_lat && driver.last_lng ? (
+            <span style={{ color: 'var(--success)', fontSize: '0.75rem', fontWeight: 600 }}>
+            ✓ {Number(driver.last_lat).toFixed(3)},{Number(driver.last_lng).toFixed(3)}
+            </span>
+          ) : (
+            <span style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem' }}>Sin GPS</span>
+          )}
+          </Td>
+          <Td>
+          {cooldowns.length === 0 ? (
+            <span style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem' }}>—</span>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {cooldowns.map((cooldown, index) => (
+              <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>
+              {cooldown.order_id.slice(0, 6)}
+              </span>
+              <CooldownBadge waitUntil={cooldown.wait_until} tick={tick} />
+              </div>
+            ))}
+            </div>
+          )}
+          </Td>
+          </tr>
+        );
+      })}
+      </tbody>
+      </table>
       </div>
-    </Collapsible>
-  );
-}
-
-export function ProfileSecuritySection({
-  loginUsername, onChangeUsername, usernameStatus,
-  currentPassword, setCurrentPassword,
-  newPassword, setNewPassword,
-  confirmPassword, setConfirmPassword,
-  onSave, message, isError,
-}) {
-  return (
-    <Collapsible title="Seguridad">
-      <p style={{ fontSize: '0.8rem', color: 'var(--gray-500)', marginBottom: '0.65rem' }}>
-        El nombre de usuario es visible en la plataforma. La contraseña protege el acceso a tu cuenta.
-      </p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', marginBottom: '0.65rem' }}>
-        <div>
-          <label style={{ display: 'block', marginBottom: '0.25rem' }}>Nombre de usuario</label>
-          <div style={{ position: 'relative' }}>
-            <input value={loginUsername} onChange={e => onChangeUsername(e.target.value)}
-              placeholder="Ej: juangarcia91" autoComplete="username"
-              style={{ paddingRight: '2.2rem' }} />
-            {usernameStatus === 'checking'  && <span style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>…</span>}
-            {usernameStatus === 'available' && <span style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.8rem', color: 'var(--success)' }}>✓</span>}
-            {usernameStatus === 'taken'     && <span style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.8rem', color: 'var(--error)' }}>✗</span>}
-          </div>
-          {usernameStatus === 'taken' && <span style={{ fontSize: '0.72rem', color: 'var(--error)', marginTop: '0.2rem', display: 'block' }}>Ese nombre ya está en uso</span>}
-        </div>
-        <label>
-          Contraseña actual <span style={{ fontWeight: 400, color: 'var(--text-tertiary)', fontSize: '0.78rem' }}>(requerida para guardar cambios)</span>
-          <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} autoComplete="current-password" />
-        </label>
-        <label>
-          Nueva contraseña <span style={{ fontWeight: 400, color: 'var(--text-tertiary)', fontSize: '0.78rem' }}>(opcional)</span>
-          <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} autoComplete="new-password" placeholder="Dejar vacío para no cambiar" />
-        </label>
-        {newPassword && (
-          <>
-            <PasswordStrength pwd={newPassword} />
-            <label>
-              Confirmar nueva contraseña
-              <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} autoComplete="new-password" />
-            </label>
-          </>
-        )}
-      </div>
-      <button className="btn-primary btn-sm" onClick={onSave} disabled={usernameStatus === 'checking' || usernameStatus === 'taken'}>
-        Guardar cambios
-      </button>
-      <Flash text={message} isError={isError} />
-    </Collapsible>
-  );
-}
-
-export function AccountManagementSection({
-  deleteConfirm, onDeleteAccount, deletePwd, setDeletePwd,
-  deleteLoading, onCancelDelete, message, isError,
-}) {
-  return (
-    <Collapsible title="Administración de cuenta">
-      <p style={{ fontSize: '0.85rem', color: 'var(--gray-600)', marginBottom: '0.75rem' }}>
-        Eliminar tu cuenta es permanente e irreversible.
-      </p>
-      {!deleteConfirm ? (
-        <button className="btn-danger btn-sm" onClick={onDeleteAccount}>Eliminar cuenta</button>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <p style={{ fontSize: '0.82rem', color: 'var(--error)', fontWeight: 600, margin: 0 }}>
-            ¿Seguro? Esta acción no se puede deshacer.
-          </p>
-          <label style={{ fontSize: '0.82rem' }}>
-            Ingresa tu contraseña para confirmar
-            <input type="password" value={deletePwd} onChange={e => setDeletePwd(e.target.value)}
-              autoComplete="current-password" placeholder="Tu contraseña"
-              style={{ marginTop: '0.25rem' }} />
-          </label>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button className="btn-danger btn-sm" onClick={onDeleteAccount} disabled={deleteLoading}>
-              {deleteLoading ? 'Eliminando…' : 'Confirmar eliminación'}
-            </button>
-            <button className="btn-sm" onClick={onCancelDelete}>Cancelar</button>
-          </div>
-        </div>
-      )}
-      <Flash text={message} isError={isError} />
-    </Collapsible>
+    )}
+    </div>
+    </div>
   );
 }
