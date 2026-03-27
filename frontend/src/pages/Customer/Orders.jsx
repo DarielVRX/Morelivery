@@ -171,14 +171,34 @@ export default function CustomerOrders({ registerRef } = {}) {
         } catch (e) { setMsg(e.message); }
       }
 
-      async function cancelOrder(orderId) {
+      async function cancelOrder(orderId, orderCreatedAt, restaurantConfirmed, driverStatus) {
+        // Calcular si la cancelación será tardía Y ambas partes ya confirmaron
+        const elapsedMs      = Date.now() - new Date(orderCreatedAt).getTime();
+        const LATE_MS        = 5 * 60 * 1000;
+        const driverAccepted = ['accepted', 'on_the_way'].includes(driverStatus);
+        const bothConfirmed  = restaurantConfirmed && driverAccepted;
+        const willBeLate     = elapsedMs > LATE_MS && bothConfirmed;
+
+        if (willBeLate) {
+          const confirmed = window.confirm(
+            '⚠️ Aviso: el restaurante y el conductor ya confirmaron este pedido.\n\n' +
+            'Cancelar ahora puede resultar en una sanción temporal en tu cuenta.\n\n' +
+            'Si tienes un problema con el pedido, te recomendamos contactar a soporte antes de cancelar.\n\n' +
+            '¿Deseas continuar con la cancelación?'
+          );
+          if (!confirmed) return;
+        }
+
         const note = window.prompt('Motivo de cancelación (obligatorio):');
         if (!note?.trim()) return;
+
         try {
-          const res = await apiFetch(`/orders/${orderId}/cancel`, { method:'PATCH', body: JSON.stringify({ note }) }, auth.token);
+          const res = await apiFetch(`/orders/${orderId}/cancel`, {
+            method: 'PATCH', body: JSON.stringify({ note }),
+          }, auth.token);
           loadActive();
-          if (res?.suspended) {
-            setMsg('⚠️ Tu cuenta ha sido suspendida por cancelar un pedido después de 5 minutos. Contacta a soporte para reactivarla.');
+          if (res?.orders_blocked) {
+            setMsg('Tu cuenta fue suspendida temporalmente. Contacta a soporte para reactivarla.');
           }
         } catch (e) { setMsg(e.message); }
       }
@@ -427,7 +447,12 @@ export default function CustomerOrders({ registerRef } = {}) {
                              />}
 
                            {['created','pending_driver','assigned','accepted'].includes(order.status) && (
-                             <button className="btn-sm btn-danger" onClick={()=>cancelOrder(order.id)} style={{ marginTop:'0.5rem' }}>
+                             <button className="btn-sm btn-danger" onClick={() => cancelOrder(
+                               order.id,
+                               order.created_at,
+                               order.restaurant_confirmed,
+                               order.status
+                             )} style={{ marginTop:'0.5rem' }}>
                              Cancelar pedido
                              </button>
                            )}
