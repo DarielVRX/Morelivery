@@ -157,7 +157,7 @@ export async function cleanStaleEntities(onOffer) {
     );
 
     const cancelledDisputes = [];
-    for (const dispute of activeDisputes) {
+    for (const dispute of activeDisputes.rows) {
       const distance = haversineMeters(
         { lat: dispute.driver_lat, lng: dispute.driver_lng },
         { lat: dispute.rest_lat, lng: dispute.rest_lng }

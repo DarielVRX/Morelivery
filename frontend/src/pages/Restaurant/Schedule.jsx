@@ -184,6 +184,26 @@ export default function RestaurantSchedule() {
       .catch(() => {});
   }, [auth.token]);
 
+  // Listener de acciones desde notificaciones push (abrir/cerrar desde el push)
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+
+    function onMessage(event) {
+      const { type, action } = event.data || {};
+      if (type !== 'NOTIFICATION_ACTION') return;
+
+      if (action === 'open_restaurant') {
+        handleToggle(true);
+      }
+      if (action === 'close_restaurant') {
+        handleToggle(false);
+      }
+    }
+
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [auth.token]); // handleToggle usa auth.token internamente
+
   // Apertura/cierre manual estricto — override: true|false, NUNCA null
   async function handleToggle(open) {
     setToggleSaving(true);
