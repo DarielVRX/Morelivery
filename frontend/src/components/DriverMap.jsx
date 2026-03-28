@@ -157,22 +157,25 @@ export default function DriverMap({
               // Si no está en movimiento: NO actualizar bearing ni centrar — mantener última vista
             }
           } else if (mode === 'free') {
-            const prevPos = prevWatchPosRef.current;
-            if (prevPos) {
-              const R   = 6371000;
-              const dLat = (next.lat - prevPos.lat) * Math.PI / 180;
-              const dLng = (next.lng - prevPos.lng) * Math.PI / 180;
-              const a   = Math.sin(dLat/2)**2 + Math.cos(prevPos.lat*Math.PI/180)*Math.cos(next.lat*Math.PI/180)*Math.sin(dLng/2)**2;
-              const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-              const currentZoom = map.getZoom();
-              if (dist > 200 && currentZoom > 10) {
-                map.easeTo({
-                  center: [next.lng, next.lat],
-                  pitch: 0,   // pitch siempre 0 en modo libre
-                  bearing: 0,
-                  zoom: 14,
-                  duration: 400, essential: true,
-                });
+            const sinceInteraction = Date.now() - lastInteractionRef.current;
+            if (sinceInteraction > 5000) {
+              const prevPos = prevWatchPosRef.current;
+              if (prevPos) {
+                const R    = 6371000;
+                const dLat = (next.lat - prevPos.lat) * Math.PI / 180;
+                const dLng = (next.lng - prevPos.lng) * Math.PI / 180;
+                const a    = Math.sin(dLat/2)**2 + Math.cos(prevPos.lat*Math.PI/180)*Math.cos(next.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+                const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                const isMoving = dist > 3;
+                if (isMoving) {
+                  map.easeTo({
+                    center: [next.lng, next.lat],
+                    pitch: 0,
+                    bearing: 0,
+                    zoom: 15,
+                    duration: 400, essential: true,
+                  });
+                }
               }
             }
           }
@@ -323,9 +326,9 @@ export default function DriverMap({
     const map = mapRef.current;
     if (!map || !_ml) return;
     _buildDriverMarker(_ml, map);
-    // Pitch 0 en todos los modos excepto nav (gestionado por centerSignal 'nav')
-    map.easeTo({ pitch: 0, bearing: 0, duration: 300, essential: true });
-  }, [centerMode, routeActive]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Solo reconstruir marcador al cambiar routeActive.
+    // NO aplicar easeTo aquí — el centerSignal se encarga de la cámara por modo.
+  }, [routeActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Heading — muta SVG
   useEffect(() => {
@@ -522,7 +525,7 @@ export default function DriverMap({
       // 'free' u otros: centrar sin pitch
       if (!pos) { onCenterDone?.(); return; }
       map.easeTo({
-        center: [pos.lng, pos.lat], zoom: 14, pitch: 0, bearing: 0,
+        center: [pos.lng, pos.lat], zoom: 15, pitch: 0, bearing: 0,
         duration: 350, essential: true,
       });
     }
