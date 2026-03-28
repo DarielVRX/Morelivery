@@ -123,7 +123,6 @@ export default function DriverMap({
           const svg = markersRef.current.driverSvg;
           if (svg && routeActiveRef.current) svg.style.transform = `rotate(${h}deg)`;
         }
-        const prev = prevWatchPosRef.current;          // ← capturar ANTES
         prevWatchPosRef.current = next;
         livePosRef.current      = next;
         setHasGPS(true);
