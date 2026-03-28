@@ -111,7 +111,7 @@ function PrepTimeDefault({ value, onChange, onSave, saving, saved,
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'1rem' }}>
             <div>
             <div style={{ fontWeight:800, fontSize:'0.95rem', color:'var(--text-primary)', marginBottom:'0.2rem' }}>
-            {isOpen ? 'Abierto — recibiendo pedidos' : 'Cerrado — no recibe pedidos'}
+            {isOpen ? '🟢 Abierto — recibiendo pedidos' : '🔴 Cerrado — no recibe pedidos'}
             </div>
             <div style={{ fontSize:'0.75rem', color:'var(--text-secondary)', lineHeight:1.4 }}>
             {isOpen
@@ -229,7 +229,7 @@ function PrepTimeDefault({ value, onChange, onSave, saving, saved,
     }
 
     return (
-      <div style={{ backgroundColor:'var(--bg-base)', minHeight:'100vh', padding:'1rem' }}>
+      <div style={{ height:'100%', overflowY:'auto', backgroundColor:'var(--bg-base)', padding:'1rem' }}>
 
       {/* Header */}
       <div style={{ margin:'-1rem -1rem 1.25rem', padding:'0.75rem 1rem 0.65rem',
