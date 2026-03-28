@@ -3,6 +3,7 @@ import { authenticate, authorize } from '../../../middlewares/auth.js';
 import { validate } from '../../../middlewares/validate.js';
 import { DELIVERY_FEE_PCT, RESTAURANT_FEE_PCT, SERVICE_FEE_PCT, isMissingColumnError, isMissingRelationError } from '../shared.js';
 import { env } from '../../../config/env.js';
+import { sendPushToUser } from '../../notifications/pushSubscription.js'; // ← NUEVO
 
 export function registerCreationRoutes(router, deps) {
   const {
@@ -47,7 +48,6 @@ export function registerCreationRoutes(router, deps) {
         if (!stripe_payment_intent_id)
           return next(new AppError(400, 'Falta la referencia de pago. Completa el pago con tarjeta primero.'));
 
-        // Verificar directamente con Stripe
         try {
           const piRes = await fetch(`https://api.stripe.com/v1/payment_intents/${stripe_payment_intent_id}`, {
             headers: { Authorization: `Bearer ${env.stripeSecretKey}` },
@@ -56,11 +56,11 @@ export function registerCreationRoutes(router, deps) {
           if (!piRes.ok)
             return next(new AppError(502, pi?.error?.message || 'Error verificando pago en Stripe'));
           if (pi.status !== 'succeeded')
-            return next(new AppError(402, 'El pago no fue aprobado. Intenta de nuevo o usa otro método de pago.'));
+            return next(new AppError(402, 'El pago no fue aprobado. Intenta de nuevo o usa otro método.'));
           if (pi.metadata?.customer_id && pi.metadata.customer_id !== req.user.userId)
             return next(new AppError(403, 'Este pago no pertenece a tu cuenta'));
 
-          // Verificar que este intent no se haya usado ya para otro pedido
+          // Verificar que este intent no se haya usado ya
           const usedCheck = await query(
             'SELECT order_id FROM payment_intents WHERE provider_intent_id=$1 AND order_id IS NOT NULL',
             [stripe_payment_intent_id]
@@ -114,37 +114,45 @@ export function registerCreationRoutes(router, deps) {
       if (!Number.isFinite(distKm) || distKm > 5)
         return next(new AppError(409, `Esta tienda está fuera de cobertura (${distKm.toFixed(1)} km). Máximo: 5 km.`));
 
-      // ── Límite de 1 pedido activo por cliente ─────────────────────────────
-      try {
-        const activeCheck = await query(
-          `SELECT COUNT(*) AS cnt FROM orders WHERE customer_id=$1 AND status NOT IN ('delivered','cancelled')`,
-          [req.user.userId]
-        );
-        if (Number(activeCheck.rows[0]?.cnt || 0) > 0) {
-          const historyCheck = await query(
-            `SELECT
-               COUNT(*) FILTER (WHERE status='delivered') AS total_delivered,
-               COUNT(*) FILTER (WHERE status='delivered' AND payment_method='cash') AS cash_delivered
-             FROM orders WHERE customer_id=$1`,
+      // ── Pedidos simultáneos — solo bloquea efectivo+efectivo ──────────────
+      const incomingMethod = payment_method || 'cash';
+      if (incomingMethod === 'cash') {
+        try {
+          const activeCheck = await query(
+            `SELECT COUNT(*) AS cnt FROM orders
+             WHERE customer_id=$1
+               AND status NOT IN ('delivered','cancelled')
+               AND payment_method='cash'`,
             [req.user.userId]
           );
-          const totalDelivered = Number(historyCheck.rows[0]?.total_delivered || 0);
-          const cashDelivered  = Number(historyCheck.rows[0]?.cash_delivered  || 0);
-          const exemptByHistory = totalDelivered >= 10 || cashDelivered >= 5;
+          if (Number(activeCheck.rows[0]?.cnt || 0) > 0) {
+            const historyCheck = await query(
+              `SELECT
+                 COUNT(*) FILTER (WHERE status='delivered') AS total_delivered,
+                 COUNT(*) FILTER (WHERE status='delivered' AND payment_method='cash') AS cash_delivered
+               FROM orders WHERE customer_id=$1`,
+              [req.user.userId]
+            );
+            const totalDelivered  = Number(historyCheck.rows[0]?.total_delivered || 0);
+            const cashDelivered   = Number(historyCheck.rows[0]?.cash_delivered  || 0);
+            const exemptByHistory = totalDelivered >= 10 || cashDelivered >= 5;
 
-          let exemptByRestaurant = false;
-          if (!exemptByHistory) {
-            try {
-              const restCheck = await query('SELECT allow_frequent_customers FROM restaurants WHERE id=$1', [restaurantId]);
-              exemptByRestaurant = Boolean(restCheck.rows[0]?.allow_frequent_customers);
-            } catch (e) { if (!isMissingColumnError(e)) throw e; }
+            let exemptByRestaurant = false;
+            if (!exemptByHistory) {
+              try {
+                const restCheck = await query(
+                  'SELECT allow_frequent_customers FROM restaurants WHERE id=$1', [restaurantId]
+                );
+                exemptByRestaurant = Boolean(restCheck.rows[0]?.allow_frequent_customers);
+              } catch (e) { if (!isMissingColumnError(e)) throw e; }
+            }
+
+            if (!exemptByHistory && !exemptByRestaurant)
+              return next(new AppError(409, 'Ya tienes un pedido en efectivo en curso. Espera a que sea entregado.'));
           }
-
-          if (!exemptByHistory && !exemptByRestaurant)
-            return next(new AppError(409, 'Ya tienes un pedido en curso. Espera a que sea entregado.'));
+        } catch (e) {
+          if (!isMissingColumnError(e) && !isMissingRelationError(e)) throw e;
         }
-      } catch (e) {
-        if (!isMissingColumnError(e) && !isMissingRelationError(e)) throw e;
       }
 
       // ── Calcular totales ──────────────────────────────────────────────────
@@ -180,10 +188,12 @@ export function registerCreationRoutes(router, deps) {
       const paymentMethod = payment_method || 'cash';
       const tipCents      = Number(tip_cents) || 0;
 
-      // ── Validar límite de efectivo ────────────────────────────────────────
+      // ── Límite de monto máximo — solo efectivo ────────────────────────────
       if (paymentMethod === 'cash') {
         try {
-          const cashLimitRow = await query('SELECT max_cash_cents FROM restaurants WHERE id=$1', [restaurantId]);
+          const cashLimitRow = await query(
+            'SELECT max_cash_cents FROM restaurants WHERE id=$1', [restaurantId]
+          );
           const maxCash = cashLimitRow.rows[0]?.max_cash_cents;
           if (maxCash && maxCash > 0) {
             const grandTotal = totalCents + serviceFee + deliveryFee + tipCents;
@@ -191,20 +201,6 @@ export function registerCreationRoutes(router, deps) {
               return next(new AppError(409, `El pedido supera el límite de efectivo ($${(maxCash/100).toFixed(2)}).`));
           }
         } catch (e) { if (!isMissingColumnError(e)) throw e; }
-      }
-
-      // ── Verificar monto del pago con tarjeta ──────────────────────────────
-      if (paymentMethod === 'card') {
-        const expectedTotal = totalCents + serviceFee + deliveryFee + tipCents;
-        // Verificar que el monto del intent coincide (tolerancia de $1 MXN por redondeos)
-        const piRes = await fetch(`https://api.stripe.com/v1/payment_intents/${stripe_payment_intent_id}`, {
-          headers: { Authorization: `Bearer ${env.stripeSecretKey}` },
-        });
-        const pi = await piRes.json().catch(() => ({}));
-        if (Math.abs(pi.amount - expectedTotal) > 100) {
-          console.warn(`[pedido] monto intent ${pi.amount} ≠ esperado ${expectedTotal}`);
-          // No rechazar — puede haber diferencias por propina ajustada. Solo loguear.
-        }
       }
 
       // ── Crear pedido ──────────────────────────────────────────────────────
@@ -216,10 +212,10 @@ export function registerCreationRoutes(router, deps) {
            delivery_lat, delivery_lng, restaurant_lat, restaurant_lng,
            estimated_volume_liters, restaurant_confirmed
          )
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,false)
+         VALUES($1,$2,'created',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,false)
          RETURNING *`,
         [
-          req.user.userId, restaurantId, 'created', totalCents,
+          req.user.userId, restaurantId, totalCents,
           serviceFee, deliveryFee, restaurantFee,
           paymentMethod, tipCents, deliveryAddress,
           orderDeliveryLat, orderDeliveryLng, restaurantLat, restaurantLng,
@@ -251,25 +247,41 @@ export function registerCreationRoutes(router, deps) {
       try { await serializedOffer(order.id, offerNextDrivers); } catch (e) {
         if (!isMissingRelationError(e) && !isMissingColumnError(e)) throw e;
       }
-
       initKitchenTiming(order.id, restaurantId).catch(() => {});
 
       const updated = await query('SELECT * FROM orders WHERE id=$1', [order.id]);
       orderEvents.emitOrderUpdate(order.id, updated.rows[0].status);
 
-      // ── Notificar al restaurante ──────────────────────────────────────────
+      // ── Notificar al restaurante (SSE + push fallback) ────────────────────
       try {
         const restInfo = await query('SELECT owner_user_id, name FROM restaurants WHERE id=$1', [restaurantId]);
         if (restInfo.rowCount > 0) {
-          sseHub.sendToUser(restInfo.rows[0].owner_user_id, 'new_order', {
-            orderId:            order.id,
-            status:             'created',
+          const ownerId = restInfo.rows[0].owner_user_id;
+          const ssePayload = {
+            orderId:             order.id,
+            status:              'created',
             totalCents,
             paymentMethod,
             restaurantConfirmed: false,
-            restaurantName:     restInfo.rows[0].name,
-            itemCount:          items.length,
-          });
+            restaurantName:      restInfo.rows[0].name,
+            itemCount:           items.length,
+          };
+
+          // SSE — entrega inmediata si la app está en primer plano
+          sseHub.sendToUser(ownerId, 'new_order', ssePayload);
+
+          // Push VAPID — fallback para cuando la app está en background/cerrada
+          sendPushToUser(ownerId, {
+            title:    '🛒 Nuevo pedido',
+            body:     `${items.length} producto${items.length !== 1 ? 's' : ''} · $${(totalCents / 100).toFixed(2)}`,
+            tag:      `new_order_${order.id}`,
+            group:    'new_order',
+            priority: 'high',
+            url:      '/restaurant',
+            vibrate:  [200, 100, 200],
+            pushType: 'new_order',
+            orderId:  order.id,
+          }).catch(e => console.warn('[push] new_order restaurant:', e.message));
         }
       } catch (_) {}
 
