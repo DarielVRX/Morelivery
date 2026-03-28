@@ -87,10 +87,15 @@ export function useRealtimeOrders(
       }
       if (shouldNotifyInBackground()) {
         notifyRealtime({
-          title: '🛵 Nueva oferta', body: 'Tienes un pedido por aceptar.',
-          tag: 'offers', group: 'driver', url: '/driver',
+          title: 'Nueva oferta de pedido',
+          body: data?.restaurantName
+            ? `Pedido de ${data.restaurantName}`
+            : 'Tienes un pedido por aceptar',
+          tag: data?.orderId ? `offer_${data.orderId}` : 'offers',
+          group: 'driver', url: '/driver',
           vibrate: VIBRATE.offer, pushType: 'new_offer',
-          actions: [{ action: 'accept', title: '✓ Aceptar' }, { action: 'reject', title: '✕ Rechazar' }],
+          orderId: data?.orderId,
+          actions: [{ action: 'accept', title: 'Aceptar' }, { action: 'reject', title: 'Rechazar' }],
         });
       }
     });
@@ -100,7 +105,7 @@ export function useRealtimeOrders(
       alertNewOrder();
       if (shouldNotifyInBackground()) {
         notifyRealtime({
-          title: '🆕 Nuevo pedido', body: 'Pedido recibido — confirma para preparar',
+          title: 'Nuevo pedido', body: 'Pedido recibido — confirma para preparar',
           tag: `new_order_${data.orderId}`, group: 'kitchen', url: '/restaurant/pedidos',
           vibrate: VIBRATE.new_order, pushType: 'new_order', orderId: data.orderId,
           actions: [{ action: 'confirm', title: '✓ Confirmar' }],
@@ -113,7 +118,7 @@ export function useRealtimeOrders(
       alertEta();
       if (shouldNotifyInBackground()) {
         notifyRealtime({
-          title: '🛵 Tu repartidor se acerca',
+          title: 'Tu repartidor se acerca',
           body:  data.message || `Llegará en aprox. ${data.etaMins} min`,
           tag: `eta_${data.orderId}`, group: 'customer', url: '/customer/pedidos',
           vibrate: VIBRATE.eta_alert, pushType: 'driver_eta_alert', orderId: data.orderId,
@@ -207,7 +212,7 @@ export function useRealtimeOrders(
       cb.current.support?.(data);
       if (shouldNotifyInBackground()) {
         notifyRealtime({
-          title: '🛟 Soporte', body: data.text || 'Nuevo mensaje de soporte',
+          title: 'Soporte', body: data.text || 'Nuevo mensaje de soporte',
           tag: 'support', group: 'support', url: '/profile',
           vibrate: VIBRATE.support,
         });
@@ -219,7 +224,7 @@ export function useRealtimeOrders(
       alertDriverArrivedRestaurant();
       if (shouldNotifyInBackground()) {
         notifyRealtime({
-          title: '🛵 Conductor llegó', body: `${data.driverName || 'El conductor'} recogió el pedido`,
+          title: 'Conductor llegó', body: `${data.driverName || 'El conductor'} recogió el pedido`,
           tag: 'kitchen', group: 'kitchen', url: '/restaurant',
           vibrate: VIBRATE.driver_arrived_restaurant,
         });
@@ -232,7 +237,7 @@ export function useRealtimeOrders(
       navigator?.vibrate?.(VIBRATE.cancelled);
       if (shouldNotifyInBackground()) {
         notifyRealtime({
-          title: '⚠️ Pedido cancelado',
+          title: 'Pedido cancelado',
           body: 'El cliente canceló mientras estabas preparando',
           tag: 'kitchen_cancel', group: 'kitchen', url: '/restaurant',
           vibrate: VIBRATE.cancelled, priority: 'high',
@@ -281,3 +286,4 @@ export function useRealtimeOrders(
     };
   }, [connect]);
 }
+

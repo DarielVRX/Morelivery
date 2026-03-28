@@ -141,6 +141,13 @@ if (typeof window !== 'undefined') {
   window.addEventListener('load', () => {
     registerServiceWorker();
     requestNotificationPermission();
+    // Re-suscribir push si el permiso ya está granted (returning users: driver, restaurant)
+    // requestNotificationPermission() solo corre el prompt si el permiso es 'default'
+    // Para usuarios que ya aceptaron, necesitamos re-enviar la suscripción al backend
+    if ('Notification' in window && Notification.permission === 'granted') {
+      // Pequeño delay para que el SW esté listo
+      setTimeout(() => trySubscribePush(), 2000);
+    }
   });
 }
 
@@ -153,3 +160,4 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </BrowserRouter>
   </React.StrictMode>
 );
+
