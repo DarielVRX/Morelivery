@@ -114,10 +114,20 @@ export function useDriverHomeRuntime({
 
   const scheduleAutoCenter = useCallback(() => {
     if (autoCenterRef.current) clearTimeout(autoCenterRef.current);
-    if (centerModeRef.current !== 'nav') return;
+    const mode = centerModeRef.current;
+
+    // nextStop y overview: restaurar su propia vista tras 10s sin interacción
+    // nav y free: restaurar follow tras 5s sin interacción
+    const delay = (mode === 'nextStop' || mode === 'overview') ? 10000 : 5000;
+
     autoCenterRef.current = setTimeout(() => {
-      if (centerModeRef.current === 'nav') setCenterSignal('nav');
-    }, 5000);
+      const currentMode = centerModeRef.current;
+      // Restaurar la vista del modo actual — cada modo recuerda su propia perspectiva
+      if (currentMode === 'nav')      setCenterSignal('nav');
+      else if (currentMode === 'free')     setCenterSignal('free');
+      else if (currentMode === 'nextStop') setCenterSignal('nextStop');
+      else if (currentMode === 'overview') setCenterSignal('overview');
+    }, delay);
   }, []);
 
   const handleMapInteraction = useCallback(() => {

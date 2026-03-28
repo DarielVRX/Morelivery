@@ -793,18 +793,22 @@ export async function getRedisClient() {
 // para obtener drivers elegibles y construye el sobre de candidatos
 // usando OSRM real (con caché).
 //
-// Diferencias respecto al simulador:
-//   - No usa world.drivers — consulta driver_profiles + orders en DB
-//   - getSpeedKmh: usa vehicle_type de la DB (bike=20, moto=35, car=40)
-//   - El filtro de capacidad usa MAX del param, no driver.max_orders
-//   - disconnect_penalties viene de driver_profiles.disconnect_penalties
-//   - No hay _reservedSlots — el FOR UPDATE SKIP LOCKED de PG lo maneja
+// CAMBIOS respecto a versión anterior:
+//   - Agrega _getClosestViableStop(): encuentra el mejor punto de inserción
+//     en la ruta actual del driver (posición actual o stop ya comprometido
+//     cercano al restaurante). Portado de AssignmentCandidateFinder.js.
+//   - Agrega loadDriverActiveStops(): carga stops activos del driver desde DB
+//     para poder calcular el viableStop correctamente.
+//   - etaToRestaurant ahora se calcula via viableStop, no directo desde pos del driver.
+//   - bridgePenaltyS ahora refleja el desvío real desde viableStop al restaurante.
+//   - approxScore se mantiene en el envelope pero NO se usa como criterio de ranking
+//     en topDrivers — el simulador es el árbitro final.
+//   - viableStop y activeStops se exponen en cada candidato para el simulador.
 
 import { query } from '../config/db.js';
 import { haversineMeters } from '../utils/geo.js';
 import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
-import { shortId } from '../utils/geo.js';
 import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
 
 /**
@@ -825,14 +829,14 @@ function speedKmhByVehicle(vehicleType) {
  * Carga drivers candidatos desde la DB:
  * - Disponibles y activos
  * - Bajo el límite de max_active_orders_per_driver
- * - Sin cooldown activo para ESTE pedido (no en order_driver_offers expirado/rechazado con wait_until > NOW)
+ * - Sin cooldown activo para ESTE pedido
  * - Con posición GPS registrada
  *
  * @param {string} orderId
  * @returns {Promise<Array>}
  */
 async function loadCandidateDrivers(orderId) {
-  const maxActive = getParam('max_active_orders_per_driver', 4);
+  const maxActive    = getParam('max_active_orders_per_driver', 4);
   const maxPenalties = getParam('disconnect_penalty_max', 3);
 
   const r = await query(
@@ -853,12 +857,10 @@ async function loadCandidateDrivers(orderId) {
        AND u.status = 'active'
        AND dp.last_lat IS NOT NULL
        AND dp.last_lng IS NOT NULL
-       -- Bajo el límite de capacidad
        AND (
          SELECT COUNT(*) FROM orders o
          WHERE o.driver_id = dp.user_id AND o.status = ANY($1::text[])
        ) < $2
-       -- Sin cooldown activo para este pedido
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
          WHERE od.order_id = $3
@@ -866,14 +868,12 @@ async function loadCandidateDrivers(orderId) {
            AND od.status IN ('rejected','released','expired')
            AND od.wait_until > NOW()
        )
-       -- No aceptó ya este pedido
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
          WHERE od.order_id = $3
            AND od.driver_id = dp.user_id
            AND od.status = 'accepted'
        )
-       -- Penalizaciones bajo el máximo
        AND dp.disconnect_penalties < $4`,
     [ACTIVE_STATUSES, maxActive, orderId, maxPenalties]
   );
@@ -891,9 +891,143 @@ async function loadCandidateDrivers(orderId) {
 }
 
 /**
+ * Carga los stops activos de un driver desde DB.
+ * Se usa para calcular el viableStop (punto de inserción óptimo).
+ *
+ * @param {string} driverId
+ * @returns {Promise<Array<{ type, orderId, pos, routeIndex }>>}
+ */
+async function loadDriverActiveStops(driverId) {
+  const r = await query(
+    `SELECT
+       o.id,
+       o.status,
+       o.delivery_lat                         AS cust_lat,
+       o.delivery_lng                         AS cust_lng,
+       COALESCE(ru.home_lat, rest.lat)        AS rest_lat,
+       COALESCE(ru.home_lng, rest.lng)        AS rest_lng
+     FROM orders o
+     JOIN restaurants rest ON rest.id = o.restaurant_id
+     LEFT JOIN users ru    ON ru.id   = rest.owner_user_id
+     WHERE o.driver_id = $1
+       AND o.status    = ANY($2::text[])
+     ORDER BY o.accepted_at ASC NULLS LAST`,
+    [driverId, ACTIVE_STATUSES]
+  );
+
+  const stops = [];
+  let idx = 0;
+
+  for (const row of r.rows) {
+    if (row.status !== 'on_the_way' && row.rest_lat && row.rest_lng) {
+      stops.push({
+        type:       'pickup',
+        orderId:    row.id,
+        pos:        { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
+        routeIndex: idx++,
+      });
+    }
+    if (row.cust_lat && row.cust_lng) {
+      stops.push({
+        type:       'delivery',
+        orderId:    row.id,
+        pos:        { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
+        routeIndex: idx++,
+      });
+    }
+  }
+
+  return stops;
+}
+
+/**
+ * Encuentra el punto de inserción óptimo para el nuevo pedido en la ruta
+ * actual del driver.
+ *
+ * Candidatos:
+ *   1. Posición actual del driver (type: 'driver')
+ *   2. Cualquier stop ya comprometido en ruta que esté dentro del radio
+ *      del restaurante — insertar el pickup nuevo después de ese stop
+ *      puede ser más eficiente que desviar desde la posición actual.
+ *
+ * Retorna el candidato con menor distancia al restaurante.
+ *
+ * @param {{lat,lng}} driverPos
+ * @param {Array}     activeStops   — de loadDriverActiveStops()
+ * @param {{lat,lng}} restaurantPos
+ * @param {number}    maxRadiusM
+ * @returns {{ type, orderId, pos, distToRestaurant, routeIndex? } | null}
+ */
+function getClosestViableStop(driverPos, activeStops, restaurantPos, maxRadiusM) {
+  const candidates = [];
+
+  // Posición actual del driver
+  const driverDist = haversineMeters(driverPos, restaurantPos);
+  if (driverDist < maxRadiusM) {
+    candidates.push({
+      type:              'driver',
+      orderId:           null,
+      pos:               { ...driverPos },
+      distToRestaurant:  driverDist,
+    });
+  }
+
+  // Stops ya en ruta
+  for (const stop of activeStops) {
+    const dist = haversineMeters(stop.pos, restaurantPos);
+    if (dist >= maxRadiusM) continue;
+    candidates.push({
+      type:             stop.type,
+      orderId:          stop.orderId,
+      pos:              { ...stop.pos },
+      routeIndex:       stop.routeIndex,
+      distToRestaurant: dist,
+    });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Retornar el candidato más cercano al restaurante
+  candidates.sort((a, b) => a.distToRestaurant - b.distToRestaurant);
+  return candidates[0];
+}
+
+/**
+ * Estima el ETA del driver hasta el viableStop recorriendo los stops previos
+ * en orden de ruta.
+ *
+ * Si viableStop es la posición del driver (type='driver'), ETA = 0.
+ *
+ * @param {{lat,lng}}  driverPos
+ * @param {Array}      activeStops
+ * @param {object}     viableStop
+ * @param {object}     driverObj    — { speed_kmh }
+ * @returns {Promise<number>}       segundos
+ */
+async function estimateEtaToViableStop(driverPos, activeStops, viableStop, driverObj) {
+  if (!viableStop || viableStop.type === 'driver') return 0;
+
+  let pos     = driverPos;
+  let eta     = 0;
+
+  for (const stop of activeStops) {
+    const travelSec = await etaEstimator.estimate(pos, stop.pos, driverObj);
+    eta += travelSec;
+    pos  = stop.pos;
+
+    const match =
+      (Number.isFinite(viableStop.routeIndex) && viableStop.routeIndex === stop.routeIndex) ||
+      (stop.type === viableStop.type && stop.orderId === viableStop.orderId);
+
+    if (match) return eta;
+  }
+
+  return 0;
+}
+
+/**
  * Construye el envelope de candidatos para un pedido.
- * Para cada driver calcula ETAs relevantes y una aproximación del score
- * que luego RouteInsertionSimulator afina.
+ * Para cada driver calcula ETAs relevantes usando el viableStop real.
  *
  * @param {string} orderId
  * @param {{ lat: number, lng: number }} restaurantPos
@@ -901,72 +1035,101 @@ async function loadCandidateDrivers(orderId) {
  * @returns {Promise<{ topDrivers: Array, viableDrivers: Array }>}
  */
 export async function findCandidates(orderId, restaurantPos, customerPos) {
-  const maxRadiusM   = getParam('max_pickup_radius_km', 5) * 1000;
-  const hardTopK     = Math.max(1, getParam('assignment_hard_top_k', 5));
-  const nearbyPrefM  = Math.max(25, getParam('nearby_driver_preference_m', 250));
+  const maxRadiusM  = getParam('max_pickup_radius_km', 5) * 1000;
+  const hardTopK    = Math.max(1, getParam('assignment_hard_top_k', 5));
+  const nearbyPrefM = Math.max(25, getParam('nearby_driver_preference_m', 250));
 
   const drivers = await loadCandidateDrivers(orderId);
-
   if (drivers.length === 0) return { topDrivers: [], viableDrivers: [] };
 
-  // Filtrar por radio y calcular ETAs en paralelo
+  // Filtrar por radio (distancia directa driver→restaurante como pre-filtro rápido)
   const withRadius = drivers.filter(d =>
     haversineMeters(d.pos, restaurantPos) < maxRadiusM
   );
-
   if (withRadius.length === 0) return { topDrivers: [], viableDrivers: [] };
 
+  // Construir envelopes en paralelo
   const envelopes = await Promise.all(
     withRadius.map(async d => {
-      const driverObj = { speed_kmh: d.speedKmh };
-      const [etaDriverToRestaurant, etaRestaurantToCustomer] = await Promise.all([
-        etaEstimator.estimate(d.pos, restaurantPos, driverObj),
+      const driverObj  = { speed_kmh: d.speedKmh };
+      const speedMs    = Math.max(1, (d.speedKmh * 1000) / 3600);
+
+      // Cargar stops activos del driver para calcular viableStop
+      const activeStops = await loadDriverActiveStops(d.id);
+
+      // Encontrar punto de inserción óptimo
+      const viableStop = getClosestViableStop(d.pos, activeStops, restaurantPos, maxRadiusM);
+
+      // Sin viableStop el driver no puede tomar el pedido
+      if (!viableStop) return null;
+
+      // ETAs
+      const [etaToViableStop, etaViableToRestaurant, etaRestaurantToCustomer] = await Promise.all([
+        estimateEtaToViableStop(d.pos, activeStops, viableStop, driverObj),
+        etaEstimator.estimate(viableStop.pos, restaurantPos, driverObj),
         etaEstimator.estimate(restaurantPos, customerPos, driverObj),
       ]);
 
       const directDriverToRestaurantMeters = haversineMeters(d.pos, restaurantPos);
-      const speedMs = Math.max(1, (d.speedKmh * 1000) / 3600);
 
-      // bridgePenaltyS: coste de desvío desde posición actual al restaurante
-      // (simplificado sin stops intermedios — el simulador completo lo hace en RouteInsertionSimulator)
-      const bridgePenaltyS = directDriverToRestaurantMeters / speedMs;
+      // bridgePenaltyS: desvío desde viableStop al restaurante
+      // Más preciso que antes donde se calculaba desde la posición directa del driver
+      const driverBridgeMeters = Math.max(
+        0,
+        directDriverToRestaurantMeters - (viableStop.distToRestaurant ?? 0)
+      );
+      const bridgePenaltyS = driverBridgeMeters / speedMs;
       const loadPenalty    = d.activeOrders * getParam('fairness_penalty_per_order_s', 120);
 
+      // approxScore se conserva en el envelope para logging/debug
+      // pero NO se usa como criterio de ranking — el simulador decide
       const approxScore =
-        etaDriverToRestaurant +
+        etaToViableStop +
+        etaViableToRestaurant +
         etaRestaurantToCustomer +
         loadPenalty +
-        bridgePenaltyS * 0.35;
+        bridgePenaltyS * getParam('pickup_bridge_penalty_factor', 1);
 
       return {
-        driver:                       d,
+        driver:                        d,
+        viableStop,
+        activeStops,
         approxScore,
-        etaToRestaurant:              etaDriverToRestaurant,
+        etaToViableStop,
+        etaViableToRestaurant,
         etaRestaurantToCustomer,
-        etaToNewCustomer:             etaDriverToRestaurant + etaRestaurantToCustomer,
+        etaToRestaurant:               etaToViableStop + etaViableToRestaurant,
+        etaToNewCustomer:              etaToViableStop + etaViableToRestaurant + etaRestaurantToCustomer,
         directDriverToRestaurantMeters,
         bridgePenaltyS,
         loadPenalty,
-        activeOrders:                 d.activeOrders,
-        driverSpeedKmh:               d.speedKmh,
-        disconnectPenalties:          d.disconnectPenalties,
-        valid:                        true,
-        validExisting:                true,
+        activeOrders:                  d.activeOrders,
+        driverSpeedKmh:                d.speedKmh,
+        disconnectPenalties:           d.disconnectPenalties,
+        valid:                         true,
+        validExisting:                 true,
       };
     })
   );
 
-  // Ordenar por approxScore
-  const viableDrivers = [...envelopes].sort((a, b) => a.approxScore - b.approxScore);
+  // Filtrar nulls (drivers sin viableStop)
+  const validEnvelopes = envelopes.filter(Boolean);
+  if (validEnvelopes.length === 0) return { topDrivers: [], viableDrivers: [] };
 
-  // Preferir drivers cercanos al restaurante
+  // viableDrivers ordenados por etaToNewCustomer (para logging/debug)
+  const viableDrivers = [...validEnvelopes].sort((a, b) => a.etaToNewCustomer - b.etaToNewCustomer);
+
+  // Preferir drivers cercanos al restaurante (o cuyo viableStop esté cerca)
   const preferredNearby = viableDrivers.filter(c =>
-    c.directDriverToRestaurantMeters <= nearbyPrefM
+    c.directDriverToRestaurantMeters <= nearbyPrefM ||
+    (c.viableStop?.distToRestaurant ?? Infinity) <= nearbyPrefM
   );
 
-  // Construir topDrivers combinando nearby + top K
-  const seen = new Set();
+  // topDrivers: nearby + top K — sin ranking por approxScore
+  // El orden aquí no importa porque el simulador evalúa todos
+  const seen       = new Set();
   const topDrivers = [];
+
   for (const c of [...preferredNearby, ...viableDrivers.slice(0, hardTopK)]) {
     if (seen.has(c.driver.id)) continue;
     seen.add(c.driver.id);
@@ -1538,65 +1701,75 @@ const CACHE_TTL_MS = 60_000; // recargar cada 60 segundos
 // (se usan si la DB no tiene la fila o si falla la carga)
 const DEFAULTS = {
   // ── Asignación / oferta ────────────────────────────────────────────────
-  offer_timeout_s:                  60,
-  cooldown_s:                       300,
-  max_active_orders_per_driver:     4,
-  assignment_retry_base_s:          2,
-  assignment_retry_max_s:           60,
-  assignment_hard_top_k:            5,
-  max_pickup_radius_km:             5,
+  offer_timeout_s:                    60,
+  cooldown_s:                         300,
+  max_active_orders_per_driver:       4,
+  assignment_retry_base_s:            2,
+  assignment_retry_max_s:             60,
+  assignment_hard_top_k:              5,
+  max_pickup_radius_km:               5,
+  simulation_budget_per_tick:         75,   // máximo de simulaciones por ciclo de asignación
+  max_customer_restaurant_distance_km:8,    // cancela pedidos con distancia restaurante→cliente mayor a esto
 
   // ── Scoring ────────────────────────────────────────────────────────────
-  fairness_penalty_per_order_s:     120,
-  soft_sla_penalty_factor:          2,
-  hard_sla_penalty_s:               3000,
-  pickup_proximity_penalty_factor:  0.35,
-  nearby_driver_preference_m:       250,
-  max_delivery_time_s:              1800,
-  disconnect_penalty_max:           3,
-  disconnect_penalty_s:             300,
-  reconnect_window_s:               600,
+  fairness_penalty_per_order_s:       120,
+  soft_sla_penalty_factor:            2,
+  hard_sla_penalty_s:                 3000,
+  pickup_proximity_penalty_factor:    0.35,
+  pickup_bridge_penalty_factor:       1,    // multiplicador sobre bridgePenaltyS en scoring
+  nearby_driver_preference_m:         250,
+  max_delivery_time_s:                1800,
+  disconnect_penalty_max:             3,
+  disconnect_penalty_s:               300,
+  reconnect_window_s:                 600,
+
+  // ── Ruteo / secuenciación ──────────────────────────────────────────────
+  sla_critical_margin_s:              180,  // margen bajo el cual un delivery se considera en riesgo para poda de permutaciones
 
   // ── Rebalanceo ─────────────────────────────────────────────────────────
-  rebalancer_interval_s:            300,
-  transfer_min_gain_s:              10,
-  transfer_cooldown_s:              60,
-  transfer_max_route_eta_s:         180,   // ruta máxima en s para disparar rebalanceo
+  rebalancer_interval_s:              300,
+  transfer_min_gain_s:                10,
+  transfer_cooldown_s:                60,
+  transfer_max_route_eta_s:           180,  // ruta máxima en s para disparar rebalanceo
 
   // ── Cocina ─────────────────────────────────────────────────────────────
-  kitchen_wait_threshold_s:         120,
-  kitchen_estimate_diff_threshold_s:90,
+  kitchen_wait_threshold_s:           120,
+  kitchen_estimate_diff_threshold_s:  90,
 
   // ── Volumen / mochila ──────────────────────────────────────────────────
-  default_bag_capacity_liters:      25,    // litros de mochila si driver no especificó
+  default_bag_capacity_liters:        25,   // litros de mochila si driver no especificó
 };
 
 // Catálogo completo con descripción — fuente de verdad para el panel de admin
 // El admin muestra TODOS estos params aunque no existan en DB todavía
 const PARAM_CATALOG = {
-  offer_timeout_s:                  { default: 60,   description: 'Segundos antes de expirar una oferta sin respuesta' },
-  cooldown_s:                       { default: 300,  description: 'Penalización en segundos tras rechazar o expirar oferta' },
-  max_active_orders_per_driver:     { default: 4,    description: 'Límite de pedidos simultáneos por driver' },
-  assignment_retry_base_s:          { default: 2,    description: 'Delay base en segundos entre reintentos de asignación' },
-  assignment_retry_max_s:           { default: 60,   description: 'Delay máximo en segundos entre reintentos de asignación' },
-  assignment_hard_top_k:            { default: 5,    description: 'Número máximo de candidatos a evaluar por ronda' },
-  max_pickup_radius_km:             { default: 5,    description: 'Radio máximo en km para considerar un driver como candidato' },
-  fairness_penalty_per_order_s:     { default: 120,  description: 'Penalización de scoring por pedido activo adicional del driver' },
-  soft_sla_penalty_factor:          { default: 2,    description: 'Multiplicador de penalización por retraso sobre SLA' },
-  hard_sla_penalty_s:               { default: 3000, description: 'Penalización fija (segundos) cuando se excede el SLA' },
-  pickup_proximity_penalty_factor:  { default: 0.35, description: 'Factor de penalización por distancia driver→restaurante' },
-  nearby_driver_preference_m:       { default: 250,  description: 'Metros de preferencia para drivers cercanos al restaurante' },
-  max_delivery_time_s:              { default: 1800, description: 'SLA máximo de entrega en segundos (30 min default)' },
-  disconnect_penalty_max:           { default: 3,    description: 'Penalizaciones acumuladas antes de excluir al driver de asignaciones' },
-  disconnect_penalty_s:             { default: 300,  description: 'Penalización de scoring (segundos) por cada desconexión previa' },
-  reconnect_window_s:               { default: 600,  description: 'Ventana en segundos para que un driver reconecte tras desconexión' },
-  rebalancer_interval_s:            { default: 300,  description: 'Cada cuántos segundos corre el motor de rebalanceo automático' },
-  transfer_min_gain_s:              { default: 10,   description: 'Ganancia mínima en segundos para aplicar rebalanceo automático' },
-  transfer_cooldown_s:              { default: 60,   description: 'Tiempo mínimo entre transferencias del mismo pedido' },
-  transfer_max_route_eta_s:         { default: 180,  description: 'ETA de ruta máximo (s) para disparar rebalanceo en un driver' },
-  kitchen_wait_threshold_s:         { default: 120,  description: 'Segundos de espera en restaurante que activan sugerencia de ajuste' },
-  kitchen_estimate_diff_threshold_s:{ default: 90,   description: 'Diferencia mínima entre estimado y real para sugerir cambio de prep' },
-  default_bag_capacity_liters:      { default: 25,   description: 'Litros de capacidad de mochila si el driver no especificó la suya' },
+  offer_timeout_s:                    { default: 60,   description: 'Segundos antes de expirar una oferta sin respuesta' },
+  cooldown_s:                         { default: 300,  description: 'Penalización en segundos tras rechazar o expirar oferta' },
+  max_active_orders_per_driver:       { default: 4,    description: 'Límite de pedidos simultáneos por driver' },
+  assignment_retry_base_s:            { default: 2,    description: 'Delay base en segundos entre reintentos de asignación' },
+  assignment_retry_max_s:             { default: 60,   description: 'Delay máximo en segundos entre reintentos de asignación' },
+  assignment_hard_top_k:              { default: 5,    description: 'Número máximo de candidatos a evaluar por ronda' },
+  max_pickup_radius_km:               { default: 5,    description: 'Radio máximo en km para considerar un driver como candidato' },
+  simulation_budget_per_tick:         { default: 75,   description: 'Número máximo de simulaciones de ruta por ciclo de asignación' },
+  max_customer_restaurant_distance_km:{ default: 8,    description: 'Distancia máxima km entre restaurante y cliente — pedidos más lejanos se cancelan automáticamente' },
+  fairness_penalty_per_order_s:       { default: 120,  description: 'Penalización de scoring por pedido activo adicional del driver' },
+  soft_sla_penalty_factor:            { default: 2,    description: 'Multiplicador de penalización por retraso sobre SLA' },
+  hard_sla_penalty_s:                 { default: 3000, description: 'Penalización fija (segundos) cuando se excede el SLA' },
+  pickup_proximity_penalty_factor:    { default: 0.35, description: 'Factor de penalización por distancia driver→restaurante' },
+  pickup_bridge_penalty_factor:       { default: 1,    description: 'Multiplicador sobre el costo de desvío (bridgePenaltyS) en el scoring' },
+  nearby_driver_preference_m:         { default: 250,  description: 'Metros de preferencia para drivers cercanos al restaurante' },
+  max_delivery_time_s:                { default: 1800, description: 'SLA máximo de entrega en segundos (30 min default)' },
+  disconnect_penalty_max:             { default: 3,    description: 'Penalizaciones acumuladas antes de excluir al driver de asignaciones' },
+  disconnect_penalty_s:               { default: 300,  description: 'Penalización de scoring (segundos) por cada desconexión previa' },
+  reconnect_window_s:                 { default: 600,  description: 'Ventana en segundos para que un driver reconecte tras desconexión' },
+  sla_critical_margin_s:              { default: 180,  description: 'Margen en segundos bajo el cual un delivery se considera crítico para poda de permutaciones de ruta' },
+  rebalancer_interval_s:              { default: 300,  description: 'Cada cuántos segundos corre el motor de rebalanceo automático' },
+  transfer_min_gain_s:                { default: 10,   description: 'Ganancia mínima en segundos para aplicar rebalanceo automático' },
+  transfer_cooldown_s:                { default: 60,   description: 'Tiempo mínimo entre transferencias del mismo pedido' },
+  transfer_max_route_eta_s:           { default: 180,  description: 'ETA de ruta máximo (s) para disparar rebalanceo en un driver' },
+  kitchen_wait_threshold_s:           { default: 120,  description: 'Segundos de espera en restaurante que activan sugerencia de ajuste' },
+  kitchen_estimate_diff_threshold_s:  { default: 90,   description: 'Diferencia mínima entre estimado y real para sugerir cambio de prep' },
+  default_bag_capacity_liters:        { default: 25,   description: 'Litros de capacidad de mochila si el driver no especificó la suya' },
 };
 
 let _params     = { ...DEFAULTS };
@@ -1704,7 +1877,6 @@ export async function saveParam(key, value, updatedBy) {
 export async function getParamsWithMeta() {
   await _ensureLoaded();
 
-  // Leer filas existentes en DB
   const r = await query(
     'SELECT key, value, description, updated_at, updated_by FROM engine_params ORDER BY key'
   ).catch(() => ({ rows: [] }));
@@ -1714,7 +1886,6 @@ export async function getParamsWithMeta() {
     dbMap[row.key] = row;
   }
 
-  // Combinar catálogo completo con lo que haya en DB
   return Object.entries(PARAM_CATALOG).map(([key, meta]) => {
     const row = dbMap[key];
     return {
@@ -1724,7 +1895,7 @@ export async function getParamsWithMeta() {
       updatedAt:   row?.updated_at   || null,
       updatedBy:   row?.updated_by   || null,
       default:     meta.default,
-      inDb:        Boolean(row),   // útil para debug — indica si ya está persistido
+      inDb:        Boolean(row),
     };
   });
 }
@@ -1747,7 +1918,6 @@ export async function seedDefaultParams() {
       values
     );
   } catch (e) {
-    // No fatal — el motor funciona sin esto gracias a DEFAULTS en código
     console.warn('[engine-params] seedDefaultParams falló (no crítico):', e.message);
   }
 }
@@ -1760,58 +1930,27 @@ export async function seedDefaultParams() {
 // Busca drivers con ruta sobreextendida y transfiere pedidos aún no recogidos a
 // drivers con mejor posición geográfica.
 //
-// DIFERENCIAS respecto al simulador:
-//   - No usa world.drivers en memoria — consulta la DB
-//   - Timeout de ejecución: si tarda más de 8s, abandona la iteración actual
-//   - Circuit breaker: si hay error grave, espera antes de reintentar
-//   - Writes a DB solo al confirmar transferencia (no en evaluación)
+// CAMBIOS respecto a versión anterior:
+//   - Pase 2 (rebalanceo automático): usa scoreCandidate() para evaluar
+//     receptores en lugar de ETA simple — consistencia con el assignment inicial.
+//   - Pase 1 (disputas): mantiene ETA puro al restaurante — criterio de
+//     urgencia, no de optimización de ruta.
+//   - rerouteDriver() se llama tras cada transferencia exitosa (ambos pases)
+//     para que el driver actualice su ruta inmediatamente via SSE.
 
 import { query } from '../config/db.js';
 import { haversineMeters } from '../utils/geo.js';
 import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
+import { scoreCandidate } from './scoring.js';
+import { rerouteDriver } from './reroute.js';
 import { sseHub } from '../modules/events/hub.js';
 import { shortId } from '../utils/geo.js';
 import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
 
-const MAX_EXEC_MS = 8_000;  // timeout de seguridad por ejecución
+const MAX_EXEC_MS = 8_000;
 
-/**
- * Carga drivers activos con sus pedidos y posición GPS.
- */
-async function loadActiveDrivers() {
-  const maxActive = getParam('max_active_orders_per_driver', 4);
-
-  const r = await query(
-    `SELECT
-       dp.user_id      AS id,
-       dp.vehicle_type,
-       dp.last_lat     AS lat,
-       dp.last_lng     AS lng,
-       dp.disconnect_penalties,
-       ARRAY_AGG(o.id ORDER BY o.accepted_at ASC) FILTER (WHERE o.id IS NOT NULL) AS order_ids,
-       COUNT(o.id)::int AS active_orders
-     FROM driver_profiles dp
-     JOIN users u ON u.id = dp.user_id
-     LEFT JOIN orders o ON o.driver_id = dp.user_id AND o.status = ANY($1::text[])
-     WHERE dp.is_available = true
-       AND u.status = 'active'
-       AND dp.last_lat IS NOT NULL
-       AND dp.last_lng IS NOT NULL
-     GROUP BY dp.user_id, dp.vehicle_type, dp.last_lat, dp.last_lng, dp.disconnect_penalties`,
-    [ACTIVE_STATUSES]
-  );
-
-  return r.rows.map(row => ({
-    id:                  row.id,
-    vehicleType:         row.vehicle_type,
-    speedKmh:            speedKmhByVehicle(row.vehicle_type),
-    pos:                 { lat: Number(row.lat), lng: Number(row.lng) },
-    disconnectPenalties: row.disconnect_penalties ?? 0,
-    orderIds:            row.order_ids ?? [],
-    activeOrders:        row.active_orders ?? 0,
-  }));
-}
+// ─── Helpers de velocidad ─────────────────────────────────────────────────────
 
 function speedKmhByVehicle(v) {
   switch (v) {
@@ -1822,10 +1961,45 @@ function speedKmhByVehicle(v) {
   }
 }
 
-/**
- * Carga los detalles de un pedido transferible.
- * "Transferible" = assigned + no recogido + sin cooldown de transferencia reciente.
- */
+// ─── Carga de drivers activos ─────────────────────────────────────────────────
+
+async function loadActiveDrivers() {
+  const r = await query(
+    `SELECT
+       dp.user_id      AS id,
+       dp.vehicle_type,
+       dp.last_lat     AS lat,
+       dp.last_lng     AS lng,
+       dp.disconnect_penalties,
+       dp.bag_capacity_liters,
+       ARRAY_AGG(o.id ORDER BY o.accepted_at ASC) FILTER (WHERE o.id IS NOT NULL) AS order_ids,
+       COUNT(o.id)::int AS active_orders
+     FROM driver_profiles dp
+     JOIN users u ON u.id = dp.user_id
+     LEFT JOIN orders o ON o.driver_id = dp.user_id AND o.status = ANY($1::text[])
+     WHERE dp.is_available = true
+       AND u.status = 'active'
+       AND dp.last_lat IS NOT NULL
+       AND dp.last_lng IS NOT NULL
+     GROUP BY dp.user_id, dp.vehicle_type, dp.last_lat, dp.last_lng,
+              dp.disconnect_penalties, dp.bag_capacity_liters`,
+    [ACTIVE_STATUSES]
+  );
+
+  return r.rows.map(row => ({
+    id:                  row.id,
+    vehicleType:         row.vehicle_type,
+    speedKmh:            speedKmhByVehicle(row.vehicle_type),
+    pos:                 { lat: Number(row.lat), lng: Number(row.lng) },
+    disconnectPenalties: row.disconnect_penalties ?? 0,
+    bagCapacityLiters:   Number(row.bag_capacity_liters) || 25,
+    orderIds:            row.order_ids ?? [],
+    activeOrders:        row.active_orders ?? 0,
+  }));
+}
+
+// ─── Carga de pedidos transferibles ──────────────────────────────────────────
+
 async function loadTransferableOrders(driverId) {
   const cooldownSec = getParam('transfer_cooldown_s', 60);
   const r = await query(
@@ -1856,9 +2030,8 @@ async function loadTransferableOrders(driverId) {
   }));
 }
 
-/**
- * Estima ETA total de la ruta del driver (suma de segments a todos sus stops).
- */
+// ─── ETA de ruta completa ─────────────────────────────────────────────────────
+
 async function estimateRouteEta(driver) {
   if (driver.orderIds.length === 0) return 0;
 
@@ -1900,33 +2073,23 @@ async function estimateRouteEta(driver) {
   return totalEta;
 }
 
-/**
- * Carga pedidos en disputa (rebalanceo manual solicitado por el driver).
- * Criterio: assignment inicial — solo ETA al restaurante, sin minGain ni maxRouteEta.
- * El created_at original se preserva para no sacrificar el SLA.
- */
-/* Carga pedidos en disputa (rebalanceo manual solicitado por el driver).
-* Criterio: assignment inicial — solo ETA al restaurante, sin minGain ni maxRouteEta.
-* El created_at original se preserva para no sacrificar el SLA.
-*
-* MODIFICACIÓN: Ya no se filtra por disputed_until > NOW() para eliminar el timeout automático.
-* Las disputas ahora son indefinidas hasta cancelación manual o por distancia.
-*/
+// ─── Carga de disputas ────────────────────────────────────────────────────────
+
 async function loadDisputedOrders() {
   const r = await query(
     `SELECT o.id, o.driver_id, o.created_at,
-    COALESCE(ru.home_lat, rest.lat) AS rest_lat,
-                        COALESCE(ru.home_lng, rest.lng) AS rest_lng,
-                        o.delivery_lat  AS cust_lat,
-                        o.delivery_lng  AS cust_lng,
-                        o.disputed_by
-                        FROM orders o
-                        JOIN restaurants rest ON rest.id = o.restaurant_id
-                        LEFT JOIN users ru ON ru.id = rest.owner_user_id
-                        WHERE o.is_disputed = true
-                        AND o.picked_up_at IS NULL
-                        ORDER BY o.created_at ASC`,
-                        []
+            COALESCE(ru.home_lat, rest.lat) AS rest_lat,
+            COALESCE(ru.home_lng, rest.lng) AS rest_lng,
+            o.delivery_lat  AS cust_lat,
+            o.delivery_lng  AS cust_lng,
+            o.disputed_by
+     FROM orders o
+     JOIN restaurants rest ON rest.id = o.restaurant_id
+     LEFT JOIN users ru ON ru.id = rest.owner_user_id
+     WHERE o.is_disputed = true
+       AND o.picked_up_at IS NULL
+     ORDER BY o.created_at ASC`,
+    []
   );
 
   return r.rows.map(row => ({
@@ -1935,43 +2098,46 @@ async function loadDisputedOrders() {
     disputedBy:    row.disputed_by,
     createdAt:     row.created_at,
     restaurantPos: { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
-                            customerPos:   { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
+    customerPos:   { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
   }));
 }
 
+// ─── Motor principal ──────────────────────────────────────────────────────────
 
 /**
  * Motor de rebalanceo principal.
  * Retorna el número de transferencias aplicadas.
  *
- * @param {Function} onOffer  — callback SSE
+ * Pase 1 — disputas (criterio: ETA puro al restaurante)
+ *   Reasignaciones urgentes solicitadas por el driver. Se prioriza
+ *   velocidad sobre optimización de ruta.
+ *
+ * Pase 2 — rebalanceo automático (criterio: scoreCandidate())
+ *   Consistente con el assignment inicial — mismo modelo de costo.
+ *
+ * @param {Function} onOffer
  * @returns {Promise<number>}
  */
 export async function runRebalancer(onOffer) {
-  const startMs       = Date.now();
-  const minGainSec    = getParam('transfer_min_gain_s', 10);
-  const maxRouteSec   = getParam('transfer_max_route_eta_s', 180);
+  const startMs     = Date.now();
+  const minGainSec  = getParam('transfer_min_gain_s', 10);
+  const maxRouteSec = getParam('transfer_max_route_eta_s', 180);
   const maxIterations = 5;
 
   let totalTransfers = 0;
 
   try {
-    const drivers = await loadActiveDrivers();
+    const drivers   = await loadActiveDrivers();
     const maxActive = getParam('max_active_orders_per_driver', 4);
-    const driverObj = (d) => ({ speed_kmh: d.speedKmh });
 
-    // ── Pase 1: pedidos en disputa (rebalanceo manual) ────────────────────────
-    // Criterio: assignment inicial — el mejor driver por ETA al restaurante.
-    // Sin minGain ni maxRouteEta — el driver que solicitó la disputa ya aceptó
-    // que el pedido sigue en su ruta si nadie lo toma.
+    // ── Pase 1: pedidos en disputa ────────────────────────────────────────────
+    // Criterio: ETA puro al restaurante — urgencia, no optimización.
     if (Date.now() - startMs <= MAX_EXEC_MS) {
       const disputed = await loadDisputedOrders();
 
       for (const order of disputed) {
         if (Date.now() - startMs > MAX_EXEC_MS) break;
 
-        // Receptores: cualquier driver disponible excepto el que tiene el pedido
-        // y el que solicitó la disputa (ya tiene cooldown largo para este pedido)
         const recipients = drivers.filter(d =>
           d.id !== order.driverId &&
           d.id !== order.disputedBy &&
@@ -1980,11 +2146,11 @@ export async function runRebalancer(onOffer) {
 
         if (recipients.length === 0) continue;
 
-        // Evaluar por ETA al restaurante — criterio puro de assignment inicial
+        const driverObj = (d) => ({ speed_kmh: d.speedKmh });
         const evaluations = await Promise.all(
           recipients.map(async d => ({
-            driver:       d,
-            etaToPickup:  await etaEstimator.estimate(d.pos, order.restaurantPos, driverObj(d)),
+            driver:      d,
+            etaToPickup: await etaEstimator.estimate(d.pos, order.restaurantPos, driverObj(d)),
           }))
         );
 
@@ -1999,7 +2165,6 @@ export async function runRebalancer(onOffer) {
         );
         if (stillDisputed.rowCount === 0) continue;
 
-        // Transferir y limpiar disputa
         await query(
           `UPDATE orders
            SET driver_id=$1, last_driver_id=$2, last_transferred_at=NOW(),
@@ -2009,7 +2174,11 @@ export async function runRebalancer(onOffer) {
           [best.driver.id, order.driverId, order.id]
         );
 
-        console.log(`[rebalancer:disputa] order=${shortId(order.id)} ${shortId(order.driverId)} → ${shortId(best.driver.id)} (eta ~${Math.round(best.etaToPickup)}s)`);
+        console.log(
+          `[rebalancer:disputa] order=${shortId(order.id)} ` +
+          `${shortId(order.driverId)} → ${shortId(best.driver.id)} ` +
+          `(eta ~${Math.round(best.etaToPickup)}s)`
+        );
 
         sseHub.sendToUser(order.driverId, 'order_transferred_away', {
           orderId:  order.id,
@@ -2021,10 +2190,16 @@ export async function runRebalancer(onOffer) {
           message: 'Se te asignó un pedido en disputa.',
         });
 
+        // Rerouting inmediato para ambos drivers
+        await Promise.all([
+          rerouteDriver(order.driverId),
+          rerouteDriver(best.driver.id),
+        ]);
+
         // Actualizar estado local
         const sourceLocal = drivers.find(d => d.id === order.driverId);
         if (sourceLocal) {
-          sourceLocal.orderIds    = sourceLocal.orderIds.filter(id => id !== order.id);
+          sourceLocal.orderIds     = sourceLocal.orderIds.filter(id => id !== order.id);
           sourceLocal.activeOrders = Math.max(0, sourceLocal.activeOrders - 1);
         }
         const recipientLocal = drivers.find(d => d.id === best.driver.id);
@@ -2037,24 +2212,22 @@ export async function runRebalancer(onOffer) {
       }
     }
 
-    // ── Pase 2: rebalanceo automático normal ──────────────────────────────────
+    // ── Pase 2: rebalanceo automático con scoreCandidate() ────────────────────
+    // Usa el mismo modelo de costo que el assignment inicial.
     for (let iter = 0; iter < maxIterations; iter++) {
-      // Timeout de seguridad
       if (Date.now() - startMs > MAX_EXEC_MS) {
         console.warn('[rebalancer] timeout de seguridad — abortando iteración');
         break;
       }
 
-      // Calcular ETAs de rutas actuales
       const routeEtas = await Promise.all(
         drivers.map(async d => ({
-          driver:           d,
-          routeEta:         await estimateRouteEta(d),
+          driver:             d,
+          routeEta:           await estimateRouteEta(d),
           transferableOrders: await loadTransferableOrders(d.id),
         }))
       );
 
-      // Filtrar drivers sobrecargados (ruta muy larga Y tienen pedidos transferibles)
       const overloaded = routeEtas.filter(r =>
         r.routeEta > maxRouteSec && r.transferableOrders.length > 0
       );
@@ -2067,38 +2240,72 @@ export async function runRebalancer(onOffer) {
         if (Date.now() - startMs > MAX_EXEC_MS) break;
 
         for (const order of transferableOrders) {
-          const maxActive = getParam('max_active_orders_per_driver', 4);
           const recipients = drivers.filter(d =>
             d.id !== sourceDriver.id && d.activeOrders < maxActive
           );
-
           if (recipients.length === 0) continue;
 
           const driverObj = (d) => ({ speed_kmh: d.speedKmh });
 
-          // ETA del driver origen al restaurante (sin el pedido)
-          const sourceEta = await etaEstimator.estimate(
-            sourceDriver.pos, order.restaurantPos, driverObj(sourceDriver)
-          );
-
-          // Evaluar receptores
+          // Evaluar receptores con scoreCandidate() para consistencia con assignment
           const evaluations = await Promise.all(
             recipients.map(async recipient => {
-              const recipientEta = await etaEstimator.estimate(
+              const etaToPickup = await etaEstimator.estimate(
                 recipient.pos, order.restaurantPos, driverObj(recipient)
               );
-              const gain = sourceEta - recipientEta;
-              return { driver: recipient, gain, recipientEta };
+              const etaPickupToCustomer = await etaEstimator.estimate(
+                order.restaurantPos, order.customerPos, driverObj(recipient)
+              );
+              const distToRestaurant = haversineMeters(recipient.pos, order.restaurantPos);
+
+              // Construir candidato mínimo compatible con scoreCandidate()
+              const candidateForScore = {
+                etaToNewCustomer:               etaToPickup + etaPickupToCustomer,
+                activeOrders:                   recipient.activeOrders,
+                bridgePenaltyS:                 distToRestaurant / Math.max(1, (recipient.speedKmh * 1000) / 3600),
+                directDriverToRestaurantMeters: distToRestaurant,
+                driverSpeedKmh:                 recipient.speedKmh,
+              };
+
+              const { totalCost } = scoreCandidate(
+                candidateForScore,
+                { max_delivery_time_s: null },
+                recipient.disconnectPenalties ?? 0
+              );
+
+              return { driver: recipient, totalCost, etaToPickup };
             })
           );
 
+          // Score del driver origen para este pedido (baseline)
+          const sourceEtaToPickup = await etaEstimator.estimate(
+            sourceDriver.pos, order.restaurantPos, driverObj(sourceDriver)
+          );
+          const sourceEtaToCustomer = await etaEstimator.estimate(
+            order.restaurantPos, order.customerPos, driverObj(sourceDriver)
+          );
+          const sourceDistToRestaurant = haversineMeters(sourceDriver.pos, order.restaurantPos);
+          const sourceCandidateForScore = {
+            etaToNewCustomer:               sourceEtaToPickup + sourceEtaToCustomer,
+            activeOrders:                   sourceDriver.activeOrders,
+            bridgePenaltyS:                 sourceDistToRestaurant / Math.max(1, (sourceDriver.speedKmh * 1000) / 3600),
+            directDriverToRestaurantMeters: sourceDistToRestaurant,
+            driverSpeedKmh:                 sourceDriver.speedKmh,
+          };
+          const { totalCost: sourceCost } = scoreCandidate(
+            sourceCandidateForScore,
+            { max_delivery_time_s: null },
+            sourceDriver.disconnectPenalties ?? 0
+          );
+
+          // Mejor receptor: menor totalCost con ganancia mínima sobre el origen
           const best = evaluations
-            .filter(e => e.gain >= minGainSec)
-            .sort((a, b) => b.gain - a.gain)[0];
+            .filter(e => (sourceCost - e.totalCost) >= minGainSec)
+            .sort((a, b) => a.totalCost - b.totalCost)[0];
 
           if (!best) continue;
 
-          // Confirmar que el pedido aún es transferible (guard de race condition)
+          // Guard de race condition
           const stillTransferable = await query(
             `SELECT id FROM orders
              WHERE id=$1 AND status='assigned' AND picked_up_at IS NULL AND driver_id=$2`,
@@ -2114,9 +2321,12 @@ export async function runRebalancer(onOffer) {
             [best.driver.id, sourceDriver.id, order.id]
           );
 
-          console.log(`[rebalancer] order=${shortId(order.id)} ${shortId(sourceDriver.id)} → ${shortId(best.driver.id)} (ganancia ~${Math.round(best.gain)}s)`);
+          console.log(
+            `[rebalancer] order=${shortId(order.id)} ` +
+            `${shortId(sourceDriver.id)} → ${shortId(best.driver.id)} ` +
+            `(score origen=${Math.round(sourceCost)} receptor=${Math.round(best.totalCost)})`
+          );
 
-          // Notificar vía SSE al driver que pierde y al que recibe
           sseHub.sendToUser(sourceDriver.id, 'order_transferred_away', {
             orderId: order.id,
             message: 'Un pedido fue reasignado a otro conductor.',
@@ -2126,8 +2336,14 @@ export async function runRebalancer(onOffer) {
             message: 'Se te asignó un pedido transferido.',
           });
 
-          // Actualizar estado local para próximas iteraciones
-          sourceDriver.orderIds = sourceDriver.orderIds.filter(id => id !== order.id);
+          // Rerouting inmediato para ambos drivers
+          await Promise.all([
+            rerouteDriver(sourceDriver.id),
+            rerouteDriver(best.driver.id),
+          ]);
+
+          // Actualizar estado local
+          sourceDriver.orderIds     = sourceDriver.orderIds.filter(id => id !== order.id);
           sourceDriver.activeOrders = Math.max(0, sourceDriver.activeOrders - 1);
           const recipient = drivers.find(d => d.id === best.driver.id);
           if (recipient) {
@@ -2140,11 +2356,12 @@ export async function runRebalancer(onOffer) {
           break;
         }
 
-        if (didTransfer) break; // recomputar estado global
+        if (didTransfer) break;
       }
 
-      if (!didTransfer) break; // convergencia
+      if (!didTransfer) break;
     }
+
   } catch (e) {
     console.error('[rebalancer] error:', e.message);
   }
@@ -2156,6 +2373,412 @@ export async function runRebalancer(onOffer) {
   return totalTransfers;
 }
 
+=== FILE: backend/src/engine/reroute.js ===
+// backend/src/engine/reroute.js
+//
+// Módulo de rerouting reactivo.
+//
+// rerouteDriver(driverId) recalcula el orden óptimo de stops del driver
+// y emite SSE 'route_update' con la nueva secuencia.
+//
+// Se llama en cada evento que cambia la ruta del driver:
+//   - Pedido asignado (acceptOffer)
+//   - Pedido cancelado
+//   - Pickup completado (driver recogió pedido en restaurante)
+//   - Delivery completado (driver entregó pedido al cliente)
+//   - Rebalanceo: driver pierde o gana un pedido
+//   - Disputa resuelta
+//
+// El secuenciador usa el mismo algoritmo de permutaciones con poda SLA
+// que route-simulator.js para garantizar consistencia entre asignación
+// y navegación en tiempo real.
+
+import { query } from '../config/db.js';
+import { haversineMeters } from '../utils/geo.js';
+import { etaEstimator } from './eta.js';
+import { getParam } from './params.js';
+import { sseHub } from '../modules/events/hub.js';
+import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
+
+// ─── Carga de stops activos ───────────────────────────────────────────────────
+
+/**
+ * Carga los stops activos del driver desde DB con toda la metadata necesaria
+ * para el secuenciador: posición, SLA, estado, tiempo de cocina.
+ *
+ * @param {string} driverId
+ * @returns {Promise<Array<RerouteStop>>}
+ *
+ * @typedef {object} RerouteStop
+ * @property {'pickup'|'delivery'} type
+ * @property {string}  orderId
+ * @property {string}  pairOrderId    — mismo orderId, para mantener precedencia
+ * @property {{lat:number,lng:number}} pos
+ * @property {number|null} pickedUpAtSec
+ * @property {number}  slaDeadlineSec — epoch segundos en que vence el SLA
+ * @property {number}  kitchenReadyAtSec — epoch segundos en que estará listo (pickups)
+ * @property {number}  volumeLiters
+ */
+async function loadDriverStopsForReroute(driverId) {
+  const nowSec    = Date.now() / 1000;
+  const maxSlaSec = getParam('max_delivery_time_s', 1800);
+
+  const r = await query(
+    `SELECT
+       o.id,
+       o.status,
+       o.picked_up_at,
+       o.created_at,
+       o.delivery_lat                          AS cust_lat,
+       o.delivery_lng                          AS cust_lng,
+       COALESCE(ru.home_lat, rest.lat)         AS rest_lat,
+       COALESCE(ru.home_lng, rest.lng)         AS rest_lng,
+       COALESCE(o.estimated_volume_liters, 0)  AS volume_liters,
+       o.kitchen_ready_at,
+       COALESCE(cu.max_delivery_time_s, $3)    AS max_delivery_time_s
+     FROM orders o
+     JOIN restaurants rest ON rest.id = o.restaurant_id
+     LEFT JOIN users ru    ON ru.id   = rest.owner_user_id
+     JOIN users cu         ON cu.id   = o.customer_id
+     WHERE o.driver_id = $1
+       AND o.status    = ANY($2::text[])
+     ORDER BY o.accepted_at ASC NULLS LAST`,
+    [driverId, ACTIVE_STATUSES, maxSlaSec]
+  );
+
+  const stops = [];
+
+  for (const row of r.rows) {
+    const pickedUpAtSec = row.picked_up_at
+      ? new Date(row.picked_up_at).getTime() / 1000
+      : null;
+
+    // SLA deadline: desde cuándo se recogió (o desde ahora si aún no se recoge)
+    const slaBase       = pickedUpAtSec ?? nowSec;
+    const slaDeadlineSec = slaBase + Number(row.max_delivery_time_s);
+
+    // Tiempo estimado en que la cocina tendrá listo el pedido
+    const kitchenReadyAtSec = row.kitchen_ready_at
+      ? new Date(row.kitchen_ready_at).getTime() / 1000
+      : nowSec; // si no hay dato, asumir listo ya
+
+    // Pickup pendiente
+    if (row.status !== 'on_the_way' && row.rest_lat && row.rest_lng) {
+      stops.push({
+        type:             'pickup',
+        orderId:          row.id,
+        pairOrderId:      row.id,
+        pos:              { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
+        pickedUpAtSec:    null,
+        slaDeadlineSec,
+        kitchenReadyAtSec,
+        volumeLiters:     Number(row.volume_liters) || 0,
+      });
+    }
+
+    // Delivery pendiente
+    if (row.cust_lat && row.cust_lng) {
+      stops.push({
+        type:             'delivery',
+        orderId:          row.id,
+        pairOrderId:      row.id,
+        pos:              { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
+        pickedUpAtSec,
+        slaDeadlineSec,
+        kitchenReadyAtSec,
+        volumeLiters:     Number(row.volume_liters) || 0,
+      });
+    }
+  }
+
+  return stops;
+}
+
+// ─── Secuenciador de permutaciones ───────────────────────────────────────────
+
+/**
+ * Genera todas las permutaciones válidas de stops respetando la invariante
+ * de precedencia: pickup de un pedido siempre antes de su delivery.
+ *
+ * Con max_active_orders=4 el peor caso son 8 stops → máx ~2520 permutaciones.
+ *
+ * @param {RerouteStop[]} stops
+ * @returns {RerouteStop[][]}
+ */
+function generateValidPermutations(stops) {
+  const results = [];
+
+  function permute(remaining, current, pickedUp) {
+    if (remaining.length === 0) {
+      results.push(current);
+      return;
+    }
+
+    for (let i = 0; i < remaining.length; i++) {
+      const stop = remaining[i];
+
+      // Invariante de precedencia hard: no hacer delivery si no se hizo el pickup
+      if (stop.type === 'delivery' && !pickedUp.has(stop.pairOrderId)) continue;
+
+      const newPickedUp = stop.type === 'pickup'
+        ? new Set([...pickedUp, stop.pairOrderId])
+        : pickedUp;
+
+      permute(
+        [...remaining.slice(0, i), ...remaining.slice(i + 1)],
+        [...current, stop],
+        newPickedUp
+      );
+    }
+  }
+
+  // Stops de pedidos ya recogidos (on_the_way) no tienen pickup pendiente —
+  // sus pairOrderIds ya están en el set inicial de pickedUp
+  const alreadyPickedUp = new Set(
+    stops
+      .filter(s => s.type === 'delivery' && s.pickedUpAtSec !== null)
+      .map(s => s.pairOrderId)
+  );
+
+  permute(stops, [], alreadyPickedUp);
+  return results;
+}
+
+/**
+ * Poda permutaciones donde un delivery en riesgo crítico llega tarde,
+ * siempre que el stop que lo bloquea NO esté también en riesgo.
+ *
+ * Es una poda suave — no fuerza posiciones, solo descarta secuencias
+ * matemáticamente malas.
+ *
+ * @param {RerouteStop[][]} permutations
+ * @param {{lat,lng}} driverPos
+ * @param {object} driverObj  — { speed_kmh }
+ * @param {number} nowSec
+ * @returns {RerouteStop[][]}
+ */
+function pruneBySla(permutations, driverPos, driverObj, nowSec) {
+  const criticalMargin = getParam('sla_critical_margin_s', 180);
+
+  // Identificar stops con margen crítico
+  const criticalOrders = new Set();
+  for (const perm of permutations.slice(0, 1)) { // usar primera perm solo para identificar críticos
+    let pos  = driverPos;
+    let time = nowSec;
+    for (const stop of perm) {
+      const eta = etaEstimator.estimateSync(pos, stop.pos, driverObj);
+      time += eta;
+      pos   = stop.pos;
+      if (stop.type === 'delivery') {
+        const remaining = stop.slaDeadlineSec - nowSec;
+        if (remaining < criticalMargin) criticalOrders.add(stop.orderId);
+      }
+    }
+  }
+
+  if (criticalOrders.size === 0) return permutations; // nada crítico, no podar
+
+  return permutations.filter(perm => {
+    let pos  = driverPos;
+    let time = nowSec;
+
+    for (const stop of perm) {
+      const eta = etaEstimator.estimateSync(pos, stop.pos, driverObj);
+      time += eta;
+      pos   = stop.pos;
+
+      if (stop.type === 'delivery' && criticalOrders.has(stop.orderId)) {
+        // Si este delivery crítico llega tarde en esta permutación, descartar
+        // a menos que el stop anterior sea también crítico (conflicto inevitable)
+        if (time > stop.slaDeadlineSec) return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+/**
+ * Evalúa el costo global de una secuencia de stops.
+ * Costo = Σ max(0, etaEntrega_i - slaDeadline_i)
+ * Una sola cifra que representa el daño total al SLA del conjunto.
+ *
+ * @param {RerouteStop[]} sequence
+ * @param {{lat,lng}} driverPos
+ * @param {object} driverObj
+ * @param {number} nowSec
+ * @returns {number}
+ */
+function evaluateSequenceCost(sequence, driverPos, driverObj, nowSec) {
+  let pos       = driverPos;
+  let time      = nowSec;
+  let totalCost = 0;
+
+  for (const stop of sequence) {
+    // Tiempo de viaje al stop
+    const travelSec = etaEstimator.estimateSync(pos, stop.pos, driverObj);
+    time += travelSec;
+    pos   = stop.pos;
+
+    if (stop.type === 'pickup') {
+      // Esperar cocina si aún no está lista
+      const waitSec = Math.max(0, stop.kitchenReadyAtSec - time);
+      time += waitSec;
+    }
+
+    if (stop.type === 'delivery') {
+      const violation = Math.max(0, time - stop.slaDeadlineSec);
+      totalCost += violation;
+    }
+  }
+
+  return totalCost;
+}
+
+/**
+ * Encuentra la secuencia óptima de stops para el driver.
+ * Aplica: precedencia (hard) → poda SLA (soft) → evaluador de costo global.
+ *
+ * @param {RerouteStop[]} stops
+ * @param {{lat,lng}} driverPos
+ * @param {object} driverObj  — { speed_kmh }
+ * @param {number} nowSec
+ * @returns {RerouteStop[]}   secuencia óptima
+ */
+export function findOptimalSequence(stops, driverPos, driverObj, nowSec) {
+  if (stops.length === 0) return [];
+  if (stops.length === 1) return stops;
+
+  // Generar permutaciones válidas (precedencia aplicada por default)
+  const permutations = generateValidPermutations(stops);
+
+  if (permutations.length === 0) return stops; // fallback: orden original
+
+  // Podar permutaciones con violaciones SLA críticas evidentes
+  const pruned = pruneBySla(permutations, driverPos, driverObj, nowSec);
+  const pool   = pruned.length > 0 ? pruned : permutations; // si la poda elimina todo, usar todas
+
+  // Evaluar costo global de cada secuencia y elegir la mínima
+  let bestSeq  = pool[0];
+  let bestCost = evaluateSequenceCost(pool[0], driverPos, driverObj, nowSec);
+
+  for (let i = 1; i < pool.length; i++) {
+    const cost = evaluateSequenceCost(pool[i], driverPos, driverObj, nowSec);
+    if (cost < bestCost) {
+      bestCost = cost;
+      bestSeq  = pool[i];
+    }
+  }
+
+  return bestSeq;
+}
+
+// ─── Carga de posición del driver ─────────────────────────────────────────────
+
+async function loadDriverPos(driverId) {
+  const r = await query(
+    `SELECT last_lat AS lat, last_lng AS lng, vehicle_type
+     FROM driver_profiles
+     WHERE user_id = $1`,
+    [driverId]
+  );
+  if (r.rowCount === 0) return null;
+  const row = r.rows[0];
+  if (!row.lat || !row.lng) return null;
+  return {
+    pos:        { lat: Number(row.lat), lng: Number(row.lng) },
+    vehicleType: row.vehicle_type,
+  };
+}
+
+function speedKmhByVehicle(vehicleType) {
+  switch (vehicleType) {
+    case 'bike':       return 20;
+    case 'motorcycle': return 35;
+    case 'car':        return 40;
+    default:           return 30;
+  }
+}
+
+// ─── Función principal ────────────────────────────────────────────────────────
+
+/**
+ * Recalcula la ruta óptima del driver y emite SSE 'route_update'.
+ *
+ * Puntos de llamada:
+ *   - acceptOffer         (events.js)
+ *   - cancelOrder         (orders route / admin)
+ *   - pickup completado   (orders route — at_restaurant)
+ *   - delivery completado (orders route — at_customer)
+ *   - rebalanceo          (rebalancer.js — pierde o gana pedido)
+ *   - disputa resuelta    (rebalancer.js — pase 1)
+ *
+ * @param {string} driverId
+ * @returns {Promise<void>}
+ */
+export async function rerouteDriver(driverId) {
+  try {
+    const driverData = await loadDriverPos(driverId);
+    if (!driverData) return; // driver sin posición registrada — skip silencioso
+
+    const { pos: driverPos, vehicleType } = driverData;
+    const speedKmh  = speedKmhByVehicle(vehicleType);
+    const driverObj = { speed_kmh: speedKmh };
+    const nowSec    = Date.now() / 1000;
+
+    const stops = await loadDriverStopsForReroute(driverId);
+
+    if (stops.length === 0) {
+      // Sin stops activos — notificar al driver que está libre
+      sseHub.sendToUser(driverId, 'route_update', {
+        stops:     [],
+        totalStops: 0,
+        message:   'Sin pedidos activos.',
+      });
+      return;
+    }
+
+    const optimalSequence = findOptimalSequence(stops, driverPos, driverObj, nowSec);
+
+    // Construir payload SSE con ETAs estimados por stop
+    let pos     = driverPos;
+    let timeSec = nowSec;
+    const stopsWithEta = [];
+
+    for (const stop of optimalSequence) {
+      const travelSec = etaEstimator.estimateSync(pos, stop.pos, driverObj);
+      timeSec += travelSec;
+
+      if (stop.type === 'pickup') {
+        const waitSec = Math.max(0, stop.kitchenReadyAtSec - timeSec);
+        timeSec += waitSec;
+      }
+
+      stopsWithEta.push({
+        type:             stop.type,
+        orderId:          stop.orderId,
+        pos:              stop.pos,
+        etaFromNowSec:    Math.round(timeSec - nowSec),
+        slaDeadlineSec:   Math.round(stop.slaDeadlineSec),
+        slaRemainingeSec: Math.round(stop.slaDeadlineSec - timeSec),
+      });
+
+      pos = stop.pos;
+    }
+
+    sseHub.sendToUser(driverId, 'route_update', {
+      stops:      stopsWithEta,
+      totalStops: stopsWithEta.length,
+    });
+
+    console.log(
+      `[reroute] driver=${driverId.slice(0,8)} → ${stopsWithEta.length} stops recalculados`
+    );
+  } catch (e) {
+    console.error(`[reroute] error driver=${driverId.slice(0,8)}:`, e.message);
+  }
+}
+
 === FILE: backend/src/engine/route-simulator.js ===
 // backend/src/engine/route-simulator.js
 //
@@ -2164,63 +2787,123 @@ export async function runRebalancer(onOffer) {
 // calculando el ETA real hacia el cliente nuevo y verificando
 // que no se rompa el SLA de los pedidos ya asignados.
 //
-// A diferencia del simulador, los stops activos del driver
-// se cargan desde la DB (no de world.orders en memoria).
+// CAMBIOS respecto a versión anterior:
+//   - Fix: deduplicación de pickups por restaurante compartido
+//     (dos pedidos del mismo restaurante comparten un solo stop de pickup)
+//   - viableStop: respeta el punto de inserción óptimo calculado por candidate-finder
+//   - prefixToViable: congela stops comprometidos antes del punto de inserción
+//   - estimateRestaurantWait: consulta kitchen_ready_at desde DB para estimar
+//     tiempo de espera en cocina (antes ignorado completamente)
+//   - totalCost: delegado a scoreCandidate() — única autoridad de scoring
+//   - findOptimalSequence de reroute.js reutilizada para secuenciar stops
+//     post-viableStop (misma lógica que navegación en tiempo real)
 
 import { query } from '../config/db.js';
 import { haversineMeters } from '../utils/geo.js';
 import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
+import { scoreCandidate } from './scoring.js';
+import { findOptimalSequence } from './reroute.js';
 import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
+
+// ─── Carga de stops del driver ────────────────────────────────────────────────
 
 /**
  * Carga los pedidos activos del driver con sus coordenadas.
- * Devuelve stops ordenados: primero pickups pendientes, luego deliveries.
+ *
+ * CAMBIO: Deduplica pickups por restaurante compartido.
+ * Si dos pedidos tienen el mismo restaurante y ambos están pendientes de recoger,
+ * se genera un solo stop de pickup con los orderIds agrupados — el driver
+ * recoge ambos en la misma parada.
  *
  * @param {string} driverId
- * @returns {Promise<Array<{ type: 'pickup'|'delivery', orderId: string, pos: {lat,lng}, pickedUpAt: Date|null }>>}
+ * @returns {Promise<Array<SimStop>>}
+ *
+ * @typedef {object} SimStop
+ * @property {'pickup'|'delivery'} type
+ * @property {string[]} orderIds      — uno o más (pickups agrupados por restaurante)
+ * @property {string}   orderId       — alias: primer orderId del grupo (compatibilidad)
+ * @property {{lat,lng}} pos
+ * @property {Date|null} pickedUpAt
+ * @property {number}   volumeLiters
+ * @property {number}   kitchenReadyAtSec
  */
 async function loadDriverStops(driverId) {
+  const nowSec = Date.now() / 1000;
+
   const r = await query(
     `SELECT
        o.id,
        o.status,
        o.picked_up_at,
-       o.delivery_lat    AS cust_lat,
-       o.delivery_lng    AS cust_lng,
-       COALESCE(ru.home_lat, rest.lat) AS rest_lat,
-       COALESCE(ru.home_lng, rest.lng) AS rest_lng,
-       COALESCE(o.estimated_volume_liters, 0) AS volume_liters
+       o.delivery_lat                         AS cust_lat,
+       o.delivery_lng                         AS cust_lng,
+       COALESCE(ru.home_lat, rest.lat)        AS rest_lat,
+       COALESCE(ru.home_lng, rest.lng)        AS rest_lng,
+       COALESCE(o.estimated_volume_liters, 0) AS volume_liters,
+       o.kitchen_ready_at,
+       rest.id                                AS restaurant_id,
+       COALESCE(cu.max_delivery_time_s, $3)   AS max_delivery_time_s
      FROM orders o
      JOIN restaurants rest ON rest.id = o.restaurant_id
-     LEFT JOIN users ru ON ru.id = rest.owner_user_id
-     JOIN users cu ON cu.id = o.customer_id
+     LEFT JOIN users ru    ON ru.id   = rest.owner_user_id
+     JOIN users cu         ON cu.id   = o.customer_id
      WHERE o.driver_id = $1
-       AND o.status = ANY($2::text[])
+       AND o.status    = ANY($2::text[])
      ORDER BY o.accepted_at ASC NULLS LAST`,
-    [driverId, ACTIVE_STATUSES]
+    [driverId, ACTIVE_STATUSES, getParam('max_delivery_time_s', 1800)]
   );
 
+  // ── Agrupar pickups por restaurante ──────────────────────────────────────
+  // Key: restaurantId → stop de pickup compartido
+  const pickupByRestaurant = new Map();
   const stops = [];
+
   for (const row of r.rows) {
+    const pickedUpAt = row.picked_up_at ? new Date(row.picked_up_at) : null;
+    const kitchenReadyAtSec = row.kitchen_ready_at
+      ? new Date(row.kitchen_ready_at).getTime() / 1000
+      : nowSec;
+
     // Pickup pendiente (no recogido aún)
     if (row.status !== 'on_the_way' && row.rest_lat && row.rest_lng) {
-      stops.push({
-        type:         'pickup',
-        orderId:      row.id,
-        pos:          { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
-        pickedUpAt:   null,
-        volumeLiters: Number(row.volume_liters) || 0,
-      });
+      const restId = row.restaurant_id;
+
+      if (pickupByRestaurant.has(restId)) {
+        // Agrupar con pickup existente del mismo restaurante
+        const existing = pickupByRestaurant.get(restId);
+        existing.orderIds.push(row.id);
+        existing.volumeLiters += Number(row.volume_liters) || 0;
+        // Usar el kitchenReadyAt más tardío (hay que esperar al último en prepararse)
+        existing.kitchenReadyAtSec = Math.max(existing.kitchenReadyAtSec, kitchenReadyAtSec);
+      } else {
+        const stop = {
+          type:             'pickup',
+          orderIds:         [row.id],
+          orderId:          row.id, // alias para compatibilidad
+          pos:              { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
+          pickedUpAt:       null,
+          volumeLiters:     Number(row.volume_liters) || 0,
+          kitchenReadyAtSec,
+        };
+        pickupByRestaurant.set(restId, stop);
+        stops.push(stop);
+      }
     }
-    // Delivery pendiente
+
+    // Delivery pendiente (uno por pedido, siempre)
     if (row.cust_lat && row.cust_lng) {
       stops.push({
-        type:         'delivery',
-        orderId:      row.id,
-        pos:          { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
-        pickedUpAt:   row.picked_up_at ? new Date(row.picked_up_at) : null,
-        volumeLiters: Number(row.volume_liters) || 0,
+        type:             'delivery',
+        orderIds:         [row.id],
+        orderId:          row.id,
+        pos:              { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
+        pickedUpAt,
+        volumeLiters:     Number(row.volume_liters) || 0,
+        kitchenReadyAtSec: nowSec,
+        slaDeadlineSec:   (pickedUpAt ? pickedUpAt.getTime() / 1000 : nowSec)
+                          + Number(row.max_delivery_time_s),
+        pairOrderId:      row.id,
       });
     }
   }
@@ -2228,199 +2911,295 @@ async function loadDriverStops(driverId) {
   return stops;
 }
 
+// ─── Espera de cocina ─────────────────────────────────────────────────────────
+
+/**
+ * Estima cuántos segundos debe esperar el driver al llegar al restaurante.
+ * Basado en kitchen_ready_at de DB — si ya pasó, espera 0.
+ *
+ * @param {SimStop} pickupStop
+ * @param {number}  arrivalSec   — epoch segundos estimado de llegada del driver
+ * @returns {number}             segundos de espera
+ */
+function estimateRestaurantWait(pickupStop, arrivalSec) {
+  return Math.max(0, pickupStop.kitchenReadyAtSec - arrivalSec);
+}
+
+// ─── Simulación principal ─────────────────────────────────────────────────────
+
 /**
  * Simula la ruta del driver incluyendo el nuevo pedido y calcula:
  * - etaToNewCustomer: segundos hasta entregar el nuevo pedido
  * - valid: no rompe SLA del nuevo pedido
  * - validExisting: no rompe SLA de pedidos ya asignados
  * - slaBreaches: lista de order IDs con SLA roto
+ * - totalCost: score final via scoreCandidate() — única autoridad
  *
- * @param {object} candidate    — de CandidateFinder
- * @param {object} order        — { id, restaurant_id, customer_id }
+ * NUEVA LÓGICA:
+ *   1. Stops antes del viableStop (prefixToViable) se recorren en orden
+ *      comprometido sin reordenar — no se puede cambiar lo que el driver
+ *      ya tiene enrutado.
+ *   2. Stops a partir del viableStop se secuencian con findOptimalSequence()
+ *      (mismo algoritmo que reroute.js) incluyendo el nuevo pedido.
+ *
+ * @param {object} candidate    — de findCandidates()
+ * @param {object} order        — { id, restaurant_id, customer_id, estimated_volume_liters }
  * @param {{ lat, lng }} restaurantPos
  * @param {{ lat, lng }} customerPos
  * @param {number} nowSec       — Date.now() / 1000
  * @returns {Promise<object>}
  */
 export async function simulateDriverWithOrder(candidate, order, restaurantPos, customerPos, nowSec) {
-  const driver      = candidate.driver;
-  const driverPos   = { ...driver.pos };
-  const driverObj   = { speed_kmh: driver.speedKmh };
-  const maxSla      = getParam('max_delivery_time_s', 1800);
-
-  // Capacidad de mochila del driver (con fallback al default del param)
+  const driver           = candidate.driver;
+  const driverPos        = { ...driver.pos };
+  const driverObj        = { speed_kmh: driver.speedKmh };
+  const maxSla           = getParam('max_delivery_time_s', 1800);
   const bagCapacityLiters = Number(driver.bagCapacityLiters)
     || getParam('default_bag_capacity_liters', 25);
+  const newOrderVolume   = Number(order.estimated_volume_liters) || 0;
 
-  // Volumen del nuevo pedido
-  const newOrderVolume = Number(order.estimated_volume_liters) || 0;
-
-  // Estado de simulación: orderId → { status, pickedUpAtSec }
+  // Estado de simulación por orderId
   const simState = {};
 
-  // Cargar stops actuales del driver
+  // Cargar stops actuales del driver (con deduplicación de pickups)
   const existingStops = await loadDriverStops(driver.id);
+
   for (const stop of existingStops) {
-    if (!simState[stop.orderId]) {
-      simState[stop.orderId] = {
-        status:      stop.type === 'delivery' && stop.pickedUpAt ? 'on_the_way' : 'assigned',
-        pickedUpAtSec: stop.pickedUpAt ? stop.pickedUpAt.getTime() / 1000 : null,
-      };
+    for (const oid of stop.orderIds) {
+      if (!simState[oid]) {
+        simState[oid] = {
+          status:        stop.type === 'delivery' && stop.pickedUpAt ? 'on_the_way' : 'assigned',
+          pickedUpAtSec: stop.pickedUpAt ? stop.pickedUpAt.getTime() / 1000 : null,
+        };
+      }
     }
   }
 
-  // Añadir el nuevo pedido
+  // Añadir nuevo pedido
   simState[order.id] = {
     status:        'assigned',
     pickedUpAtSec: null,
     isNew:         true,
   };
 
-  let currentPos = { ...driverPos };
-  let simNow     = nowSec;
-  let etaToNewCustomer = Infinity;
-  let pickupDone = false;
+  // ── viableStop y prefixToViable ───────────────────────────────────────────
+  // viableStop: punto de inserción óptimo desde candidate-finder
+  // prefixToViable: stops comprometidos ANTES del punto de inserción
+  // — se recorren en orden fijo, sin reordenar
+  const viableStop = candidate.viableStop ?? { type: 'driver' };
 
-  // ── Volumen de mochila ────────────────────────────────────────────────────
-  // currentVolume: volumen ocupado en cada momento de la simulación.
-  // Sube en cada pickup, baja en cada delivery.
-  // Se inicializa con los pedidos que ya están en 'on_the_way' (ya recogidos).
+  const prefixStops = [];
+  if (viableStop.type !== 'driver') {
+    for (const stop of existingStops) {
+      const match =
+        stop.type    === viableStop.type &&
+        stop.orderId === viableStop.orderId;
+      prefixStops.push(stop);
+      if (match) break;
+    }
+  }
+
+  // Stops post-viableStop (los que se secuenciarán de forma óptima)
+  const prefixOrderIds = new Set(prefixStops.flatMap(s => s.orderIds));
+  const postStops = existingStops.filter(s =>
+    !s.orderIds.every(oid => prefixOrderIds.has(oid))
+  );
+
+  // ── Volumen inicial ───────────────────────────────────────────────────────
   let currentVolume = 0;
   for (const stop of existingStops) {
     if (stop.type === 'delivery' && stop.pickedUpAt !== null) {
       currentVolume += stop.volumeLiters;
     }
   }
-  let peakVolume = currentVolume; // pico máximo en cualquier punto de la ruta
+  let peakVolume = currentVolume;
 
-  const maxIter = (existingStops.length + 1) * 6 + 10;
+  let currentPos       = { ...driverPos };
+  let simNow           = nowSec;
+  let etaToNewCustomer = Infinity;
 
-  for (let i = 0; i < maxIter; i++) {
-    // Construir stops activos desde el estado actual
-    const activeStops = [];
-
-    for (const stop of existingStops) {
-      const state = simState[stop.orderId];
-      if (!state) continue;
-      if (stop.type === 'pickup' && state.status === 'assigned') {
-        activeStops.push(stop);
-      }
-      if (stop.type === 'delivery' && state.status === 'on_the_way') {
-        activeStops.push(stop);
-      }
-    }
-
-    // Agregar el nuevo pedido
-    if (!pickupDone) {
-      activeStops.push({ type: 'pickup', orderId: order.id, pos: restaurantPos });
-    } else if (simState[order.id]?.status === 'on_the_way') {
-      activeStops.push({ type: 'delivery', orderId: order.id, pos: customerPos });
-    }
-
-    // Filtrar stops ya procesados
-    const pending = activeStops.filter(s => {
-      const st = simState[s.orderId];
-      if (!st) return false;
-      if (s.type === 'pickup')   return st.status === 'assigned';
-      if (s.type === 'delivery') return st.status === 'on_the_way';
-      return false;
-    });
-
-    if (pending.length === 0) break;
-
-    // Detectar entregas urgentes (SLA casi vencido)
-    const urgent = pending.filter(s => {
-      if (s.type !== 'delivery') return false;
-      const st = simState[s.orderId];
-      if (!st?.pickedUpAtSec) return false;
-      const elapsed   = simNow - st.pickedUpAtSec;
-      const remaining = maxSla - elapsed;
-      const etaDirect = etaEstimator.estimateSync(currentPos, s.pos, driverObj);
-      return etaDirect >= remaining;
-    });
-
-    // Elegir siguiente stop: urgentes primero, luego el más cercano
-    const pool    = urgent.length > 0 ? urgent : pending;
-    let nextStop  = pool[0];
-    let bestDist  = haversineMeters(currentPos, pool[0].pos);
-    for (const s of pool.slice(1)) {
-      const d = haversineMeters(currentPos, s.pos);
-      if (d < bestDist) { bestDist = d; nextStop = s; }
-    }
-
-    // Moverse al siguiente stop
-    const travelSec = await etaEstimator.estimate(currentPos, nextStop.pos, driverObj);
+  // ── Fase 1: recorrer prefixToViable en orden comprometido ─────────────────
+  for (const stop of prefixStops) {
+    const travelSec = await etaEstimator.estimate(currentPos, stop.pos, driverObj);
     simNow     += travelSec;
-    currentPos  = { ...nextStop.pos };
+    currentPos  = { ...stop.pos };
 
-    const state = simState[nextStop.orderId];
-    if (!state) break;
+    if (stop.type === 'pickup') {
+      const waitSec = estimateRestaurantWait(stop, simNow);
+      simNow += waitSec;
 
-    if (nextStop.type === 'pickup') {
-      // Esperar cocina si corresponde — se omite en simulación (el kitchen engine lo maneja)
-      state.status      = 'on_the_way';
-      state.pickedUpAtSec = simNow;
-
-      // Subir volumen al recoger
-      const vol = nextStop.orderId === order.id ? newOrderVolume : (nextStop.volumeLiters || 0);
-      currentVolume += vol;
+      for (const oid of stop.orderIds) {
+        if (simState[oid]) {
+          simState[oid].status      = 'on_the_way';
+          simState[oid].pickedUpAtSec = simNow;
+        }
+      }
+      currentVolume += stop.volumeLiters;
       if (currentVolume > peakVolume) peakVolume = currentVolume;
 
-      if (nextStop.orderId === order.id) {
-        pickupDone = true;
-      }
-    } else {
-      state.status = 'delivered';
+    } else if (stop.type === 'delivery') {
+      if (simState[stop.orderId]) simState[stop.orderId].status = 'delivered';
+      currentVolume = Math.max(0, currentVolume - stop.volumeLiters);
 
-      // Bajar volumen al entregar
-      const vol = nextStop.orderId === order.id ? newOrderVolume : (nextStop.volumeLiters || 0);
-      currentVolume = Math.max(0, currentVolume - vol);
-
-      if (nextStop.orderId === order.id) {
+      if (stop.orderId === order.id) {
         etaToNewCustomer = simNow - nowSec;
       }
     }
   }
 
-  // Verificar SLA del nuevo pedido
-  const delay = Math.max(0, etaToNewCustomer - maxSla);
-  const valid  = Number.isFinite(etaToNewCustomer) && delay === 0;
+  // ── Fase 2: secuenciar stops post-viableStop + nuevo pedido ───────────────
+  // Construir lista de stops para el secuenciador en formato RerouteStop
+  const stopsForSequencer = [];
 
-  // Verificar SLA de pedidos existentes on_the_way
+  // Stops existentes post-viableStop que aún no están completados
+  for (const stop of postStops) {
+    const state = simState[stop.orderId];
+    if (!state) continue;
+
+    if (stop.type === 'pickup' && state.status === 'assigned') {
+      stopsForSequencer.push({
+        type:             'pickup',
+        orderId:          stop.orderId,
+        pairOrderId:      stop.orderId,
+        pos:              stop.pos,
+        pickedUpAtSec:    null,
+        slaDeadlineSec:   simNow + maxSla, // aproximación conservadora
+        kitchenReadyAtSec: stop.kitchenReadyAtSec,
+        volumeLiters:     stop.volumeLiters,
+        _simStop:         stop,
+      });
+    } else if (stop.type === 'delivery' && state.status === 'on_the_way') {
+      stopsForSequencer.push({
+        type:             'delivery',
+        orderId:          stop.orderId,
+        pairOrderId:      stop.orderId,
+        pos:              stop.pos,
+        pickedUpAtSec:    state.pickedUpAtSec,
+        slaDeadlineSec:   (state.pickedUpAtSec ?? simNow) + maxSla,
+        kitchenReadyAtSec: simNow,
+        volumeLiters:     stop.volumeLiters,
+        _simStop:         stop,
+      });
+    }
+  }
+
+  // Agregar pickup del nuevo pedido
+  stopsForSequencer.push({
+    type:             'pickup',
+    orderId:          order.id,
+    pairOrderId:      order.id,
+    pos:              restaurantPos,
+    pickedUpAtSec:    null,
+    slaDeadlineSec:   simNow + maxSla,
+    kitchenReadyAtSec: nowSec, // nuevo pedido — cocina recién arranca
+    volumeLiters:     newOrderVolume,
+  });
+
+  // Agregar delivery del nuevo pedido — el secuenciador respeta precedencia
+  stopsForSequencer.push({
+    type:             'delivery',
+    orderId:          order.id,
+    pairOrderId:      order.id,
+    pos:              customerPos,
+    pickedUpAtSec:    null, // se actualizará durante la simulación
+    slaDeadlineSec:   simNow + maxSla,
+    kitchenReadyAtSec: simNow,
+    volumeLiters:     newOrderVolume,
+  });
+
+  // Obtener secuencia óptima (precedencia + poda SLA + costo global mínimo)
+  const optimalSequence = findOptimalSequence(
+    stopsForSequencer,
+    currentPos,
+    driverObj,
+    simNow
+  );
+
+  // ── Fase 3: simular la secuencia óptima ───────────────────────────────────
+  const pickupDoneSet = new Set();
+
+  for (const stop of optimalSequence) {
+    const travelSec = await etaEstimator.estimate(currentPos, stop.pos, driverObj);
+    simNow     += travelSec;
+    currentPos  = { ...stop.pos };
+
+    if (stop.type === 'pickup') {
+      const waitSec = estimateRestaurantWait(stop, simNow);
+      simNow += waitSec;
+
+      if (simState[stop.orderId]) {
+        simState[stop.orderId].status       = 'on_the_way';
+        simState[stop.orderId].pickedUpAtSec = simNow;
+      }
+
+      currentVolume += stop.volumeLiters;
+      if (currentVolume > peakVolume) peakVolume = currentVolume;
+      pickupDoneSet.add(stop.orderId);
+
+    } else if (stop.type === 'delivery') {
+      // Sólo simular delivery si el pickup ya fue procesado (precedencia)
+      if (!pickupDoneSet.has(stop.pairOrderId) && stop.orderId !== order.id) continue;
+
+      if (simState[stop.orderId]) simState[stop.orderId].status = 'delivered';
+      currentVolume = Math.max(0, currentVolume - stop.volumeLiters);
+
+      if (stop.orderId === order.id) {
+        etaToNewCustomer = simNow - nowSec;
+        // Actualizar slaDeadline del delivery del nuevo pedido
+        const pickupSec = simState[order.id]?.pickedUpAtSec ?? simNow;
+        stop.slaDeadlineSec = pickupSec + maxSla;
+      }
+    }
+  }
+
+  // ── Verificación SLA ──────────────────────────────────────────────────────
+  const delay = Math.max(0, etaToNewCustomer - maxSla);
+  const valid = Number.isFinite(etaToNewCustomer) && delay === 0;
+
   const slaBreaches = [];
   for (const stop of existingStops) {
     if (stop.type !== 'delivery') continue;
     const st = simState[stop.orderId];
     if (!st || st.status !== 'delivered') continue;
     const pickedUp = st.pickedUpAtSec ?? nowSec;
-    // Buscar el delivered simNow (aproximación: si se entregó usamos simNow como proxy)
-    // El cálculo es conservador
-    if (st.status === 'delivered') {
-      const elapsed = simNow - pickedUp;
-      if (elapsed > maxSla) slaBreaches.push(stop.orderId);
-    }
+    const elapsed  = simNow - pickedUp;
+    if (elapsed > maxSla) slaBreaches.push(stop.orderId);
   }
 
   const validExisting = slaBreaches.length === 0;
 
   // ── Volumen de mochila ────────────────────────────────────────────────────
-  // bagOverflowPct > 100 significa que en algún punto de la ruta la mochila
-  // se llenaría por encima de su capacidad (incluye pickups futuros).
   const bagOverflowPct = bagCapacityLiters > 0
     ? Math.round((peakVolume / bagCapacityLiters) * 100)
     : 0;
 
-  return {
+  // ── Score final — scoreCandidate() es la única autoridad ─────────────────
+  const simResult = {
     ...candidate,
     etaToNewCustomer,
-    valid:         valid && validExisting,
+    activeOrders:                  driver.activeOrders ?? 0,
+    bridgePenaltyS:                candidate.bridgePenaltyS ?? 0,
+    directDriverToRestaurantMeters: candidate.directDriverToRestaurantMeters ?? 0,
+    driverSpeedKmh:                driver.speedKmh ?? 30,
+  };
+
+  const { totalCost, ...scoreParts } = scoreCandidate(
+    simResult,
+    { max_delivery_time_s: null },
+    driver.disconnectPenalties ?? 0
+  );
+
+  return {
+    ...simResult,
+    valid:            valid && validExisting,
     validExisting,
     slaBreaches,
-    newOrderDelay: delay,
-    totalCost:     etaToNewCustomer + delay,
+    newOrderDelay:    delay,
+    totalCost,
+    ...scoreParts,
     // Volumen
     bagCapacityLiters,
-    peakVolumeLiters:  Math.round(peakVolume * 1000) / 1000,
+    peakVolumeLiters: Math.round(peakVolume * 1000) / 1000,
     bagOverflowPct,
   };
 }
@@ -2434,42 +3213,66 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
 // por desconexión previas.
 //
 // Un costo menor = mejor candidato.
+//
+// CAMBIOS respecto a versión anterior:
+//   - pickup_bridge_penalty_factor ahora viene de params (antes hardcoded 0.35)
+//   - bridgePenaltyS se recibe directamente del simulador (calculado sobre viableStop real)
 
 import { getParam } from './params.js';
 
 /**
  * Calcula el score de un candidato para un pedido específico.
  *
- * @param {object} candidate  — resultado de CandidateFinder.find()
+ * @param {object} candidate  — resultado de simulateDriverWithOrder()
+ *   Campos esperados:
+ *     etaToNewCustomer          {number}  ETA total hasta entregar el nuevo pedido (segundos)
+ *     activeOrders              {number}  pedidos activos del driver al momento de simular
+ *     bridgePenaltyS            {number}  coste de desvío desde viableStop al restaurante (segundos)
+ *     directDriverToRestaurantMeters {number} distancia haversine driver→restaurante
+ *     driverSpeedKmh            {number}  velocidad del driver en km/h
+ *
  * @param {object} customer   — { max_delivery_time_s? }
  * @param {number} driverPenalties — disconnect_penalties del driver (de DB)
- * @returns {{ totalCost: number, fairnessPenalty, softSlaPenalty, hardSlaPenalty, proximityPenalty, bridgePenalty, disconnectPenalty }}
+ *
+ * @returns {{
+ *   totalCost: number,
+ *   fairnessPenalty: number,
+ *   softSlaPenalty: number,
+ *   hardSlaPenalty: number,
+ *   proximityPenalty: number,
+ *   bridgePenalty: number,
+ *   disconnectPenalty: number,
+ * }}
  */
 export function scoreCandidate(candidate, customer, driverPenalties = 0) {
-  const fairnessWeight     = getParam('fairness_penalty_per_order_s', 120);
-  const softSlaWeight      = getParam('soft_sla_penalty_factor', 2);
-  const hardPenalty        = getParam('hard_sla_penalty_s', 3000);
-  const proximityWeight    = getParam('pickup_proximity_penalty_factor', 0.35);
-  const disconnectPenaltyS = getParam('disconnect_penalty_s', 300);
-  const maxDeliverySla     = getParam('max_delivery_time_s', 1800);
+  const fairnessWeight      = getParam('fairness_penalty_per_order_s',    120);
+  const softSlaWeight       = getParam('soft_sla_penalty_factor',          2);
+  const hardPenalty         = getParam('hard_sla_penalty_s',            3000);
+  const proximityWeight     = getParam('pickup_proximity_penalty_factor', 0.35);
+  const bridgeWeight        = getParam('pickup_bridge_penalty_factor',      1);  // antes hardcoded
+  const disconnectPenaltyS  = getParam('disconnect_penalty_s',            300);
+  const maxDeliverySla      = getParam('max_delivery_time_s',            1800);
 
-  const activeOrders    = candidate.activeOrders ?? 0;
-  const fairnessPenalty = activeOrders * fairnessWeight;
+  const activeOrders      = candidate.activeOrders ?? 0;
+  const fairnessPenalty   = activeOrders * fairnessWeight;
   const disconnectPenalty = driverPenalties * disconnectPenaltyS;
 
-  const maxSla       = customer?.max_delivery_time_s ?? maxDeliverySla;
-  const eta          = candidate.etaToNewCustomer ?? Infinity;
-  const delay        = Math.max(0, eta - maxSla);
+  const maxSla         = customer?.max_delivery_time_s ?? maxDeliverySla;
+  const eta            = candidate.etaToNewCustomer ?? Infinity;
+  const delay          = Math.max(0, eta - maxSla);
   const softSlaPenalty = delay * softSlaWeight;
   const hardSlaPenalty = delay > 0 ? hardPenalty : 0;
 
   // proximityPenalty: coste de que el driver esté lejos del restaurante
+  // Se calcula sobre la distancia directa driver→restaurante y la velocidad real del driver
   const speedMs = Math.max(1, ((candidate.driverSpeedKmh ?? 30) * 1000) / 3600);
   const directMeters = candidate.directDriverToRestaurantMeters ?? 0;
   const proximityPenalty = Math.max(0, directMeters) * proximityWeight / speedMs;
 
-  // bridgePenalty: coste extra de desvío que el driver tiene que hacer
-  const bridgePenalty = Math.max(0, candidate.bridgePenaltyS ?? 0);
+  // bridgePenalty: coste de desvío desde viableStop al restaurante
+  // bridgePenaltyS viene calculado por el simulador sobre el punto de inserción real,
+  // no sobre la posición directa del driver — más preciso que antes.
+  const bridgePenalty = Math.max(0, candidate.bridgePenaltyS ?? 0) * bridgeWeight;
 
   const totalCost =
     eta +
@@ -6324,7 +7127,7 @@ export async function applyOrderCooldownReduction(orderId, alreadyTriggered = fa
 //   Ronda 6:    batch=5
 //   Ronda 7+:   batch=10
 //
-// WRAPAROUND: los drivers elegibles se ordenan por driver_number.
+// WRAPAROUND: los drivers elegibles se ordenan por score de simulación.
 // Si en la ronda N ya se ofertó a K drivers, se saltan los primeros K
 // y se toman los siguientes batchSize (con wraparound circular).
 //
@@ -6333,19 +7136,117 @@ export async function applyOrderCooldownReduction(orderId, alreadyTriggered = fa
 //   - Los advisory locks evitan asignaciones duplicadas.
 //   - Si hay menos drivers disponibles que batchSize, se usan todos los disponibles.
 //
-// DRIVERS CON OFERTA PENDING (inactivos): se saltan sin incrementar ronda.
+// CAMBIOS respecto a versión anterior:
+//   - simulation_budget_per_tick: cap de simulaciones por ciclo para evitar explosión
+//     en horas pico. Si se agota, el pedido se reencola para el próximo ciclo.
+//   - _reserveDriverSlot / _releaseDriverSlot: evita que dos pedidos concurrentes
+//     asignen el mismo driver simultáneamente (race condition).
+//   - max_customer_restaurant_distance_km: cancela pedidos inalcanzables antes de
+//     buscar driver — evita pedidos en cola infinita.
+//   - _getRetryPriority: cola de reintentos priorizada por antigüedad + urgencia SLA
+//     en lugar de FIFO.
+//   - triggerPendingAssignments(): trigger inmediato al liberar un driver — no espera
+//     al próximo tick del intervalo de mantenimiento.
+//   - Score final basado 100% en simulación — se eliminó el scoreCandidate() redundante
+//     en este archivo (ya lo llama route-simulator.js internamente).
 
-import { OFFER_TIMEOUT_SECONDS, log, logWarn } from './constants.js';
+import { log, logWarn } from './constants.js';
+import { getParam } from '../../../engine/params.js';
 import {
   getOpenOrder, getPendingOffer, getOfferRound, markPendingDriver,
-  getEligibleDrivers, getEligibleIdleDrivers,
+  getEligibleDrivers, getEligibleIdleDrivers, getQueuedOrders,
 } from './queries.js';
 import { upsertOffer } from './offer.js';
 import { applyOrderCooldownReduction } from './cooldown.js';
 import { findCandidates } from '../../../engine/candidate-finder.js';
 import { simulateDriverWithOrder } from '../../../engine/route-simulator.js';
-import { scoreCandidate } from '../../../engine/scoring.js';
 import { query } from '../../../config/db.js';
+import { haversineMeters } from '../../../utils/geo.js';
+import { serializedOffer, hasActiveChain } from './queue.js';
+
+// ─── Budget de simulaciones por ciclo ────────────────────────────────────────
+// Compartido entre todos los pedidos del mismo ciclo de asignación.
+// Se resetea al inicio de cada llamada a triggerPendingAssignments().
+let _simulationBudget = 0;
+
+// ─── Reserved slots por driver ────────────────────────────────────────────────
+// Map<driverId, count> — slots reservados mientras se simula un candidato.
+// Evita race condition donde dos pedidos concurrentes asignan el mismo driver.
+const _reservedSlots = new Map();
+
+function _reserveDriverSlot(driverId) {
+  _reservedSlots.set(driverId, (_reservedSlots.get(driverId) ?? 0) + 1);
+}
+
+function _releaseDriverSlot(driverId) {
+  const current = _reservedSlots.get(driverId) ?? 0;
+  if (current <= 1) _reservedSlots.delete(driverId);
+  else _reservedSlots.set(driverId, current - 1);
+}
+
+function _getReservedSlots(driverId) {
+  return _reservedSlots.get(driverId) ?? 0;
+}
+
+// ─── Prioridad de reintentos ──────────────────────────────────────────────────
+
+/**
+ * Calcula la prioridad de un pedido en la cola de reintentos.
+ * Mayor prioridad = número más alto.
+ * Combina antigüedad del pedido + urgencia SLA.
+ *
+ * @param {object} order  — fila de getQueuedOrders()
+ * @param {number} nowSec
+ * @returns {number}
+ */
+function _getRetryPriority(order, nowSec) {
+  const createdAt = order.created_at
+    ? new Date(order.created_at).getTime() / 1000
+    : nowSec;
+  const age       = Math.max(0, nowSec - createdAt);
+
+  const maxSla    = getParam('max_delivery_time_s', 1800);
+  const elapsed   = age;
+  const urgency   = Math.max(0, elapsed - maxSla);
+
+  return age + urgency * 2;
+}
+
+// ─── Trigger inmediato al liberar driver ──────────────────────────────────────
+
+/**
+ * Dispara asignación inmediata para pedidos en cola cuando un driver queda libre.
+ * Se llama desde: delivery completado, rebalanceo (driver pierde pedido),
+ * cancelación de pedido.
+ *
+ * A diferencia del intervalo de mantenimiento, este trigger es síncrono
+ * con el evento de liberación — reduce el tiempo de pedidos sin driver.
+ *
+ * @param {Function} onOffer
+ */
+export async function triggerPendingAssignments(onOffer) {
+  try {
+    const nowSec  = Date.now() / 1000;
+    const queued  = await getQueuedOrders();
+
+    // Ordenar por prioridad descendente
+    const sorted = queued
+      .filter(o => o.has_candidates && !hasActiveChain(o.id))
+      .sort((a, b) => _getRetryPriority(b, nowSec) - _getRetryPriority(a, nowSec));
+
+    // Resetear budget para este ciclo
+    _simulationBudget = getParam('simulation_budget_per_tick', 75);
+
+    for (const order of sorted) {
+      if (_simulationBudget <= 0) break;
+      serializedOffer(order.id, offerNextDrivers, onOffer);
+    }
+  } catch (e) {
+    logWarn('triggerPending', `error disparando asignaciones pendientes: ${e.message}`);
+  }
+}
+
+// ─── Función principal ────────────────────────────────────────────────────────
 
 /**
  * Intenta enviar oferta(s) para el pedido dado.
@@ -6368,16 +7269,36 @@ export async function offerNextDrivers(orderId, onOffer) {
     return 0;
   }
 
-  // ── 3. Calcular ronda y batchSize ─────────────────────────────────────────
+  // ── 3. Verificar distancia máxima restaurante→cliente ────────────────────
+  // Cancela pedidos inalcanzables antes de buscar driver — evita cola infinita.
+  const maxDistKm = getParam('max_customer_restaurant_distance_km', 8);
+  if (maxDistKm > 0 &&
+      Number.isFinite(orderRow.restaurant_lat) &&
+      Number.isFinite(orderRow.delivery_lat)) {
+    const distKm = haversineMeters(
+      { lat: Number(orderRow.restaurant_lat), lng: Number(orderRow.restaurant_lng) },
+      { lat: Number(orderRow.delivery_lat),   lng: Number(orderRow.delivery_lng) }
+    ) / 1000;
+
+    if (distKm > maxDistKm) {
+      await query(
+        `UPDATE orders
+         SET status = 'cancelled', cancelled_by = 'distance_limit', updated_at = NOW()
+         WHERE id = $1`,
+        [orderId]
+      );
+      log(`order=${orderId}`, `cancelado — distancia restaurante→cliente ${distKm.toFixed(2)}km > ${maxDistKm}km`);
+      return 0;
+    }
+  }
+
+  // ── 4. Calcular ronda y batchSize ─────────────────────────────────────────
   const pastCount = await getOfferRound(orderId);
   const round     = pastCount + 1;
   const batchSize = round <= 5 ? 1 : round === 6 ? 5 : 10;
   log(`order=${orderId}`, `ronda=${round} batch=${batchSize}`);
 
-  // ── 4. Obtener drivers elegibles (sin cooldown, sin haber aceptado) ────────
-  // Para batch=1 solo queremos drivers IDLE (sin pending en otro pedido).
-  // Para batch>1 tomamos todos los elegibles — los que tengan pending serán
-  // descartados por el advisory lock en upsertOffer (sin contar como ronda).
+  // ── 5. Obtener drivers elegibles ──────────────────────────────────────────
   const eligible = batchSize === 1
     ? await getEligibleIdleDrivers(orderId)
     : await getEligibleDrivers(orderId);
@@ -6392,23 +7313,17 @@ export async function offerNextDrivers(orderId, onOffer) {
     const reduced = await applyOrderCooldownReduction(orderId, orderRow.offer_cooldown_triggered);
 
     if (!reduced) {
-      // Sin cooldowns que reducir: todos los drivers están en pending offer
-      // en otro pedido, o sin disponibilidad. Esperar al próximo wake-up.
       logWarn(`order=${orderId}`, 'sin cooldown que reducir → pending_driver');
       await markPendingDriver(orderId);
       return 0;
     }
 
     if (reduced.newWaitSecs >= 1) {
-      // Cooldown reducido pero el driver todavía espera — el ticker lo
-      // detectará cuando expire y reencola automáticamente.
       log(`order=${orderId}`, `cooldown reducido a ${Math.round(reduced.newWaitSecs)}s → pending_driver`);
       await markPendingDriver(orderId);
       return 0;
     }
 
-    // newWaitSecs < 1 → wait_until ya en el pasado → driver elegible ahora mismo.
-    // Re-consultar elegibles con batch=1 para continuar el flujo normalmente.
     const immediateEligible = batchSize === 1
       ? await getEligibleIdleDrivers(orderId)
       : await getEligibleDrivers(orderId);
@@ -6419,22 +7334,19 @@ export async function offerNextDrivers(orderId, onOffer) {
       return 0;
     }
 
-    // Continuar con los candidatos recién liberados
     eligible.push(...immediateEligible);
   }
 
-  // ── 5. Scoring + Wraparound circular ─────────────────────────────────────
-  // Usa scoreCandidate() del motor para ordenar — corrige la inconsistencia
-  // anterior donde se calculaba un score ad-hoc aquí en lugar de reutilizar
-  // la función dedicada con todos sus parámetros configurables.
-  let scoredEligible = eligible.map(d => ({ ...d, bagOverflowPct: 0 })); // fallback
+  // ── 6. Simulación + Scoring ───────────────────────────────────────────────
+  // El score final viene 100% de simulateDriverWithOrder() via scoreCandidate().
+  // No hay scoring ad-hoc en este archivo.
+  let scoredEligible = eligible.map(d => ({ ...d, bagOverflowPct: 0 })); // fallback sin simulación
 
   try {
     const coordsRow = await query(
-      `SELECT restaurant_lat, restaurant_lng, delivery_lat, delivery_lng,
-              o.customer_id,
-              COALESCE(o.delivery_lat, cu.lat)  AS cust_lat,
-              COALESCE(o.delivery_lng, cu.lng)  AS cust_lng,
+      `SELECT restaurant_lat, restaurant_lng,
+              COALESCE(o.delivery_lat, cu.lat) AS cust_lat,
+              COALESCE(o.delivery_lng, cu.lng) AS cust_lng,
               o.estimated_volume_liters
        FROM orders o
        JOIN users cu ON cu.id = o.customer_id
@@ -6452,49 +7364,71 @@ export async function offerNextDrivers(orderId, onOffer) {
         lat: Number(coord.cust_lat),
         lng: Number(coord.cust_lng),
       };
-      const orderForSim = {
-        id: orderId,
-        estimated_volume_liters: Number(coord.estimated_volume_liters) || 0,
-      };
 
-      if (
-        Number.isFinite(restaurantPos.lat) && Number.isFinite(customerPos.lat)
-      ) {
+      if (Number.isFinite(restaurantPos.lat) && Number.isFinite(customerPos.lat)) {
+
+        // ── Verificar budget disponible ───────────────────────────────────
+        if (_simulationBudget <= 0) {
+          log(`order=${orderId}`, 'budget de simulaciones agotado — reencolar para próximo ciclo');
+          await markPendingDriver(orderId);
+          return 0;
+        }
+
         const { topDrivers } = await findCandidates(orderId, restaurantPos, customerPos);
 
         if (topDrivers.length > 0) {
-          // Para rondas con batch > 1 correr simulación completa para obtener
-          // bagOverflowPct y score definitivo. Para ronda 1-5 (batch=1) usar
-          // scoreCandidate() sobre el envelope — más rápido, suficientemente preciso.
-          // Siempre simular para obtener bagOverflowPct correcto (pico de carga en ruta).
-          // Para batch=1 la simulación es igualmente necesaria — sin ella el conductor
-          // no recibe aviso de capacidad aunque la oferta lo lleve a colapsar su mochila.
           const nowSec = Date.now() / 1000;
+          const orderForSim = {
+            id: orderId,
+            estimated_volume_liters: Number(coord.estimated_volume_liters) || 0,
+          };
 
-          const scored = await Promise.all(
-            topDrivers.map(async (env) => {
-              try {
-                const candidate = await simulateDriverWithOrder(
-                  env, orderForSim, restaurantPos, customerPos, nowSec
-                );
-                const { totalCost } = scoreCandidate(
-                  candidate,
-                  { max_delivery_time_s: null },
-                  candidate.driver?.disconnectPenalties ?? env.disconnectPenalties ?? 0
-                );
-                return {
-                  driverId:       env.driver.id,
-                  totalCost,
-                  bagOverflowPct: candidate.bagOverflowPct ?? 0,
-                };
-              } catch {
-                return { driverId: env.driver.id, totalCost: Infinity, bagOverflowPct: 0 };
-              }
+          // Aplicar budget y reserved slots
+          const maxActive = getParam('max_active_orders_per_driver', 4);
+          const cappedDrivers = topDrivers
+            .filter(c => {
+              const reserved = _getReservedSlots(c.driver.id);
+              return (c.driver.activeOrders + reserved) < maxActive;
             })
-          );
+            .slice(0, Math.min(_simulationBudget, topDrivers.length));
+
+          if (cappedDrivers.length === 0) {
+            log(`order=${orderId}`, 'todos los candidatos están reservados → pending_driver');
+            await markPendingDriver(orderId);
+            return 0;
+          }
+
+          // Reservar slots durante la simulación
+          for (const c of cappedDrivers) _reserveDriverSlot(c.driver.id);
+          _simulationBudget -= cappedDrivers.length;
+
+          let scored;
+          try {
+            scored = await Promise.all(
+              cappedDrivers.map(async (env) => {
+                try {
+                  const result = await simulateDriverWithOrder(
+                    env, orderForSim, restaurantPos, customerPos, nowSec
+                  );
+                  // totalCost ya viene de scoreCandidate() dentro del simulador
+                  return {
+                    driverId:       env.driver.id,
+                    totalCost:      result.totalCost,
+                    bagOverflowPct: result.bagOverflowPct ?? 0,
+                  };
+                } catch {
+                  return { driverId: env.driver.id, totalCost: Infinity, bagOverflowPct: 0 };
+                }
+              })
+            );
+          } finally {
+            // Liberar slots siempre, incluso si hay error
+            for (const c of cappedDrivers) _releaseDriverSlot(c.driver.id);
+          }
 
           const scoreMap = new Map(scored.map(s => [s.driverId, s]));
 
+          // Ordenar eligible por score de simulación
           scoredEligible = [...eligible]
             .map(d => ({
               ...d,
@@ -6506,7 +7440,7 @@ export async function offerNextDrivers(orderId, onOffer) {
               return sA - sB;
             });
 
-          log(`order=${orderId}`, `scoreCandidate aplicado — ${topDrivers.length} candidatos`);
+          log(`order=${orderId}`, `simulación aplicada — ${cappedDrivers.length} candidatos`);
         }
       }
     }
@@ -6514,7 +7448,7 @@ export async function offerNextDrivers(orderId, onOffer) {
     log(`order=${orderId}`, `scoring fallback a driver_number: ${e.message}`);
   }
 
-  // Wraparound circular sobre la lista ya ordenada por score
+  // ── 7. Wraparound circular sobre lista ordenada por score ─────────────────
   const offset    = scoredEligible.length > 0 ? pastCount % scoredEligible.length : 0;
   const totalElg  = scoredEligible.length;
   const realBatch = Math.min(batchSize, totalElg);
@@ -6529,7 +7463,7 @@ export async function offerNextDrivers(orderId, onOffer) {
     realBatch,
   });
 
-  // ── 6. Enviar ofertas ─────────────────────────────────────────────────────
+  // ── 8. Enviar ofertas ─────────────────────────────────────────────────────
   let sent = 0;
   for (const row of batch) {
     const ok = await upsertOffer(orderId, row.user_id, onOffer, row.bagOverflowPct ?? 0);
@@ -6537,7 +7471,6 @@ export async function offerNextDrivers(orderId, onOffer) {
   }
 
   if (sent === 0) {
-    // Todos los drivers del batch tenían pending offer (advisory lock los saltó)
     log(`order=${orderId}`, 'batch completo en pending — pending_driver');
     await markPendingDriver(orderId);
   }
@@ -6555,8 +7488,15 @@ export async function offerNextDrivers(orderId, onOffer) {
 //   - rejectOffer:   Driver rechaza → cooldown, despertar pedidos huérfanos
 //   - releaseOrder:  Driver libera un pedido ya asignado → volver a ofrecer
 //   - expireTimedOutOffers: Ticker periódico → expirar ofertas sin respuesta
+//   - notifyPickup:  Driver recogió pedido en restaurante → reroute
+//   - notifyDelivery: Driver entregó pedido al cliente → reroute + trigger
+//   - notifyOrderCancelled: Pedido cancelado → reroute del driver afectado
 //
-// Todas las rutas que re-enquelan pedidos pasan por serializedOffer de queue.js.
+// CAMBIOS respecto a versión anterior:
+//   - rerouteDriver() se llama en: acceptOffer, releaseOrder, notifyPickup,
+//     notifyDelivery, notifyOrderCancelled.
+//   - triggerPendingAssignments() se llama en: notifyDelivery (driver liberado),
+//     notifyOrderCancelled (slot liberado).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { REBALANCE_COOLDOWN_SECONDS, REBALANCE_DISPUTE_TIMEOUT_S, SESSION_REBALANCE_LIMIT, log, logWarn } from './constants.js';
@@ -6568,12 +7508,13 @@ import {
   expireAllPendingForDriver,
   expireTimedOutOffersInDB,
   getOpenOrder, getQueuedOrders,
-  getOrderForSse,           // nueva
+  getOrderForSse,
 } from './queries.js';
 import { query } from '../../../config/db.js';
 import { serializedOffer, hasActiveChain } from './queue.js';
-import { offerNextDrivers } from './core.js';
-import { sseHub } from '../../events/hub.js';   // nueva
+import { offerNextDrivers, triggerPendingAssignments } from './core.js';
+import { sseHub } from '../../events/hub.js';
+import { rerouteDriver } from '../../../engine/reroute.js';
 
 // ─── Aceptar ──────────────────────────────────────────────────────────────────
 
@@ -6600,14 +7541,19 @@ export async function acceptOffer(orderId, driverId) {
   if (orderData) {
     const payload = {
       orderId,
-      status: 'assigned',
-      totalCents: orderData.total_cents,
+      status:         'assigned',
+      totalCents:     orderData.total_cents,
       restaurantName: orderData.restaurant_name,
-      customerName: orderData.customer_name,
+      customerName:   orderData.customer_name,
     };
-    sseHub.sendToUser(orderData.customer_id, 'order_update', payload);
-    sseHub.sendToUser(orderData.restaurant_id, 'order_update', payload);
+    sseHub.sendToUser(orderData.customer_id,    'order_update', payload);
+    sseHub.sendToUser(orderData.restaurant_id,  'order_update', payload);
   }
+
+  // Rerouting inmediato — el driver tiene un nuevo pedido en su ruta
+  rerouteDriver(driverId).catch(e =>
+    logWarn(orderId, `rerouteDriver error tras aceptar: ${e.message}`)
+  );
 
   log(orderId, `🎉 ASIGNADO → driver=${driverId.slice(0,8)}`);
   return true;
@@ -6622,11 +7568,10 @@ export async function acceptOffer(orderId, driverId) {
  * 3. Re-encola este pedido para buscar otro driver.
  */
 export async function rejectOffer(orderId, driverId, onOffer) {
-  log(orderId, `rejectOffer driver=${driverId} cooldown=${COOLDOWN_SECONDS}s`);
+  log(orderId, `rejectOffer driver=${driverId} cooldown=${getParam('cooldown_s', 300)}s`);
 
   await rejectDriverOffer(orderId, driverId, getParam('cooldown_s', 300));
 
-  // Liberar otros pedidos que el driver tenía bloqueados con pending offer
   const freedOrderIds = await expireAllPendingForDriver(driverId, orderId);
   for (const freeOrderId of freedOrderIds) {
     if (!hasActiveChain(freeOrderId)) {
@@ -6635,7 +7580,6 @@ export async function rejectOffer(orderId, driverId, onOffer) {
     }
   }
 
-  // Re-enqueue del pedido rechazado
   serializedOffer(orderId, offerNextDrivers, onOffer);
 }
 
@@ -6647,14 +7591,14 @@ export async function rejectOffer(orderId, driverId, onOffer) {
  * 2. Desasigna el driver del pedido → vuelve a created/pending_driver.
  * 3. Libera otros pedidos bloqueados.
  * 4. Re-encola el pedido liberado.
+ * 5. Rerouting del driver — su ruta cambió.
  */
 export async function releaseOrder(orderId, driverId, onOffer) {
-  log(orderId, `releaseOrder driver=${driverId} cooldown=${COOLDOWN_SECONDS}s`);
+  log(orderId, `releaseOrder driver=${driverId} cooldown=${getParam('cooldown_s', 300)}s`);
 
   await releaseDriverOffer(orderId, driverId, getParam('cooldown_s', 300));
   await unassignDriverFromOrder(orderId, driverId);
 
-  // Liberar otros pedidos bloqueados por el driver
   const freedOrderIds = await expireAllPendingForDriver(driverId, null);
   for (const freeOrderId of freedOrderIds) {
     if (freeOrderId !== orderId && !hasActiveChain(freeOrderId)) {
@@ -6664,22 +7608,146 @@ export async function releaseOrder(orderId, driverId, onOffer) {
   }
 
   serializedOffer(orderId, offerNextDrivers, onOffer);
+
+  // Rerouting — el pedido salió de la ruta del driver
+  rerouteDriver(driverId).catch(e =>
+    logWarn(orderId, `rerouteDriver error tras liberar: ${e.message}`)
+  );
+}
+
+// ─── Pickup completado ────────────────────────────────────────────────────────
+
+/**
+ * El driver recogió el pedido en el restaurante.
+ * Actualiza estado del pedido y dispara rerouting.
+ *
+ * @returns {{ ok: boolean }}
+ */
+export async function notifyPickup(orderId, driverId) {
+  log(orderId, `notifyPickup driver=${driverId.slice(0,8)}`);
+
+  const r = await query(
+    `UPDATE orders
+     SET status = 'on_the_way', picked_up_at = NOW(), updated_at = NOW()
+     WHERE id = $1 AND driver_id = $2
+       AND status IN ('assigned','accepted','preparing','ready')
+       AND picked_up_at IS NULL
+     RETURNING id`,
+    [orderId, driverId]
+  );
+
+  if (r.rowCount === 0) {
+    logWarn(orderId, `notifyPickup: pedido no encontrado o ya recogido — driver=${driverId.slice(0,8)}`);
+    return { ok: false };
+  }
+
+  // SSE al cliente y restaurante
+  const orderData = await getOrderForSse(orderId);
+  if (orderData) {
+    const payload = { orderId, status: 'on_the_way' };
+    sseHub.sendToUser(orderData.customer_id,   'order_update', payload);
+    sseHub.sendToUser(orderData.restaurant_id, 'order_update', payload);
+  }
+
+  // Rerouting — el estado de la ruta cambió (pickup ya procesado)
+  rerouteDriver(driverId).catch(e =>
+    logWarn(orderId, `rerouteDriver error tras pickup: ${e.message}`)
+  );
+
+  log(orderId, `📦 RECOGIDO → driver=${driverId.slice(0,8)}`);
+  return { ok: true };
+}
+
+// ─── Delivery completado ──────────────────────────────────────────────────────
+
+/**
+ * El driver entregó el pedido al cliente.
+ * Actualiza estado, dispara rerouting y trigger de asignación para pedidos en cola.
+ *
+ * @returns {{ ok: boolean }}
+ */
+export async function notifyDelivery(orderId, driverId, onOffer) {
+  log(orderId, `notifyDelivery driver=${driverId.slice(0,8)}`);
+
+  const r = await query(
+    `UPDATE orders
+     SET status = 'delivered', delivered_at = NOW(), updated_at = NOW()
+     WHERE id = $1 AND driver_id = $2
+       AND status = 'on_the_way'
+     RETURNING id`,
+    [orderId, driverId]
+  );
+
+  if (r.rowCount === 0) {
+    logWarn(orderId, `notifyDelivery: pedido no encontrado o no en tránsito — driver=${driverId.slice(0,8)}`);
+    return { ok: false };
+  }
+
+  // SSE al cliente y restaurante
+  const orderData = await getOrderForSse(orderId);
+  if (orderData) {
+    const payload = { orderId, status: 'delivered' };
+    sseHub.sendToUser(orderData.customer_id,   'order_update', payload);
+    sseHub.sendToUser(orderData.restaurant_id, 'order_update', payload);
+  }
+
+  // Rerouting — pedido entregado, ruta actualizada
+  rerouteDriver(driverId).catch(e =>
+    logWarn(orderId, `rerouteDriver error tras delivery: ${e.message}`)
+  );
+
+  // Trigger inmediato — el driver liberó capacidad, puede tomar pedidos en cola
+  triggerPendingAssignments(onOffer).catch(e =>
+    logWarn(orderId, `triggerPendingAssignments error: ${e.message}`)
+  );
+
+  log(orderId, `✅ ENTREGADO → driver=${driverId.slice(0,8)}`);
+  return { ok: true };
+}
+
+// ─── Pedido cancelado ─────────────────────────────────────────────────────────
+
+/**
+ * Un pedido fue cancelado (por el cliente, admin, o distancia límite).
+ * Si tenía driver asignado, dispara rerouting y trigger de asignación.
+ *
+ * @param {string} orderId
+ * @param {string|null} driverId  — null si no tenía driver
+ * @param {Function} onOffer
+ */
+export async function notifyOrderCancelled(orderId, driverId, onOffer) {
+  log(orderId, `notifyOrderCancelled driver=${driverId?.slice(0,8) ?? 'none'}`);
+
+  if (driverId) {
+    // Rerouting — el pedido desapareció de la ruta del driver
+    rerouteDriver(driverId).catch(e =>
+      logWarn(orderId, `rerouteDriver error tras cancelación: ${e.message}`)
+    );
+
+    // Trigger inmediato — slot liberado
+    triggerPendingAssignments(onOffer).catch(e =>
+      logWarn(orderId, `triggerPendingAssignments error tras cancelación: ${e.message}`)
+    );
+  }
 }
 
 // ─── Expirar ofertas con timeout ──────────────────────────────────────────────
 
 /**
  * Ticker periódico (llamado desde el intervalo del servidor).
- * Expira todas las ofertas pending que llevan más de OFFER_TIMEOUT_SECONDS
+ * Expira todas las ofertas pending que llevan más de offer_timeout_s
  * sin respuesta del driver, y re-encola esos pedidos.
  */
 export async function expireTimedOutOffers(onOffer) {
-  const expired = await expireTimedOutOffersInDB(getParam('offer_timeout_s', 60), getParam('cooldown_s', 300));
+  const expired = await expireTimedOutOffersInDB(
+    getParam('offer_timeout_s', 60),
+    getParam('cooldown_s', 300)
+  );
 
   if (expired.length > 0) {
     console.log(
       `[assign] expireTimedOutOffers: ${expired.length} oferta(s) expiradas:`,
-                expired.map(r => `order=${r.order_id} driver=${r.driver_id}`).join(', ')
+      expired.map(r => `order=${r.order_id} driver=${r.driver_id}`).join(', ')
     );
   }
 
@@ -6698,9 +7766,7 @@ export async function expireTimedOutOffers(onOffer) {
     }
   }
 
-  // Barrer pedidos huérfanos (pending_driver sin oferta activa ni cadena en memoria).
-  // Cubre el caso de un driver que se conecta vía SSE sin cambiar disponibilidad,
-  // o pedidos que quedaron varados entre ticks.
+  // Barrer pedidos huérfanos
   try {
     const orphans = await getQueuedOrders();
     for (const ord of orphans) {
@@ -6717,27 +7783,17 @@ export async function expireTimedOutOffers(onOffer) {
 
 /**
  * El driver solicita rebalanceo manual de un pedido aún no recogido.
- *
- * - El pedido queda marcado como `is_disputed = true` con un timeout.
- * - El rebalancer lo oferta a otros drivers usando criterio de assignment inicial
- *   (sin minGain ni maxRouteEta — solo ETA al restaurante como en el assignment).
- * - Si nadie lo toma antes de `disputed_until`, la disputa se cancela automáticamente
- *   (el pedido sigue en la ruta del driver original).
- * - El driver queda en cooldown largo para ese pedido.
- * - Se incrementan contadores de sesión e histórico.
- *
  * @returns {{ ok: boolean, reason?: string }}
  */
 export async function requestRebalance(orderId, driverId) {
   log(orderId, `requestRebalance driver=${driverId.slice(0,8)}`);
 
-  // 1. Verificar que el pedido existe, está asignado a este driver y no fue recogido
   const orderRow = await query(
     `SELECT id, status, picked_up_at, is_disputed
-    FROM orders
-    WHERE id = $1 AND driver_id = $2
-    AND status IN ('assigned','accepted','preparing','ready')
-    AND picked_up_at IS NULL`,
+     FROM orders
+     WHERE id = $1 AND driver_id = $2
+       AND status IN ('assigned','accepted','preparing','ready')
+       AND picked_up_at IS NULL`,
     [orderId, driverId]
   );
   if (orderRow.rowCount === 0) {
@@ -6747,7 +7803,6 @@ export async function requestRebalance(orderId, driverId) {
     return { ok: false, reason: 'Este pedido ya está en disputa' };
   }
 
-  // 2. Verificar límite de sesión
   const profileRow = await query(
     `SELECT session_rebalances FROM driver_profiles WHERE user_id = $1`,
     [driverId]
@@ -6757,35 +7812,29 @@ export async function requestRebalance(orderId, driverId) {
     return { ok: false, reason: `Límite de rebalanceos por sesión alcanzado (${SESSION_REBALANCE_LIMIT})` };
   }
 
-  // 3. Marcar pedido como en disputa
   const disputedUntil = new Date(Date.now() + REBALANCE_DISPUTE_TIMEOUT_S * 1000);
   await query(
     `UPDATE orders
-    SET is_disputed = true,
-    disputed_until = $1,
-    disputed_by = $2,
-    updated_at = NOW()
-    WHERE id = $3`,
+     SET is_disputed = true, disputed_until = $1, disputed_by = $2, updated_at = NOW()
+     WHERE id = $3`,
     [disputedUntil, driverId, orderId]
   );
 
-  // 4. Cooldown largo para el driver en este pedido (registro en order_driver_offers)
   await query(
     `INSERT INTO order_driver_offers(order_id, driver_id, status, wait_until)
-    VALUES ($1, $2, 'released', NOW() + ($3 * INTERVAL '1 second'))
-    ON CONFLICT (order_id, driver_id)
-    DO UPDATE SET status='released',
-    wait_until = NOW() + ($3 * INTERVAL '1 second'),
-              updated_at = NOW()`,
-              [orderId, driverId, REBALANCE_COOLDOWN_SECONDS]
+     VALUES ($1, $2, 'released', NOW() + ($3 * INTERVAL '1 second'))
+     ON CONFLICT (order_id, driver_id)
+     DO UPDATE SET status='released',
+                   wait_until  = NOW() + ($3 * INTERVAL '1 second'),
+                   updated_at  = NOW()`,
+    [orderId, driverId, REBALANCE_COOLDOWN_SECONDS]
   );
 
-  // 5. Incrementar contadores sesión + histórico
   await query(
     `UPDATE driver_profiles
-    SET session_rebalances = session_rebalances + 1,
-    total_rebalances   = total_rebalances + 1
-    WHERE user_id = $1`,
+     SET session_rebalances = session_rebalances + 1,
+         total_rebalances   = total_rebalances + 1
+     WHERE user_id = $1`,
     [driverId]
   );
 
@@ -6800,30 +7849,21 @@ export async function requestRebalance(orderId, driverId) {
 export async function cancelDispute(orderId, driverId) {
   log(orderId, `cancelDispute driver=${driverId.slice(0,8)}`);
 
-  // Verificar que el pedido está en disputa y el driver es el original
   const orderRow = await query(
-    `SELECT id, driver_id, disputed_by, is_disputed
-    FROM orders
-    WHERE id = $1 AND is_disputed = true AND driver_id = $2`,
+    `SELECT id FROM orders
+     WHERE id = $1 AND is_disputed = true AND driver_id = $2`,
     [orderId, driverId]
   );
   if (orderRow.rowCount === 0) {
     return { ok: false, reason: 'No hay disputa activa para este pedido' };
   }
 
-  // Cancelar disputa: quitar flags, resetear disputed_until, limpiar disputed_by
   await query(
     `UPDATE orders
-    SET is_disputed = false,
-    disputed_until = NULL,
-    disputed_by = NULL,
-    updated_at = NOW()
-    WHERE id = $1`,
+     SET is_disputed = false, disputed_until = NULL, disputed_by = NULL, updated_at = NOW()
+     WHERE id = $1`,
     [orderId]
   );
-
-  // Opcional: enviar notificación SSE al driver que recibió la oferta (si la hay) de que ya no está disponible
-  // (No necesario para este ticket)
 
   log(orderId, `disputa cancelada manualmente por driver=${driverId.slice(0,8)}`);
   return { ok: true };
@@ -6831,27 +7871,35 @@ export async function cancelDispute(orderId, driverId) {
 
 /**
  * Ticker periódico: cancela disputas que expiraron sin ser tomadas.
- * El pedido vuelve a su ruta normal (is_disputed = false, driver_id no cambia).
  */
 export async function expireDisputedOrders() {
   const r = await query(
     `UPDATE orders
-    SET is_disputed    = false,
-    disputed_until = NULL,
-    disputed_by    = NULL,
-    updated_at     = NOW()
-    WHERE is_disputed = true
-    AND disputed_until < NOW()
-    AND driver_id IS NOT NULL
-    RETURNING id, driver_id`,
+     SET is_disputed    = false,
+         disputed_until = NULL,
+         disputed_by    = NULL,
+         updated_at     = NOW()
+     WHERE is_disputed = true
+       AND disputed_until < NOW()
+       AND driver_id IS NOT NULL
+     RETURNING id, driver_id`,
     []
   );
 
   if (r.rowCount > 0) {
     log('ticker', `${r.rowCount} disputa(s) expiradas sin tomador — pedidos vuelven a ruta original`);
+
+    // Rerouting para drivers que recuperan sus pedidos
+    await Promise.all(
+      r.rows.map(row =>
+        rerouteDriver(row.driver_id).catch(e =>
+          logWarn(row.id, `rerouteDriver error tras expiración disputa: ${e.message}`)
+        )
+      )
+    );
   }
 
-  return r.rows; // [{id, driver_id}]
+  return r.rows;
 }
 
 === FILE: backend/src/modules/orders/assignment/index.js ===
@@ -8027,6 +9075,7 @@ export function registerHistoryRoutes(router, deps) {
 import { authenticate, authorize } from '../../../middlewares/auth.js';
 import { validate } from '../../../middlewares/validate.js';
 import { STATUS_TS, notifyOrderParties } from '../shared.js';
+import { notifyPickup, notifyDelivery, notifyOrderCancelled } from '../assignment/events.js';
 
 export function registerLifecycleRoutes(router, deps) {
   const { query, AppError, orderEvents, recordPickupWait, evaluatePrepEstimate, sseHub, logEvent, updateOrderStatusSchema } = deps;
@@ -8102,6 +9151,9 @@ export function registerLifecycleRoutes(router, deps) {
       await notifyOrderParties(updated.id, 'order_update', { orderId: updated.id, status: updated.status });
 
       if (nextStatus === 'on_the_way' && updated.driver_id) {
+        // Notificar pickup al motor de asignación → rerouting del driver
+        await notifyPickup(updated.id, updated.driver_id).catch(() => {});
+
         const waitResult = await query(
           `SELECT EXTRACT(EPOCH FROM (NOW() - ready_at))::int AS wait_s FROM orders WHERE id=$1 AND ready_at IS NOT NULL`,
           [updated.id]
@@ -8132,6 +9184,13 @@ export function registerLifecycleRoutes(router, deps) {
 
       console.log(`[pedido.estado] id=${updated.id.slice(0,8)} → "${nextStatus}" por rol=${req.user.role}`);
       logEvent('order.status_changed', { orderId: updated.id, status: updated.status, actor: req.user.userId });
+
+      // Notificar delivery al motor → rerouting + trigger de asignación pendiente
+      if (nextStatus === 'delivered' && updated.driver_id) {
+        const onOffer = deps.onOffer ?? null;
+        await notifyDelivery(updated.id, updated.driver_id, onOffer).catch(() => {});
+      }
+
       return res.json({ order: updated });
     } catch (error) { return next(error); }
   });
@@ -8185,6 +9244,8 @@ export function registerLifecycleRoutes(router, deps) {
       // Notificar al driver si estaba asignado
       if (order.driver_id) {
         sseHub.sendToUser(order.driver_id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
+        const onOffer = deps.onOffer ?? null;
+        await notifyOrderCancelled(req.params.id, order.driver_id, onOffer).catch(() => {});
       }
 
       if (isLateCancel) {
@@ -8258,6 +9319,8 @@ export function registerLifecycleRoutes(router, deps) {
       if (order.driver_id) {
         await query('UPDATE orders SET driver_id=NULL, last_driver_id=driver_id WHERE id=$1', [req.params.id]).catch(() => {});
         sseHub.sendToUser(order.driver_id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
+        const onOffer = deps.onOffer ?? null;
+        await notifyOrderCancelled(req.params.id, order.driver_id, onOffer).catch(() => {});
       }
 
       console.log(`[pedido.cancelado] id=${req.params.id.slice(0,8)} por restaurante`);
@@ -8786,6 +9849,13 @@ export async function getOrderItems(orderIds = []) {
   return map;
 }
 
+// onOffer: callback que dispara SSE de oferta a un driver.
+// Se pasa a eventos de ciclo de vida (delivery, cancelación) para que puedan
+// despertar pedidos en cola inmediatamente al liberar capacidad.
+function onOffer(driverId, orderId, payload) {
+  sseHub.sendToUser(driverId, 'new_offer', payload);
+}
+
 export const sharedDeps = {
   query,
   orderEvents,
@@ -8803,6 +9873,7 @@ export const sharedDeps = {
   suggestionResponseSchema,
   suggestionSchema,
   updateOrderStatusSchema,
+  onOffer,
 };
 
 === FILE: backend/src/modules/payments/routes.js ===
@@ -13596,7 +14667,7 @@ export default function DriverMap({
     if (el) {
       el.style.filter = dark
       ? 'invert(1) contrast(1.1) hue-rotate(180deg) brightness(0.85) saturate(1.5)'
-      : 'contrast(1.1) saturate(1.8) brightness(0.9) grayscale(0.1)';
+      : 'contrast(1.1) saturate(1.8) brightness(0.9) grayscale(1)';
     }
   }
 
