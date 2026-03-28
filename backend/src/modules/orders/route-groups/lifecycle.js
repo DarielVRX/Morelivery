@@ -1,6 +1,7 @@
 import { authenticate, authorize } from '../../../middlewares/auth.js';
 import { validate } from '../../../middlewares/validate.js';
 import { STATUS_TS, notifyOrderParties } from '../shared.js';
+import { notifyPickup, notifyDelivery, notifyOrderCancelled } from '../assignment/events.js';
 
 export function registerLifecycleRoutes(router, deps) {
   const { query, AppError, orderEvents, recordPickupWait, evaluatePrepEstimate, sseHub, logEvent, updateOrderStatusSchema } = deps;
@@ -76,6 +77,9 @@ export function registerLifecycleRoutes(router, deps) {
       await notifyOrderParties(updated.id, 'order_update', { orderId: updated.id, status: updated.status });
 
       if (nextStatus === 'on_the_way' && updated.driver_id) {
+        // Notificar pickup al motor de asignación → rerouting del driver
+        await notifyPickup(updated.id, updated.driver_id).catch(() => {});
+
         const waitResult = await query(
           `SELECT EXTRACT(EPOCH FROM (NOW() - ready_at))::int AS wait_s FROM orders WHERE id=$1 AND ready_at IS NOT NULL`,
           [updated.id]
@@ -106,6 +110,13 @@ export function registerLifecycleRoutes(router, deps) {
 
       console.log(`[pedido.estado] id=${updated.id.slice(0,8)} → "${nextStatus}" por rol=${req.user.role}`);
       logEvent('order.status_changed', { orderId: updated.id, status: updated.status, actor: req.user.userId });
+
+      // Notificar delivery al motor → rerouting + trigger de asignación pendiente
+      if (nextStatus === 'delivered' && updated.driver_id) {
+        const onOffer = deps.onOffer ?? null;
+        await notifyDelivery(updated.id, updated.driver_id, onOffer).catch(() => {});
+      }
+
       return res.json({ order: updated });
     } catch (error) { return next(error); }
   });
@@ -159,6 +170,8 @@ export function registerLifecycleRoutes(router, deps) {
       // Notificar al driver si estaba asignado
       if (order.driver_id) {
         sseHub.sendToUser(order.driver_id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
+        const onOffer = deps.onOffer ?? null;
+        await notifyOrderCancelled(req.params.id, order.driver_id, onOffer).catch(() => {});
       }
 
       if (isLateCancel) {
@@ -232,6 +245,8 @@ export function registerLifecycleRoutes(router, deps) {
       if (order.driver_id) {
         await query('UPDATE orders SET driver_id=NULL, last_driver_id=driver_id WHERE id=$1', [req.params.id]).catch(() => {});
         sseHub.sendToUser(order.driver_id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
+        const onOffer = deps.onOffer ?? null;
+        await notifyOrderCancelled(req.params.id, order.driver_id, onOffer).catch(() => {});
       }
 
       console.log(`[pedido.cancelado] id=${req.params.id.slice(0,8)} por restaurante`);

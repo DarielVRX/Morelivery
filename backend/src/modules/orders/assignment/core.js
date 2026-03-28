@@ -7,7 +7,7 @@
 //   Ronda 6:    batch=5
 //   Ronda 7+:   batch=10
 //
-// WRAPAROUND: los drivers elegibles se ordenan por driver_number.
+// WRAPAROUND: los drivers elegibles se ordenan por score de simulación.
 // Si en la ronda N ya se ofertó a K drivers, se saltan los primeros K
 // y se toman los siguientes batchSize (con wraparound circular).
 //
@@ -16,19 +16,117 @@
 //   - Los advisory locks evitan asignaciones duplicadas.
 //   - Si hay menos drivers disponibles que batchSize, se usan todos los disponibles.
 //
-// DRIVERS CON OFERTA PENDING (inactivos): se saltan sin incrementar ronda.
+// CAMBIOS respecto a versión anterior:
+//   - simulation_budget_per_tick: cap de simulaciones por ciclo para evitar explosión
+//     en horas pico. Si se agota, el pedido se reencola para el próximo ciclo.
+//   - _reserveDriverSlot / _releaseDriverSlot: evita que dos pedidos concurrentes
+//     asignen el mismo driver simultáneamente (race condition).
+//   - max_customer_restaurant_distance_km: cancela pedidos inalcanzables antes de
+//     buscar driver — evita pedidos en cola infinita.
+//   - _getRetryPriority: cola de reintentos priorizada por antigüedad + urgencia SLA
+//     en lugar de FIFO.
+//   - triggerPendingAssignments(): trigger inmediato al liberar un driver — no espera
+//     al próximo tick del intervalo de mantenimiento.
+//   - Score final basado 100% en simulación — se eliminó el scoreCandidate() redundante
+//     en este archivo (ya lo llama route-simulator.js internamente).
 
-import { OFFER_TIMEOUT_SECONDS, log, logWarn } from './constants.js';
+import { log, logWarn } from './constants.js';
+import { getParam } from '../../../engine/params.js';
 import {
   getOpenOrder, getPendingOffer, getOfferRound, markPendingDriver,
-  getEligibleDrivers, getEligibleIdleDrivers,
+  getEligibleDrivers, getEligibleIdleDrivers, getQueuedOrders,
 } from './queries.js';
 import { upsertOffer } from './offer.js';
 import { applyOrderCooldownReduction } from './cooldown.js';
 import { findCandidates } from '../../../engine/candidate-finder.js';
 import { simulateDriverWithOrder } from '../../../engine/route-simulator.js';
-import { scoreCandidate } from '../../../engine/scoring.js';
 import { query } from '../../../config/db.js';
+import { haversineMeters } from '../../../utils/geo.js';
+import { serializedOffer, hasActiveChain } from './queue.js';
+
+// ─── Budget de simulaciones por ciclo ────────────────────────────────────────
+// Compartido entre todos los pedidos del mismo ciclo de asignación.
+// Se resetea al inicio de cada llamada a triggerPendingAssignments().
+let _simulationBudget = 0;
+
+// ─── Reserved slots por driver ────────────────────────────────────────────────
+// Map<driverId, count> — slots reservados mientras se simula un candidato.
+// Evita race condition donde dos pedidos concurrentes asignan el mismo driver.
+const _reservedSlots = new Map();
+
+function _reserveDriverSlot(driverId) {
+  _reservedSlots.set(driverId, (_reservedSlots.get(driverId) ?? 0) + 1);
+}
+
+function _releaseDriverSlot(driverId) {
+  const current = _reservedSlots.get(driverId) ?? 0;
+  if (current <= 1) _reservedSlots.delete(driverId);
+  else _reservedSlots.set(driverId, current - 1);
+}
+
+function _getReservedSlots(driverId) {
+  return _reservedSlots.get(driverId) ?? 0;
+}
+
+// ─── Prioridad de reintentos ──────────────────────────────────────────────────
+
+/**
+ * Calcula la prioridad de un pedido en la cola de reintentos.
+ * Mayor prioridad = número más alto.
+ * Combina antigüedad del pedido + urgencia SLA.
+ *
+ * @param {object} order  — fila de getQueuedOrders()
+ * @param {number} nowSec
+ * @returns {number}
+ */
+function _getRetryPriority(order, nowSec) {
+  const createdAt = order.created_at
+    ? new Date(order.created_at).getTime() / 1000
+    : nowSec;
+  const age       = Math.max(0, nowSec - createdAt);
+
+  const maxSla    = getParam('max_delivery_time_s', 1800);
+  const elapsed   = age;
+  const urgency   = Math.max(0, elapsed - maxSla);
+
+  return age + urgency * 2;
+}
+
+// ─── Trigger inmediato al liberar driver ──────────────────────────────────────
+
+/**
+ * Dispara asignación inmediata para pedidos en cola cuando un driver queda libre.
+ * Se llama desde: delivery completado, rebalanceo (driver pierde pedido),
+ * cancelación de pedido.
+ *
+ * A diferencia del intervalo de mantenimiento, este trigger es síncrono
+ * con el evento de liberación — reduce el tiempo de pedidos sin driver.
+ *
+ * @param {Function} onOffer
+ */
+export async function triggerPendingAssignments(onOffer) {
+  try {
+    const nowSec  = Date.now() / 1000;
+    const queued  = await getQueuedOrders();
+
+    // Ordenar por prioridad descendente
+    const sorted = queued
+      .filter(o => o.has_candidates && !hasActiveChain(o.id))
+      .sort((a, b) => _getRetryPriority(b, nowSec) - _getRetryPriority(a, nowSec));
+
+    // Resetear budget para este ciclo
+    _simulationBudget = getParam('simulation_budget_per_tick', 75);
+
+    for (const order of sorted) {
+      if (_simulationBudget <= 0) break;
+      serializedOffer(order.id, offerNextDrivers, onOffer);
+    }
+  } catch (e) {
+    logWarn('triggerPending', `error disparando asignaciones pendientes: ${e.message}`);
+  }
+}
+
+// ─── Función principal ────────────────────────────────────────────────────────
 
 /**
  * Intenta enviar oferta(s) para el pedido dado.
@@ -51,16 +149,36 @@ export async function offerNextDrivers(orderId, onOffer) {
     return 0;
   }
 
-  // ── 3. Calcular ronda y batchSize ─────────────────────────────────────────
+  // ── 3. Verificar distancia máxima restaurante→cliente ────────────────────
+  // Cancela pedidos inalcanzables antes de buscar driver — evita cola infinita.
+  const maxDistKm = getParam('max_customer_restaurant_distance_km', 8);
+  if (maxDistKm > 0 &&
+      Number.isFinite(orderRow.restaurant_lat) &&
+      Number.isFinite(orderRow.delivery_lat)) {
+    const distKm = haversineMeters(
+      { lat: Number(orderRow.restaurant_lat), lng: Number(orderRow.restaurant_lng) },
+      { lat: Number(orderRow.delivery_lat),   lng: Number(orderRow.delivery_lng) }
+    ) / 1000;
+
+    if (distKm > maxDistKm) {
+      await query(
+        `UPDATE orders
+         SET status = 'cancelled', cancelled_by = 'distance_limit', updated_at = NOW()
+         WHERE id = $1`,
+        [orderId]
+      );
+      log(`order=${orderId}`, `cancelado — distancia restaurante→cliente ${distKm.toFixed(2)}km > ${maxDistKm}km`);
+      return 0;
+    }
+  }
+
+  // ── 4. Calcular ronda y batchSize ─────────────────────────────────────────
   const pastCount = await getOfferRound(orderId);
   const round     = pastCount + 1;
   const batchSize = round <= 5 ? 1 : round === 6 ? 5 : 10;
   log(`order=${orderId}`, `ronda=${round} batch=${batchSize}`);
 
-  // ── 4. Obtener drivers elegibles (sin cooldown, sin haber aceptado) ────────
-  // Para batch=1 solo queremos drivers IDLE (sin pending en otro pedido).
-  // Para batch>1 tomamos todos los elegibles — los que tengan pending serán
-  // descartados por el advisory lock en upsertOffer (sin contar como ronda).
+  // ── 5. Obtener drivers elegibles ──────────────────────────────────────────
   const eligible = batchSize === 1
     ? await getEligibleIdleDrivers(orderId)
     : await getEligibleDrivers(orderId);
@@ -75,23 +193,17 @@ export async function offerNextDrivers(orderId, onOffer) {
     const reduced = await applyOrderCooldownReduction(orderId, orderRow.offer_cooldown_triggered);
 
     if (!reduced) {
-      // Sin cooldowns que reducir: todos los drivers están en pending offer
-      // en otro pedido, o sin disponibilidad. Esperar al próximo wake-up.
       logWarn(`order=${orderId}`, 'sin cooldown que reducir → pending_driver');
       await markPendingDriver(orderId);
       return 0;
     }
 
     if (reduced.newWaitSecs >= 1) {
-      // Cooldown reducido pero el driver todavía espera — el ticker lo
-      // detectará cuando expire y reencola automáticamente.
       log(`order=${orderId}`, `cooldown reducido a ${Math.round(reduced.newWaitSecs)}s → pending_driver`);
       await markPendingDriver(orderId);
       return 0;
     }
 
-    // newWaitSecs < 1 → wait_until ya en el pasado → driver elegible ahora mismo.
-    // Re-consultar elegibles con batch=1 para continuar el flujo normalmente.
     const immediateEligible = batchSize === 1
       ? await getEligibleIdleDrivers(orderId)
       : await getEligibleDrivers(orderId);
@@ -102,22 +214,19 @@ export async function offerNextDrivers(orderId, onOffer) {
       return 0;
     }
 
-    // Continuar con los candidatos recién liberados
     eligible.push(...immediateEligible);
   }
 
-  // ── 5. Scoring + Wraparound circular ─────────────────────────────────────
-  // Usa scoreCandidate() del motor para ordenar — corrige la inconsistencia
-  // anterior donde se calculaba un score ad-hoc aquí en lugar de reutilizar
-  // la función dedicada con todos sus parámetros configurables.
-  let scoredEligible = eligible.map(d => ({ ...d, bagOverflowPct: 0 })); // fallback
+  // ── 6. Simulación + Scoring ───────────────────────────────────────────────
+  // El score final viene 100% de simulateDriverWithOrder() via scoreCandidate().
+  // No hay scoring ad-hoc en este archivo.
+  let scoredEligible = eligible.map(d => ({ ...d, bagOverflowPct: 0 })); // fallback sin simulación
 
   try {
     const coordsRow = await query(
-      `SELECT restaurant_lat, restaurant_lng, delivery_lat, delivery_lng,
-              o.customer_id,
-              COALESCE(o.delivery_lat, cu.lat)  AS cust_lat,
-              COALESCE(o.delivery_lng, cu.lng)  AS cust_lng,
+      `SELECT restaurant_lat, restaurant_lng,
+              COALESCE(o.delivery_lat, cu.lat) AS cust_lat,
+              COALESCE(o.delivery_lng, cu.lng) AS cust_lng,
               o.estimated_volume_liters
        FROM orders o
        JOIN users cu ON cu.id = o.customer_id
@@ -135,49 +244,71 @@ export async function offerNextDrivers(orderId, onOffer) {
         lat: Number(coord.cust_lat),
         lng: Number(coord.cust_lng),
       };
-      const orderForSim = {
-        id: orderId,
-        estimated_volume_liters: Number(coord.estimated_volume_liters) || 0,
-      };
 
-      if (
-        Number.isFinite(restaurantPos.lat) && Number.isFinite(customerPos.lat)
-      ) {
+      if (Number.isFinite(restaurantPos.lat) && Number.isFinite(customerPos.lat)) {
+
+        // ── Verificar budget disponible ───────────────────────────────────
+        if (_simulationBudget <= 0) {
+          log(`order=${orderId}`, 'budget de simulaciones agotado — reencolar para próximo ciclo');
+          await markPendingDriver(orderId);
+          return 0;
+        }
+
         const { topDrivers } = await findCandidates(orderId, restaurantPos, customerPos);
 
         if (topDrivers.length > 0) {
-          // Para rondas con batch > 1 correr simulación completa para obtener
-          // bagOverflowPct y score definitivo. Para ronda 1-5 (batch=1) usar
-          // scoreCandidate() sobre el envelope — más rápido, suficientemente preciso.
-          // Siempre simular para obtener bagOverflowPct correcto (pico de carga en ruta).
-          // Para batch=1 la simulación es igualmente necesaria — sin ella el conductor
-          // no recibe aviso de capacidad aunque la oferta lo lleve a colapsar su mochila.
           const nowSec = Date.now() / 1000;
+          const orderForSim = {
+            id: orderId,
+            estimated_volume_liters: Number(coord.estimated_volume_liters) || 0,
+          };
 
-          const scored = await Promise.all(
-            topDrivers.map(async (env) => {
-              try {
-                const candidate = await simulateDriverWithOrder(
-                  env, orderForSim, restaurantPos, customerPos, nowSec
-                );
-                const { totalCost } = scoreCandidate(
-                  candidate,
-                  { max_delivery_time_s: null },
-                  candidate.driver?.disconnectPenalties ?? env.disconnectPenalties ?? 0
-                );
-                return {
-                  driverId:       env.driver.id,
-                  totalCost,
-                  bagOverflowPct: candidate.bagOverflowPct ?? 0,
-                };
-              } catch {
-                return { driverId: env.driver.id, totalCost: Infinity, bagOverflowPct: 0 };
-              }
+          // Aplicar budget y reserved slots
+          const maxActive = getParam('max_active_orders_per_driver', 4);
+          const cappedDrivers = topDrivers
+            .filter(c => {
+              const reserved = _getReservedSlots(c.driver.id);
+              return (c.driver.activeOrders + reserved) < maxActive;
             })
-          );
+            .slice(0, Math.min(_simulationBudget, topDrivers.length));
+
+          if (cappedDrivers.length === 0) {
+            log(`order=${orderId}`, 'todos los candidatos están reservados → pending_driver');
+            await markPendingDriver(orderId);
+            return 0;
+          }
+
+          // Reservar slots durante la simulación
+          for (const c of cappedDrivers) _reserveDriverSlot(c.driver.id);
+          _simulationBudget -= cappedDrivers.length;
+
+          let scored;
+          try {
+            scored = await Promise.all(
+              cappedDrivers.map(async (env) => {
+                try {
+                  const result = await simulateDriverWithOrder(
+                    env, orderForSim, restaurantPos, customerPos, nowSec
+                  );
+                  // totalCost ya viene de scoreCandidate() dentro del simulador
+                  return {
+                    driverId:       env.driver.id,
+                    totalCost:      result.totalCost,
+                    bagOverflowPct: result.bagOverflowPct ?? 0,
+                  };
+                } catch {
+                  return { driverId: env.driver.id, totalCost: Infinity, bagOverflowPct: 0 };
+                }
+              })
+            );
+          } finally {
+            // Liberar slots siempre, incluso si hay error
+            for (const c of cappedDrivers) _releaseDriverSlot(c.driver.id);
+          }
 
           const scoreMap = new Map(scored.map(s => [s.driverId, s]));
 
+          // Ordenar eligible por score de simulación
           scoredEligible = [...eligible]
             .map(d => ({
               ...d,
@@ -189,7 +320,7 @@ export async function offerNextDrivers(orderId, onOffer) {
               return sA - sB;
             });
 
-          log(`order=${orderId}`, `scoreCandidate aplicado — ${topDrivers.length} candidatos`);
+          log(`order=${orderId}`, `simulación aplicada — ${cappedDrivers.length} candidatos`);
         }
       }
     }
@@ -197,7 +328,7 @@ export async function offerNextDrivers(orderId, onOffer) {
     log(`order=${orderId}`, `scoring fallback a driver_number: ${e.message}`);
   }
 
-  // Wraparound circular sobre la lista ya ordenada por score
+  // ── 7. Wraparound circular sobre lista ordenada por score ─────────────────
   const offset    = scoredEligible.length > 0 ? pastCount % scoredEligible.length : 0;
   const totalElg  = scoredEligible.length;
   const realBatch = Math.min(batchSize, totalElg);
@@ -212,7 +343,7 @@ export async function offerNextDrivers(orderId, onOffer) {
     realBatch,
   });
 
-  // ── 6. Enviar ofertas ─────────────────────────────────────────────────────
+  // ── 8. Enviar ofertas ─────────────────────────────────────────────────────
   let sent = 0;
   for (const row of batch) {
     const ok = await upsertOffer(orderId, row.user_id, onOffer, row.bagOverflowPct ?? 0);
@@ -220,7 +351,6 @@ export async function offerNextDrivers(orderId, onOffer) {
   }
 
   if (sent === 0) {
-    // Todos los drivers del batch tenían pending offer (advisory lock los saltó)
     log(`order=${orderId}`, 'batch completo en pending — pending_driver');
     await markPendingDriver(orderId);
   }
