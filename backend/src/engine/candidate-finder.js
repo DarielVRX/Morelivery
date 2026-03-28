@@ -5,18 +5,22 @@
 // para obtener drivers elegibles y construye el sobre de candidatos
 // usando OSRM real (con caché).
 //
-// Diferencias respecto al simulador:
-//   - No usa world.drivers — consulta driver_profiles + orders en DB
-//   - getSpeedKmh: usa vehicle_type de la DB (bike=20, moto=35, car=40)
-//   - El filtro de capacidad usa MAX del param, no driver.max_orders
-//   - disconnect_penalties viene de driver_profiles.disconnect_penalties
-//   - No hay _reservedSlots — el FOR UPDATE SKIP LOCKED de PG lo maneja
+// CAMBIOS respecto a versión anterior:
+//   - Agrega _getClosestViableStop(): encuentra el mejor punto de inserción
+//     en la ruta actual del driver (posición actual o stop ya comprometido
+//     cercano al restaurante). Portado de AssignmentCandidateFinder.js.
+//   - Agrega loadDriverActiveStops(): carga stops activos del driver desde DB
+//     para poder calcular el viableStop correctamente.
+//   - etaToRestaurant ahora se calcula via viableStop, no directo desde pos del driver.
+//   - bridgePenaltyS ahora refleja el desvío real desde viableStop al restaurante.
+//   - approxScore se mantiene en el envelope pero NO se usa como criterio de ranking
+//     en topDrivers — el simulador es el árbitro final.
+//   - viableStop y activeStops se exponen en cada candidato para el simulador.
 
 import { query } from '../config/db.js';
 import { haversineMeters } from '../utils/geo.js';
 import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
-import { shortId } from '../utils/geo.js';
 import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
 
 /**
@@ -37,14 +41,14 @@ function speedKmhByVehicle(vehicleType) {
  * Carga drivers candidatos desde la DB:
  * - Disponibles y activos
  * - Bajo el límite de max_active_orders_per_driver
- * - Sin cooldown activo para ESTE pedido (no en order_driver_offers expirado/rechazado con wait_until > NOW)
+ * - Sin cooldown activo para ESTE pedido
  * - Con posición GPS registrada
  *
  * @param {string} orderId
  * @returns {Promise<Array>}
  */
 async function loadCandidateDrivers(orderId) {
-  const maxActive = getParam('max_active_orders_per_driver', 4);
+  const maxActive    = getParam('max_active_orders_per_driver', 4);
   const maxPenalties = getParam('disconnect_penalty_max', 3);
 
   const r = await query(
@@ -65,12 +69,10 @@ async function loadCandidateDrivers(orderId) {
        AND u.status = 'active'
        AND dp.last_lat IS NOT NULL
        AND dp.last_lng IS NOT NULL
-       -- Bajo el límite de capacidad
        AND (
          SELECT COUNT(*) FROM orders o
          WHERE o.driver_id = dp.user_id AND o.status = ANY($1::text[])
        ) < $2
-       -- Sin cooldown activo para este pedido
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
          WHERE od.order_id = $3
@@ -78,14 +80,12 @@ async function loadCandidateDrivers(orderId) {
            AND od.status IN ('rejected','released','expired')
            AND od.wait_until > NOW()
        )
-       -- No aceptó ya este pedido
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
          WHERE od.order_id = $3
            AND od.driver_id = dp.user_id
            AND od.status = 'accepted'
        )
-       -- Penalizaciones bajo el máximo
        AND dp.disconnect_penalties < $4`,
     [ACTIVE_STATUSES, maxActive, orderId, maxPenalties]
   );
@@ -103,9 +103,143 @@ async function loadCandidateDrivers(orderId) {
 }
 
 /**
+ * Carga los stops activos de un driver desde DB.
+ * Se usa para calcular el viableStop (punto de inserción óptimo).
+ *
+ * @param {string} driverId
+ * @returns {Promise<Array<{ type, orderId, pos, routeIndex }>>}
+ */
+async function loadDriverActiveStops(driverId) {
+  const r = await query(
+    `SELECT
+       o.id,
+       o.status,
+       o.delivery_lat                         AS cust_lat,
+       o.delivery_lng                         AS cust_lng,
+       COALESCE(ru.home_lat, rest.lat)        AS rest_lat,
+       COALESCE(ru.home_lng, rest.lng)        AS rest_lng
+     FROM orders o
+     JOIN restaurants rest ON rest.id = o.restaurant_id
+     LEFT JOIN users ru    ON ru.id   = rest.owner_user_id
+     WHERE o.driver_id = $1
+       AND o.status    = ANY($2::text[])
+     ORDER BY o.accepted_at ASC NULLS LAST`,
+    [driverId, ACTIVE_STATUSES]
+  );
+
+  const stops = [];
+  let idx = 0;
+
+  for (const row of r.rows) {
+    if (row.status !== 'on_the_way' && row.rest_lat && row.rest_lng) {
+      stops.push({
+        type:       'pickup',
+        orderId:    row.id,
+        pos:        { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
+        routeIndex: idx++,
+      });
+    }
+    if (row.cust_lat && row.cust_lng) {
+      stops.push({
+        type:       'delivery',
+        orderId:    row.id,
+        pos:        { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
+        routeIndex: idx++,
+      });
+    }
+  }
+
+  return stops;
+}
+
+/**
+ * Encuentra el punto de inserción óptimo para el nuevo pedido en la ruta
+ * actual del driver.
+ *
+ * Candidatos:
+ *   1. Posición actual del driver (type: 'driver')
+ *   2. Cualquier stop ya comprometido en ruta que esté dentro del radio
+ *      del restaurante — insertar el pickup nuevo después de ese stop
+ *      puede ser más eficiente que desviar desde la posición actual.
+ *
+ * Retorna el candidato con menor distancia al restaurante.
+ *
+ * @param {{lat,lng}} driverPos
+ * @param {Array}     activeStops   — de loadDriverActiveStops()
+ * @param {{lat,lng}} restaurantPos
+ * @param {number}    maxRadiusM
+ * @returns {{ type, orderId, pos, distToRestaurant, routeIndex? } | null}
+ */
+function getClosestViableStop(driverPos, activeStops, restaurantPos, maxRadiusM) {
+  const candidates = [];
+
+  // Posición actual del driver
+  const driverDist = haversineMeters(driverPos, restaurantPos);
+  if (driverDist < maxRadiusM) {
+    candidates.push({
+      type:              'driver',
+      orderId:           null,
+      pos:               { ...driverPos },
+      distToRestaurant:  driverDist,
+    });
+  }
+
+  // Stops ya en ruta
+  for (const stop of activeStops) {
+    const dist = haversineMeters(stop.pos, restaurantPos);
+    if (dist >= maxRadiusM) continue;
+    candidates.push({
+      type:             stop.type,
+      orderId:          stop.orderId,
+      pos:              { ...stop.pos },
+      routeIndex:       stop.routeIndex,
+      distToRestaurant: dist,
+    });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Retornar el candidato más cercano al restaurante
+  candidates.sort((a, b) => a.distToRestaurant - b.distToRestaurant);
+  return candidates[0];
+}
+
+/**
+ * Estima el ETA del driver hasta el viableStop recorriendo los stops previos
+ * en orden de ruta.
+ *
+ * Si viableStop es la posición del driver (type='driver'), ETA = 0.
+ *
+ * @param {{lat,lng}}  driverPos
+ * @param {Array}      activeStops
+ * @param {object}     viableStop
+ * @param {object}     driverObj    — { speed_kmh }
+ * @returns {Promise<number>}       segundos
+ */
+async function estimateEtaToViableStop(driverPos, activeStops, viableStop, driverObj) {
+  if (!viableStop || viableStop.type === 'driver') return 0;
+
+  let pos     = driverPos;
+  let eta     = 0;
+
+  for (const stop of activeStops) {
+    const travelSec = await etaEstimator.estimate(pos, stop.pos, driverObj);
+    eta += travelSec;
+    pos  = stop.pos;
+
+    const match =
+      (Number.isFinite(viableStop.routeIndex) && viableStop.routeIndex === stop.routeIndex) ||
+      (stop.type === viableStop.type && stop.orderId === viableStop.orderId);
+
+    if (match) return eta;
+  }
+
+  return 0;
+}
+
+/**
  * Construye el envelope de candidatos para un pedido.
- * Para cada driver calcula ETAs relevantes y una aproximación del score
- * que luego RouteInsertionSimulator afina.
+ * Para cada driver calcula ETAs relevantes usando el viableStop real.
  *
  * @param {string} orderId
  * @param {{ lat: number, lng: number }} restaurantPos
@@ -113,72 +247,101 @@ async function loadCandidateDrivers(orderId) {
  * @returns {Promise<{ topDrivers: Array, viableDrivers: Array }>}
  */
 export async function findCandidates(orderId, restaurantPos, customerPos) {
-  const maxRadiusM   = getParam('max_pickup_radius_km', 5) * 1000;
-  const hardTopK     = Math.max(1, getParam('assignment_hard_top_k', 5));
-  const nearbyPrefM  = Math.max(25, getParam('nearby_driver_preference_m', 250));
+  const maxRadiusM  = getParam('max_pickup_radius_km', 5) * 1000;
+  const hardTopK    = Math.max(1, getParam('assignment_hard_top_k', 5));
+  const nearbyPrefM = Math.max(25, getParam('nearby_driver_preference_m', 250));
 
   const drivers = await loadCandidateDrivers(orderId);
-
   if (drivers.length === 0) return { topDrivers: [], viableDrivers: [] };
 
-  // Filtrar por radio y calcular ETAs en paralelo
+  // Filtrar por radio (distancia directa driver→restaurante como pre-filtro rápido)
   const withRadius = drivers.filter(d =>
     haversineMeters(d.pos, restaurantPos) < maxRadiusM
   );
-
   if (withRadius.length === 0) return { topDrivers: [], viableDrivers: [] };
 
+  // Construir envelopes en paralelo
   const envelopes = await Promise.all(
     withRadius.map(async d => {
-      const driverObj = { speed_kmh: d.speedKmh };
-      const [etaDriverToRestaurant, etaRestaurantToCustomer] = await Promise.all([
-        etaEstimator.estimate(d.pos, restaurantPos, driverObj),
+      const driverObj  = { speed_kmh: d.speedKmh };
+      const speedMs    = Math.max(1, (d.speedKmh * 1000) / 3600);
+
+      // Cargar stops activos del driver para calcular viableStop
+      const activeStops = await loadDriverActiveStops(d.id);
+
+      // Encontrar punto de inserción óptimo
+      const viableStop = getClosestViableStop(d.pos, activeStops, restaurantPos, maxRadiusM);
+
+      // Sin viableStop el driver no puede tomar el pedido
+      if (!viableStop) return null;
+
+      // ETAs
+      const [etaToViableStop, etaViableToRestaurant, etaRestaurantToCustomer] = await Promise.all([
+        estimateEtaToViableStop(d.pos, activeStops, viableStop, driverObj),
+        etaEstimator.estimate(viableStop.pos, restaurantPos, driverObj),
         etaEstimator.estimate(restaurantPos, customerPos, driverObj),
       ]);
 
       const directDriverToRestaurantMeters = haversineMeters(d.pos, restaurantPos);
-      const speedMs = Math.max(1, (d.speedKmh * 1000) / 3600);
 
-      // bridgePenaltyS: coste de desvío desde posición actual al restaurante
-      // (simplificado sin stops intermedios — el simulador completo lo hace en RouteInsertionSimulator)
-      const bridgePenaltyS = directDriverToRestaurantMeters / speedMs;
+      // bridgePenaltyS: desvío desde viableStop al restaurante
+      // Más preciso que antes donde se calculaba desde la posición directa del driver
+      const driverBridgeMeters = Math.max(
+        0,
+        directDriverToRestaurantMeters - (viableStop.distToRestaurant ?? 0)
+      );
+      const bridgePenaltyS = driverBridgeMeters / speedMs;
       const loadPenalty    = d.activeOrders * getParam('fairness_penalty_per_order_s', 120);
 
+      // approxScore se conserva en el envelope para logging/debug
+      // pero NO se usa como criterio de ranking — el simulador decide
       const approxScore =
-        etaDriverToRestaurant +
+        etaToViableStop +
+        etaViableToRestaurant +
         etaRestaurantToCustomer +
         loadPenalty +
-        bridgePenaltyS * 0.35;
+        bridgePenaltyS * getParam('pickup_bridge_penalty_factor', 1);
 
       return {
-        driver:                       d,
+        driver:                        d,
+        viableStop,
+        activeStops,
         approxScore,
-        etaToRestaurant:              etaDriverToRestaurant,
+        etaToViableStop,
+        etaViableToRestaurant,
         etaRestaurantToCustomer,
-        etaToNewCustomer:             etaDriverToRestaurant + etaRestaurantToCustomer,
+        etaToRestaurant:               etaToViableStop + etaViableToRestaurant,
+        etaToNewCustomer:              etaToViableStop + etaViableToRestaurant + etaRestaurantToCustomer,
         directDriverToRestaurantMeters,
         bridgePenaltyS,
         loadPenalty,
-        activeOrders:                 d.activeOrders,
-        driverSpeedKmh:               d.speedKmh,
-        disconnectPenalties:          d.disconnectPenalties,
-        valid:                        true,
-        validExisting:                true,
+        activeOrders:                  d.activeOrders,
+        driverSpeedKmh:                d.speedKmh,
+        disconnectPenalties:           d.disconnectPenalties,
+        valid:                         true,
+        validExisting:                 true,
       };
     })
   );
 
-  // Ordenar por approxScore
-  const viableDrivers = [...envelopes].sort((a, b) => a.approxScore - b.approxScore);
+  // Filtrar nulls (drivers sin viableStop)
+  const validEnvelopes = envelopes.filter(Boolean);
+  if (validEnvelopes.length === 0) return { topDrivers: [], viableDrivers: [] };
 
-  // Preferir drivers cercanos al restaurante
+  // viableDrivers ordenados por etaToNewCustomer (para logging/debug)
+  const viableDrivers = [...validEnvelopes].sort((a, b) => a.etaToNewCustomer - b.etaToNewCustomer);
+
+  // Preferir drivers cercanos al restaurante (o cuyo viableStop esté cerca)
   const preferredNearby = viableDrivers.filter(c =>
-    c.directDriverToRestaurantMeters <= nearbyPrefM
+    c.directDriverToRestaurantMeters <= nearbyPrefM ||
+    (c.viableStop?.distToRestaurant ?? Infinity) <= nearbyPrefM
   );
 
-  // Construir topDrivers combinando nearby + top K
-  const seen = new Set();
+  // topDrivers: nearby + top K — sin ranking por approxScore
+  // El orden aquí no importa porque el simulador evalúa todos
+  const seen       = new Set();
   const topDrivers = [];
+
   for (const c of [...preferredNearby, ...viableDrivers.slice(0, hardTopK)]) {
     if (seen.has(c.driver.id)) continue;
     seen.add(c.driver.id);

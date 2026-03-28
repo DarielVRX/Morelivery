@@ -85,6 +85,13 @@ export async function getOrderItems(orderIds = []) {
   return map;
 }
 
+// onOffer: callback que dispara SSE de oferta a un driver.
+// Se pasa a eventos de ciclo de vida (delivery, cancelación) para que puedan
+// despertar pedidos en cola inmediatamente al liberar capacidad.
+function onOffer(driverId, orderId, payload) {
+  sseHub.sendToUser(driverId, 'new_offer', payload);
+}
+
 export const sharedDeps = {
   query,
   orderEvents,
@@ -102,4 +109,5 @@ export const sharedDeps = {
   suggestionResponseSchema,
   suggestionSchema,
   updateOrderStatusSchema,
+  onOffer,
 };
