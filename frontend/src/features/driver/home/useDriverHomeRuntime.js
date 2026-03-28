@@ -144,8 +144,8 @@ export function useDriverHomeRuntime({
   // ── Ciclo de centrado en modo navegación ──────────────────────────────────
   const handleCenterCycle = useCallback(() => {
     if (!routeActive || !routeGeometry?.length) {
-      setCenterMode('nav');
-      centerModeRef.current = 'nav';
+      setCenterMode('free');
+      centerModeRef.current = 'free';
       clearTimeout(autoCenterRef.current);
       setCenterSignal('free');
       return;
@@ -283,8 +283,8 @@ export function useDriverHomeRuntime({
       setRouteActive(false);
       setRouteGeometry(null);
       setRouteSteps([]);
-      setCenterMode('nav');
-      centerModeRef.current = 'nav';
+      setCenterMode('free');
+      centerModeRef.current = 'free';
       centerCycleRef.current = 0;
       setCenterSignal('free');
       return;
