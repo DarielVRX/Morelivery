@@ -16,6 +16,7 @@ export function useRealtimeOrders(
   onChatMessage, onReconnect, onKitchenEvent,
   onTransferEvent, onSupportMessage,
   onNewOrder, onEtaAlert, onDriverArrived, onSimulatedCall,
+  onRouteUpdate,
 ) {
   const esRef          = useRef(null);
   const reconnectTimer = useRef(null);
@@ -31,6 +32,7 @@ export function useRealtimeOrders(
       chat: onChatMessage, reconnect: onReconnect, kitchen: onKitchenEvent,
       transfer: onTransferEvent, support: onSupportMessage,
       newOrder: onNewOrder, eta: onEtaAlert, arrived: onDriverArrived, call: onSimulatedCall,
+      routeUpdate: onRouteUpdate,
     };
   });
 
@@ -194,6 +196,12 @@ export function useRealtimeOrders(
           vibrate: VIBRATE.offer,
         });
       }
+    });
+
+    // Secuencia óptima de stops calculada por el motor de ruteo del backend.
+    // No genera notificación — actualiza la navegación del driver en tiempo real.
+    on('route_update', (data) => {
+      cb.current.routeUpdate?.(data);
     });
 
     on('chat_message', (data) => {
