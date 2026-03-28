@@ -370,6 +370,11 @@ self.addEventListener('push', (event) => {
     }
 
     if (group === 'driver' || pushType === 'new_offer') {
+      // Guard: si la app está abierta y enfocada, el SSE ya manejó la oferta.
+      // Mostrar push solo cuando la app está en background/cerrada.
+      const activeClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      if (activeClients.some(c => c.focused)) return;
+
       await showGroupedNotification({
         group: 'driver', title, body, url, priority: 'high',
         tag: group, vibrate: VIBRATE.offer,
@@ -378,6 +383,13 @@ self.addEventListener('push', (event) => {
           { action: 'reject', title: '✕ Rechazar' },
         ],
       });
+      return;
+    }
+
+    // route_update es SSE-first — el push solo llega si la app está cerrada.
+    // En ese caso simplemente abrir la app; el SSE sincronizará al reconectar.
+    if (pushType === 'route_update') {
+      // No mostrar notificación visible — solo despertar la app si está en background
       return;
     }
 

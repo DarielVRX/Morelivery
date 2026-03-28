@@ -19,6 +19,7 @@ import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
 import { scoreCandidate } from './scoring.js';
 import { rerouteDriver } from './reroute.js';
+import { sendPushToUser } from '../notifications/pushSubscription.js';
 import { sseHub } from '../modules/events/hub.js';
 import { shortId } from '../utils/geo.js';
 import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
@@ -265,6 +266,13 @@ export async function runRebalancer(onOffer) {
           message: 'Se te asignó un pedido en disputa.',
         });
 
+        // Push al driver receptor — fallback si app está cerrada
+        sendPushToUser(best.driver.id, {
+          title: '📦 Pedido asignado', body: 'Se te asignó un pedido en disputa.',
+          tag: `reassigned_${order.id}`, group: 'driver', priority: 'high',
+          url: '/driver', vibrate: [300, 100, 300], pushType: 'reassigned', orderId: order.id,
+        }).catch(e => console.warn('[push] transfer_in disputa:', e.message));
+
         // Rerouting inmediato para ambos drivers
         await Promise.all([
           rerouteDriver(order.driverId),
@@ -410,6 +418,13 @@ export async function runRebalancer(onOffer) {
             orderId: order.id,
             message: 'Se te asignó un pedido transferido.',
           });
+
+          // Push al driver receptor — fallback si app está cerrada
+          sendPushToUser(best.driver.id, {
+            title: '📦 Pedido asignado', body: 'Se te asignó un pedido transferido.',
+            tag: `reassigned_${order.id}`, group: 'driver', priority: 'high',
+            url: '/driver', vibrate: [300, 100, 300], pushType: 'reassigned', orderId: order.id,
+          }).catch(e => console.warn('[push] transfer_in rebalanceo:', e.message));
 
           // Rerouting inmediato para ambos drivers
           await Promise.all([

@@ -34,26 +34,44 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 // ── Suscripción VAPID push ────────────────────────────────────────────────────
+//
+// Siempre re-envía al backend para garantizar que el endpoint quede
+// asociado al usuario activo — cubre el caso de múltiples usuarios
+// en el mismo dispositivo (driver A → driver B → mismo endpoint).
+//
+// Si el permiso está denegado: no intenta suscribir, devuelve 'denied'
+// para que el UI pueda guiar al usuario a habilitarlo manualmente.
 async function subscribeToPush(token) {
   if (!VAPID_PUB_KEY) {
     console.warn('[perms] VITE_VAPID_PUBLIC_KEY no definida — push subscription omitida');
     return null;
   }
+
+  // Permiso denegado — no hay nada que hacer programáticamente
+  if (Notification.permission === 'denied') {
+    console.warn('[perms] push subscription omitida — permiso denegado por el usuario');
+    return 'denied';
+  }
+
   try {
     const reg = await navigator.serviceWorker.ready;
-    // Si ya hay suscripción activa, reutilizarla
+
     let sub = await reg.pushManager.getSubscription();
     if (!sub) {
+      // No hay suscripción activa — solicitar una nueva
       sub = await reg.pushManager.subscribe({
         userVisibleOnly:      true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUB_KEY),
       });
     }
-    // Enviar al backend para guardar/actualizar
+
+    // Siempre enviar al backend — garantiza que el user_id queda actualizado
+    // aunque el endpoint ya exista (ON CONFLICT DO UPDATE en DB)
     await apiFetch('/push/subscribe', {
       method: 'POST',
       body:   JSON.stringify(sub.toJSON()),
     }, token);
+
     return sub;
   } catch (e) {
     console.warn('[perms] push subscription error:', e.message);
@@ -320,11 +338,20 @@ export function usePermissions(token, role) {
     };
   }, [token, requestAll]);
 
-  // Re-suscribir push cada vez que el token cambia y los permisos ya están granted
-  // Esto cubre el caso en que driver/restaurant inician sesión después de admin
+  // Re-suscribir push en cada login — garantiza que el endpoint quede
+  // asociado al usuario activo independientemente de quién se suscribió antes.
+  // Si está denegado: actualizar estado para que el UI pueda guiar al usuario.
   useEffect(() => {
-    if (!token || Notification.permission !== 'granted') return;
-    subscribeToPush(token).catch(() => {});
+    if (!token) return;
+
+    if (Notification.permission === 'denied') {
+      setStatus(s => ({ ...s, notifications: 'denied' }));
+      return;
+    }
+
+    if (Notification.permission === 'granted') {
+      subscribeToPush(token).catch(() => {});
+    }
   }, [token]);
 
   return {

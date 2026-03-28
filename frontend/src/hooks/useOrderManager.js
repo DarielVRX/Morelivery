@@ -32,6 +32,9 @@ export function useOrderManager(token, patchUser, userDriver) {
   const [notifPriorityMode, setNotifPriorityMode] = useState(getNotifPriorityMode);
   const [transferBanner, setTransferBanner] = useState(null);
   const [routeBagPct,    setRouteBagPct]    = useState(null);
+  // Secuencia óptima de stops calculada por el motor de ruteo del backend.
+  // Se actualiza via SSE route_update — null significa usar el orden por defecto.
+  const [routeStopsOverride, setRouteStopsOverride] = useState(null);
 
   const loadDataRef         = useRef(null);
   const myPositionRef       = useRef(null);
@@ -116,7 +119,7 @@ export function useOrderManager(token, patchUser, userDriver) {
       })();
 
       setActiveOrder(active);
-      if (!active) setRouteBagPct(null);
+      if (!active) { setRouteBagPct(null); setRouteStopsOverride(null); }
       const newOffer = (off.offers||[]).length > 0 ? off.offers[0] : null;
       setPendingOffer(prev => {
         if (newOffer?.id !== prev?.id) setOfferMinimized(false);
@@ -144,6 +147,15 @@ export function useOrderManager(token, patchUser, userDriver) {
     setTimeout(() => loadDataRef.current?.(), 600);
   }, []);
 
+  // Recibe la secuencia óptima de stops del motor de ruteo del backend.
+  // Actualiza routeStopsOverride para que DriverHomeMapSection muestre
+  // el orden correcto sin esperar el próximo loadData().
+  const handleRouteUpdate = useCallback((data) => {
+    if (Array.isArray(data?.stops) && data.stops.length > 0) {
+      setRouteStopsOverride(data.stops);
+    }
+  }, []);
+
   const handleTransferEvent = useCallback((data) => {
     setTransferBanner(data);
     setTimeout(() => setTransferBanner(null), 8_000);
@@ -169,6 +181,8 @@ export function useOrderManager(token, patchUser, userDriver) {
     handleOrderUpdate, () => {}, handleNewOffer,
     handleChatMessage, handleReconnect, undefined,
     handleTransferEvent, undefined,
+    undefined, undefined, undefined, undefined,
+    handleRouteUpdate,
   );
 
   // ── Acciones ──────────────────────────────────────────────────────────────
@@ -328,6 +342,7 @@ export function useOrderManager(token, patchUser, userDriver) {
     setMyPosition: (pos) => { myPositionRef.current = pos; },
     setOfferMinimized, setOrderExpanded, setShowRelease, setReleaseNote, setTransferBanner,
     routeBagPct,
+    routeStopsOverride,
     loadData, toggleAvailability,
     acceptOffer: handleAcceptOffer, rejectOffer, changeStatus,
     doRelease, doRebalance, doCancelDispute, doSimulatedCall, handleOfferExpired,
