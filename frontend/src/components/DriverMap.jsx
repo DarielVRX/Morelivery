@@ -123,6 +123,7 @@ export default function DriverMap({
           const svg = markersRef.current.driverSvg;
           if (svg && routeActiveRef.current) svg.style.transform = `rotate(${h}deg)`;
         }
+        const prev = prevWatchPosRef.current;          // ← capturar ANTES
         prevWatchPosRef.current = next;
         livePosRef.current      = next;
         setHasGPS(true);
@@ -133,17 +134,14 @@ export default function DriverMap({
           if (mode === 'nav') {
             const sinceInteraction = Date.now() - lastInteractionRef.current;
             if (sinceInteraction > 5000) {
-              // Pausar auto-centrado si el driver no se está moviendo
-              // Detectar movimiento: comparar con posición previa
-              const prevPos = prevWatchPosRef.current;
               const R = 6371000;
               let isMoving = true;
-              if (prevPos) {
-                const dLat = (next.lat - prevPos.lat) * Math.PI / 180;
-                const dLng = (next.lng - prevPos.lng) * Math.PI / 180;
-                const a = Math.sin(dLat/2)**2 + Math.cos(prevPos.lat*Math.PI/180)*Math.cos(next.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+              if (prev) {                              // ← usar prev capturado
+                const dLat = (next.lat - prev.lat) * Math.PI / 180;
+                const dLng = (next.lng - prev.lng) * Math.PI / 180;
+                const a = Math.sin(dLat/2)**2 + Math.cos(prev.lat*Math.PI/180)*Math.cos(next.lat*Math.PI/180)*Math.sin(dLng/2)**2;
                 const distM = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-                isMoving = distM > 3; // > 3m entre ticks = en movimiento
+                isMoving = distM > 3;
               }
               if (isMoving) {
                 const h = liveHeadingRef.current;
@@ -152,31 +150,27 @@ export default function DriverMap({
                   duration: 250, offset: [0, Math.round(map.getContainer().clientHeight * 0.18)],
                            essential: true,
                 });
-                // Conservar último heading aunque se pause el centrado
               }
-              // Si no está en movimiento: NO actualizar bearing ni centrar — mantener última vista
             }
           } else if (mode === 'free') {
             const sinceInteraction = Date.now() - lastInteractionRef.current;
             if (sinceInteraction > 5000) {
-              const prevPos = prevWatchPosRef.current;
-              if (prevPos) {
-                const R    = 6371000;
-                const dLat = (next.lat - prevPos.lat) * Math.PI / 180;
-                const dLng = (next.lng - prevPos.lng) * Math.PI / 180;
-                const a    = Math.sin(dLat/2)**2 + Math.cos(prevPos.lat*Math.PI/180)*Math.cos(next.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+              const R = 6371000;
+              let isMoving = false;
+              if (prev) {                              // ← usar prev capturado
+                const dLat = (next.lat - prev.lat) * Math.PI / 180;
+                const dLng = (next.lng - prev.lng) * Math.PI / 180;
+                const a    = Math.sin(dLat/2)**2 + Math.cos(prev.lat*Math.PI/180)*Math.cos(next.lat*Math.PI/180)*Math.sin(dLng/2)**2;
                 const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-                const isMoving = dist > 3;
-                if (isMoving) {
-                  map.easeTo({
-                    center: [next.lng, next.lat],
-                    pitch: 0,
-                    bearing: 0,
-                    zoom: 15,
-                    duration: 400, essential: true,
-                  });
-                }
+                isMoving = dist > 3;
               }
+              map.easeTo({                             // ← siempre: pitch/bearing 0
+                center: isMoving ? [next.lng, next.lat] : map.getCenter(),
+                         pitch: 0,
+                         bearing: 0,
+                         zoom: isMoving ? 15 : map.getZoom(),
+                         duration: 400, essential: true,
+              });
             }
           }
         }
