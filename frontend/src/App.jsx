@@ -290,12 +290,12 @@ function RestaurantLayout() {
     <ProtectedRole role="restaurant">
       <SplitLayout
         onRefresh={() => window.location.reload()}
-        ordersContent={<RestaurantOrders />}
+        ordersContent={<RestaurantSchedule />}
         homeContent={
           <Suspense fallback={<Spinner />}>
             <Routes>
-              <Route path="horario" element={<RestaurantSchedule />} />
-              <Route index          element={<RestaurantMenu />} />
+              <Route path="menu" element={<RestaurantMenu />} />
+              <Route index       element={<RestaurantOrders />} />
             </Routes>
           </Suspense>
         }
@@ -409,3 +409,4 @@ export default function App() {
     </AuthProvider>
   );
 }
+
