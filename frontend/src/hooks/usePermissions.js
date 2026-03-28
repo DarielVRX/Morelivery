@@ -15,7 +15,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api/client';
 
-const STORAGE_KEY   = 'morelivery_perms_requested';
+// STORAGE_KEY es por usuario — evita que un rol bloquee la suscripción de otro
+function getStorageKey(token) {
+  try {
+    const raw = localStorage.getItem('morelivery_auth_v1');
+    const userId = raw ? JSON.parse(raw)?.user?.id : null;
+    return userId ? `morelivery_perms_requested_${userId}` : 'morelivery_perms_requested';
+  } catch { return 'morelivery_perms_requested'; }
+}
 const VAPID_PUB_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
 
 // Convierte la VAPID public key de base64url a Uint8Array
@@ -247,7 +254,7 @@ export function usePermissions(token, role) {
     setStatus(s => ({ ...s, battery }));
 
     // Marcar como solicitado para no volver a pedir automáticamente
-    try { localStorage.setItem(STORAGE_KEY, '1'); } catch (_) {}
+    try { localStorage.setItem(getStorageKey(token), '1'); } catch (_) {}
 
     setLoading(false);
     setMsg('Permisos configurados.');
@@ -288,7 +295,13 @@ export function usePermissions(token, role) {
     if (!token) return;
     if (autoRequested.current) return;
     try {
-      if (localStorage.getItem(STORAGE_KEY) === '1') return;
+      if (localStorage.getItem(getStorageKey(token)) === '1') {
+        // Ya se pidieron permisos — pero siempre re-suscribir push por si el token rotó
+        if (Notification.permission === 'granted') {
+          subscribeToPush(token).catch(() => {});
+        }
+        return;
+      }
     } catch (_) {}
 
     // Esperar interacción del usuario antes de pedir (requerido en móvil)
@@ -307,6 +320,13 @@ export function usePermissions(token, role) {
     };
   }, [token, requestAll]);
 
+  // Re-suscribir push cada vez que el token cambia y los permisos ya están granted
+  // Esto cubre el caso en que driver/restaurant inician sesión después de admin
+  useEffect(() => {
+    if (!token || Notification.permission !== 'granted') return;
+    subscribeToPush(token).catch(() => {});
+  }, [token]);
+
   return {
     status,           // estado de cada permiso
     loading,          // true mientras se están pidiendo
@@ -320,3 +340,4 @@ export function usePermissions(token, role) {
     getNetworkInfo:     () => getNetworkInfo(),
   };
 }
+
