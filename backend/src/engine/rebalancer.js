@@ -19,7 +19,7 @@ import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
 import { scoreCandidate } from './scoring.js';
 import { rerouteDriver } from './reroute.js';
-import { sendPushToUser } from '../notifications/pushSubscription.js';
+import { sendPushToUser } from '../modules/notifications/pushSubscription.js';
 import { sseHub } from '../modules/events/hub.js';
 import { shortId } from '../utils/geo.js';
 import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
