@@ -232,14 +232,14 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer' 
           ¿No tienes cuenta? <strong>Regístrate</strong>
         </button>
 
-        {/* Links discretos de rol — no aparecen si appKey está fijado */}
+        {/* Links discretos de rol — solo en la entrada principal (sin appKey) */}
         {!appKey && (
           <div style={{ display: 'flex', justifyContent: 'center', gap: '1.25rem', marginTop: '0.1rem' }}>
-            <button type="button" onClick={() => onGoRegister('driver')}
+            <button type="button" onClick={() => navigate('/driver/login')}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: '0.75rem', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
               Soy repartidor
             </button>
-            <button type="button" onClick={() => onGoRegister('restaurant')}
+            <button type="button" onClick={() => navigate('/restaurant/login')}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: '0.75rem', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
               Tengo un negocio
             </button>

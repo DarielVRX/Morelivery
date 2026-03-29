@@ -189,10 +189,14 @@ function AuthScreen({ mode = 'login' }) {
   const { isDark, toggle } = useTheme();
   const app        = findApp(appKey);
 
-  if (auth.user && (!appKey || auth.user.role === appKey))
-    return <Navigate to={app?.home || `/${auth.user.role}`} replace />;
+  if (auth.user && auth.user.role === appKey)
+    return <Navigate to={app?.home || `/${appKey}`} replace />;
 
-  // appKey puede ser null cuando se llega desde "/" — no redirigir
+  // Sin appKey (ruta "/") con sesión activa — redirigir al home del rol
+  if (auth.user && !appKey)
+    return <Navigate to={findApp(auth.user.role)?.home || `/${auth.user.role}`} replace />;
+
+  if (appKey && !app) return <Navigate to="/" replace />;
 
   const wrongRole = auth.user && auth.user.role !== appKey;
 
@@ -226,9 +230,13 @@ function AuthScreen({ mode = 'login' }) {
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem 1.25rem' }}>
         <div style={{ width: '100%', maxWidth: '420px' }}>
           {appKey && (
-            <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
-              <div style={{ marginBottom: '0.5rem' }}>{ROLE_ICONS[appKey] ?? '🔐'}</div>
-              <p style={{ margin: '0.3rem 0 0', fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+            <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
+              <div style={{ marginBottom: '0.5rem', display: 'flex', justifyContent: 'center' }}>
+                {ROLE_ICONS[appKey]
+                  ? <span style={{ opacity: 0.85 }}>{ROLE_ICONS[appKey]}</span>
+                  : <span style={{ fontSize: '2.5rem' }}>🔐</span>}
+              </div>
+              <p style={{ margin: '0.3rem 0 0', fontWeight: 700, fontSize: '1rem', color: 'var(--text-secondary)' }}>
                 {app?.label}
               </p>
             </div>
