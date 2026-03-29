@@ -229,18 +229,16 @@ function AuthScreen({ mode = 'login' }) {
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem 1.25rem' }}>
         <div style={{ width: '100%', maxWidth: '420px' }}>
-          {appKey && (
-            <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
-              <div style={{ marginBottom: '0.5rem', display: 'flex', justifyContent: 'center' }}>
-                {ROLE_ICONS[appKey]
-                  ? <span style={{ opacity: 0.85 }}>{ROLE_ICONS[appKey]}</span>
-                  : <span style={{ fontSize: '2.5rem' }}>🔐</span>}
-              </div>
-              <p style={{ margin: '0.3rem 0 0', fontWeight: 700, fontSize: '1rem', color: 'var(--text-secondary)' }}>
-                {app?.label}
-              </p>
+          <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
+            <div style={{ marginBottom: '0.5rem', display: 'flex', justifyContent: 'center' }}>
+              <span style={{ opacity: 0.85 }}>
+                {ROLE_ICONS[appKey] ?? <IconCustomer />}
+              </span>
             </div>
-          )}
+            <p style={{ margin: '0.3rem 0 0', fontWeight: 700, fontSize: '1rem', color: 'var(--text-secondary)' }}>
+              {app?.label ?? 'Cliente'}
+            </p>
+          </div>
           {wrongRole && (
             <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 8, padding: '0.6rem 0.875rem', marginBottom: '0.75rem', fontSize: '0.82rem', color: '#856404' }}>
               ⚠️ Ya tienes sesión como <strong>{findApp(auth.user.role)?.label}</strong>. Inicia sesión aquí para cambiar de cuenta.
