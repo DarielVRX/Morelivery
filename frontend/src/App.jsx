@@ -189,10 +189,10 @@ function AuthScreen({ mode = 'login' }) {
   const { isDark, toggle } = useTheme();
   const app        = findApp(appKey);
 
-  if (auth.user && auth.user.role === appKey)
-    return <Navigate to={app?.home || `/${appKey}`} replace />;
+  if (auth.user && (!appKey || auth.user.role === appKey))
+    return <Navigate to={app?.home || `/${auth.user.role}`} replace />;
 
-  if (!app) return <Navigate to="/" replace />;
+  // appKey puede ser null cuando se llega desde "/" — no redirigir
 
   const wrongRole = auth.user && auth.user.role !== appKey;
 
@@ -203,12 +203,7 @@ function AuthScreen({ mode = 'login' }) {
         padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--gray-200)',
         background: 'var(--bg-card)', position: 'sticky', top: 0, zIndex: 10,
       }}>
-        <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--brand)', fontSize: '0.875rem', fontWeight: 600, textDecoration: 'none' }}>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          Inicio
-        </Link>
+        <div style={{ width: 34 }} />  {/* spacer para centrar el logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           <img src="/logo.svg" alt="" style={{ width: 24, height: 24 }} />
           <BrandName size="0.95rem" />
@@ -230,12 +225,14 @@ function AuthScreen({ mode = 'login' }) {
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem 1.25rem' }}>
         <div style={{ width: '100%', maxWidth: '420px' }}>
-          <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
-            <div style={{ marginBottom: '0.5rem' }}>{ROLE_ICONS[appKey] ?? '🔐'}</div>
-            <p style={{ margin: '0.3rem 0 0', fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-              {app.label}
-            </p>
-          </div>
+          {appKey && (
+            <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
+              <div style={{ marginBottom: '0.5rem' }}>{ROLE_ICONS[appKey] ?? '🔐'}</div>
+              <p style={{ margin: '0.3rem 0 0', fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                {app?.label}
+              </p>
+            </div>
+          )}
           {wrongRole && (
             <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 8, padding: '0.6rem 0.875rem', marginBottom: '0.75rem', fontSize: '0.82rem', color: '#856404' }}>
               ⚠️ Ya tienes sesión como <strong>{findApp(auth.user.role)?.label}</strong>. Inicia sesión aquí para cambiar de cuenta.
@@ -387,7 +384,7 @@ function AppRoutes() {
 function RootRouter() {
   return (
     <Routes>
-      <Route path="/"                 element={<LandingScreen />} />
+      <Route path="/"                 element={<AuthScreen mode="login" />} />
       <Route path="/:appKey/login"    element={<AuthScreen mode="login" />} />
       <Route path="/:appKey/register" element={<AuthScreen mode="register" />} />
       <Route path="/reset-password"   element={
