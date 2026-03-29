@@ -1,4 +1,14 @@
 // frontend/src/pages/AuthPage.jsx
+//
+// CAMBIOS:
+//   - AuthPage es la entrada directa — sin splash
+//   - Formulario asume 'customer' por default
+//   - Dos links discretos en LoginView: "Soy repartidor" / "Tengo un negocio"
+//     que llevan al registro con el rol preseleccionado (login Y registro)
+//   - Errores de credenciales siempre genéricos — no revelan el rol
+//   - RegisterView con progressive disclosure: paso 1 usuario, paso 2 contacto,
+//     paso 3 contraseña/dirección
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -39,7 +49,6 @@ async function getFingerprint() {
   catch { return undefined; }
 }
 
-// Etiqueta de campo obligatorio
 function Req() {
   return <span style={{ color: 'var(--danger)', fontWeight: 400, fontSize: '0.75rem', marginLeft: 3 }}>*</span>;
 }
@@ -81,15 +90,15 @@ function AddressBlock({ postalCode, setPostalCode, estado, setEstado, ciudad, se
 }
 
 // ── LoginView ─────────────────────────────────────────────────────────────────
-function LoginView({ appKey, onGoRegister, onGoForgot }) {
-  const { login }    = useAuth();
-  const navigate     = useNavigate();
-  const [loading,    setLoading]    = useState(false);
-  const [msg,        setMsg]        = useState('');
+function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer' }) {
+  const { login }   = useAuth();
+  const navigate    = useNavigate();
+  const [loading,   setLoading]   = useState(false);
+  const [msg,       setMsg]       = useState('');
   const [showResend, setShowResend] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
-  const [role,       setRole]       = useState(appKey || 'customer');
-  const roleRef      = useRef(role);
+  const [role,      setRole]      = useState(appKey || initialRole);
+  const roleRef     = useRef(role);
   const googleBtnRef = useRef(null);
   const googleInit   = useRef(false);
   const [installPrompt, setInstallPrompt] = useState(null);
@@ -97,6 +106,7 @@ function LoginView({ appKey, onGoRegister, onGoForgot }) {
   const passwordRef = useRef(null);
 
   useEffect(() => { roleRef.current = role; }, [role]);
+
   useEffect(() => {
     const h = (e) => { e.preventDefault(); setInstallPrompt(e); };
     window.addEventListener('beforeinstallprompt', h);
@@ -109,7 +119,7 @@ function LoginView({ appKey, onGoRegister, onGoForgot }) {
       const data = await apiFetch('/auth/google', { method: 'POST', body: JSON.stringify({ credential: response.credential, role: roleRef.current }) });
       login({ token: data.token, user: data.user });
       navigate(`/${data.user.role}`);
-    } catch (e) { setMsg(e.message); }
+    } catch { setMsg('No se pudo iniciar sesión. Verifica tus datos e intenta de nuevo.'); }
     finally { setLoading(false); }
   }, [login, navigate]);
 
@@ -122,8 +132,7 @@ function LoginView({ appKey, onGoRegister, onGoForgot }) {
   }, []);
 
   useEffect(() => {
-    if (!GOOGLE_CLIENT_ID) return;
-    if (googleInit.current) return;
+    if (!GOOGLE_CLIENT_ID || googleInit.current) return;
     const render = () => {
       if (!window.google || !googleBtnRef.current) return;
       googleInit.current = true;
@@ -145,16 +154,20 @@ function LoginView({ appKey, onGoRegister, onGoForgot }) {
     try {
       const deviceFingerprint = await getFingerprint();
       const data = await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, role: appKey || undefined, deviceFingerprint }) });
-      if (appKey === 'admin' && data.user.role !== 'admin') { setMsg('Esta cuenta no es de administrador.'); return; }
-      if (appKey && data.user.role !== appKey) {
-        const labels = { customer: 'Cliente', restaurant: 'Tienda', driver: 'Conductor', admin: 'Administrador' };
-        setMsg(`Esta cuenta es de tipo "${labels[data.user.role] || data.user.role}". Accede desde la sección correcta.`); return;
+      // Solo validación estricta para admin — sin revelar rol en otros casos
+      if (appKey === 'admin' && data.user.role !== 'admin') {
+        setMsg('Correo o contraseña incorrectos.');
+        return;
       }
       login({ token: data.token, user: data.user });
       navigate(`/${data.user.role}`);
     } catch (e) {
-      setMsg(e.message);
-      if (e.message?.includes('verificar tu correo')) setShowResend(true);
+      // Error genérico — no revelar si el rol es incorrecto ni si el correo existe
+      setMsg('Correo o contraseña incorrectos.');
+      if (e.message?.includes('verificar tu correo')) {
+        setMsg('Verifica tu correo antes de ingresar.');
+        setShowResend(true);
+      }
     } finally { setLoading(false); }
   }
 
@@ -166,7 +179,7 @@ function LoginView({ appKey, onGoRegister, onGoForgot }) {
       await apiFetch('/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) });
       setMsg('Correo de verificación reenviado. Revisa tu bandeja.');
       setShowResend(false);
-    } catch (e) { setMsg(e.message); }
+    } catch { setMsg('No se pudo reenviar. Intenta más tarde.'); }
     finally { setResendLoading(false); }
   }
 
@@ -182,15 +195,19 @@ function LoginView({ appKey, onGoRegister, onGoForgot }) {
             onKeyDown={e => e.key === 'Enter' && submitLogin()} />
         </label>
       </div>
+
       <div style={{ textAlign: 'right', marginTop: '-0.25rem', marginBottom: '0.75rem' }}>
-        <button type="button" onClick={onGoForgot} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.8rem', padding: 0 }}>
+        <button type="button" onClick={onGoForgot}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.8rem', padding: 0 }}>
           ¿Olvidaste tu contraseña?
         </button>
       </div>
+
       <div className="row">
         <button className="btn-primary" onClick={submitLogin} disabled={loading}>
           {loading ? 'Ingresando…' : 'Iniciar sesión'}
         </button>
+
         {GOOGLE_CLIENT_ID && (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.25rem 0' }}>
@@ -198,23 +215,10 @@ function LoginView({ appKey, onGoRegister, onGoForgot }) {
               <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>o continúa con</span>
               <hr style={{ flex: 1, border: 'none', borderTop: '1px solid var(--border)' }} />
             </div>
-            {!appKey && (
-              <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center', marginBottom: '0.4rem' }}>
-                {[['customer','Cliente'],['restaurant','Tienda'],['driver','Conductor']].map(([val, label]) => (
-                  <button key={val} type="button" onClick={() => setRole(val)}
-                    style={{ padding: '0.2rem 0.65rem', fontSize: '0.75rem', cursor: 'pointer',
-                      border: `1.5px solid ${role === val ? 'var(--brand)' : 'var(--border)'}`,
-                      borderRadius: 6, background: role === val ? 'var(--brand-light)' : 'var(--bg-card)',
-                      color: role === val ? 'var(--brand)' : 'var(--text-secondary)',
-                      fontWeight: role === val ? 700 : 400, minHeight: 'unset' }}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
             <div style={{ display: 'flex', justifyContent: 'center' }}><div ref={googleBtnRef} /></div>
           </>
         )}
+
         {installPrompt && (
           <button type="button" className="btn-sm"
             onClick={async () => { installPrompt.prompt(); await installPrompt.userChoice.catch(() => null); setInstallPrompt(null); }}
@@ -222,11 +226,27 @@ function LoginView({ appKey, onGoRegister, onGoForgot }) {
             Instalar app
           </button>
         )}
-        <button type="button" onClick={onGoRegister}
+
+        <button type="button" onClick={() => onGoRegister('customer')}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.875rem', textAlign: 'center', padding: '0.25rem 0' }}>
           ¿No tienes cuenta? <strong>Regístrate</strong>
         </button>
+
+        {/* Links discretos de rol — no aparecen si appKey está fijado */}
+        {!appKey && (
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '1.25rem', marginTop: '0.1rem' }}>
+            <button type="button" onClick={() => onGoRegister('driver')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: '0.75rem', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
+              Soy repartidor
+            </button>
+            <button type="button" onClick={() => onGoRegister('restaurant')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: '0.75rem', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
+              Tengo un negocio
+            </button>
+          </div>
+        )}
       </div>
+
       {showResend && (
         <div style={{ marginTop: '0.5rem', padding: '0.65rem 0.9rem', background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', borderRadius: 8, fontSize: '0.82rem', color: 'var(--warn)' }}>
           ¿No recibiste el correo de verificación?{' '}
@@ -241,26 +261,30 @@ function LoginView({ appKey, onGoRegister, onGoForgot }) {
   );
 }
 
-// ── RegisterView ──────────────────────────────────────────────────────────────
-function RegisterView({ appKey, onGoLogin, onSuccess }) {
+// ── RegisterView con progressive disclosure ───────────────────────────────────
+// Paso 1 — Identidad:  nombre, alias
+// Paso 2 — Contacto:   correo, teléfono (customer), tipo de cuenta
+// Paso 3 — Seguridad:  contraseña + dirección
+
+function RegisterView({ appKey, onGoLogin, onSuccess, initialRole = 'customer' }) {
+  const [step,    setStep]    = useState(1);
   const [loading, setLoading] = useState(false);
   const [msg,     setMsg]     = useState('');
   const [msgOk,   setMsgOk]   = useState(false);
 
-  // Nombre separado en nombre y apellido
-  const [firstName, setFirstName] = useState('');
-  const [lastName,  setLastName]  = useState('');
-  const [alias,     setAlias]     = useState('');
-  const [regEmail,  setRegEmail]  = useState('');
-  const [regPwd,    setRegPwd]    = useState('');
+  const [firstName,  setFirstName]  = useState('');
+  const [lastName,   setLastName]   = useState('');
+  const [alias,      setAlias]      = useState('');
+  const [regEmail,   setRegEmail]   = useState('');
+  const [regPwd,     setRegPwd]     = useState('');
   const [regPwdConf, setRegPwdConf] = useState('');
-  const [phone,     setPhone]     = useState('');
-  const [pwdError,  setPwdError]  = useState('');
-  const validRoles = ['customer', 'restaurant', 'driver'];
-  const [role, setRole] = useState(validRoles.includes(appKey) ? appKey : 'customer');
+  const [phone,      setPhone]      = useState('');
+  const [pwdError,   setPwdError]   = useState('');
 
-  // Validación en tiempo real de email
-  const [emailStatus, setEmailStatus] = useState(''); // '' | 'checking' | 'available' | 'taken'
+  const validRoles = ['customer', 'restaurant', 'driver'];
+  const [role, setRole] = useState(validRoles.includes(appKey) ? appKey : initialRole);
+
+  const [emailStatus,  setEmailStatus]  = useState('');
   const emailTimer = useRef(null);
 
   const [postalCode,   setPostalCode]   = useState('');
@@ -277,7 +301,6 @@ function RegisterView({ appKey, onGoLogin, onSuccess }) {
 
   useEffect(() => { if (!regPwd) { setPwdError(''); return; } setPwdError(validatePassword(regPwd) || ''); }, [regPwd]);
 
-  // Validar email en tiempo real
   useEffect(() => {
     const email = regEmail.trim();
     if (!email || !/\S+@\S+\.\S+/.test(email)) { setEmailStatus(''); return; }
@@ -311,24 +334,43 @@ function RegisterView({ appKey, onGoLogin, onSuccess }) {
     return [[calle, numero].filter(Boolean).join(' '), colonia, ciudad, estado, postalCode].filter(Boolean).join(', ');
   }
 
-  async function submitRegister() {
-    if (!firstName.trim())     { setMsg('Ingresa tu nombre'); return; }
-    if (!lastName.trim())      { setMsg('Ingresa tu apellido'); return; }
-    if (!alias.trim())         { setMsg('Ingresa un alias'); return; }
-    if (!regEmail.trim())      { setMsg('Ingresa tu correo electrónico'); return; }
-    if (!/\S+@\S+\.\S+/.test(regEmail)) { setMsg('Correo inválido'); return; }
-    if (emailStatus === 'taken') { setMsg('Este correo ya está registrado. ¿Ya tienes cuenta?'); return; }
-    const pwdErr = validatePassword(regPwd);
-    if (pwdErr)                { setMsg(pwdErr); return; }
-    if (regPwd !== regPwdConf) { setMsg('Las contraseñas no coinciden'); return; }
-    if (role === 'customer' && !phone.trim()) { setMsg('El número de teléfono es obligatorio'); return; }
-    if (role === 'restaurant' && (!postalCode || !calle)) { setMsg('La dirección completa de tu tienda es requerida'); return; }
+  function validateStep1() {
+    if (!firstName.trim()) { setMsg('Ingresa tu nombre'); return false; }
+    if (!lastName.trim())  { setMsg('Ingresa tu apellido'); return false; }
+    if (!alias.trim())     { setMsg('Ingresa un alias'); return false; }
+    return true;
+  }
 
+  function validateStep2() {
+    if (!regEmail.trim())                     { setMsg('Ingresa tu correo electrónico'); return false; }
+    if (!/\S+@\S+\.\S+/.test(regEmail))       { setMsg('Correo inválido'); return false; }
+    if (emailStatus === 'taken')               { setMsg('Este correo ya está registrado. ¿Ya tienes cuenta?'); return false; }
+    if (role === 'customer' && !phone.trim()) { setMsg('El número de teléfono es obligatorio'); return false; }
+    return true;
+  }
+
+  function validateStep3() {
+    const pwdErr = validatePassword(regPwd);
+    if (pwdErr)                { setMsg(pwdErr); return false; }
+    if (regPwd !== regPwdConf) { setMsg('Las contraseñas no coinciden'); return false; }
+    if (role === 'restaurant' && (!postalCode || !calle)) { setMsg('La dirección completa de tu tienda es requerida'); return false; }
+    return true;
+  }
+
+  function nextStep() {
+    setMsg('');
+    if (step === 1 && !validateStep1()) return;
+    if (step === 2 && !validateStep2()) return;
+    setStep(s => s + 1);
+  }
+
+  async function submitRegister() {
+    setMsg('');
+    if (!validateStep3()) return;
     const fullName    = `${firstName.trim()} ${lastName.trim()}`;
     const username    = await makeUniqueUsername(alias);
-    const addressFull = ['customer','restaurant'].includes(role) && (postalCode || calle) ? buildAddress() : undefined;
+    const addressFull = ['customer', 'restaurant'].includes(role) && (postalCode || calle) ? buildAddress() : undefined;
     const deviceFingerprint = await getFingerprint();
-
     setLoading(true);
     try {
       await apiFetch('/auth/register', { method: 'POST', body: JSON.stringify({
@@ -347,82 +389,134 @@ function RegisterView({ appKey, onGoLogin, onSuccess }) {
     finally { setLoading(false); }
   }
 
+  const stepLabels = ['Identidad', 'Contacto', 'Seguridad'];
+
   return (
     <>
-      <div className="row">
-        {/* Nombre y apellido separados */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-          <label>Nombre <Req /><input value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="Juan" autoComplete="given-name" /></label>
-          <label>Apellido <Req /><input value={lastName} onChange={e => setLastName(e.target.value)} placeholder="García" autoComplete="family-name" /></label>
-        </div>
-        <label>Alias / Apodo <Req />
-          <input value={alias} onChange={e => setAlias(e.target.value)} placeholder="Ej: JuanG" autoComplete="nickname" />
-          <span style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginTop: '0.2rem', display: 'block' }}>Así te verán los demás.</span>
-        </label>
-        <label>Correo electrónico <Req />
-          <div style={{ position: 'relative' }}>
-            <input value={regEmail} onChange={e => setRegEmail(e.target.value)} type="email" placeholder="tu@correo.com" autoComplete="email"
-              style={{ paddingRight: '2rem' }} />
-            {emailStatus === 'checking'  && <span style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>…</span>}
-            {emailStatus === 'available' && <span style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--success)' }}>✓</span>}
-            {emailStatus === 'taken'     && <span style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--danger)' }}>✗</span>}
-          </div>
-          {emailStatus === 'taken' && (
-            <span style={{ fontSize: '0.72rem', color: 'var(--danger)', marginTop: '0.2rem', display: 'block' }}>
-              Este correo ya tiene una cuenta. <button type="button" onClick={onGoLogin} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--brand)', padding: 0, fontSize: '0.72rem', fontWeight: 700 }}>Inicia sesión</button>
+      {/* Indicador de pasos */}
+      <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1rem', alignItems: 'center' }}>
+        {[1,2,3].map(n => (
+          <div key={n} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flex: n < 3 ? 1 : 'none' }}>
+            <div style={{
+              width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+              background: n <= step ? 'var(--brand)' : 'var(--border)',
+              color: n <= step ? '#fff' : 'var(--text-tertiary)',
+              fontSize: '0.7rem', fontWeight: 700,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              {n < step ? '✓' : n}
+            </div>
+            <span style={{ fontSize: '0.72rem', color: n === step ? 'var(--text-primary)' : 'var(--text-tertiary)', fontWeight: n === step ? 600 : 400 }}>
+              {stepLabels[n-1]}
             </span>
+            {n < 3 && <div style={{ flex: 1, height: 1, background: n < step ? 'var(--brand)' : 'var(--border)' }} />}
+          </div>
+        ))}
+      </div>
+
+      {/* Paso 1 — Identidad */}
+      {step === 1 && (
+        <div className="row">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+            <label>Nombre <Req /><input value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="Juan" autoComplete="given-name" /></label>
+            <label>Apellido <Req /><input value={lastName} onChange={e => setLastName(e.target.value)} placeholder="García" autoComplete="family-name" /></label>
+          </div>
+          <label>Alias / Apodo <Req />
+            <input value={alias} onChange={e => setAlias(e.target.value)} placeholder="Ej: JuanG" autoComplete="nickname" />
+            <span style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginTop: '0.2rem', display: 'block' }}>Así te verán los demás.</span>
+          </label>
+        </div>
+      )}
+
+      {/* Paso 2 — Contacto */}
+      {step === 2 && (
+        <div className="row">
+          <label>Correo electrónico <Req />
+            <div style={{ position: 'relative' }}>
+              <input value={regEmail} onChange={e => setRegEmail(e.target.value)} type="email" placeholder="tu@correo.com" autoComplete="email"
+                style={{ paddingRight: '2rem' }} />
+              {emailStatus === 'checking'  && <span style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>…</span>}
+              {emailStatus === 'available' && <span style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--success)' }}>✓</span>}
+              {emailStatus === 'taken'     && <span style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--danger)' }}>✗</span>}
+            </div>
+            {emailStatus === 'taken' && (
+              <span style={{ fontSize: '0.72rem', color: 'var(--danger)', marginTop: '0.2rem', display: 'block' }}>
+                Este correo ya tiene una cuenta.{' '}
+                <button type="button" onClick={onGoLogin} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--brand)', padding: 0, fontSize: '0.72rem', fontWeight: 700 }}>Inicia sesión</button>
+              </span>
+            )}
+          </label>
+
+          {role === 'customer' && (
+            <label>Teléfono <Req />
+              <input value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g,'').slice(0,15))} type="tel" placeholder="Ej: 4431234567" autoComplete="tel" inputMode="numeric" />
+            </label>
           )}
-        </label>
-        {role === 'customer' && (
-          <label>Teléfono <Req />
-            <input value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g,'').slice(0,15))} type="tel" placeholder="Ej: 4431234567" autoComplete="tel" inputMode="numeric" />
-          </label>
-        )}
-        {!appKey && (
-          <label>Tipo de cuenta <Req />
-            <select value={role} onChange={e => setRole(e.target.value)}>
-              <option value="customer">Cliente</option>
-              <option value="restaurant">Tienda</option>
-              <option value="driver">Conductor</option>
-            </select>
-          </label>
-        )}
-      </div>
-      <div className="row" style={{ marginTop: '0.5rem' }}>
-        <label>Contraseña <Req />
-          <input value={regPwd} onChange={e => setRegPwd(e.target.value)} type="password" placeholder="Mínimo 8 caracteres" autoComplete="new-password" />
-          {pwdError && <span style={{ fontSize: '0.73rem', color: 'var(--error)', marginTop: '0.2rem', display: 'block' }}>{pwdError}</span>}
-        </label>
-        <label>Confirmar contraseña <Req />
-          <input value={regPwdConf} onChange={e => setRegPwdConf(e.target.value)} type="password" placeholder="Repite la contraseña" autoComplete="new-password" />
-        </label>
-        {regPwd.length > 0 && <PasswordStrength pwd={regPwd} />}
-      </div>
-      <div style={{ marginTop: '0.75rem' }}>
-        <p style={{ fontWeight: 700, fontSize: '0.82rem', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>
-          {role === 'restaurant' ? <>Dirección de la tienda <Req /></> : 'Dirección (puedes agregarla después)'}
-        </p>
-        <AddressBlock postalCode={postalCode} setPostalCode={setPostalCode}
-          estado={estado} setEstado={setEstado} ciudad={ciudad} setCiudad={setCiudad}
-          colonia={colonia} setColonia={setColonia} coloniasList={coloniasList}
-          calle={calle} setCalle={setCalle} numero={numero} setNumero={setNumero}
-          cpLoading={cpLoading} cpError={cpError}
-          required={role === 'restaurant'} />
-      </div>
-      <p style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: '0.5rem' }}>
-        Los campos con <span style={{ color: 'var(--danger)' }}>*</span> son obligatorios.
-      </p>
+
+          {!appKey && (
+            <label>Tipo de cuenta <Req />
+              <select value={role} onChange={e => setRole(e.target.value)}>
+                <option value="customer">Cliente</option>
+                <option value="restaurant">Tengo un negocio</option>
+                <option value="driver">Soy repartidor</option>
+              </select>
+            </label>
+          )}
+        </div>
+      )}
+
+      {/* Paso 3 — Seguridad */}
+      {step === 3 && (
+        <>
+          <div className="row">
+            <label>Contraseña <Req />
+              <input value={regPwd} onChange={e => setRegPwd(e.target.value)} type="password" placeholder="Mínimo 8 caracteres" autoComplete="new-password" />
+              {pwdError && <span style={{ fontSize: '0.73rem', color: 'var(--error)', marginTop: '0.2rem', display: 'block' }}>{pwdError}</span>}
+            </label>
+            <label>Confirmar contraseña <Req />
+              <input value={regPwdConf} onChange={e => setRegPwdConf(e.target.value)} type="password" placeholder="Repite la contraseña" autoComplete="new-password" />
+            </label>
+            {regPwd.length > 0 && <PasswordStrength pwd={regPwd} />}
+          </div>
+          <div style={{ marginTop: '0.75rem' }}>
+            <p style={{ fontWeight: 700, fontSize: '0.82rem', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>
+              {role === 'restaurant' ? <>Dirección de la tienda <Req /></> : 'Dirección (puedes agregarla después)'}
+            </p>
+            <AddressBlock postalCode={postalCode} setPostalCode={setPostalCode}
+              estado={estado} setEstado={setEstado} ciudad={ciudad} setCiudad={setCiudad}
+              colonia={colonia} setColonia={setColonia} coloniasList={coloniasList}
+              calle={calle} setCalle={setCalle} numero={numero} setNumero={setNumero}
+              cpLoading={cpLoading} cpError={cpError} required={role === 'restaurant'} />
+          </div>
+          <p style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: '0.5rem' }}>
+            Los campos con <span style={{ color: 'var(--danger)' }}>*</span> son obligatorios.
+          </p>
+        </>
+      )}
+
+      {msg && <p className={`flash ${msgOk ? 'flash-ok' : 'flash-error'}`} style={{ marginTop: '0.75rem' }}>{msg}</p>}
+
       <div className="row" style={{ marginTop: '0.75rem' }}>
-        <button className="btn-primary" onClick={submitRegister}
-          disabled={loading || emailStatus === 'taken' || emailStatus === 'checking'}>
-          {loading ? 'Registrando…' : 'Crear cuenta'}
-        </button>
+        {step < 3
+          ? <button className="btn-primary" onClick={nextStep}
+              disabled={step === 2 && (emailStatus === 'taken' || emailStatus === 'checking')}>
+              Continuar →
+            </button>
+          : <button className="btn-primary" onClick={submitRegister} disabled={loading}>
+              {loading ? 'Registrando…' : 'Crear cuenta'}
+            </button>
+        }
+        {step > 1 && (
+          <button type="button" onClick={() => { setMsg(''); setStep(s => s - 1); }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.875rem', textAlign: 'center', padding: '0.25rem 0' }}>
+            ← Atrás
+          </button>
+        )}
         <button type="button" onClick={onGoLogin}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.875rem', textAlign: 'center', padding: '0.25rem 0' }}>
           ¿Ya tienes cuenta? <strong>Inicia sesión</strong>
         </button>
       </div>
-      {msg && <p className={`flash ${msgOk ? 'flash-ok' : 'flash-error'}`} style={{ marginTop: '0.75rem' }}>{msg}</p>}
     </>
   );
 }
@@ -440,7 +534,7 @@ function ForgotView({ onGoLogin }) {
     try {
       await apiFetch('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: email.trim() }) });
       setMsg('Si el correo está registrado recibirás un enlace para restablecer tu contraseña.'); setMsgOk(true);
-    } catch (e) { setMsg(e.message); setMsgOk(false); }
+    } catch { setMsg('No se pudo enviar. Intenta más tarde.'); setMsgOk(false); }
     finally { setLoading(false); }
   }
 
@@ -473,7 +567,13 @@ export default function AuthPage({ mode = 'login', appKey = null }) {
   const [verifiedBanner, setVerifiedBanner] = useState(searchParams.get('verified') === '1');
   const [showVerifyHint, setShowVerifyHint] = useState(false);
 
-  function goTo(v) { setView(v); }
+  // Rol compartido — los links de rol en login llevan al registro con rol preseleccionado
+  const [sharedRole, setSharedRole] = useState('customer');
+
+  function goTo(v, role = null) {
+    if (role) setSharedRole(role);
+    setView(v);
+  }
 
   const TITLES = { login: 'Iniciar sesión', register: 'Crear cuenta', forgot: 'Recuperar contraseña' };
   const SUBS   = {
@@ -500,9 +600,23 @@ export default function AuthPage({ mode = 'login', appKey = null }) {
         </div>
       )}
 
-      {view === 'login'    && <LoginView appKey={appKey} onGoRegister={() => goTo('register')} onGoForgot={() => goTo('forgot')} />}
-      {view === 'register' && <RegisterView appKey={appKey} onGoLogin={() => goTo('login')} onSuccess={() => { setShowVerifyHint(true); setView('login'); }} />}
-      {view === 'forgot'   && <ForgotView onGoLogin={() => goTo('login')} />}
+      {view === 'login' && (
+        <LoginView
+          appKey={appKey}
+          initialRole={sharedRole}
+          onGoRegister={(role) => goTo('register', role || 'customer')}
+          onGoForgot={() => goTo('forgot')}
+        />
+      )}
+      {view === 'register' && (
+        <RegisterView
+          appKey={appKey}
+          initialRole={sharedRole}
+          onGoLogin={() => goTo('login')}
+          onSuccess={() => { setShowVerifyHint(true); setView('login'); }}
+        />
+      )}
+      {view === 'forgot' && <ForgotView onGoLogin={() => goTo('login')} />}
     </section>
   );
 }
