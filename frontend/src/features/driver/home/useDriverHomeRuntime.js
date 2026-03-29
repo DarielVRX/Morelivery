@@ -46,7 +46,7 @@ export function useDriverHomeRuntime({
   const [routeSteps,     setRouteSteps]     = useState([]);
   const [navHeadingDeg,  setNavHeadingDeg]  = useState(0);
   const [centerSignal,   setCenterSignal]   = useState(null);
-  const [centerMode,     setCenterMode]     = useState('nav');
+  const [centerMode,     setCenterMode]     = useState('free');
   const [routeActive,    setRouteActive]    = useState(false);
   const [activeZones,    setActiveZones]    = useState([]);
   const [activeImpassable, setActiveImpassable] = useState([]);
@@ -63,7 +63,7 @@ export function useDriverHomeRuntime({
   const REROUTE_DIST_M   = 50;
   const REROUTE_COOLDOWN = 15_000;
 
-  const centerModeRef      = useRef('nav');
+  const centerModeRef      = useRef('free');
   const centerCycleRef     = useRef(0);
   const autoCenterRef      = useRef(null);
   const lastInteractionRef = useRef(Date.now());
@@ -109,6 +109,28 @@ export function useDriverHomeRuntime({
       centerCycleRef.current = 0;
     }
   }, [activeOrder]);
+
+  // ── Estado inicial del mapa al montar ────────────────────────────────────
+  // Dispara centerSignal='free' una sola vez para que DriverMap aplique
+  // pitch 0, zoom 15, bearing 0 desde el primer render.
+  // Si el driver ya tiene pedido activo al entrar, activa modo nav y traza ruta.
+  const initializedRef = useRef(false);
+  useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
+    if (hasActiveOrder) {
+      // Pedido activo al montar — activar nav y trazar ruta automáticamente
+      setCenterMode('nav');
+      centerModeRef.current = 'nav';
+      setCenterSignal('nav');
+      // Pequeño delay para que openRoadRouteApi tenga activeOrder disponible
+      setTimeout(() => openRoadRouteApiRef.current?.(), 300);
+    } else {
+      // Sin pedido — arrancar en free con pitch 0
+      setCenterSignal('free');
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { refreshZones(); }, [refreshZones]);
 
