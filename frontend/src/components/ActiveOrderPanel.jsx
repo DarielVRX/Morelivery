@@ -272,7 +272,7 @@ export default function ActiveOrderPanel({
 
               {showCallSelector && (
                 <div style={{
-                  position:'absolute', bottom:'110%', left:0, right:0,
+                  position:'absolute', top:'110%', left:0, right:0,
                   background:'var(--bg-card)', border:'1px solid var(--border)',
                   borderRadius:8, boxShadow:'0 4px 16px rgba(0,0,0,0.15)',
                   zIndex:50, overflow:'hidden',
