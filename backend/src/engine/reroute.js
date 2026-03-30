@@ -58,7 +58,7 @@ async function loadDriverStopsForReroute(driverId) {
        COALESCE(ru.home_lat, rest.lat)         AS rest_lat,
        COALESCE(ru.home_lng, rest.lng)         AS rest_lng,
        COALESCE(o.estimated_volume_liters, 0)  AS volume_liters,
-       o.kitchen_ready_at,
+       o.kitchen_estimated_ready,
        COALESCE(cu.max_delivery_time_s, $3)    AS max_delivery_time_s
      FROM orders o
      JOIN restaurants rest ON rest.id = o.restaurant_id
@@ -82,8 +82,8 @@ async function loadDriverStopsForReroute(driverId) {
     const slaDeadlineSec = slaBase + Number(row.max_delivery_time_s);
 
     // Tiempo estimado en que la cocina tendrá listo el pedido
-    const kitchenReadyAtSec = row.kitchen_ready_at
-      ? new Date(row.kitchen_ready_at).getTime() / 1000
+    const kitchenReadyAtSec = row.kitchen_estimated_ready
+      ? new Date(row.kitchen_estimated_ready).getTime() / 1000
       : nowSec; // si no hay dato, asumir listo ya
 
     // Pickup pendiente
@@ -234,29 +234,32 @@ function pruneBySla(permutations, driverPos, driverObj, nowSec) {
  * @returns {number}
  */
 function evaluateSequenceCost(sequence, driverPos, driverObj, nowSec) {
-  let pos       = driverPos;
-  let time      = nowSec;
-  let totalCost = 0;
+  let pos      = driverPos;
+  let time     = nowSec;
+  let slaCost  = 0;
 
   for (const stop of sequence) {
-    // Tiempo de viaje al stop
     const travelSec = etaEstimator.estimateSync(pos, stop.pos, driverObj);
     time += travelSec;
     pos   = stop.pos;
 
     if (stop.type === 'pickup') {
-      // Esperar cocina si aún no está lista
       const waitSec = Math.max(0, stop.kitchenReadyAtSec - time);
       time += waitSec;
     }
 
     if (stop.type === 'delivery') {
       const violation = Math.max(0, time - stop.slaDeadlineSec);
-      totalCost += violation;
+      slaCost += violation;
     }
   }
 
-  return totalCost;
+  // totalEta: tiempo total hasta completar el último stop
+  // Se usa como desempate cuando slaCost es igual entre secuencias —
+  // evita rutas subóptimas cuando ningún pedido está en riesgo de SLA.
+  const totalEta = time - nowSec;
+
+  return { slaCost, totalEta };
 }
 
 /**
@@ -282,14 +285,21 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec) {
   const pruned = pruneBySla(permutations, driverPos, driverObj, nowSec);
   const pool   = pruned.length > 0 ? pruned : permutations; // si la poda elimina todo, usar todas
 
-  // Evaluar costo global de cada secuencia y elegir la mínima
+  // Evaluar costo global de cada secuencia y elegir la mínima.
+  // Criterio primario: slaCost (violaciones SLA acumuladas).
+  // Criterio secundario: totalEta (desempate cuando slaCost es igual —
+  //   evita rutas ineficientes cuando ningún pedido está en riesgo).
   let bestSeq  = pool[0];
-  let bestCost = evaluateSequenceCost(pool[0], driverPos, driverObj, nowSec);
+  let bestEval = evaluateSequenceCost(pool[0], driverPos, driverObj, nowSec);
 
   for (let i = 1; i < pool.length; i++) {
-    const cost = evaluateSequenceCost(pool[i], driverPos, driverObj, nowSec);
-    if (cost < bestCost) {
-      bestCost = cost;
+    const eval_ = evaluateSequenceCost(pool[i], driverPos, driverObj, nowSec);
+    const betterSla = eval_.slaCost < bestEval.slaCost;
+    const sameSla   = eval_.slaCost === bestEval.slaCost;
+    const betterEta = eval_.totalEta < bestEval.totalEta;
+
+    if (betterSla || (sameSla && betterEta)) {
+      bestEval = eval_;
       bestSeq  = pool[i];
     }
   }

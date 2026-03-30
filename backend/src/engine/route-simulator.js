@@ -59,7 +59,7 @@ async function loadDriverStops(driverId) {
        COALESCE(ru.home_lat, rest.lat)        AS rest_lat,
        COALESCE(ru.home_lng, rest.lng)        AS rest_lng,
        COALESCE(o.estimated_volume_liters, 0) AS volume_liters,
-       o.kitchen_ready_at,
+       o.kitchen_estimated_ready,
        rest.id                                AS restaurant_id,
        COALESCE(cu.max_delivery_time_s, $3)   AS max_delivery_time_s
      FROM orders o
@@ -79,8 +79,8 @@ async function loadDriverStops(driverId) {
 
   for (const row of r.rows) {
     const pickedUpAt = row.picked_up_at ? new Date(row.picked_up_at) : null;
-    const kitchenReadyAtSec = row.kitchen_ready_at
-      ? new Date(row.kitchen_ready_at).getTime() / 1000
+    const kitchenReadyAtSec = row.kitchen_estimated_ready
+      ? new Date(row.kitchen_estimated_ready).getTime() / 1000
       : nowSec;
 
     // Pickup pendiente (no recogido aún)
