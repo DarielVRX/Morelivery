@@ -2,13 +2,12 @@
 import { useEffect } from 'react';
 import { useOfferCountdown } from '../hooks/useOfferCountdown';
 
-const OFFER_TIMEOUT_SECONDS = 60;
-
 /**
- * @param {number} secondsLeft  segundos restantes calculados por el servidor
- * @param {function} onExpired  callback cuando llega a 0
+ * @param {number} secondsLeft   segundos restantes calculados por el servidor
+ * @param {number} totalSeconds  duración total de la oferta (para el arco SVG)
+ * @param {function} onExpired   callback cuando llega a 0
  */
-export default function OfferCountdown({ secondsLeft: initialSecondsLeft, onExpired }) {
+export default function OfferCountdown({ secondsLeft: initialSecondsLeft, totalSeconds = 60, onExpired }) {
   const { secondsLeft, urgent, expired } = useOfferCountdown(initialSecondsLeft);
 
   useEffect(() => {
@@ -19,7 +18,7 @@ export default function OfferCountdown({ secondsLeft: initialSecondsLeft, onExpi
   }, [expired]);
 
   const color = expired ? '#9ca3af' : urgent ? '#dc2626' : secondsLeft <= 30 ? '#f59e0b' : '#16a34a';
-  const pct   = Math.max(0, secondsLeft / OFFER_TIMEOUT_SECONDS);
+  const pct   = Math.max(0, secondsLeft / totalSeconds);
   const r     = 16;
   const circ  = 2 * Math.PI * r;
   const dash  = circ * pct;
@@ -40,7 +39,7 @@ export default function OfferCountdown({ secondsLeft: initialSecondsLeft, onExpi
         <div style={{ fontSize:'0.75rem', color:'var(--gray-600)', lineHeight:1 }}>Tiempo</div>
         <div style={{ fontWeight:700, fontSize:'0.9rem', color,
           animation: urgent && !expired ? 'pulse-text 0.8s ease-in-out infinite' : 'none' }}>
-          {expired ? 'Expirada' : urgent ? `${secondsLeft}s` : `${secondsLeft}s`}
+          {expired ? 'Expirada' : `${secondsLeft}s`}
         </div>
       </div>
       <style>{`@keyframes pulse-text { 0%,100%{opacity:1} 50%{opacity:0.35} }`}</style>
