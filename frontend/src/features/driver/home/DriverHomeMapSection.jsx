@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import DriverMap from '../../../components/DriverMap';
 import NavFABs from '../../../components/NavFABs';
 import RoadPrefsLayer from '../../../components/RoadPrefsLayer';
+import SupportChat from '../../support/SupportChat';
 import WayPicker from '../../../components/WayPicker';
 import ZoneLayer from '../../../components/ZoneLayer';
 import ZonePlacer from '../../../components/ZonePlacer';
@@ -174,6 +175,7 @@ export default function DriverHomeMapSection({
         onQuickReport={onQuickReport}
         handMode={handMode}
         speedKmh={speedKmh}
+        supportPanelContent={<SupportChat />}
       />
 
       {navMode === 'zone' && mapInstance && (

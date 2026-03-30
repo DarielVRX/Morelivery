@@ -1,7 +1,7 @@
 // frontend/src/components/ActiveOrderPanel.jsx
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { getDriverEarningCents, getOrderGrandTotalCents, isCashPayment } from '../features/driver/shared/orderUtils';
+import { IconChat, OrderChat } from '../features/customer/orders/components';
 import { fmt } from '../utils/format';
 import FeeBreakdown from './FeeBreakdown';
 
@@ -45,10 +45,6 @@ function IconCash() {
 function IconPhone() {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.55 12 19.79 19.79 0 01.48 3.38 2 2 0 012.46 1h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 8.73A16 16 0 0015.27 17l1.8-1.8a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>;
 }
-function IconSupport() {
-  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;
-}
-
 export default function ActiveOrderPanel({
   order,
   expanded,
@@ -64,14 +60,16 @@ export default function ActiveOrderPanel({
   onCancelDispute,
   onRoute,
   onSimulatedCall,
+  authToken,
+  chatTick = 0,
   routeActive = false,
   handMode = 'left',
   panelRef,
 }) {
-  const navigate = useNavigate();
   const [showCallSelector, setShowCallSelector] = useState(false);
   const [callingTarget,    setCallingTarget]    = useState(null);
   const [callFeedback,     setCallFeedback]     = useState(null);
+  const [chatOpen,         setChatOpen]         = useState(false);
 
   useEffect(() => { if (!expanded) setShowCallSelector(false); }, [expanded]);
   useEffect(() => {
@@ -293,9 +291,8 @@ export default function ActiveOrderPanel({
               )}
             </div>
 
-            {/* Botón de soporte — compacto */}
             <button
-              onClick={() => navigate('/profile?tab=support')}
+              onClick={() => setChatOpen((v) => !v)}
               style={{
                 display:'flex', alignItems:'center', gap:6,
                 padding:'0.35rem 0.75rem', borderRadius:8, fontWeight:600,
@@ -303,9 +300,12 @@ export default function ActiveOrderPanel({
                 background:'var(--bg-raised)', color:'var(--text-secondary)',
                 cursor:'pointer', width:'100%',
               }}>
-              <IconSupport />
-              Contactar soporte
+              <IconChat />
+              {chatOpen ? 'Cerrar chat del pedido' : 'Chat del pedido'}
             </button>
+            {chatOpen && (
+              <OrderChat orderId={order.id} token={authToken} refreshTick={chatTick} />
+            )}
 
             {/* Disputa activa */}
             {order.is_disputed && (
