@@ -45,7 +45,7 @@ function writeDeniedReason({ role, status, deliveredAt, chatReopenedAt, isAdmin 
 }
 
 export function registerSupportRoutes(router, deps) {
-  const { query, AppError, sseHub, logEvent } = deps;
+  const { query, AppError, sseHub, logEvent, sendPushToUser } = deps;
 
   router.post('/:id/complaint', authenticate, authorize(['customer']), async (req, res, next) => {
     try {
@@ -156,6 +156,18 @@ export function registerSupportRoutes(router, deps) {
             text:       text.trim(),
             createdAt:  msg.rows[0].created_at,
           });
+          sendPushToUser?.(recipId, {
+            title: `💬 Mensaje de ${senderName}`,
+            body: text.trim(),
+            tag: `chat_${req.params.id}`,
+            group: 'chat',
+            priority: 'normal',
+            url: '/driver',
+            type: 'chat_message',
+            pushType: 'chat_message',
+            orderId: req.params.id,
+            vibrate: [180, 80, 180],
+          }).catch(() => {});
         }
         return res.json({ message: msg.rows[0] });
       } catch (e) {
@@ -218,6 +230,18 @@ export function registerSupportRoutes(router, deps) {
           createdAt:  new Date().toISOString(),
           isSystem:   true,
         });
+        sendPushToUser?.(recipId, {
+          title: '💬 Chat del pedido reabierto',
+          body: systemText,
+          tag: `chat_${req.params.id}`,
+          group: 'chat',
+          priority: 'normal',
+          url: '/driver',
+          type: 'chat_message',
+          pushType: 'chat_message',
+          orderId: req.params.id,
+          vibrate: [180, 80, 180],
+        }).catch(() => {});
       }
 
       logEvent('order.chat_reopened', { orderId: req.params.id, by: uid, role });

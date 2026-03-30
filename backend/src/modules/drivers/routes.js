@@ -536,6 +536,19 @@ router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver']),
       driverName,
       message: `${driverName} está intentando localizarte`,
     });
+    sendPushToUser(targetId, {
+      title: '📞 Llamada del repartidor',
+      body: `${driverName} está intentando localizarte`,
+      tag: `call_${orderId}`,
+      group: target,
+      priority: 'high',
+      url: target === 'customer' ? '/customer/pedidos' : '/restaurant/pedidos',
+      type: 'simulated_call',
+      pushType: 'simulated_call',
+      orderId,
+      driverName,
+      vibrate: [800, 400, 800, 400, 800],
+    }).catch(() => {});
 
     console.log(`[driver.call] ${driverId.slice(0,8)} → ${target} order=${orderId.slice(0,8)}`);
     return res.json({ ok: true });
