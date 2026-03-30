@@ -114,12 +114,22 @@ export async function triggerPendingAssignments(onOffer) {
       .filter(o => o.has_candidates && !hasActiveChain(o.id))
       .sort((a, b) => _getRetryPriority(b, nowSec) - _getRetryPriority(a, nowSec));
 
-    // Resetear budget para este ciclo
+    // Resetear budget para este ciclo — una sola vez antes del loop
     _simulationBudget = getParam('simulation_budget_per_tick', 75);
 
+    log('triggerPending', `ciclo: ${sorted.length} pedidos en cola, budget=${_simulationBudget}`, {
+      orders: sorted.map(o => ({ id: o.id, priority: Math.round(_getRetryPriority(o, nowSec)) })),
+    });
+
+    // Procesar en SERIE: cada pedido espera al anterior antes de consumir budget.
+    // Evita que dos pedidos concurrentes lean el mismo budget=75 y ambos lo agoten.
+    // El orden de prioridad (antigüedad + urgencia SLA) se respeta gracias al sort previo.
     for (const order of sorted) {
-      if (_simulationBudget <= 0) break;
-      serializedOffer(order.id, offerNextDrivers, onOffer);
+      if (_simulationBudget <= 0) {
+        log('triggerPending', `budget agotado — quedan ${sorted.length - sorted.indexOf(order)} pedidos sin procesar`);
+        break;
+      }
+      await serializedOffer(order.id, offerNextDrivers, onOffer);
     }
   } catch (e) {
     logWarn('triggerPending', `error disparando asignaciones pendientes: ${e.message}`);
