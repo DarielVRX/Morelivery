@@ -1,13 +1,9 @@
 // frontend/src/pages/Driver/Home.jsx — orquestador puro
-// FIX: NAVFABS_HEIGHT calculado dinámicamente con ResizeObserver en lugar
-// de valor hardcodeado 200. Evita que el FAB de soporte quede flotando
-// en el aire cuando no hay pedido activo (sin ActiveOrderPanel).
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import ActiveOrderPanel from '../../components/ActiveOrderPanel';
 import OfferPanel from '../../components/OfferPanel';
-import SupportChat from '../../features/support/SupportChat';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { ensureDriverHomeAnimations } from '../../features/driver/home/animations';
@@ -46,9 +42,6 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     });
   }, []);
 
-  // ── Panel de soporte flotante ─────────────────────────────────────────────
-  const [showSupport, setShowSupport] = useState(false);
-
   useEffect(() => {
     if (!registerRef) return;
     const wire = () => {
@@ -77,22 +70,6 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     return () => ro.disconnect();
   }, [order.hasActiveOrder, order.pendingOffer]);
 
-  // FIX: navFabsHeight calculado dinámicamente en lugar de NAVFABS_HEIGHT = 200 hardcodeado.
-  // Cuando no hay pedido activo, NavFABs arranca desde abajo y el FAB de soporte
-  // debe posicionarse sobre el NavFABs real, no sobre un valor fijo.
-  const navFabsRef = useRef(null);
-  const [navFabsHeight, setNavFabsHeight] = useState(200); // fallback inicial conservador
-
-  useEffect(() => {
-    const el = navFabsRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const h = entry.contentRect.height;
-      if (h > 0) setNavFabsHeight(h);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   const { position: myPosition, matchedPosition, error: gpsError } = useDriverLocation(
     auth.token, order.availability, order.hasActiveOrder, auth.user?.id
@@ -135,27 +112,6 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     registerRef.current.token            = auth.token;
     registerRef.current.notifyAlertsUpdate?.();
   }, [home.activeZones, home.activeImpassable, home.myPreferences]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // FIX: usar navFabsHeight dinámico en lugar de NAVFABS_HEIGHT = 200 hardcodeado
-  const supportFabBottom  = panelHeight + 8 + navFabsHeight + 12;
-  const supportPanelBottom = supportFabBottom + 52;
-
-  const supportFabStyle = {
-    position: 'absolute',
-    bottom: supportFabBottom,
-    [handMode === 'right' ? 'left' : 'right']: 14,
-    zIndex: 401,
-    width: 44, height: 44,
-    borderRadius: '50%',
-    background: showSupport ? 'var(--brand)' : '#fff',
-    border: '1.5px solid var(--border)',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
-    cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: '1.1rem',
-    color: showSupport ? '#fff' : 'var(--text-secondary)',
-    transition: 'all 0.15s',
-  };
 
   return (
     <div className="driver-map-root" style={{ display:'flex', flexDirection:'column',
@@ -215,8 +171,6 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         isDark={isDark}
         handMode={handMode}
         offerRouteGeometry={home.offerRouteGeometry}
-        // FIX: pasar ref al componente NavFABs para medir su altura real
-        navFabsRef={navFabsRef}
         onQuickReport={async (type, pos) => {
           if (type === 'zone') {
             home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'other', radius_m: 500, estimated_hours: 1 });
@@ -233,35 +187,6 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
           }
         }}
       />
-
-      {/* FAB de soporte — posicionado encima de NavFABs con altura dinámica */}
-      <button style={supportFabStyle} onClick={() => setShowSupport(v => !v)}
-        title="Soporte">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10"/>
-          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-          <line x1="12" y1="17" x2="12.01" y2="17"/>
-        </svg>
-      </button>
-
-      {/* Panel de soporte */}
-      {showSupport && (
-        <div style={{
-          position: 'absolute',
-          bottom: supportPanelBottom,
-          [handMode === 'right' ? 'left' : 'right']: 14,
-          width: 320, height: 480,
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border)',
-          borderRadius: 16,
-          boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
-          zIndex: 402,
-          overflow: 'hidden',
-          display: 'flex', flexDirection: 'column',
-        }}>
-          <SupportChat />
-        </div>
-      )}
 
       <OfferPanel
         offer={order.pendingOffer}
@@ -299,6 +224,8 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         onRoute={home.handleToggleRoute}
         // FIX: retornar la promesa para que ActiveOrderPanel pueda capturar el error
         onSimulatedCall={(target) => order.doSimulatedCall(target, setMsg)}
+        authToken={auth.token}
+        chatTick={order.chatTick}
         routeActive={home.routeActive}
         handMode={handMode}
         panelRef={activePanelRef}
@@ -306,4 +233,3 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     </div>
   );
 }
-

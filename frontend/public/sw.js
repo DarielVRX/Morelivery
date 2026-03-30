@@ -419,6 +419,15 @@ self.addEventListener('push', (event) => {
       return;
     }
 
+    if (pushType === 'chat_message') {
+      await showGroupedNotification({
+        group: 'chat', title, body, url, priority: 'normal',
+        tag: `chat_${orderId || Date.now()}`, vibrate: VIBRATE.support,
+        actions: [{ action: 'message', title: '💬 Abrir chat' }],
+      });
+      return;
+    }
+
     await showGroupedNotification({ group, title, body, url, priority, tag: group, vibrate, actions });
   })());
 });
@@ -529,4 +538,3 @@ self.addEventListener('notificationclick', (event) => {
     })
   );
 });
-

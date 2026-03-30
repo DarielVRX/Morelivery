@@ -1,4 +1,5 @@
 // frontend/src/components/NavFABs.jsx
+import { useMemo, useState } from 'react';
 
 // ── Iconos ────────────────────────────────────────────────────────────────────
 function IconCenter({ mode }) {
@@ -80,6 +81,23 @@ function IconReport({ reportMode }) {
     </svg>
   );
 }
+function IconSupport() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+      <line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+  );
+}
+function IconCopyright() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M15 9a4 4 0 1 0 0 6"/>
+    </svg>
+  );
+}
 
 const REPORT_PILLS = [
   { mode: 'zone',       label: 'Zona de alerta', icon: '◆', color: '#f97316' },
@@ -111,7 +129,10 @@ export default function NavFABs({
   onQuickReport,
   isDark = false,
   handMode = 'left',   // 'left' | 'right'
+  supportPanelContent = null,
 }) {
+  const [showSupport, setShowSupport] = useState(false);
+  const [showAttribution, setShowAttribution] = useState(false);
   const withRoute    = hasActiveOrder && (routeGeometry?.length > 0);
   const safeBot      = 'env(safe-area-inset-bottom, 0px)';
   const BASE         = bottomOffset;
@@ -135,6 +156,8 @@ export default function NavFABs({
   const menuBottom      = withRoute
     ? `calc(${BASE + SZ_P + GAP + SZ_S + GAP + SZ_S + GAP}px + ${safeBot})`
     : `calc(${BASE + SZ_P + GAP + SZ_S + GAP}px + ${safeBot})`;
+  const supportBottom = `calc(${BASE + SZ_P + GAP + SZ_S + GAP + SZ_S + GAP}px + ${safeBot})`;
+  const legalBottom = `calc(${BASE + SZ_P + GAP + SZ_S + GAP + SZ_S + GAP + SZ_S + GAP}px + ${safeBot})`;
 
   // Color del botón centrar según ciclo
   const centerBg =
@@ -179,6 +202,22 @@ export default function NavFABs({
 
   const showReport = navMode !== 'zone' && navMode !== 'impassable' && navMode !== 'preference';
   const showMore   = withRoute && navMode !== 'zone' && navMode !== 'impassable' && navMode !== 'preference' && !isReportOpen;
+  const panelSideStyle = { [side]: 12 };
+  const supportPanelStyle = useMemo(() => ({
+    position: 'absolute',
+    bottom: `calc(${supportBottom} + ${SZ_S}px + ${GAP}px)`,
+    ...panelSideStyle,
+    width: 'min(340px, calc(100vw - 24px))',
+    maxHeight: 'min(520px, calc(100vh - 120px))',
+    background: 'var(--bg-card)',
+    border: '1px solid var(--border)',
+    borderRadius: 16,
+    boxShadow: '0 8px 32px rgba(0,0,0,0.22)',
+    zIndex: 404,
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+  }), [panelSideStyle, supportBottom]);
 
   // Mostrar velocidad solo en modo nav con ruta activa
   const showSpeed = withRoute && speedKmh !== null && centerMode === 'nav';
@@ -347,7 +386,67 @@ export default function NavFABs({
           ))}
         </div>
       )}
+
+      <button
+        onClick={() => {
+          setShowAttribution(false);
+          setShowSupport((v) => !v);
+        }}
+        title="Soporte" aria-label="Soporte" className="dh-fab"
+        style={{
+          ...fabBase,
+          bottom: supportBottom,
+          width: SZ_S, height: SZ_S,
+          background: showSupport ? 'var(--brand)' : '#fff',
+          border: '1.5px solid var(--border)',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          color: showSupport ? '#fff' : 'var(--text-secondary)',
+        }}>
+        <IconSupport />
+      </button>
+
+      <button
+        onClick={() => {
+          setShowSupport(false);
+          setShowAttribution((v) => !v);
+        }}
+        title="Créditos del mapa" aria-label="Créditos del mapa" className="dh-fab"
+        style={{
+          ...fabBase,
+          bottom: legalBottom,
+          width: SZ_S, height: SZ_S,
+          background: showAttribution ? 'var(--brand)' : '#fff',
+          border: '1.5px solid var(--border)',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          color: showAttribution ? '#fff' : 'var(--text-secondary)',
+        }}>
+        <IconCopyright />
+      </button>
+
+      {showSupport && supportPanelContent && (
+        <div style={supportPanelStyle}>
+          {supportPanelContent}
+        </div>
+      )}
+
+      {showAttribution && (
+        <div style={{
+          ...supportPanelStyle,
+          padding: '0.9rem',
+          gap: 8,
+          maxWidth: 'min(300px, calc(100vw - 24px))',
+        }}>
+          <div style={{ fontSize:'0.82rem', fontWeight:800, color:'var(--text-primary)' }}>Créditos del mapa</div>
+          <div style={{ fontSize:'0.75rem', color:'var(--text-secondary)', lineHeight:1.35 }}>
+            © OpenStreetMap contributors<br />
+            © Stadia Maps / OpenMapTiles
+          </div>
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer"
+            style={{ fontSize:'0.74rem', color:'var(--brand)', fontWeight:700 }}>
+            Ver atribuciones completas
+          </a>
+        </div>
+      )}
     </>
   );
 }
-

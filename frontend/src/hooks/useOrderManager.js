@@ -32,6 +32,7 @@ export function useOrderManager(token, patchUser, userDriver) {
   const [notifPriorityMode, setNotifPriorityMode] = useState(getNotifPriorityMode);
   const [transferBanner, setTransferBanner] = useState(null);
   const [routeBagPct,    setRouteBagPct]    = useState(null);
+  const [chatTick,       setChatTick]       = useState(0);
   // Secuencia óptima de stops calculada por el motor de ruteo del backend.
   // Se actualiza via SSE route_update — null significa usar el orden por defecto.
   const [routeStopsOverride, setRouteStopsOverride] = useState(null);
@@ -173,8 +174,11 @@ export function useOrderManager(token, patchUser, userDriver) {
   }, []);
 
   const handleChatMessage = useCallback((data) => {
+    if (data?.orderId && String(data.orderId) === String(activeOrder?.id)) {
+      setChatTick((v) => v + 1);
+    }
     ordersChatListenerRef.current?.(data);
-  }, []);
+  }, [activeOrder?.id]);
 
   useRealtimeOrders(
     token,
@@ -342,6 +346,7 @@ export function useOrderManager(token, patchUser, userDriver) {
     setMyPosition: (pos) => { myPositionRef.current = pos; },
     setOfferMinimized, setOrderExpanded, setShowRelease, setReleaseNote, setTransferBanner,
     routeBagPct,
+    chatTick,
     routeStopsOverride,
     loadData, toggleAvailability,
     acceptOffer: handleAcceptOffer, rejectOffer, changeStatus,
