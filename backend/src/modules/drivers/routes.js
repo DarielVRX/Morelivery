@@ -12,6 +12,8 @@ import { acceptOffer, rejectOffer, releaseOrder, offerNextDrivers, getQueuedOrde
 import { sseHub } from '../events/hub.js';
 import { offerCb } from '../events/offerCallback.js';
 import { AppError } from '../../utils/errors.js';
+import { getParam }       from '../../engine/params.js';
+import { sendPushToUser } from '../notifications/pushSubscription.js';
 
 const router = Router();
 const ETA_ALERT_COOLDOWN_MS     = 5 * 60 * 1000; // 5 min entre alertas ETA
@@ -151,7 +153,7 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
                 ru.full_name AS restaurant_owner_name,
                 COALESCE(o.delivery_lat, c.lat) AS customer_lat,
                 COALESCE(o.delivery_lng, c.lng) AS customer_lng,
-                GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + (60::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
+                GREATEST(0, EXTRACT(EPOCH FROM (od.updated_at + ($2::int * INTERVAL '1 second') - NOW())))::int AS seconds_left
          FROM order_driver_offers od
          JOIN orders o ON o.id = od.order_id
          JOIN restaurants r ON r.id = o.restaurant_id
@@ -159,7 +161,7 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
          JOIN users c ON c.id = o.customer_id
          WHERE od.driver_id=$1 AND od.status='pending' AND o.driver_id IS NULL
          ORDER BY od.created_at ASC`,
-        [req.user.userId]
+        [req.user.userId, getParam('offer_timeout_s', 60)]
       );
     } catch (e) {
       if (!isMissingColumnError(e) && !isMissingRelationError(e)) throw e;
@@ -397,15 +399,23 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
         etaAlertedAt.set(ord.id, now);
         const etaPayload = { orderId: ord.id, etaMins, distM: Math.round(distM), target: isOTW ? 'delivery' : 'pickup' };
         if (isOTW) {
-          sseHub.sendToUser(ord.customer_id, 'driver_eta_alert', {
-            ...etaPayload,
-            message: `Tu conductor llegará en aproximadamente ${etaMins} minuto${etaMins !== 1 ? 's' : ''}`,
-          });
+          const etaMsg = `Tu conductor llegará en aproximadamente ${etaMins} minuto${etaMins !== 1 ? 's' : ''}`;
+          sseHub.sendToUser(ord.customer_id, 'driver_eta_alert', { ...etaPayload, message: etaMsg });
+          sendPushToUser(ord.customer_id, {
+            title: 'Tu pedido está por llegar',
+            body:  etaMsg,
+            tag:   `eta_${ord.id}`, group: 'customer', priority: 'normal',
+            url:   '/customer', pushType: 'driver_eta_alert', orderId: ord.id,
+          }).catch(() => {});
         } else {
-          sseHub.sendToUser(ord.restaurant_owner_id, 'driver_eta_alert', {
-            ...etaPayload,
-            message: `El conductor llegará en aproximadamente ${etaMins} minuto${etaMins !== 1 ? 's' : ''}`,
-          });
+          const etaMsg = `El conductor llegará en aproximadamente ${etaMins} minuto${etaMins !== 1 ? 's' : ''}`;
+          sseHub.sendToUser(ord.restaurant_owner_id, 'driver_eta_alert', { ...etaPayload, message: etaMsg });
+          sendPushToUser(ord.restaurant_owner_id, {
+            title: 'El conductor está por llegar',
+            body:  etaMsg,
+            tag:   `eta_${ord.id}`, group: 'restaurant', priority: 'normal',
+            url:   '/restaurant', pushType: 'driver_eta_alert', orderId: ord.id,
+          }).catch(() => {});
         }
       }
 
@@ -416,8 +426,20 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
         const arrivedPayload = { orderId: ord.id, distM: Math.round(distM), target: isOTW ? 'delivery' : 'pickup' };
         if (isOTW) {
           sseHub.sendToUser(ord.customer_id, 'driver_arrived', { ...arrivedPayload, message: 'Tu conductor ha llegado' });
+          sendPushToUser(ord.customer_id, {
+            title: 'Tu conductor ha llegado',
+            body:  'El repartidor está esperando en tu puerta',
+            tag:   `arrived_${ord.id}`, group: 'customer', priority: 'high',
+            url:   '/customer', pushType: 'driver_arrived', orderId: ord.id,
+          }).catch(() => {});
         } else {
           sseHub.sendToUser(ord.restaurant_owner_id, 'driver_arrived', { ...arrivedPayload, message: 'El conductor ha llegado a recoger el pedido' });
+          sendPushToUser(ord.restaurant_owner_id, {
+            title: 'El conductor ha llegado',
+            body:  'El repartidor está en el restaurante para recoger el pedido',
+            tag:   `arrived_pickup_${ord.id}`, group: 'restaurant', priority: 'high',
+            url:   '/restaurant', pushType: 'driver_arrived', orderId: ord.id,
+          }).catch(() => {});
         }
       }
     }
