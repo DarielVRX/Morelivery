@@ -1,4 +1,6 @@
 // backend/modules/events/hub.js
+import { getParam } from '../../engine/params.js';
+
 let _id = 0;
 
 class SseHub {
@@ -46,7 +48,7 @@ class SseHub {
   }
 
   notifyNewOffer(driverId, offerId, orderData) {
-    const payload = { type: 'new_offer', offerId, ...orderData };
+    const payload = { type: 'new_offer', offerId, secondsLeft: getParam('offer_timeout_s', 60), ...orderData };
     this.sendToUser(driverId, 'new_offer', payload);
     this.sendToRole('admin', 'offer_assigned', {
       driverId,

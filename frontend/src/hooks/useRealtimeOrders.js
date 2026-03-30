@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { API_BASE } from '../api/client';
 import {
-  canNotify, shouldNotifyInBackground, notificationPriority,
+  canNotify, notificationPriority,
   notifyAppFocused, notifyRealtime, notifyCall,
   alertOfferAttention, alertNewOrder,
   alertDriverArrivedCustomer, alertDriverArrivedRestaurant,
@@ -66,7 +66,7 @@ export function useRealtimeOrders(
 
     on('order_update', (data) => {
       cb.current.update?.(data);
-      if (shouldNotifyInBackground()) {
+      if (document.visibilityState !== 'visible') {
         notifyRealtime({
           title: 'Actualización de pedido',
           body:  data?.status ? `Estado: ${data.status}` : 'Tu pedido fue actualizado',
@@ -87,7 +87,7 @@ export function useRealtimeOrders(
         alertOfferAttention(notificationPriority('offers'));
         lastOfferPulse.current = { id: data?.orderId || null, at: now };
       }
-      if (shouldNotifyInBackground()) {
+      if (document.visibilityState !== 'visible') {
         notifyRealtime({
           title: 'Nueva oferta de pedido',
           body: data?.restaurantName
@@ -105,7 +105,7 @@ export function useRealtimeOrders(
     on('new_order', (data) => {
       cb.current.newOrder?.(data);
       alertNewOrder();
-      if (shouldNotifyInBackground()) {
+      if (document.visibilityState !== 'visible') {
         notifyRealtime({
           title: 'Nuevo pedido', body: 'Pedido recibido — confirma para preparar',
           tag: `new_order_${data.orderId}`, group: 'kitchen', url: '/restaurant/pedidos',
@@ -118,7 +118,7 @@ export function useRealtimeOrders(
     on('driver_eta_alert', (data) => {
       cb.current.eta?.(data);
       alertEta();
-      if (shouldNotifyInBackground()) {
+      if (document.visibilityState !== 'visible') {
         notifyRealtime({
           title: 'Tu repartidor se acerca',
           body:  data.message || `Llegará en aprox. ${data.etaMins} min`,
@@ -137,7 +137,7 @@ export function useRealtimeOrders(
       } else {
         alertDriverArrivedCustomer();
       }
-      if (shouldNotifyInBackground()) {
+      if (document.visibilityState !== 'visible') {
         const isPickup = data.target === 'pickup';
         notifyRealtime({
           title: isPickup ? '🛵 Conductor llegó a recoger' : '📍 Tu repartidor llegó',
@@ -162,7 +162,7 @@ export function useRealtimeOrders(
 
     on('kitchen_auto_ready', (data) => {
       cb.current.kitchen?.({ type: 'kitchen_auto_ready', ...data });
-      if (shouldNotifyInBackground()) {
+      if (document.visibilityState !== 'visible') {
         notifyRealtime({
           title: 'Pedido listo para recoger', body: data.message || '',
           tag: 'kitchen', group: 'kitchen', url: '/restaurant/pedidos',
@@ -177,7 +177,7 @@ export function useRealtimeOrders(
       cb.current.transfer?.({ type: 'order_transferred_away', ...data });
       cb.current.update?.(data);
       navigator?.vibrate?.(VIBRATE.transfer);
-      if (shouldNotifyInBackground()) {
+      if (document.visibilityState !== 'visible') {
         notifyRealtime({
           title: 'Pedido reasignado', body: 'Un pedido fue transferido a otro conductor',
           tag: 'driver', group: 'driver', url: '/driver',
@@ -189,7 +189,7 @@ export function useRealtimeOrders(
     on('order_transferred_in', (data) => {
       cb.current.transfer?.({ type: 'order_transferred_in', ...data });
       cb.current.update?.(data);
-      if (shouldNotifyInBackground()) {
+      if (document.visibilityState !== 'visible') {
         notifyRealtime({
           title: 'Nuevo pedido asignado', body: 'Se te asignó un pedido transferido',
           tag: 'offers', group: 'driver', url: '/driver',
@@ -206,7 +206,7 @@ export function useRealtimeOrders(
 
     on('chat_message', (data) => {
       cb.current.chat?.(data);
-      if (shouldNotifyInBackground()) {
+      if (document.visibilityState !== 'visible') {
         notifyRealtime({
           title: `Mensaje de ${data.senderName || 'soporte'}`,
           body: data.text || 'Tienes un nuevo mensaje',
@@ -218,7 +218,7 @@ export function useRealtimeOrders(
 
     on('support_message', (data) => {
       cb.current.support?.(data);
-      if (shouldNotifyInBackground()) {
+      if (document.visibilityState !== 'visible') {
         notifyRealtime({
           title: 'Soporte', body: data.text || 'Nuevo mensaje de soporte',
           tag: 'support', group: 'support', url: '/profile',
@@ -230,7 +230,7 @@ export function useRealtimeOrders(
     on('driver_arrival', (data) => {
       cb.current.kitchen?.({ type: 'driver_arrival', ...data });
       alertDriverArrivedRestaurant();
-      if (shouldNotifyInBackground()) {
+      if (document.visibilityState !== 'visible') {
         notifyRealtime({
           title: 'Conductor llegó', body: `${data.driverName || 'El conductor'} recogió el pedido`,
           tag: 'kitchen', group: 'kitchen', url: '/restaurant',
@@ -243,7 +243,7 @@ export function useRealtimeOrders(
       cb.current.kitchen?.({ type: 'order_cancelled_preparing', ...data });
       playUrgentAlert();
       navigator?.vibrate?.(VIBRATE.cancelled);
-      if (shouldNotifyInBackground()) {
+      if (document.visibilityState !== 'visible') {
         notifyRealtime({
           title: 'Pedido cancelado',
           body: 'El cliente canceló mientras estabas preparando',
