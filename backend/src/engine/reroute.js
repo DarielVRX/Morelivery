@@ -59,11 +59,10 @@ async function loadDriverStopsForReroute(driverId) {
        COALESCE(ru.home_lng, rest.lng)         AS rest_lng,
        COALESCE(o.estimated_volume_liters, 0)  AS volume_liters,
        o.kitchen_estimated_ready,
-       COALESCE(cu.max_delivery_time_s, $3)    AS max_delivery_time_s
+       $3                                      AS max_delivery_time_s
      FROM orders o
      JOIN restaurants rest ON rest.id = o.restaurant_id
      LEFT JOIN users ru    ON ru.id   = rest.owner_user_id
-     JOIN users cu         ON cu.id   = o.customer_id
      WHERE o.driver_id = $1
        AND o.status    = ANY($2::text[])
      ORDER BY o.accepted_at ASC NULLS LAST`,
