@@ -255,6 +255,13 @@ export async function offerNextDrivers(orderId, onOffer) {
         }
 
         const { topDrivers } = await findCandidates(orderId, restaurantPos, customerPos);
+        log(`order=${orderId}`, `findCandidates: ${topDrivers.length} topDrivers`, {
+          topDrivers: topDrivers.map(c => ({ id: c.driver.id, etaToNewCustomer: Math.round(c.etaToNewCustomer) })),
+        });
+
+        if (topDrivers.length === 0) {
+          logWarn(`order=${orderId}`, 'findCandidates retornó 0 topDrivers — fallback a scoredEligible sin simulación');
+        }
 
         if (topDrivers.length > 0) {
           const nowSec = Date.now() / 1000;
@@ -273,7 +280,15 @@ export async function offerNextDrivers(orderId, onOffer) {
             .slice(0, Math.min(_simulationBudget, topDrivers.length));
 
           if (cappedDrivers.length === 0) {
-            log(`order=${orderId}`, 'todos los candidatos están reservados → pending_driver');
+            logWarn(`order=${orderId}`, 'todos los candidatos están reservados o en slot máximo', {
+              topDriversCount: topDrivers.length,
+              reservedSlots: topDrivers.map(c => ({
+                id: c.driver.id,
+                activeOrders: c.driver.activeOrders,
+                reserved: _getReservedSlots(c.driver.id),
+                maxActive,
+              })),
+            });
             await markPendingDriver(orderId);
             return 0;
           }
@@ -290,6 +305,7 @@ export async function offerNextDrivers(orderId, onOffer) {
                   const result = await simulateDriverWithOrder(
                     env, orderForSim, restaurantPos, customerPos, nowSec
                   );
+                  log(`order=${orderId}`, `sim driver=${env.driver.id}: totalCost=${Math.round(result.totalCost)} valid=${result.valid} eta=${Math.round(result.etaToNewCustomer)}`);
                   // totalCost ya viene de scoreCandidate() dentro del simulador
                   return {
                     driverId:       env.driver.id,
@@ -341,6 +357,7 @@ export async function offerNextDrivers(orderId, onOffer) {
     drivers: batch.map(d => d.user_id),
     offset,
     realBatch,
+    scoredEligibleCount: scoredEligible.length,
   });
 
   // ── 8. Enviar ofertas ─────────────────────────────────────────────────────
