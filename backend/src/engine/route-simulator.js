@@ -22,7 +22,7 @@ import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
 import { scoreCandidate } from './scoring.js';
 import { findOptimalSequence } from './reroute.js';
-import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
+import { ACTIVE_STATUSES, log, logWarn } from '../modules/orders/assignment/constants.js';
 
 // ─── Carga de stops del driver ────────────────────────────────────────────────
 
@@ -176,6 +176,16 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
     || getParam('default_bag_capacity_liters', 25);
   const newOrderVolume   = Number(order.estimated_volume_liters) || 0;
 
+  log(`simulator order=${order.id} driver=${driver.id}`, 'inicio simulación', {
+    driverPos,
+    viableStopType: candidate.viableStop?.type ?? 'none',
+    viableStopDist: Math.round(candidate.viableStop?.distToRestaurant ?? 0),
+    activeOrders:   driver.activeOrders,
+    speedKmh:       driver.speedKmh,
+    bagCapacity:    bagCapacityLiters,
+    newOrderVolume,
+  });
+
   // Estado de simulación por orderId
   const simState = {};
 
@@ -216,6 +226,14 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
       if (match) break;
     }
   }
+
+  log(`simulator order=${order.id} driver=${driver.id}`, 'stops cargados', {
+    existingStopsCount: existingStops.length,
+    prefixStopsCount:   prefixStops.length,
+    postStopsCount:     existingStops.length - prefixStops.length,
+    viableStop:         viableStop.type,
+    prefixStops: prefixStops.map(s => ({ type: s.type, orderId: s.orderId })),
+  });
 
   // Stops post-viableStop (los que se secuenciarán de forma óptima)
   const prefixOrderIds = new Set(prefixStops.flatMap(s => s.orderIds));
@@ -406,6 +424,27 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
     { max_delivery_time_s: null },
     driver.disconnectPenalties ?? 0
   );
+
+  log(`simulator order=${order.id} driver=${driver.id}`, 'resultado simulación', {
+    etaToNewCustomer:  Math.round(etaToNewCustomer),
+    valid,
+    validExisting,
+    slaBreaches,
+    newOrderDelay:     Math.round(delay),
+    peakVolumeLiters:  Math.round(peakVolume * 10) / 10,
+    bagOverflowPct,
+    totalCost:         Math.round(totalCost),
+    stopsSecuenciados: optimalSequence.length,
+  });
+
+  if (!valid) {
+    logWarn(`simulator order=${order.id} driver=${driver.id}`, 'simulación inválida', {
+      etaToNewCustomer: Math.round(etaToNewCustomer),
+      maxSla,
+      delay: Math.round(delay),
+      slaBreaches,
+    });
+  }
 
   return {
     ...simResult,

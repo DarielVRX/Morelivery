@@ -21,7 +21,7 @@ import { query } from '../config/db.js';
 import { haversineMeters } from '../utils/geo.js';
 import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
-import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
+import { ACTIVE_STATUSES, log, logWarn } from '../modules/orders/assignment/constants.js';
 
 /**
  * Velocidad promedio según tipo de vehículo.
@@ -90,7 +90,7 @@ async function loadCandidateDrivers(orderId) {
     [ACTIVE_STATUSES, maxActive, orderId, maxPenalties]
   );
 
-  return r.rows.map(row => ({
+  const result = r.rows.map(row => ({
     id:                  row.id,
     driverNumber:        row.driver_number,
     vehicleType:         row.vehicle_type,
@@ -100,6 +100,10 @@ async function loadCandidateDrivers(orderId) {
     pos:                 { lat: Number(row.lat), lng: Number(row.lng) },
     activeOrders:        row.active_orders ?? 0,
   }));
+  log(`finder order=${orderId}`, `loadCandidateDrivers: ${result.length} drivers en DB`, {
+    drivers: result.map(d => ({ id: d.id, activeOrders: d.activeOrders, vehicle: d.vehicleType })),
+  });
+  return result;
 }
 
 /**
@@ -182,6 +186,11 @@ function getClosestViableStop(driverPos, activeStops, restaurantPos, maxRadiusM)
       pos:               { ...driverPos },
       distToRestaurant:  driverDist,
     });
+  } else {
+    logWarn('finder', 'getClosestViableStop: driver fuera de radio', {
+      driverDist: Math.round(driverDist),
+      maxRadiusM,
+    });
   }
 
   // Stops ya en ruta
@@ -197,7 +206,19 @@ function getClosestViableStop(driverPos, activeStops, restaurantPos, maxRadiusM)
     });
   }
 
-  if (candidates.length === 0) return null;
+  if (candidates.length === 0) {
+    logWarn('finder', 'getClosestViableStop: sin candidatos viables', {
+      driverDist: Math.round(driverDist),
+      maxRadiusM,
+      activeStopsCount: activeStops.length,
+      activeStopDists: activeStops.map(s => ({
+        type: s.type,
+        orderId: s.orderId,
+        dist: Math.round(haversineMeters(s.pos, restaurantPos)),
+      })),
+    });
+    return null;
+  }
 
   // Retornar el candidato más cercano al restaurante
   candidates.sort((a, b) => a.distToRestaurant - b.distToRestaurant);
@@ -252,13 +273,24 @@ export async function findCandidates(orderId, restaurantPos, customerPos) {
   const nearbyPrefM = Math.max(25, getParam('nearby_driver_preference_m', 250));
 
   const drivers = await loadCandidateDrivers(orderId);
-  if (drivers.length === 0) return { topDrivers: [], viableDrivers: [] };
+  if (drivers.length === 0) {
+    logWarn(`finder order=${orderId}`, 'findCandidates: 0 drivers elegibles en DB');
+    return { topDrivers: [], viableDrivers: [] };
+  }
 
   // Filtrar por radio (distancia directa driver→restaurante como pre-filtro rápido)
   const withRadius = drivers.filter(d =>
     haversineMeters(d.pos, restaurantPos) < maxRadiusM
   );
-  if (withRadius.length === 0) return { topDrivers: [], viableDrivers: [] };
+  log(`finder order=${orderId}`, `filtro radio: ${drivers.length} total → ${withRadius.length} dentro de ${maxRadiusM}m`, {
+    descartadosPorRadio: drivers
+      .filter(d => haversineMeters(d.pos, restaurantPos) >= maxRadiusM)
+      .map(d => ({ id: d.id, dist: Math.round(haversineMeters(d.pos, restaurantPos)) })),
+  });
+  if (withRadius.length === 0) {
+    logWarn(`finder order=${orderId}`, 'findCandidates: 0 drivers dentro del radio');
+    return { topDrivers: [], viableDrivers: [] };
+  }
 
   // Construir envelopes en paralelo
   const envelopes = await Promise.all(
@@ -273,7 +305,13 @@ export async function findCandidates(orderId, restaurantPos, customerPos) {
       const viableStop = getClosestViableStop(d.pos, activeStops, restaurantPos, maxRadiusM);
 
       // Sin viableStop el driver no puede tomar el pedido
-      if (!viableStop) return null;
+      if (!viableStop) {
+        logWarn(`finder order=${orderId}`, `driver=${d.id} descartado: sin viableStop`, {
+          driverPos: d.pos,
+          activeStopsCount: activeStops.length,
+        });
+        return null;
+      }
 
       // ETAs
       const [etaToViableStop, etaViableToRestaurant, etaRestaurantToCustomer] = await Promise.all([
@@ -302,6 +340,18 @@ export async function findCandidates(orderId, restaurantPos, customerPos) {
         loadPenalty +
         bridgePenaltyS * getParam('pickup_bridge_penalty_factor', 1);
 
+      log(`finder order=${orderId}`, `envelope driver=${d.id}`, {
+        viableStopType:       viableStop.type,
+        viableStopDist:       Math.round(viableStop.distToRestaurant ?? 0),
+        etaToViableStop:      Math.round(etaToViableStop),
+        etaViableToRestaurant: Math.round(etaViableToRestaurant),
+        etaRestaurantToCustomer: Math.round(etaRestaurantToCustomer),
+        etaToNewCustomer:     Math.round(etaToViableStop + etaViableToRestaurant + etaRestaurantToCustomer),
+        bridgePenaltyS:       Math.round(bridgePenaltyS),
+        activeOrders:         d.activeOrders,
+        approxScore:          Math.round(approxScore),
+      });
+
       return {
         driver:                        d,
         viableStop,
@@ -326,7 +376,11 @@ export async function findCandidates(orderId, restaurantPos, customerPos) {
 
   // Filtrar nulls (drivers sin viableStop)
   const validEnvelopes = envelopes.filter(Boolean);
-  if (validEnvelopes.length === 0) return { topDrivers: [], viableDrivers: [] };
+  log(`finder order=${orderId}`, `envelopes: ${withRadius.length} candidatos → ${validEnvelopes.length} con viableStop válido`);
+  if (validEnvelopes.length === 0) {
+    logWarn(`finder order=${orderId}`, 'findCandidates: 0 envelopes válidos tras viableStop');
+    return { topDrivers: [], viableDrivers: [] };
+  }
 
   // viableDrivers ordenados por etaToNewCustomer (para logging/debug)
   const viableDrivers = [...validEnvelopes].sort((a, b) => a.etaToNewCustomer - b.etaToNewCustomer);
@@ -347,6 +401,14 @@ export async function findCandidates(orderId, restaurantPos, customerPos) {
     seen.add(c.driver.id);
     topDrivers.push(c);
   }
+
+  log(`finder order=${orderId}`, `topDrivers final: ${topDrivers.length}`, {
+    topDrivers: topDrivers.map(c => ({
+      id: c.driver.id,
+      etaToNewCustomer: Math.round(c.etaToNewCustomer),
+      approxScore: Math.round(c.approxScore),
+    })),
+  });
 
   return { topDrivers, viableDrivers };
 }

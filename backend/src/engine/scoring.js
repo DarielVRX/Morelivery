@@ -12,6 +12,7 @@
 //   - bridgePenaltyS se recibe directamente del simulador (calculado sobre viableStop real)
 
 import { getParam } from './params.js';
+import { log } from '../modules/orders/assignment/constants.js';
 
 /**
  * Calcula el score de un candidato para un pedido específico.
@@ -76,7 +77,7 @@ export function scoreCandidate(candidate, customer, driverPenalties = 0) {
     bridgePenalty +
     disconnectPenalty;
 
-  return {
+  const result = {
     totalCost: Number.isFinite(totalCost) ? totalCost : Infinity,
     fairnessPenalty,
     softSlaPenalty,
@@ -85,4 +86,20 @@ export function scoreCandidate(candidate, customer, driverPenalties = 0) {
     bridgePenalty,
     disconnectPenalty,
   };
+
+  log(`scoring driver=${candidate.driverSpeedKmh ?? '?'}kmh`, 'scoreCandidate', {
+    eta:              Math.round(eta),
+    fairnessPenalty:  Math.round(fairnessPenalty),
+    softSlaPenalty:   Math.round(softSlaPenalty),
+    hardSlaPenalty:   Math.round(hardSlaPenalty),
+    proximityPenalty: Math.round(proximityPenalty),
+    bridgePenalty:    Math.round(bridgePenalty),
+    disconnectPenalty: Math.round(disconnectPenalty),
+    totalCost:        Math.round(result.totalCost),
+    activeOrders,
+    maxSla,
+    delay:            Math.round(delay),
+  });
+
+  return result;
 }
