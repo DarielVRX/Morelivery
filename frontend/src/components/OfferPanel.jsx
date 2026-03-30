@@ -1,137 +1,10 @@
 // frontend/src/components/OfferPanel.jsx
-import { useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
 import { getDriverEarningCents } from '../features/driver/shared/orderUtils';
 import OfferCountdown from './OfferCountdown';
 import { fmt } from '../utils/format';
-import { ensureMapLibreCSS, ensureMapLibreJS } from '../utils/mapLibre';
-import { syncDriverRouteLayers } from '../features/driver/map/helpers';
 
-// ── Modal de ruta de oferta ───────────────────────────────────────────────────
-function OfferRouteModal({ offer, geometry, loading, onClose, onShowFull, showingFull }) {
-  const containerRef = useRef(null);
-  const mapRef       = useRef(null);
 
-  useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
-    ensureMapLibreCSS();
-    ensureMapLibreJS().then((ml) => {
-      if (!containerRef.current || mapRef.current) return;
-      const center = offer.restaurantLng
-        ? [Number(offer.restaurantLng), Number(offer.restaurantLat)]
-        : [-101.19, 19.70];
-
-      const map = new ml.Map({
-        container: containerRef.current,
-        style: 'https://tiles.openfreemap.org/styles/bright',
-        center,
-        zoom: 13,
-        pitch: 0,
-        attributionControl: false,
-        dragRotate: false,
-      });
-
-      map.on('load', () => {
-        // Marcador tienda
-        if (offer.restaurantLat && offer.restaurantLng) {
-          const el = document.createElement('div');
-          el.style.cssText = 'width:28px;height:28px;border-radius:50%;background:#16a34a;display:grid;place-items:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);font-size:15px;';
-          el.textContent = '🏪';
-          new ml.Marker({ element: el })
-            .setLngLat([Number(offer.restaurantLng), Number(offer.restaurantLat)])
-            .addTo(map);
-        }
-        // Marcador cliente
-        if (offer.customerLat && offer.customerLng) {
-          const el = document.createElement('div');
-          el.style.cssText = 'width:28px;height:28px;border-radius:50%;background:#f97316;display:grid;place-items:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);font-size:15px;';
-          el.textContent = '📦';
-          new ml.Marker({ element: el })
-            .setLngLat([Number(offer.customerLng), Number(offer.customerLat)])
-            .addTo(map);
-        }
-
-        // Dibujar ruta si ya está disponible
-        if (geometry?.length) {
-          syncDriverRouteLayers(map, geometry);
-          // fitBounds
-          const pts = geometry.map(p => [p.lng, p.lat]);
-          if (pts.length >= 2) {
-            try {
-              const bounds = pts.reduce((b, p) => b.extend(p), new ml.LngLatBounds(pts[0], pts[0]));
-              map.fitBounds(bounds, { padding: 40, maxZoom: 15, duration: 400 });
-            } catch (_) {}
-          }
-        }
-      });
-
-      mapRef.current = map;
-    });
-
-    return () => {
-      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Actualizar ruta si llega la geometría después de que el mapa carga
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !geometry?.length) return;
-    if (map.isStyleLoaded()) {
-      syncDriverRouteLayers(map, geometry);
-    } else {
-      map.once('load', () => syncDriverRouteLayers(map, geometry));
-    }
-  }, [geometry]);
-
-  return (
-    <div style={{
-      position:'fixed', inset:0, zIndex:500, background:'rgba(0,0,0,0.6)',
-      display:'flex', flexDirection:'column',
-    }} onClick={onClose}>
-      <div style={{
-        flex:1, display:'flex', flexDirection:'column',
-        margin:'2rem 1rem 1rem',
-        background:'var(--bg-card)', borderRadius:16,
-        overflow:'hidden', boxShadow:'0 20px 40px rgba(0,0,0,0.4)',
-      }} onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div style={{ padding:'0.75rem 1rem', borderBottom:'1px solid var(--border)',
-          display:'flex', alignItems:'center', gap:'0.5rem' }}>
-          <div style={{ flex:1 }}>
-            <div style={{ fontWeight:700, fontSize:'0.9rem' }}>Ruta del pedido</div>
-            <div style={{ fontSize:'0.72rem', color:'var(--text-secondary)' }}>
-              {offer.restaurantName || 'Tienda'} → {offer.customerAddress || 'Cliente'}
-            </div>
-          </div>
-          <button
-            onClick={onShowFull}
-            style={{
-              padding:'0.3rem 0.7rem', borderRadius:8, fontSize:'0.75rem', fontWeight:700,
-              border:'1.5px solid var(--brand)', background: showingFull ? 'var(--brand)' : 'transparent',
-              color: showingFull ? '#fff' : 'var(--brand)', cursor:'pointer',
-            }}>
-            {showingFull ? 'Ruta oferta' : 'Ruta total'}
-          </button>
-          <button onClick={onClose}
-            style={{ background:'none', border:'none', cursor:'pointer', fontSize:'1.2rem',
-              color:'var(--text-tertiary)', padding:'0.2rem' }}>✕</button>
-        </div>
-
-        {/* Mapa */}
-        <div style={{ flex:1, position:'relative' }}>
-          {loading && (
-            <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center',
-              justifyContent:'center', background:'rgba(255,255,255,0.7)', zIndex:10,
-              fontSize:'0.85rem', color:'var(--text-secondary)' }}>
-              Calculando ruta…
-            </div>
-          )}
-          <div ref={containerRef} style={{ height:'100%', width:'100%' }} />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Panel principal ───────────────────────────────────────────────────────────
 export default function OfferPanel({
@@ -152,8 +25,6 @@ export default function OfferPanel({
   onShowFullOfferRoute,
   showFullOfferRoute,
 }) {
-  const [showRouteModal, setShowRouteModal] = useState(false);
-
   // Pedir ruta automáticamente al mostrar la oferta
   useEffect(() => {
     if (offer?.restaurantLat && offer?.customerLat) {
@@ -171,17 +42,6 @@ export default function OfferPanel({
 
   return (
     <>
-      {showRouteModal && (
-        <OfferRouteModal
-          offer={offer}
-          geometry={offerRouteGeometry}
-          loading={offerRouteLoading}
-          onClose={() => setShowRouteModal(false)}
-          onShowFull={() => onShowFullOfferRoute?.()}
-          showingFull={showFullOfferRoute}
-        />
-      )}
-
       <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:30,
         pointerEvents: minimized ? 'none' : 'auto' }}>
         <div className="dh-offer-panel" style={{
@@ -291,7 +151,7 @@ export default function OfferPanel({
                     background:'#eff6ff', color:'#1d4ed8',
                     border:'1.5px solid #3b82f6', cursor:'pointer',
                     display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2 }}
-                  onClick={() => setShowRouteModal(true)}>
+                  onClick={() => onRequestOfferRoute?.(offer)}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                     <polygon points="3 11 22 2 13 21 11 13 3 11"/>
