@@ -81,7 +81,7 @@ export default function DriverHomeMapSection({
   // - Si hay oferta y no hay ruta activa: offerRouteGeometry
   const displayGeometry = routeActive
     ? routeGeometry
-    : (!hasActiveOrder && offerRouteGeometry?.length ? offerRouteGeometry : routeGeometry);
+    : (offerRouteGeometry?.length ? offerRouteGeometry : routeGeometry);
 
   return (
     <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden', zIndex: 0 }}>
@@ -97,7 +97,7 @@ export default function DriverHomeMapSection({
       )}
 
       {/* Indicador de ruta de oferta activa */}
-      {!hasActiveOrder && !routeActive && offerRouteGeometry?.length > 0 && (
+      {!routeActive && offerRouteGeometry?.length > 0 && (
         <div style={{
           position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
           background: 'rgba(37,99,235,0.85)', color: '#fff', borderRadius: 20,

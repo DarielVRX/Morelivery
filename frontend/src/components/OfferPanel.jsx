@@ -123,6 +123,7 @@ export default function OfferPanel({
               <OfferCountdown
                 key={offer.id}
                 secondsLeft={offer.seconds_left ?? offer.secondsLeft ?? 60}
+                totalSeconds={offer.seconds_left ?? offer.secondsLeft ?? 60}
                 onExpired={onExpired}
               />
 
