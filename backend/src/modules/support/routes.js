@@ -4,6 +4,7 @@ import { authenticate } from '../../middlewares/auth.js';
 import { query }        from '../../config/db.js';
 import { AppError }     from '../../utils/errors.js';
 import { sseHub }       from '../events/hub.js';
+import { sendPushToUser } from '../notifications/pushSubscription.js';
 
 // Notifica a todos los admins conectados (para cuando un usuario abre/responde ticket)
 async function notifyAdmins(event, data) {
@@ -149,9 +150,26 @@ router.post('/tickets/:id/messages', authenticate, async (req, res, next) => {
     if (isAdmin) {
       // Admin respondió — notificar al dueño del ticket
       sseHub.sendToUser(ticket.rows[0].user_id, 'support_message', ssePayload);
+      sendPushToUser(ticket.rows[0].user_id, {
+        title: 'Soporte — nueva respuesta',
+        body:  text.trim().slice(0, 80),
+        tag:   `support_${req.params.id}`, group: 'support', priority: 'normal',
+        url:   '/support',
+      }).catch(() => {});
     } else {
       // Usuario escribió — notificar a todos los admins
       await notifyAdmins('support_message', ssePayload);
+      try {
+        const admins = await query(`SELECT id FROM users WHERE role = 'admin'`);
+        for (const admin of admins.rows) {
+          sendPushToUser(admin.id, {
+            title: 'Soporte — nuevo mensaje',
+            body:  text.trim().slice(0, 80),
+            tag:   `support_${req.params.id}`, group: 'support', priority: 'normal',
+            url:   '/admin',
+          }).catch(() => {});
+        }
+      } catch (_) {}
     }
 
     return res.json({ message: msg.rows[0] });

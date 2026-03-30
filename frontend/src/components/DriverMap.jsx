@@ -54,6 +54,7 @@ export default function DriverMap({
   const isDarkRef         = useRef(isDark);
 
   const [showAttrib, setShowAttrib] = useState(false);
+  const [mapReady,   setMapReady]   = useState(false);
   const [hasGPS,     setHasGPS]     = useState(Boolean(driverPos));
 
   useEffect(() => { isDarkRef.current = isDark; }, [isDark]);
@@ -302,6 +303,14 @@ export default function DriverMap({
             'invert(1) hue-rotate(180deg) saturate(0.85) brightness(0.9)';
           }
         }
+        const pos = livePosRef.current;
+        if (pos) {
+          map.easeTo({
+            center: [pos.lng, pos.lat], zoom: 15, pitch: 0, bearing: 0,
+            duration: 350, essential: true,
+          });
+        }
+        setMapReady(true);
       });
       mapRef.current = map;
       window.__map = map;
@@ -524,7 +533,7 @@ export default function DriverMap({
     }
 
     onCenterDone?.();
-  }, [centerSignal]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [centerSignal, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ height: '100%', width: '100%', position: 'relative' }}>

@@ -5,7 +5,7 @@
 //     y no pasaba nada. Ahora envía NOTIFICATION_ACTION al cliente
 //     para que el listener en React llame PATCH /restaurants/my/toggle.
 
-const SHELL_VERSION = 'v5';
+const SHELL_VERSION = 'v6';
 const SHELL_CACHE   = `morelivery-shell-${SHELL_VERSION}`;
 const SHELL_ASSETS  = [
   '/', '/index.html', '/manifest.webmanifest',

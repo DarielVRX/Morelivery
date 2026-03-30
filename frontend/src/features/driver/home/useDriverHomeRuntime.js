@@ -30,7 +30,11 @@ const OFFER_ROUTE_CACHE_MS = 5 * 60 * 1000; // 5 minutos
 const offerRouteCache = new Map();
 
 function getOfferRouteCacheKey(offer) {
-  return `${offer.restaurantLat},${offer.restaurantLng}-${offer.customerLat},${offer.customerLng}`;
+  const rLat = offer.restaurantLat ?? offer.restaurant_lat;
+  const rLng = offer.restaurantLng ?? offer.restaurant_lng;
+  const cLat = offer.customerLat   ?? offer.customer_lat;
+  const cLng = offer.customerLng   ?? offer.customer_lng;
+  return `${rLat},${rLng}-${cLat},${cLng}`;
 }
 
 export function useDriverHomeRuntime({
@@ -316,7 +320,11 @@ export function useDriverHomeRuntime({
 
   // ── Preview de ruta de oferta ─────────────────────────────────────────────
   const openOfferRoutePreview = useCallback(async (offer) => {
-    if (!offer?.restaurantLat || !offer?.customerLat) return;
+    const rLat = offer?.restaurantLat ?? offer?.restaurant_lat;
+    const rLng = offer?.restaurantLng ?? offer?.restaurant_lng;
+    const cLat = offer?.customerLat   ?? offer?.customer_lat;
+    const cLng = offer?.customerLng   ?? offer?.customer_lng;
+    if (!rLat || !cLat) return;
 
     const key = getOfferRouteCacheKey(offer);
     const cached = offerRouteCache.get(key);
@@ -327,8 +335,8 @@ export function useDriverHomeRuntime({
 
     setOfferRouteLoading(true);
     try {
-      const pickup   = { lat: Number(offer.restaurantLat), lng: Number(offer.restaurantLng) };
-      const delivery = { lat: Number(offer.customerLat),   lng: Number(offer.customerLng)   };
+      const pickup   = { lat: Number(rLat), lng: Number(rLng) };
+      const delivery = { lat: Number(cLat), lng: Number(cLng) };
       const data = await fetchRouteModel({ origin: pickup, pickup: null, delivery, token });
       if (data?.geometry?.length) {
         offerRouteCache.set(key, { geometry: data.geometry, ts: Date.now() });

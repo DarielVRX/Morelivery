@@ -84,7 +84,7 @@ export function useNavFeatures({
 
   // ── Wake Lock — solo activo con pedido activo Y ruta calculada ─────────────
   useEffect(() => {
-    const shouldLock = hasActiveOrder && routeGeometry?.length > 0;
+    const shouldLock = true;
 
     async function acquire() {
       try {
