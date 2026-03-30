@@ -25,8 +25,8 @@ const orderRepeatTimers = new Map(); // orderId → intervalId
 
 // ── Patrones de vibración por tipo ───────────────────────────────────────────
 const VIBRATE = {
-  offer:     [500, 100, 500, 100, 500, 100, 500],
-  new_order: [500, 150, 500, 150, 500],
+  offer:     [500,100,500,100,500,100,500],
+  new_order: [500,150,500,150,500],
   call:      [500,300,500,300,500,300,500,300,500,300,500,300,500],
   cancel:    [200, 100, 200],
   eta:       [150, 80, 150],
@@ -198,7 +198,7 @@ async function showCallNotification({ orderId, driverName, url }) {
   existing.forEach(n => n.close());
 
   await self.registration.showNotification('📞 Llamada entrante', {
-    body:               `${driverName || 'Tu repartidor'} está intentando localizarte`,
+    body:               `${driverName || 'Tu repartidor'} está intentando localizarte, por favor revisa el chat`,
     tag:                `call_${orderId}`,
     icon:               '/icon-192.png',
     badge:              '/badge.svg',
