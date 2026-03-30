@@ -59,6 +59,7 @@ async function loadDriverStopsForReroute(driverId) {
        COALESCE(ru.home_lng, rest.lng)         AS rest_lng,
        COALESCE(o.estimated_volume_liters, 0)  AS volume_liters,
        o.kitchen_estimated_ready,
+       rest.id                                 AS restaurant_id,
        $3                                      AS max_delivery_time_s
      FROM orders o
      JOIN restaurants rest ON rest.id = o.restaurant_id
@@ -69,6 +70,9 @@ async function loadDriverStopsForReroute(driverId) {
     [driverId, ACTIVE_STATUSES, maxSlaSec]
   );
 
+  // Agrupar pickups por restaurante — dos pedidos del mismo local
+  // comparten un solo stop de pickup: el driver los recoge en una sola parada.
+  const pickupByRestaurant = new Map();
   const stops = [];
 
   for (const row of r.rows) {
@@ -77,7 +81,7 @@ async function loadDriverStopsForReroute(driverId) {
       : null;
 
     // SLA deadline: desde cuándo se recogió (o desde ahora si aún no se recoge)
-    const slaBase       = pickedUpAtSec ?? nowSec;
+    const slaBase        = pickedUpAtSec ?? nowSec;
     const slaDeadlineSec = slaBase + Number(row.max_delivery_time_s);
 
     // Tiempo estimado en que la cocina tendrá listo el pedido
@@ -85,26 +89,49 @@ async function loadDriverStopsForReroute(driverId) {
       ? new Date(row.kitchen_estimated_ready).getTime() / 1000
       : nowSec; // si no hay dato, asumir listo ya
 
-    // Pickup pendiente
+    // Pickup pendiente — deduplicar por restaurante
     if (row.status !== 'on_the_way' && row.rest_lat && row.rest_lng) {
-      stops.push({
-        type:             'pickup',
-        orderId:          row.id,
-        pairOrderId:      row.id,
-        pos:              { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
-        pickedUpAtSec:    null,
-        slaDeadlineSec,
-        kitchenReadyAtSec,
-        volumeLiters:     Number(row.volume_liters) || 0,
-      });
+      const restId = row.restaurant_id;
+
+      if (pickupByRestaurant.has(restId)) {
+        // Agrupar con el pickup existente del mismo restaurante
+        const existing = pickupByRestaurant.get(restId);
+        // Esperar al pedido que tarde más en estar listo
+        existing.kitchenReadyAtSec = Math.max(existing.kitchenReadyAtSec, kitchenReadyAtSec);
+        existing.volumeLiters     += Number(row.volume_liters) || 0;
+        // pairOrderId del grupo apunta al primer orderId — las deliveries
+        // de los pedidos agrupados mantienen su propio pairOrderId individual
+      } else {
+        const stop = {
+          type:             'pickup',
+          orderId:          row.id,
+          pairOrderId:      row.id,
+          pos:              { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
+          pickedUpAtSec:    null,
+          slaDeadlineSec,
+          kitchenReadyAtSec,
+          volumeLiters:     Number(row.volume_liters) || 0,
+          restaurantId:     restId,
+        };
+        pickupByRestaurant.set(restId, stop);
+        stops.push(stop);
+      }
     }
 
-    // Delivery pendiente
+    // Delivery pendiente — uno por pedido, siempre
     if (row.cust_lat && row.cust_lng) {
+      // pairOrderId apunta al pickup del mismo restaurante si fue agrupado,
+      // o al propio orderId si tiene pickup individual
+      const restId     = row.restaurant_id;
+      const pickupStop = pickupByRestaurant.get(restId);
+      const pairId     = (pickupStop && row.status !== 'on_the_way')
+        ? pickupStop.orderId
+        : row.id;
+
       stops.push({
         type:             'delivery',
         orderId:          row.id,
-        pairOrderId:      row.id,
+        pairOrderId:      pairId,
         pos:              { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
         pickedUpAtSec,
         slaDeadlineSec,
@@ -233,18 +260,22 @@ function pruneBySla(permutations, driverPos, driverObj, nowSec) {
  * @returns {number}
  */
 function evaluateSequenceCost(sequence, driverPos, driverObj, nowSec) {
-  let pos      = driverPos;
-  let time     = nowSec;
-  let slaCost  = 0;
+  let pos           = driverPos;
+  let time          = nowSec;
+  let slaCost       = 0;
+  let kitchenWait   = 0;
+  let totalDistance = 0;
 
   for (const stop of sequence) {
     const travelSec = etaEstimator.estimateSync(pos, stop.pos, driverObj);
-    time += travelSec;
-    pos   = stop.pos;
+    totalDistance  += haversineMeters(pos, stop.pos);
+    time           += travelSec;
+    pos             = stop.pos;
 
     if (stop.type === 'pickup') {
       const waitSec = Math.max(0, stop.kitchenReadyAtSec - time);
-      time += waitSec;
+      kitchenWait  += waitSec;
+      time         += waitSec;
     }
 
     if (stop.type === 'delivery') {
@@ -253,12 +284,16 @@ function evaluateSequenceCost(sequence, driverPos, driverObj, nowSec) {
     }
   }
 
-  // totalEta: tiempo total hasta completar el último stop
-  // Se usa como desempate cuando slaCost es igual entre secuencias —
-  // evita rutas subóptimas cuando ningún pedido está en riesgo de SLA.
+  // Criterio de costo en orden de prioridad:
+  //   1. slaCost       — violaciones SLA acumuladas (segundos de exceso)
+  //   2. totalDistance — metros totales recorridos (penaliza backtracking)
+  //                      el costo físico de desvío siempre supera al de espera
+  //   3. kitchenWait   — tiempo total que el driver espera en restaurantes
+  //                      desempate: entre rutas de igual distancia, menos espera
+  //   4. totalEta      — último desempate: tiempo absoluto hasta el último stop
   const totalEta = time - nowSec;
 
-  return { slaCost, totalEta };
+  return { slaCost, kitchenWait, totalDistance, totalEta };
 }
 
 /**
@@ -293,11 +328,21 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec) {
 
   for (let i = 1; i < pool.length; i++) {
     const eval_ = evaluateSequenceCost(pool[i], driverPos, driverObj, nowSec);
-    const betterSla = eval_.slaCost < bestEval.slaCost;
-    const sameSla   = eval_.slaCost === bestEval.slaCost;
-    const betterEta = eval_.totalEta < bestEval.totalEta;
 
-    if (betterSla || (sameSla && betterEta)) {
+    const betterSla      = eval_.slaCost       < bestEval.slaCost;
+    const sameSla        = eval_.slaCost      === bestEval.slaCost;
+    const betterDist     = eval_.totalDistance < bestEval.totalDistance;
+    const sameDist       = eval_.totalDistance === bestEval.totalDistance;
+    const betterWait     = eval_.kitchenWait   < bestEval.kitchenWait;
+    const sameWait       = eval_.kitchenWait  === bestEval.kitchenWait;
+    const betterEta      = eval_.totalEta      < bestEval.totalEta;
+
+    if (
+      betterSla ||
+      (sameSla && betterDist) ||
+      (sameSla && sameDist && betterWait) ||
+      (sameSla && sameDist && sameWait && betterEta)
+    ) {
       bestEval = eval_;
       bestSeq  = pool[i];
     }
