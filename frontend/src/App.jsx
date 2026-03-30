@@ -403,7 +403,26 @@ function RootRouter() {
   );
 }
 
+function useVibrationBridge() {
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+
+    const handler = (event) => {
+      if (event.data?.type === 'VIBRATE_EXECUTE') {
+        navigator.vibrate?.(event.data.pattern || [200]);
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handler);
+
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handler);
+    };
+  }, []);
+}
+
 export default function App() {
+useVibrationBridge();
   return (
     <AuthProvider>
       <ThemeProvider>
