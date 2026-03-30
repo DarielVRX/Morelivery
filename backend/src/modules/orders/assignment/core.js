@@ -47,7 +47,7 @@ import { serializedOffer, hasActiveChain } from './queue.js';
 // ─── Budget de simulaciones por ciclo ────────────────────────────────────────
 // Compartido entre todos los pedidos del mismo ciclo de asignación.
 // Se resetea al inicio de cada llamada a triggerPendingAssignments().
-let _simulationBudget = 0;
+let _simulationBudget = 75; // default hasta el primer triggerPendingAssignments
 
 // ─── Reserved slots por driver ────────────────────────────────────────────────
 // Map<driverId, count> — slots reservados mientras se simula un candidato.
