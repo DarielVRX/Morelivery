@@ -4,6 +4,7 @@ import { logEvent } from '../../utils/logger.js';
 import { AppError } from '../../utils/errors.js';
 import { offerNextDrivers, expireTimedOutOffers, serializedOffer, getPendingAssignmentOrders } from './assignment/index.js';
 import { sseHub } from '../events/hub.js';
+import { sendPushToUser } from '../notifications/pushSubscription.js';
 import { initKitchenTiming, evaluatePrepEstimate, recordPickupWait } from '../../engine/kitchen.js';
 import { createOrderSchema, suggestionResponseSchema, suggestionSchema, updateOrderStatusSchema } from './schemas.js';
 
@@ -110,4 +111,5 @@ export const sharedDeps = {
   suggestionSchema,
   updateOrderStatusSchema,
   onOffer,
+  sendPushToUser,
 };
