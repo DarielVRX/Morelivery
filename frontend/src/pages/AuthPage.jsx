@@ -209,7 +209,6 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer' 
         </button>
         </div>
       )}
-      </div>
 
       <div style={{ textAlign: 'right', marginTop: '-0.25rem', marginBottom: '0.75rem' }}>
         <button type="button" onClick={onGoForgot}
@@ -246,6 +245,7 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer' 
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.875rem', textAlign: 'center', padding: '0.25rem 0' }}>
           ¿No tienes cuenta? <strong>Regístrate</strong>
         </button>
+      </div>
 
       {showResend && (
         <div style={{ marginTop: '0.5rem', padding: '0.65rem 0.9rem', background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', borderRadius: 8, fontSize: '0.82rem', color: 'var(--warn)' }}>
