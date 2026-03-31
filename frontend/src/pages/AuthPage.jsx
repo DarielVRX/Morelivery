@@ -196,6 +196,21 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer' 
         </label>
       </div>
 
+      {/* Links discretos de rol — solo en la entrada principal (sin appKey) */}
+      {!appKey && (
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '1.25rem', marginTop: '0.1rem' }}>
+        <button type="button" onClick={() => navigate('/driver/login')}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: '0.75rem', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
+        Soy repartidor
+        </button>
+        <button type="button" onClick={() => navigate('/restaurant/login')}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: '0.75rem', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
+        Tengo un negocio
+        </button>
+        </div>
+      )}
+      </div>
+
       <div style={{ textAlign: 'right', marginTop: '-0.25rem', marginBottom: '0.75rem' }}>
         <button type="button" onClick={onGoForgot}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.8rem', padding: 0 }}>
@@ -231,21 +246,6 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer' 
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.875rem', textAlign: 'center', padding: '0.25rem 0' }}>
           ¿No tienes cuenta? <strong>Regístrate</strong>
         </button>
-
-        {/* Links discretos de rol — solo en la entrada principal (sin appKey) */}
-        {!appKey && (
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '1.25rem', marginTop: '0.1rem' }}>
-            <button type="button" onClick={() => navigate('/driver/login')}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: '0.75rem', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
-              Soy repartidor
-            </button>
-            <button type="button" onClick={() => navigate('/restaurant/login')}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: '0.75rem', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
-              Tengo un negocio
-            </button>
-          </div>
-        )}
-      </div>
 
       {showResend && (
         <div style={{ marginTop: '0.5rem', padding: '0.65rem 0.9rem', background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', borderRadius: 8, fontSize: '0.82rem', color: 'var(--warn)' }}>
