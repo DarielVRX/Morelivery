@@ -487,14 +487,7 @@ export default function AddressSearchBar({ userPos, homeAddress, homePos, onSele
             <div ref={mapContRef} style={{ flex: 1, width: '100%', minHeight: 0 }} />
 
             {/* Footer */}
-            <div style={{
-              display:     'flex',
-              gap:         '0.5rem',
-              padding:     '0.75rem 1rem',
-              borderTop:   '1px solid var(--border)',
-              background:  'var(--bg-card)',
-              flexShrink:  0,
-            }}>
+            <div className="addr-map-footer">
               <span style={{ flex: 1, fontSize: '0.78rem', color: 'var(--text-tertiary)', alignSelf: 'center' }}>
                 {pinPlaced
                   ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}><IconPin />Pin colocado — confirma o muévelo</span>
@@ -518,6 +511,20 @@ export default function AddressSearchBar({ userPos, homeAddress, homePos, onSele
           flex-direction: column;
           width: 100%;
           height: 100dvh;
+          max-height: 100dvh;
+          overflow: hidden;
+        }
+        .addr-map-footer {
+          display: flex;
+          gap: 0.5rem;
+          padding: 0.75rem 1rem;
+          padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+          border-top: 1px solid var(--border);
+          background: var(--bg-card);
+          flex-shrink: 0;
+          position: sticky;
+          bottom: 0;
+          z-index: 2;
         }
         @media (min-width: 520px) {
           .addr-map-modal {
@@ -525,6 +532,9 @@ export default function AddressSearchBar({ userPos, homeAddress, homePos, onSele
             height: 70dvh;
             max-height: 600px;
             border-radius: 12px;
+          }
+          .addr-map-footer {
+            padding-bottom: 0.75rem;
           }
         }
       `}</style>
