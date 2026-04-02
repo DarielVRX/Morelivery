@@ -74,8 +74,8 @@ export default function Layout({ children }) {
           <img className="brand-logo" src="/logo.svg" alt={UI_BRAND} />
           <div>
             <h1 style={{ color: 'inherit' }}>
-              <span style={{ color: '#e3aaaa' }}>More</span>
-              <span style={{ color: 'var(--text-primary)' }}>livery</span>
+              <span style={{ color: '#e3aaaa' }}>En</span>
+              <span style={{ color: 'var(--text-primary)' }}>Corto</span>
             </h1>
             {role && <span className="role-pill">{ROLE_LABELS[role] || role}</span>}
           </div>

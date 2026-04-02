@@ -1,5 +1,5 @@
 const DEFAULT_UI_BRAND = 'En Corto';
-const DEFAULT_ROUTER_BRAND = 'morelivery';
+const DEFAULT_ROUTER_BRAND = 'encorto';
 
 const sanitize = (value, fallback) => {
   const normalized = String(value || '').trim();

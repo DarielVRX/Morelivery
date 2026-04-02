@@ -5,9 +5,9 @@ export default defineConfig(({ mode }) => {
   // Carga variables de entorno según el modo (dev/prod)
   const env = loadEnv(mode, process.cwd());
 
-  const ROUTER_BRAND = (env.VITE_ROUTER_BRAND || 'morelivery').trim().toLowerCase();
+  const ROUTER_BRAND = (env.VITE_ROUTER_BRAND || 'encorto').trim().toLowerCase();
   const API_TARGET = env.VITE_API_TARGET || `https://${ROUTER_BRAND}.onrender.com`;
-  const UI_BRAND = env.VITE_UI_BRAND || 'Morelivery';
+  const UI_BRAND = env.VITE_UI_BRAND || 'En Corto';
 
   const API_PATHS = [
     '/nav', '/orders', '/drivers', '/auth', '/restaurants',
