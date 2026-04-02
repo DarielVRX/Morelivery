@@ -13,3 +13,13 @@ export const apiRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false
 });
+
+// SSE necesita límite generoso — es una conexión persistente que puede durar horas.
+// Limita reconexiones abusivas (bot/spam) sin bloquear uso legítimo.
+export const sseRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10, // máx 10 reconexiones por minuto por IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: false,
+});
