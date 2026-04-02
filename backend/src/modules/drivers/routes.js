@@ -555,4 +555,19 @@ router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver']),
   } catch (error) { return next(error); }
 });
 
+/* ── POST /drivers/reroute ───────────────────────────────────────────────── */
+// Fuerza un recálculo de ruta para el driver autenticado.
+// El resultado llega via SSE route_update — no hay payload en la respuesta.
+// Se llama desde el frontend en: reconexión SSE, loadData con override null,
+// y tras acceptOffer para garantizar que el primer route_update sea correcto.
+router.post('/reroute', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const { rerouteDriver } = await import('../../engine/reroute.js');
+    rerouteDriver(req.user.userId).catch(e =>
+      console.warn(`[driver.reroute] error driver=${req.user.userId.slice(0,8)}:`, e.message)
+    );
+    return res.json({ ok: true });
+  } catch (error) { return next(error); }
+});
+
 export default router;

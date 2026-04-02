@@ -65,8 +65,6 @@ export function useDriverHomeRuntime({
 
   // Rerouting
   const lastRerouteRef   = useRef(0);
-  const REROUTE_DIST_M   = 50;
-  const REROUTE_COOLDOWN = 15_000;
 
   const centerModeRef      = useRef('free');
   const centerCycleRef     = useRef(0);
@@ -212,79 +210,22 @@ export function useDriverHomeRuntime({
   }, [myPosition, onMessage, token]);
 
   // ── Ruta activa ───────────────────────────────────────────────────────────
-  // Usa routeStopsOverride del backend cuando está disponible.
-  // Fallback: pedidos confirmados en orden de aceptación.
+  // Solo usa routeStopsOverride del backend. Si no hay override disponible,
+  // no calcula ruta de respaldo — espera al route_update del backend.
   const openRoadRouteApi = useCallback(() => {
     if (!activeOrder) return;
 
-    // Si el backend ya calculó la secuencia óptima, usar ese orden para los waypoints
-    if (Array.isArray(routeStopsOverride) && routeStopsOverride.length > 0) {
-      const waypoints = routeStopsOverride
-        .filter(s => s.pos && Number.isFinite(s.pos.lat) && Number.isFinite(s.pos.lng))
-        .map(s => ({ lat: s.pos.lat, lng: s.pos.lng }));
-
-      if (waypoints.length) {
-        const buildRoute = (origin) => {
-          const segments = [origin, ...waypoints];
-          const fetches  = [];
-          for (let i = 0; i < segments.length - 1; i++) {
-            fetches.push(fetchRouteModel({ origin: segments[i], pickup: null, delivery: segments[i + 1], token }));
-          }
-          Promise.all(fetches)
-            .then((results) => {
-              const combined = results.flatMap(d => d?.geometry || []);
-              if (!combined.length) throw new Error('Ruta vacía');
-              const steps = results.flatMap(d => Array.isArray(d?.steps) ? d.steps : []);
-              setRouteGeometry(combined);
-              setRouteSteps(steps);
-              setRouteActive(true);
-              centerCycleRef.current = 0;
-              const first = results[0];
-              if (first) onMessage(formatRouteSummary(first));
-              setCenterSignal('nav');
-            })
-            .catch((error) => {
-              setRouteGeometry(null);
-              setRouteSteps([]);
-              onMessage(error.message?.includes('502') ? 'Motor de rutas no disponible' : 'No se pudo calcular la ruta');
-            });
-        };
-
-        if (myPosition) { buildRoute(myPosition); return; }
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => buildRoute({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-            () => buildRoute(waypoints[0]),
-            { timeout: 4000, maximumAge: 15000 }
-          );
-          return;
-        }
-        buildRoute(waypoints[0]);
-        return;
-      }
-    }
-
-    // Fallback: construir waypoints desde pedidos confirmados en orden de aceptación
-    const orders = (confirmedOrders?.length ? confirmedOrders : (activeOrder?.restaurant_confirmed !== false ? [activeOrder] : []))
-      .filter(o => !['delivered', 'cancelled'].includes(o.status))
-      .sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at));
-
-    if (!orders.length) {
-      onMessage('Esperando confirmación del restaurante para trazar la ruta');
+    if (!Array.isArray(routeStopsOverride) || routeStopsOverride.length === 0) {
+      // Sin override — no calcular ruta de respaldo, el backend la enviará via SSE
+      onMessage('Calculando ruta óptima…');
       return;
     }
 
-    const waypoints = [];
-    for (const o of orders) {
-      const { pickup, delivery } = getDriverRouteStops(o);
-      if (pickup && !o.picked_up_at) waypoints.push(pickup);
-      if (delivery) waypoints.push(delivery);
-    }
+    const waypoints = routeStopsOverride
+      .filter(s => s.pos && Number.isFinite(s.pos.lat) && Number.isFinite(s.pos.lng))
+      .map(s => ({ lat: s.pos.lat, lng: s.pos.lng }));
 
-    if (!waypoints.length) {
-      onMessage('Faltan coordenadas del pedido para trazar la ruta');
-      return;
-    }
+    if (!waypoints.length) return;
 
     const buildRoute = (origin) => {
       const segments = [origin, ...waypoints];
@@ -313,7 +254,6 @@ export function useDriverHomeRuntime({
     };
 
     if (myPosition) { buildRoute(myPosition); return; }
-
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => buildRoute({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
@@ -323,37 +263,16 @@ export function useDriverHomeRuntime({
       return;
     }
     buildRoute(waypoints[0]);
-  }, [activeOrder, confirmedOrders, myPosition, onMessage, token]);
+  }, [activeOrder, routeStopsOverride, myPosition, onMessage, token]);
 
   // FIX: ref siempre apunta a la versión más reciente de openRoadRouteApi.
-  // Evita stale closure en el efecto de rerouting cuando confirmedOrders cambia
-  // sin necesidad de agregarlo como dependencia (lo que causaría loops infinitos).
   const openRoadRouteApiRef = useRef(openRoadRouteApi);
   useEffect(() => {
     openRoadRouteApiRef.current = openRoadRouteApi;
   }, [openRoadRouteApi]);
 
-  // ── Rerouting silencioso ───────────────────────────────────────────────────
-  useEffect(() => {
-    if (!routeActive || !routeGeometry?.length || !myPosition) return;
-
-    const now = Date.now();
-    if (now - lastRerouteRef.current < REROUTE_COOLDOWN) return;
-
-    let minDist = Infinity;
-    for (const pt of routeGeometry) {
-      const d = haversineMeters(myPosition.lat, myPosition.lng, pt.lat, pt.lng);
-      if (d < minDist) minDist = d;
-    }
-
-    if (minDist > REROUTE_DIST_M) {
-      lastRerouteRef.current = now;
-      console.log(`[reroute] desviación ${Math.round(minDist)}m — recalculando`);
-      // FIX: usar ref en lugar de closure directo — siempre apunta a la versión fresca
-      openRoadRouteApiRef.current?.();
-    }
-  // FIX: openRoadRouteApi removido de las dependencias — se accede via ref
-  }, [myPosition?.lat, myPosition?.lng, routeActive, routeGeometry]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Rerouting silencioso eliminado — el backend maneja todo el recálculo
+  // via SSE route_update. El frontend solo dibuja lo que recibe.
 
   const handleToggleRoute = useCallback(() => {
     if (routeActive) {

@@ -13,8 +13,34 @@ import { useRealtimeOrders } from './useRealtimeOrders';
 import { playOfferAlertSound } from '../utils/audio';
 import { haversineMeters } from '../utils/geo';
 import { getNotifPriorityMode } from '../utils/format';
+import { brandStorageKey } from '../config/brand';
+
+// ── Persistencia de routeStopsOverride en sessionStorage ──────────────────────
+// Clave por userId para evitar colisiones entre drivers en el mismo dispositivo.
+function getStopsKey(userId) {
+  return brandStorageKey(`route_stops_${userId}`);
+}
+function saveStopsOverride(userId, stops) {
+  if (!userId || !stops?.length) return;
+  try { sessionStorage.setItem(getStopsKey(userId), JSON.stringify(stops)); } catch (_) {}
+}
+function loadStopsOverride(userId) {
+  if (!userId) return null;
+  try {
+    const raw = sessionStorage.getItem(getStopsKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+  } catch (_) { return null; }
+}
+function clearStopsOverride(userId) {
+  if (!userId) return;
+  try { sessionStorage.removeItem(getStopsKey(userId)); } catch (_) {}
+}
 
 export function useOrderManager(token, patchUser, userDriver) {
+  const userId = userDriver?.user_id ?? null;
+
   const [activeOrder,    setActiveOrder]    = useState(null);
   const [activeOrders,   setActiveOrders]   = useState([]);
   const [availability,   setAvailability]   = useState(false);
@@ -33,9 +59,8 @@ export function useOrderManager(token, patchUser, userDriver) {
   const [transferBanner, setTransferBanner] = useState(null);
   const [routeBagPct,    setRouteBagPct]    = useState(null);
   const [chatTick,       setChatTick]       = useState(0);
-  // Secuencia óptima de stops calculada por el motor de ruteo del backend.
-  // Se actualiza via SSE route_update — null significa usar el orden por defecto.
-  const [routeStopsOverride, setRouteStopsOverride] = useState(null);
+  // Inicializar desde sessionStorage para sobrevivir recargas
+  const [routeStopsOverride, setRouteStopsOverride] = useState(() => loadStopsOverride(userId));
 
   const loadDataRef         = useRef(null);
   const myPositionRef       = useRef(null);
@@ -120,7 +145,20 @@ export function useOrderManager(token, patchUser, userDriver) {
       })();
 
       setActiveOrder(active);
-      if (!active) { setRouteBagPct(null); setRouteStopsOverride(null); }
+
+      if (!active) {
+        setRouteBagPct(null);
+        setRouteStopsOverride(null);
+        clearStopsOverride(userId);
+      } else {
+        // Si no hay override guardado, pedir reroute al backend para obtener secuencia fresca
+        setRouteStopsOverride(prev => {
+          if (!prev) {
+            apiFetch('/drivers/reroute', { method: 'POST' }, token).catch(() => {});
+          }
+          return prev;
+        });
+      }
       const newOffer = (off.offers||[]).length > 0 ? off.offers[0] : null;
       setPendingOffer(prev => {
         if (newOffer?.id !== prev?.id) setOfferMinimized(false);
@@ -149,13 +187,13 @@ export function useOrderManager(token, patchUser, userDriver) {
   }, []);
 
   // Recibe la secuencia óptima de stops del motor de ruteo del backend.
-  // Actualiza routeStopsOverride para que DriverHomeMapSection muestre
-  // el orden correcto sin esperar el próximo loadData().
+  // Persiste en sessionStorage para sobrevivir recargas en el mismo dispositivo.
   const handleRouteUpdate = useCallback((data) => {
     if (Array.isArray(data?.stops) && data.stops.length > 0) {
       setRouteStopsOverride(data.stops);
+      saveStopsOverride(userId, data.stops);
     }
-  }, []);
+  }, [userId]);
 
   const handleTransferEvent = useCallback((data) => {
     setTransferBanner(data);
@@ -171,7 +209,9 @@ export function useOrderManager(token, patchUser, userDriver) {
   const handleReconnect = useCallback(() => {
     loadDataRef.current?.();
     ordersReconnectListenerRef.current?.();
-  }, []);
+    // Forzar reroute en reconexión SSE — el backend emitirá route_update fresco
+    apiFetch('/drivers/reroute', { method: 'POST' }, token).catch(() => {});
+  }, [token]);
 
   const handleChatMessage = useCallback((data) => {
     if (data?.orderId && String(data.orderId) === String(activeOrder?.id)) {
@@ -210,6 +250,10 @@ export function useOrderManager(token, patchUser, userDriver) {
       setPendingOffer(null); setOfferMinimized(false); setOrderExpanded(false);
       loadData();
       notifyOrdersPanel();
+      // Delay para que el motor procese la asignación antes de pedir reroute
+      setTimeout(() => {
+        apiFetch('/drivers/reroute', { method: 'POST' }, token).catch(() => {});
+      }, 1500);
     } catch (e) { onError?.(e.message); }
     finally { setLoadingOffer(false); }
   }
