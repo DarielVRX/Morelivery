@@ -6,7 +6,9 @@ const RAW_API_BASE = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, 
 export const API_BASE = RAW_API_BASE.replace(/\/api$/i, '');
 
 // Evento global que AuthContext escucha para hacer logout automático cuando el JWT expira
-export const AUTH_EXPIRED_EVENT = 'morelivery:auth_expired';
+import { brandEventName } from '../config/brand';
+
+export const AUTH_EXPIRED_EVENT = brandEventName('auth_expired');
 
 export async function apiFetch(path, options = {}, token = null) {
   const normalizedPath = path.startsWith('/api/')

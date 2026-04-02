@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import express from 'express';
 
 import { env } from '../config/env.js';
+import { SERVICE_NAME } from '../config/brand.js';
 import { checkDbConnection } from '../config/db.js';
 import { apiRateLimit } from '../middlewares/rateLimit.js';
 
@@ -38,7 +39,7 @@ export function applyCoreMiddleware(app) {
 }
 
 export function registerHealthEndpoints(app) {
-  app.get('/', (_req, res) => res.json({ service: 'morelivery-api', status: 'online' }));
+  app.get('/', (_req, res) => res.json({ service: SERVICE_NAME, status: 'online' }));
   app.get('/health', (_req, res) => res.json({ status: 'ok', env: env.nodeEnv }));
   app.get('/health/db', async (_req, res, next) => {
     try {

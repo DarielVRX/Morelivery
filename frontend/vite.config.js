@@ -1,7 +1,8 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-const API_TARGET = 'https://morelivery.onrender.com';
+const ROUTER_BRAND = (process.env.VITE_ROUTER_BRAND || 'encorto').trim().toLowerCase();
+const API_TARGET = process.env.VITE_API_TARGET || `https://${ROUTER_BRAND}.onrender.com`;
 const API_PATHS  = [
   '/nav', '/orders', '/drivers', '/auth', '/restaurants',
   '/users', '/admin', '/events', '/payments', '/support',

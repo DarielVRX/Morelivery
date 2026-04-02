@@ -14,14 +14,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api/client';
+import { brandStorageKey } from '../config/brand';
 
 // STORAGE_KEY es por usuario — evita que un rol bloquee la suscripción de otro
 function getStorageKey(token) {
   try {
-    const raw = localStorage.getItem('morelivery_auth_v1');
+    const raw = localStorage.getItem(brandStorageKey('auth_v1'));
     const userId = raw ? JSON.parse(raw)?.user?.id : null;
-    return userId ? `morelivery_perms_requested_${userId}` : 'morelivery_perms_requested';
-  } catch { return 'morelivery_perms_requested'; }
+    return userId ? `${brandStorageKey('perms_requested')}_${userId}` : brandStorageKey('perms_requested');
+  } catch { return brandStorageKey('perms_requested'); }
 }
 const VAPID_PUB_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
 
@@ -226,7 +227,7 @@ export function usePermissions(token, role) {
     // 3. Push subscription VAPID (solo si notificaciones granted)
     if (notifResult === 'granted' && reg && token) {
       await subscribeToPush(token);
-      try { localStorage.setItem('morelivery_notif_enabled', '1'); } catch (_) {}
+      try { localStorage.setItem(brandStorageKey('notif_enabled'), '1'); } catch (_) {}
     }
 
     // 4. Geolocalización — crítico para driver, útil para customer

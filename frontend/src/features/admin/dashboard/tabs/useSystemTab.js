@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../../../api/client';
 import { useAuth } from '../../../../contexts/AuthContext';
+import { ROUTER_BRAND, UI_BRAND, brandStorageKey } from '../../../../config/brand';
 
 // ─── Helpers — Browser API readers ────────────────────────────────────────────
 
@@ -104,7 +105,7 @@ function readFileSystemSupport() {
 
 async function readSyncQueueLength() {
   try {
-    const cache = await caches.open('morelivery-sync-queue');
+    const cache = await caches.open(brandStorageKey('sync-queue'));
     const resp = await cache.match('queue');
     if (!resp) return 0;
     const queue = await resp.json();
@@ -201,7 +202,7 @@ export function useSystemTab({ onMessage }) {
   const fireTestNotif = async () => {
     try {
       const reg = await navigator.serviceWorker.ready;
-      reg.active?.postMessage({ type: 'TEST_NOTIFICATION', title: 'Morelivery', body: 'Notificaciones funcionando ✓', tag: 'test' });
+      reg.active?.postMessage({ type: 'TEST_NOTIFICATION', title: UI_BRAND, body: 'Notificaciones funcionando ✓', tag: 'test' });
       onMessage?.('🔔 Notificación enviada al SW');
     } catch (e) { onMessage?.(`❌ ${e.message}`); }
   };
@@ -287,7 +288,7 @@ export function useSystemTab({ onMessage }) {
   };
 
   const testClipboard = async () => {
-    const text = `morelivery-test-${Date.now()}`;
+    const text = `${ROUTER_BRAND}-test-${Date.now()}`;
     try {
       await navigator.clipboard.writeText(text);
       const read = await navigator.clipboard.readText();
@@ -402,7 +403,7 @@ export function useSystemTab({ onMessage }) {
 
   const clearSyncQueue = async () => {
     try {
-      const cache = await caches.open('morelivery-sync-queue');
+      const cache = await caches.open(brandStorageKey('sync-queue'));
       await cache.put('queue', new Response(JSON.stringify([]), { headers: { 'Content-Type': 'application/json' } }));
       setS(prev => ({ ...prev, syncQueueLength: 0 }));
       onMessage?.('🗑️ Cola de sync vaciada');
@@ -444,7 +445,7 @@ export function useSystemTab({ onMessage }) {
     if (!('showSaveFilePicker' in window)) return onMessage?.('❌ File System Access no soportado');
     try {
       const handle = await window.showSaveFilePicker({
-        suggestedName: `morelivery-export-${Date.now()}.json`,
+        suggestedName: `${ROUTER_BRAND}-export-${Date.now()}.json`,
         types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
       });
       const writable = await handle.createWritable();

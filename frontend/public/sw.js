@@ -6,15 +6,18 @@
 //     para que el listener en React llame PATCH /restaurants/my/toggle.
 
 const SHELL_VERSION = 'v6';
-const SHELL_CACHE   = `morelivery-shell-${SHELL_VERSION}`;
+const ROUTER_BRAND = 'encorto';
+const UI_BRAND = 'En Corto';
+
+const SHELL_CACHE   = `${ROUTER_BRAND}-shell-${SHELL_VERSION}`;
 const SHELL_ASSETS  = [
   '/', '/index.html', '/manifest.webmanifest',
   '/icon-192.png', '/icon-512.png', '/badge.svg', '/logo.svg',
 ];
 
-const SYNC_QUEUE_KEY = 'morelivery-sync-queue';
-const SYNC_TAG       = 'morelivery-status-sync';
-const VOICE_CACHE    = 'morelivery-voices-v1';
+const SYNC_QUEUE_KEY = `${ROUTER_BRAND}-sync-queue`;
+const SYNC_TAG       = `${ROUTER_BRAND}-status-sync`;
+const VOICE_CACHE    = `${ROUTER_BRAND}-voices-v1`;
 const VOICE_ASSETS   = [
   '/voices/recordatorio-30s.mp3',
   '/voices/recordatorio-3min.mp3',
@@ -69,7 +72,7 @@ self.addEventListener('activate', (event) => {
       self.clients.claim(),
       caches.keys().then(keys =>
         Promise.all(
-          keys.filter(k => k.startsWith('morelivery-shell-') && k !== SHELL_CACHE)
+          keys.filter(k => k.startsWith(`${ROUTER_BRAND}-shell-`) && k !== SHELL_CACHE)
               .map(k => caches.delete(k))
         )
       ),
@@ -78,7 +81,7 @@ self.addEventListener('activate', (event) => {
 });
 
 // ── Tile cache ────────────────────────────────────────────────────────────────
-const TILES_CACHE   = 'morelivery-tiles-v2';
+const TILES_CACHE   = `${ROUTER_BRAND}-tiles-v2`;
 const TILES_DOMAINS = [
   'tiles.openfreemap.org', 'tile.openfreemap.org',
   'tiles.stadiamaps.com',  'tile.stadiamaps.com',
@@ -216,7 +219,7 @@ self.addEventListener('message', (event) => {
   const type = event.data?.type;
 
   if (type === 'TEST_NOTIFICATION') {
-    const { title = 'Morelivery', body = 'Notificación de prueba ✓', tag = 'test' } = event.data;
+    const { title = UI_BRAND, body = 'Notificación de prueba ✓', tag = 'test' } = event.data;
     notifCounts[tag] = { count: 0, lastBody: '', url: '/' };
     showGroupedNotification({ group: tag, title, body, url: '/', priority: 'high', tag });
     return;
@@ -318,10 +321,10 @@ self.addEventListener('push', (event) => {
   if (!event.data) return;
   let payload;
   try { payload = event.data.json(); }
-  catch { payload = { title: 'Morelivery', body: event.data.text() }; }
+  catch { payload = { title: UI_BRAND, body: event.data.text() }; }
 
   const {
-    title    = 'Morelivery',
+    title    = UI_BRAND,
     body     = '',
     tag      = 'general',
     group    = tag,

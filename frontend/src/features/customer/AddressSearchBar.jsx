@@ -17,6 +17,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { nominatimReverse } from '../../utils/geocode';
+import { brandUserAgent } from '../../config/brand';
 
 const STADIA_KEY  = import.meta.env?.VITE_STADIA_KEY || '';
 const STYLE_LIGHT = STADIA_KEY
@@ -215,7 +216,7 @@ export default function AddressSearchBar({ userPos, homeAddress, homePos, onSele
     debounceRef.current = setTimeout(async () => {
       try {
         const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(val + ', Morelia, Michoacán')}&format=json&addressdetails=1&limit=6&countrycodes=mx&accept-language=es&viewbox=-101.5,19.9,-100.9,19.5&bounded=1`;
-        const r    = await fetch(url, { headers: { 'Accept-Language': 'es', 'User-Agent': 'Morelivery/1.0' } });
+        const r    = await fetch(url, { headers: { 'Accept-Language': 'es', 'User-Agent': brandUserAgent() } });
         const data = await r.json();
         const items = (data || []).map(item => {
           const a     = item.address || {};

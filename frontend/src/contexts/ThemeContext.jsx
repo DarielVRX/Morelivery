@@ -4,7 +4,9 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 
 const ThemeContext = createContext(null);
-const STORAGE_KEY = 'morelivery_theme';
+import { brandStorageKey } from '../config/brand';
+
+const STORAGE_KEY = brandStorageKey('theme');
 
 function getInitialTheme() {
   try {

@@ -1,6 +1,6 @@
 {
-  "name": "Morelivery",
-  "short_name": "Morelivery",
+  "name": "En Corto",
+  "short_name": "En Corto",
   "description": "Plataforma de entregas a domicilio",
   "start_url": "/",
   "display": "standalone",

@@ -9,7 +9,9 @@
  * @typedef {{ lat: number, lng: number, label: string }} DeliveryPos
  */
 
-const KEY_PREFIX = 'morelivery_delivery_pos';
+import { brandStorageKey } from '../config/brand';
+
+const KEY_PREFIX = brandStorageKey('delivery_pos');
 
 function userIdFromToken(token) {
   try {
