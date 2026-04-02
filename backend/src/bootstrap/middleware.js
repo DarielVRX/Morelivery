@@ -6,7 +6,7 @@ import express from 'express';
 import { env } from '../config/env.js';
 import { SERVICE_NAME } from '../config/brand.js';
 import { checkDbConnection } from '../config/db.js';
-import { apiRateLimit } from '../middlewares/rateLimit.js';
+import { apiRateLimit, sseRateLimit } from '../middlewares/rateLimit.js';
 
 function corsOrigin(origin, callback) {
   if (!origin) return callback(null, true);
@@ -24,7 +24,7 @@ function corsOrigin(origin, callback) {
 
 function createRateLimitSkipper() {
   return (req, res, next) => {
-    if (req.path === '/api/events' || req.path === '/events') return next();
+    if (req.path === '/api/events' || req.path === '/events') return sseRateLimit(req, res, next);
     return apiRateLimit(req, res, next);
   };
 }

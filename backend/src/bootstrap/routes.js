@@ -15,6 +15,7 @@ import syncRoutes        from '../modules/sync/routes.js';
 import voiceRoutes       from '../modules/voice/routes.js';
 // FIX: support no estaba registrado → POST /api/support/tickets devolvía 404
 import supportRoutes     from '../modules/support/routes.js';
+import pushRoutes        from '../modules/push/routes.js';
 
 const routeRegistry = [
   ['auth',           authRoutes],
@@ -36,6 +37,7 @@ const routeRegistry = [
   ['support',        supportRoutes], // GET/POST /api/support/tickets
                                      // GET/POST /api/support/tickets/:id/messages
                                      // PATCH    /api/support/tickets/:id/status
+  ['push',           pushRoutes],    // POST /api/push/subscribe, DELETE /api/push/unsubscribe
 ];
 
 export function registerApplicationRoutes(app) {
