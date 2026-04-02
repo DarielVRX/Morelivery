@@ -23,6 +23,7 @@ import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
 import { sseHub } from '../modules/events/hub.js';
 import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
+import { groupPickupStops } from './stop-grouper.js';
 
 // ─── Carga de stops activos ───────────────────────────────────────────────────
 
@@ -70,77 +71,7 @@ async function loadDriverStopsForReroute(driverId) {
     [driverId, ACTIVE_STATUSES, maxSlaSec]
   );
 
-  // Agrupar pickups por restaurante — dos pedidos del mismo local
-  // comparten un solo stop de pickup: el driver los recoge en una sola parada.
-  const pickupByRestaurant = new Map();
-  const stops = [];
-
-  for (const row of r.rows) {
-    const pickedUpAtSec = row.picked_up_at
-      ? new Date(row.picked_up_at).getTime() / 1000
-      : null;
-
-    // SLA deadline: desde cuándo se recogió (o desde ahora si aún no se recoge)
-    const slaBase        = pickedUpAtSec ?? nowSec;
-    const slaDeadlineSec = slaBase + Number(row.max_delivery_time_s);
-
-    // Tiempo estimado en que la cocina tendrá listo el pedido
-    const kitchenReadyAtSec = row.kitchen_estimated_ready
-      ? new Date(row.kitchen_estimated_ready).getTime() / 1000
-      : nowSec; // si no hay dato, asumir listo ya
-
-    // Pickup pendiente — deduplicar por restaurante
-    if (row.status !== 'on_the_way' && row.rest_lat && row.rest_lng) {
-      const restId = row.restaurant_id;
-
-      if (pickupByRestaurant.has(restId)) {
-        // Agrupar con el pickup existente del mismo restaurante
-        const existing = pickupByRestaurant.get(restId);
-        // Esperar al pedido que tarde más en estar listo
-        existing.kitchenReadyAtSec = Math.max(existing.kitchenReadyAtSec, kitchenReadyAtSec);
-        existing.volumeLiters     += Number(row.volume_liters) || 0;
-        // pairOrderId del grupo apunta al primer orderId — las deliveries
-        // de los pedidos agrupados mantienen su propio pairOrderId individual
-      } else {
-        const stop = {
-          type:             'pickup',
-          orderId:          row.id,
-          pairOrderId:      row.id,
-          pos:              { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
-          pickedUpAtSec:    null,
-          slaDeadlineSec,
-          kitchenReadyAtSec,
-          volumeLiters:     Number(row.volume_liters) || 0,
-          restaurantId:     restId,
-        };
-        pickupByRestaurant.set(restId, stop);
-        stops.push(stop);
-      }
-    }
-
-    // Delivery pendiente — uno por pedido, siempre
-    if (row.cust_lat && row.cust_lng) {
-      // pairOrderId apunta al pickup del mismo restaurante si fue agrupado,
-      // o al propio orderId si tiene pickup individual
-      const restId     = row.restaurant_id;
-      const pickupStop = pickupByRestaurant.get(restId);
-      const pairId     = (pickupStop && row.status !== 'on_the_way')
-        ? pickupStop.orderId
-        : row.id;
-
-      stops.push({
-        type:             'delivery',
-        orderId:          row.id,
-        pairOrderId:      pairId,
-        pos:              { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
-        pickedUpAtSec,
-        slaDeadlineSec,
-        kitchenReadyAtSec,
-        volumeLiters:     Number(row.volume_liters) || 0,
-      });
-    }
-  }
-
+  const { stops } = groupPickupStops(r.rows, nowSec, 'reroute');
   return stops;
 }
 
@@ -284,33 +215,50 @@ function evaluateSequenceCost(sequence, driverPos, driverObj, nowSec) {
     }
   }
 
+  // Criterio de costo en orden de prioridad:
+  //   1. slaCost       — violaciones SLA acumuladas (segundos de exceso)
+  //   2. totalDistance — metros totales recorridos (penaliza backtracking)
+  //                      el costo físico de desvío siempre supera al de espera
+  //   3. kitchenWait   — tiempo total que el driver espera en restaurantes
+  //                      desempate: entre rutas de igual distancia, menos espera
+  //   4. totalEta      — último desempate: tiempo absoluto hasta el último stop
   const totalEta = time - nowSec;
+
   return { slaCost, kitchenWait, totalDistance, totalEta };
 }
 
+/**
+ * Encuentra la secuencia óptima de stops para el driver.
+ * Aplica: precedencia (hard) → poda SLA (soft) → evaluador de costo global.
+ *
+ * @param {RerouteStop[]} stops
+ * @param {{lat,lng}} driverPos
+ * @param {object} driverObj  — { speed_kmh }
+ * @param {number} nowSec
+ * @returns {RerouteStop[]}   secuencia óptima
+ */
 export function findOptimalSequence(stops, driverPos, driverObj, nowSec) {
   if (stops.length === 0) return [];
   if (stops.length === 1) return stops;
 
+  // Generar permutaciones válidas (precedencia aplicada por default)
   const permutations = generateValidPermutations(stops);
-  if (permutations.length === 0) return stops;
 
+  if (permutations.length === 0) return stops; // fallback: orden original
+
+  // Podar permutaciones con violaciones SLA críticas evidentes
   const pruned = pruneBySla(permutations, driverPos, driverObj, nowSec);
-  const pool   = pruned.length > 0 ? pruned : permutations;
+  const pool   = pruned.length > 0 ? pruned : permutations; // si la poda elimina todo, usar todas
 
-  console.log(`[reroute:seq] ${stops.length} stops → ${permutations.length} perms → ${pool.length} tras poda SLA`);
-
+  // Evaluar costo global de cada secuencia y elegir la mínima.
+  // Criterio primario: slaCost (violaciones SLA acumuladas).
+  // Criterio secundario: totalEta (desempate cuando slaCost es igual —
+  //   evita rutas ineficientes cuando ningún pedido está en riesgo).
   let bestSeq  = pool[0];
   let bestEval = evaluateSequenceCost(pool[0], driverPos, driverObj, nowSec);
 
-  // Log permutación inicial
-  console.log(`[reroute:seq] perm[0] ${pool[0].map(s => `${s.type}(${s.orderId?.slice(0,6)})`).join('→')} | slaCost=${Math.round(bestEval.slaCost)} dist=${Math.round(bestEval.totalDistance)} kitWait=${Math.round(bestEval.kitchenWait)} eta=${Math.round(bestEval.totalEta)}`);
-
   for (let i = 1; i < pool.length; i++) {
     const eval_ = evaluateSequenceCost(pool[i], driverPos, driverObj, nowSec);
-
-    const label = pool[i].map(s => `${s.type}(${s.orderId?.slice(0,6)})`).join('→');
-    console.log(`[reroute:seq] perm[${i}] ${label} | slaCost=${Math.round(eval_.slaCost)} dist=${Math.round(eval_.totalDistance)} kitWait=${Math.round(eval_.kitchenWait)} eta=${Math.round(eval_.totalEta)}`);
 
     const betterSla      = eval_.slaCost       < bestEval.slaCost;
     const sameSla        = eval_.slaCost      === bestEval.slaCost;
@@ -326,17 +274,10 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec) {
       (sameSla && sameDist && betterWait) ||
       (sameSla && sameDist && sameWait && betterEta)
     ) {
-      const reason = betterSla ? 'mejor slaCost'
-        : betterDist ? 'mismo sla, menor distancia'
-        : betterWait ? 'mismo sla+dist, menor kitchenWait'
-        : 'mismo sla+dist+wait, menor eta';
-      console.log(`[reroute:seq] ↑ nuevo mejor [${i}] por: ${reason}`);
       bestEval = eval_;
       bestSeq  = pool[i];
     }
   }
-
-  console.log(`[reroute:seq] GANADOR: ${bestSeq.map(s => `${s.type}(${s.orderId?.slice(0,6)})`).join('→')} | slaCost=${Math.round(bestEval.slaCost)} dist=${Math.round(bestEval.totalDistance)} kitWait=${Math.round(bestEval.kitchenWait)} eta=${Math.round(bestEval.totalEta)}`);
 
   return bestSeq;
 }
@@ -362,8 +303,8 @@ async function loadDriverPos(driverId) {
 function speedKmhByVehicle(vehicleType) {
   switch (vehicleType) {
     case 'bike':       return 20;
-    case 'motorcycle': return 35;
-    case 'car':        return 40;
+    case 'motorcycle': return 40;
+    case 'car':        return 30;
     default:           return 30;
   }
 }
@@ -393,22 +334,52 @@ export async function rerouteDriver(driverId) {
     const speedKmh  = speedKmhByVehicle(vehicleType);
     const driverObj = { speed_kmh: speedKmh };
     const nowSec    = Date.now() / 1000;
+    const lockRadiusM = getParam('reroute_lock_radius_m', 200);
 
     const stops = await loadDriverStopsForReroute(driverId);
 
     if (stops.length === 0) {
-      // Sin stops activos — notificar al driver que está libre
       sseHub.sendToUser(driverId, 'route_update', {
-        stops:     [],
+        stops:      [],
         totalStops: 0,
-        message:   'Sin pedidos activos.',
+        message:    'Sin pedidos activos.',
       });
       return;
     }
 
-    const optimalSequence = findOptimalSequence(stops, driverPos, driverObj, nowSec);
+    // ── prefixToViable — mismo patrón que route-simulator ────────────────────
+    // Si el driver está dentro del radio de bloqueo respecto al primer stop,
+    // ese stop es intocable. Se recorre en orden comprometido y el secuenciador
+    // solo opera sobre los stops restantes.
+    //
+    // El "primer stop" se determina por el stop de menor distancia al driver
+    // entre todos los stops activos — no necesariamente el primero en la lista.
 
-    // Construir payload SSE con ETAs estimados por stop
+    let lockedStop  = null;
+    let minDistM    = Infinity;
+
+    for (const stop of stops) {
+      const dist = haversineMeters(driverPos, stop.pos);
+      if (dist < minDistM) {
+        minDistM  = dist;
+        lockedStop = stop;
+      }
+    }
+
+    const isLocked = minDistM <= lockRadiusM;
+
+    // prefixStops: el stop bloqueado (si aplica), en orden fijo
+    // postStops: el resto, se secuencian de forma óptima
+    const prefixStops = isLocked ? [lockedStop] : [];
+    const postStops   = isLocked
+      ? stops.filter(s => s !== lockedStop)
+      : stops;
+
+    // Secuenciar postStops — si no hay prefijo, secuencia todos
+    const optimalPost = findOptimalSequence(postStops, driverPos, driverObj, nowSec);
+    const optimalSequence = [...prefixStops, ...optimalPost];
+
+    // ── Construir payload SSE con ETAs estimados por stop ────────────────────
     let pos     = driverPos;
     let timeSec = nowSec;
     const stopsWithEta = [];
@@ -423,12 +394,13 @@ export async function rerouteDriver(driverId) {
       }
 
       stopsWithEta.push({
-        type:             stop.type,
-        orderId:          stop.orderId,
-        pos:              stop.pos,
-        etaFromNowSec:    Math.round(timeSec - nowSec),
-        slaDeadlineSec:   Math.round(stop.slaDeadlineSec),
-        slaRemainingeSec: Math.round(stop.slaDeadlineSec - timeSec),
+        type:              stop.type,
+        orderId:           stop.orderId,
+        pos:               stop.pos,
+        etaFromNowSec:     Math.round(timeSec - nowSec),
+        slaDeadlineSec:    Math.round(stop.slaDeadlineSec),
+        slaRemainingSec:   Math.round(stop.slaDeadlineSec - timeSec),
+        locked:            isLocked && stop === lockedStop,
       });
 
       pos = stop.pos;
@@ -440,7 +412,8 @@ export async function rerouteDriver(driverId) {
     });
 
     console.log(
-      `[reroute] driver=${driverId.slice(0,8)} → ${stopsWithEta.length} stops recalculados`
+      `[reroute] driver=${driverId.slice(0,8)} → ${stopsWithEta.length} stops` +
+      (isLocked ? ` (locked: ${lockedStop?.type} a ${Math.round(minDistM)}m)` : '')
     );
   } catch (e) {
     console.error(`[reroute] error driver=${driverId.slice(0,8)}:`, e.message);
