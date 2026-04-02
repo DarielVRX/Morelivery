@@ -33,9 +33,9 @@ function parseAllowedOrigins() {
 export const env = {
   port: Number(process.env.PORT || 4000),
   nodeEnv: process.env.NODE_ENV || 'development',
-  jwtSecret: process.env.JWT_SECRET || 'change-me-in-production',
+  jwtSecret: process.env.JWT_SECRET || (() => { throw new Error('JWT_SECRET no configurado'); })(),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
-  databaseUrl: process.env.DATABASE_URL || `postgresql://postgres:REDACTED@localhost:5432/railway`,
+  databaseUrl: process.env.DATABASE_URL || (() => { throw new Error('DATABASE_URL no configurado'); })(),
   allowedOrigins: parseAllowedOrigins(),
   redisUrl: process.env.REDIS_URL || '',
   // OSRM propio en Railway — fallback al servidor público si no está configurado
