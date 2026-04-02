@@ -81,28 +81,3 @@ export async function reverseGeocode(lat, lng) {
     return d.display_name?.split(',').slice(0, 2).join(', ') || null;
   } catch { return null; }
 }
-
-// ── Grid para agrupación espacial ─────────────────────────────────────────────
-// Cuantiza una posición a una celda de GRID_METERS × GRID_METERS.
-// Usado por osrm-cache y stop-grouper para agrupar puntos cercanos.
-const GRID_METERS = 75;
-
-function _quantizeLatGrid(lat) {
-  const meters = lat * 111320;
-  return Math.round(meters / GRID_METERS) * GRID_METERS;
-}
-function _quantizeLngGrid(lat, lng) {
-  const meters = lng * 111320 * Math.cos(lat * Math.PI / 180);
-  return Math.round(meters / GRID_METERS) * GRID_METERS;
-}
-
-/**
- * Devuelve una string clave de celda de grilla para una posición {lat, lng}.
- * Dos posiciones dentro de GRID_METERS metros entre sí producen la misma clave.
- *
- * @param {{ lat: number, lng: number }} pos
- * @returns {string}
- */
-export function posToGridKey(pos) {
-  return `${_quantizeLatGrid(pos.lat)}:${_quantizeLngGrid(pos.lat, pos.lng)}`;
-}
