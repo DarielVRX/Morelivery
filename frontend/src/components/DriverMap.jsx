@@ -39,7 +39,7 @@ export default function DriverMap({
   const { isDark }        = useTheme();
   const containerRef      = useRef(null);
   const mapRef            = useRef(null);
-  const markersRef        = useRef({ driver: null, driverSvg: null, custom: null, pickup: null, delivery: null });
+  const markersRef        = useRef({ driver: null, driverSvg: null, custom: null, stops: [] });
   const livePosRef        = useRef(driverPos || null);
   const liveHeadingRef    = useRef(0);
   const watchIdRef        = useRef(null);
@@ -416,19 +416,51 @@ export default function DriverMap({
     return () => map.off('click', hide);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Marcadores tienda / cliente
+  // Marcadores de stops — renderiza todos los pickups y deliveries en orden
+  // Usa allStops (del backend via route_update) cuando está disponible.
+  // Fallback: pickupPos y deliveryPos del activeOrder.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !_ml) return;
-    if (markersRef.current.pickup)   { markersRef.current.pickup.remove();   markersRef.current.pickup   = null; }
-    if (markersRef.current.delivery) { markersRef.current.delivery.remove(); markersRef.current.delivery = null; }
-    if (pickupPos) {
-      markersRef.current.pickup = createDriverPoiMarker(_ml, pickupPos, { emoji: '🏪', color: '#16a34a', label: pickupLabel || 'Tienda' }).addTo(map);
+
+    // Limpiar markers anteriores
+    markersRef.current.stops.forEach(m => m.remove());
+    markersRef.current.stops = [];
+
+    if (allStops?.length > 0) {
+      // Usar la secuencia del backend — un marker por stop con número de orden
+      allStops.forEach((stop, idx) => {
+        if (!Number.isFinite(stop.lat) || !Number.isFinite(stop.lng)) return;
+        const isPickup = stop.type === 'pickup';
+        const emoji    = isPickup ? '🏪' : '📦';
+        const color    = isPickup ? '#16a34a' : '#f97316';
+        const label    = isPickup
+          ? (pickupLabel || 'Tienda')
+          : (deliveryLabel || 'Cliente');
+        const marker = createDriverPoiMarker(_ml, stop, {
+          emoji,
+          color,
+          label: allStops.length > 2 ? `${idx + 1}. ${label}` : label,
+        }).addTo(map);
+        markersRef.current.stops.push(marker);
+      });
+    } else {
+      // Fallback: markers simples de pickup y delivery
+      if (pickupPos) {
+        const m = createDriverPoiMarker(_ml, pickupPos, { emoji: '🏪', color: '#16a34a', label: pickupLabel || 'Tienda' }).addTo(map);
+        markersRef.current.stops.push(m);
+      }
+      if (deliveryPos) {
+        const m = createDriverPoiMarker(_ml, deliveryPos, { emoji: '📦', color: '#f97316', label: deliveryLabel || 'Cliente' }).addTo(map);
+        markersRef.current.stops.push(m);
+      }
     }
-    if (deliveryPos) {
-      markersRef.current.delivery = createDriverPoiMarker(_ml, deliveryPos, { emoji: '📦', color: '#f97316', label: deliveryLabel || 'Cliente' }).addTo(map);
-    }
-  }, [pickupPos?.lat, pickupPos?.lng, deliveryPos?.lat, deliveryPos?.lng, pickupLabel, deliveryLabel]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    allStops,
+    pickupPos?.lat, pickupPos?.lng,
+    deliveryPos?.lat, deliveryPos?.lng,
+    pickupLabel, deliveryLabel,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ruta GeoJSON
   useEffect(() => {

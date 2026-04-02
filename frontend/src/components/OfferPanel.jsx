@@ -26,8 +26,11 @@ export default function OfferPanel({
   showFullOfferRoute,
 }) {
   // Pedir ruta automáticamente al mostrar la oferta
+  // Normaliza snake_case (SSE) y camelCase (directo) para las coordenadas
   useEffect(() => {
-    if (offer?.restaurantLat && offer?.customerLat) {
+    const rLat = offer?.restaurantLat ?? offer?.restaurant_lat;
+    const cLat = offer?.customerLat   ?? offer?.customer_lat;
+    if (rLat && cLat) {
       onRequestOfferRoute?.(offer);
     }
   }, [offer?.id]); // eslint-disable-line react-hooks/exhaustive-deps

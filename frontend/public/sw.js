@@ -163,7 +163,7 @@ async function playVoice(voiceName) {
 const notifCounts = {};
 
 async function showGroupedNotification({
-  group, title, body, url, priority, tag, vibrate, actions,
+  group, title, body, url, priority, tag, vibrate, actions, requireInteraction: forceRequire,
 }) {
   if (!notifCounts[group]) notifCounts[group] = { count: 0, lastBody: '', url };
   notifCounts[group].count++;
@@ -186,7 +186,7 @@ async function showGroupedNotification({
     tag,
     icon:               '/icon-192.png',
     badge:              '/badge.svg',
-    requireInteraction: isHigh,
+    requireInteraction: forceRequire ?? isHigh,
     renotify:           true,
     timestamp:          Date.now(),
     vibrate:            vibratePattern,
@@ -373,14 +373,17 @@ self.addEventListener('push', (event) => {
     }
 
     if (group === 'driver' || pushType === 'new_offer') {
-      // Guard: si la app está abierta y enfocada, el SSE ya manejó la oferta.
-      // Mostrar push solo cuando la app está en background/cerrada.
+      // Guard: si la app está abierta Y enfocada, el SSE ya manejó la oferta.
+      // En Android PWA, focused puede ser false aunque la app esté visible —
+      // usamos visibilityState vía clients para ser más precisos.
       const activeClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      if (activeClients.some(c => c.focused)) return;
+      const anyFocused = activeClients.some(c => c.focused && c.visibilityState === 'visible');
+      if (anyFocused) return;
 
       await showGroupedNotification({
         group: 'driver', title, body, url, priority: 'high',
         tag: group, vibrate: VIBRATE.offer,
+        requireInteraction: true,
         actions: [
           { action: 'accept', title: '✓ Aceptar' },
           { action: 'reject', title: '✕ Rechazar' },
@@ -393,6 +396,14 @@ self.addEventListener('push', (event) => {
     // En ese caso simplemente abrir la app; el SSE sincronizará al reconectar.
     if (pushType === 'route_update') {
       // No mostrar notificación visible — solo despertar la app si está en background
+      return;
+    }
+
+    if (pushType === 'dispute_cancelled_auto') {
+      await showGroupedNotification({
+        group: 'driver', title, body, url, priority: 'normal',
+        tag: `dispute_${orderId || Date.now()}`, vibrate: VIBRATE.normal,
+      });
       return;
     }
 
