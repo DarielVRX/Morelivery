@@ -2,6 +2,7 @@
 // Lista de términos bloqueados para nombres de usuario y alias.
 // No es exhaustiva — cubre los casos más comunes y obvios.
 // Se compara contra versión normalizada (sin acentos, minúsculas).
+import { ROUTER_BRAND } from '../config/brand.js';
 
 const BLOCKED_TERMS = [
   // Insultos y ofensas en español
@@ -16,7 +17,7 @@ const BLOCKED_TERMS = [
   // Términos de odio / discriminación
   'nazi', 'Hitler', 'kkk',
   // Suplantación de identidad
-  'admin', 'soporte', 'morelivery', 'support', 'sistema',
+  'admin', 'soporte', ROUTER_BRAND, 'support', 'sistema',
 ];
 
 function normalize(str) {

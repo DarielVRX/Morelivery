@@ -1,6 +1,6 @@
 /**
- * useCart.js — Carrito persistente para Morelivery
- * Clave localStorage: 'morelivery_cart'
+ * useCart.js — Carrito persistente para la app
+ * Clave localStorage: brandStorageKey('cart')
  * NO reemplaza ni modifica pendingOrder.js
  *
  * Estructura almacenada:
@@ -13,7 +13,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 
-const STORAGE_KEY = 'morelivery_cart';
+const STORAGE_KEY = brandStorageKey('cart');
 
 function readStorage() {
   try {
@@ -36,7 +36,7 @@ function writeStorage(cart) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(cart));
     }
     // Notificar a otras instancias del hook en el mismo tab
-    window.dispatchEvent(new Event('morelivery_cart_updated'));
+    window.dispatchEvent(new Event(brandEventName('cart_updated')));
   } catch {
     // storage lleno o bloqueado — silencioso
   }
@@ -123,10 +123,10 @@ export function useCart() {
     function sync() {
       setCartState(readStorage());
     }
-    window.addEventListener('morelivery_cart_updated', sync);
+    window.addEventListener(brandEventName('cart_updated'), sync);
     window.addEventListener('storage', (e) => { if (e.key === STORAGE_KEY) sync(); });
     return () => {
-      window.removeEventListener('morelivery_cart_updated', sync);
+      window.removeEventListener(brandEventName('cart_updated'), sync);
       window.removeEventListener('storage', sync);
     };
   }, []);

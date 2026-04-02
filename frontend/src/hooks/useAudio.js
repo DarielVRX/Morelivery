@@ -1,12 +1,13 @@
 // frontend/src/hooks/useAudio.js
 // Sonidos y notificaciones — patrones diferenciados por evento
+import { brandStorageKey } from '../config/brand';
 
 // ── Permisos y preferencias ───────────────────────────────────────────────────
 export function canNotify() {
   return typeof window !== 'undefined' && 'Notification' in window;
 }
 export function notificationsEnabled() {
-  try { return localStorage.getItem('morelivery_notif_enabled') !== '0'; }
+  try { return localStorage.getItem(brandStorageKey('notif_enabled')) !== '0'; }
   catch { return true; }
 }
 export function shouldNotifyInBackground() {
@@ -15,7 +16,7 @@ export function shouldNotifyInBackground() {
 }
 export function notificationPriority(group) {
   try {
-    const stored = localStorage.getItem('morelivery_notif_priority');
+    const stored = localStorage.getItem(brandStorageKey('notif_priority'));
     if (stored === 'high') return 'high';
     if (['offers', 'order_updates', 'driver', 'kitchen'].includes(group)) return 'high';
     return 'normal';

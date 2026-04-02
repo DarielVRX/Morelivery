@@ -1,11 +1,11 @@
 {
   "rewrites": [
-    { "source": "/api/(.*)",        "destination": "https://morelivery.onrender.com/api/$1" },
-    { "source": "/auth/(.*)",       "destination": "https://morelivery.onrender.com/auth/$1" },
-    { "source": "/orders/(.*)",     "destination": "https://morelivery.onrender.com/orders/$1" },
-    { "source": "/drivers/(.*)",    "destination": "https://morelivery.onrender.com/drivers/$1" },
-    { "source": "/restaurants/(.*)", "destination": "https://morelivery.onrender.com/restaurants/$1" },
-    { "source": "/users/(.*)",      "destination": "https://morelivery.onrender.com/users/$1" },
+    { "source": "/api/(.*)",        "destination": "https://encorto.onrender.com/api/$1" },
+    { "source": "/auth/(.*)",       "destination": "https://encorto.onrender.com/auth/$1" },
+    { "source": "/orders/(.*)",     "destination": "https://encorto.onrender.com/orders/$1" },
+    { "source": "/drivers/(.*)",    "destination": "https://encorto.onrender.com/drivers/$1" },
+    { "source": "/restaurants/(.*)", "destination": "https://encorto.onrender.com/restaurants/$1" },
+    { "source": "/users/(.*)",      "destination": "https://encorto.onrender.com/users/$1" },
     { "source": "/(.*)",            "destination": "/index.html" }
   ]
 }

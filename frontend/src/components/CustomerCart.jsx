@@ -1,7 +1,7 @@
 /**
  * CustomerCart.jsx — Panel de carrito persistente del cliente
  * Se monta como ordersContent en la ruta /customer del SplitLayout.
- * Lee y escribe via useCart (localStorage 'morelivery_cart').
+ * Lee y escribe via useCart (localStorage con clave de marca).
  * Al hacer "Ir a pagar" guarda en pendingOrder y navega a /customer/pagos.
  */
 

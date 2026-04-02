@@ -1,4 +1,5 @@
 // utils/format.js — formateadores y constantes de dominio compartidas
+import { brandStorageKey } from '../config/brand';
 
 export function fmt(cents) {
   return `$${((cents ?? 0) / 100).toFixed(2)}`;
@@ -15,7 +16,7 @@ export function formatShortDate(iso, locale = 'es-MX') {
 
 export function getNotifPriorityMode() {
   try {
-    return localStorage.getItem('morelivery_notif_priority') === 'high' ? 'high' : 'normal';
+    return localStorage.getItem(brandStorageKey('notif_priority')) === 'high' ? 'high' : 'normal';
   } catch (_) {
     return 'normal';
   }

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AUTH_EXPIRED_EVENT } from '../api/client';
+import { brandStorageKey } from '../config/brand';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function urlBase64ToUint8Array(base64String) {
@@ -140,7 +141,7 @@ async function requestNotificationsForUser(token, userId, role) {
   try {
     const result = await Notification.requestPermission();
     if (result === 'granted') {
-      try { localStorage.setItem('morelivery_notif_enabled', '1'); } catch (_) {}
+      try { localStorage.setItem(brandStorageKey('notif_enabled'), '1'); } catch (_) {}
       await subscribePushForUser(token);
     }
   } catch (_) {}
@@ -148,7 +149,7 @@ async function requestNotificationsForUser(token, userId, role) {
 
 // ── Context ───────────────────────────────────────────────────────────────────
 const AuthContext = createContext(null);
-const STORAGE_KEY = 'morelivery_auth_v1';
+const STORAGE_KEY = brandStorageKey('auth_v1');
 
 function loadStoredAuth() {
   try {

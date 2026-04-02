@@ -2,9 +2,10 @@
 // Draft de pedido en sessionStorage — se escribe al elegir ubicación,
 // se lee en RestaurantPage, se confirma al pagar, se borra al salir sin pagar.
 // TTL de 5 minutos: si el usuario regresa dentro de ese tiempo, retoma el draft.
+import { brandStorageKey } from '../config/brand';
 
-const KEY     = 'morelivery_pending_order';
-const TIMER   = 'morelivery_pending_timer';
+const KEY     = brandStorageKey('pending_order');
+const TIMER   = brandStorageKey('pending_timer');
 const TTL_MS  = 5 * 60 * 1000; // 5 minutos
 
 export function savePendingOrder(data) {

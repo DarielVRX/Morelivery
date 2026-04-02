@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { usePermissions } from '../../hooks/usePermissions';
+import { brandStorageKey } from '../../config/brand';
 
 export function useProfileSettings(token, role) {
   const {
@@ -14,20 +15,20 @@ export function useProfileSettings(token, role) {
   const notifStatus = permStatus.notifications;
   const [notifMsg, setNotifMsg] = useState('');
   const [highPriorityNotifs, setHighPriorityNotifs] = useState(() => {
-    try { return localStorage.getItem('morelivery_notif_priority') === 'high'; } catch { return false; }
+    try { return localStorage.getItem(brandStorageKey('notif_priority')) === 'high'; } catch { return false; }
   });
   const [notifEnabled, setNotifEnabled] = useState(() => {
-    try { return localStorage.getItem('morelivery_notif_enabled') !== '0'; } catch { return true; }
+    try { return localStorage.getItem(brandStorageKey('notif_enabled')) !== '0'; } catch { return true; }
   });
   const [deferredInstall, setDeferredInstall] = useState(null);
   const [isInstalled, setIsInstalled] = useState(
     typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches
   );
   const [theme, setTheme] = useState(() => {
-    try { return localStorage.getItem('morelivery_theme') || 'system'; } catch { return 'system'; }
+    try { return localStorage.getItem(brandStorageKey('theme')) || 'system'; } catch { return 'system'; }
   });
   const [reducedMotion, setReducedMotion] = useState(() => {
-    try { return localStorage.getItem('morelivery_reduced_motion') === '1'; } catch { return false; }
+    try { return localStorage.getItem(brandStorageKey('reduced_motion')) === '1'; } catch { return false; }
   });
   const [offlineCacheMsg, setOfflineCacheMsg] = useState('');
 
@@ -48,7 +49,7 @@ export function useProfileSettings(token, role) {
 
   function applyTheme(value) {
     setTheme(value);
-    try { localStorage.setItem('morelivery_theme', value); } catch (_) {}
+    try { localStorage.setItem(brandStorageKey('theme'), value); } catch (_) {}
     const root = document.documentElement;
     if (value === 'dark') root.setAttribute('data-theme', 'dark');
     else if (value === 'light') root.removeAttribute('data-theme');
@@ -62,7 +63,7 @@ export function useProfileSettings(token, role) {
   function toggleReducedMotion() {
     setReducedMotion((previous) => {
       const next = !previous;
-      try { localStorage.setItem('morelivery_reduced_motion', next ? '1' : '0'); } catch (_) {}
+      try { localStorage.setItem(brandStorageKey('reduced_motion'), next ? '1' : '0'); } catch (_) {}
       document.documentElement.style.setProperty('--transition-speed', next ? '0ms' : '');
       return next;
     });
@@ -108,7 +109,7 @@ export function useProfileSettings(token, role) {
   function toggleHighPriorityNotifs() {
     setHighPriorityNotifs((previous) => {
       const next = !previous;
-      try { localStorage.setItem('morelivery_notif_priority', next ? 'high' : 'normal'); } catch (_) {}
+      try { localStorage.setItem(brandStorageKey('notif_priority'), next ? 'high' : 'normal'); } catch (_) {}
       return next;
     });
   }
@@ -120,7 +121,7 @@ export function useProfileSettings(token, role) {
     }
     setNotifEnabled((previous) => {
       const next = !previous;
-      try { localStorage.setItem('morelivery_notif_enabled', next ? '1' : '0'); } catch (_) {}
+      try { localStorage.setItem(brandStorageKey('notif_enabled'), next ? '1' : '0'); } catch (_) {}
       setNotifMsg(next ? 'Notificaciones activas.' : 'Notificaciones pausadas para este dispositivo.');
       return next;
     });

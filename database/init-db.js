@@ -2,12 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pg from 'pg';
+import { DEFAULT_DATABASE_NAME } from '../backend/src/config/brand.js';
 
 const { Client } = pg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const schemaPath = path.join(__dirname, 'schema.sql');
-const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/morelivery';
+const connectionString = process.env.DATABASE_URL || `postgresql://postgres:postgres@localhost:5432/${DEFAULT_DATABASE_NAME}`;
 
 async function initDB() {
   const client = new Client({ connectionString, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
