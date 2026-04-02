@@ -83,8 +83,8 @@ const ROLE_ICONS = {
 function BrandName({ size = '2rem' }) {
   return (
     <span style={{ fontSize: size, fontWeight: 900, letterSpacing: '-0.02em' }}>
-      <span style={{ color: '#e3aaaa' }}>More</span>
-      <span style={{ color: 'var(--text-primary)' }}>livery</span>
+      <span style={{ color: '#e3aaaa' }}>En</span>
+      <span style={{ color: 'var(--text-primary)' }}>Corto</span>
     </span>
   );
 }
