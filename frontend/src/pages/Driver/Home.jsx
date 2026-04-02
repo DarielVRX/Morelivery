@@ -92,6 +92,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
     hasActiveOrder: order.hasActiveOrder,
     myPosition: displayPosition,
     onMessage: setMsg,
+    routeStopsOverride: order.routeStopsOverride,
   });
 
   const { voiceEnabled, setVoiceEnabled, wakeLockActive } = useNavFeatures({

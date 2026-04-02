@@ -41,6 +41,7 @@ export function useDriverHomeRuntime({
   token, availability, activeOrder, activeOrders,
   confirmedOrders,
   hasActiveOrder, myPosition, onMessage,
+  routeStopsOverride,  // secuencia óptima del backend via SSE route_update
 }) {
   const [counters,       setCounters]       = useState(null);
   const [customPin,      setCustomPin]      = useState(null);
@@ -210,10 +211,60 @@ export function useDriverHomeRuntime({
       .catch(() => onMessage('No se pudo calcular la ruta al pin'));
   }, [myPosition, onMessage, token]);
 
-  // ── Ruta activa (solo pedidos confirmados por restaurante) ─────────────────
+  // ── Ruta activa ───────────────────────────────────────────────────────────
+  // Usa routeStopsOverride del backend cuando está disponible.
+  // Fallback: pedidos confirmados en orden de aceptación.
   const openRoadRouteApi = useCallback(() => {
     if (!activeOrder) return;
 
+    // Si el backend ya calculó la secuencia óptima, usar ese orden para los waypoints
+    if (Array.isArray(routeStopsOverride) && routeStopsOverride.length > 0) {
+      const waypoints = routeStopsOverride
+        .filter(s => s.pos && Number.isFinite(s.pos.lat) && Number.isFinite(s.pos.lng))
+        .map(s => ({ lat: s.pos.lat, lng: s.pos.lng }));
+
+      if (waypoints.length) {
+        const buildRoute = (origin) => {
+          const segments = [origin, ...waypoints];
+          const fetches  = [];
+          for (let i = 0; i < segments.length - 1; i++) {
+            fetches.push(fetchRouteModel({ origin: segments[i], pickup: null, delivery: segments[i + 1], token }));
+          }
+          Promise.all(fetches)
+            .then((results) => {
+              const combined = results.flatMap(d => d?.geometry || []);
+              if (!combined.length) throw new Error('Ruta vacía');
+              const steps = results.flatMap(d => Array.isArray(d?.steps) ? d.steps : []);
+              setRouteGeometry(combined);
+              setRouteSteps(steps);
+              setRouteActive(true);
+              centerCycleRef.current = 0;
+              const first = results[0];
+              if (first) onMessage(formatRouteSummary(first));
+              setCenterSignal('nav');
+            })
+            .catch((error) => {
+              setRouteGeometry(null);
+              setRouteSteps([]);
+              onMessage(error.message?.includes('502') ? 'Motor de rutas no disponible' : 'No se pudo calcular la ruta');
+            });
+        };
+
+        if (myPosition) { buildRoute(myPosition); return; }
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => buildRoute({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+            () => buildRoute(waypoints[0]),
+            { timeout: 4000, maximumAge: 15000 }
+          );
+          return;
+        }
+        buildRoute(waypoints[0]);
+        return;
+      }
+    }
+
+    // Fallback: construir waypoints desde pedidos confirmados en orden de aceptación
     const orders = (confirmedOrders?.length ? confirmedOrders : (activeOrder?.restaurant_confirmed !== false ? [activeOrder] : []))
       .filter(o => !['delivered', 'cancelled'].includes(o.status))
       .sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at));
@@ -393,20 +444,31 @@ export function useDriverHomeRuntime({
       .catch((error) => onMessage(getErrorMessage(error, 'No se pudieron guardar las preferencias')));
   }, [onMessage, token]);
 
-  // allStops: solo de pedidos confirmados por restaurante
-  const allStops = (confirmedOrders?.length
-    ? confirmedOrders
-    : (activeOrder?.restaurant_confirmed !== false && activeOrder ? [activeOrder] : [])
-  )
-    .filter(o => !['delivered', 'cancelled'].includes(o.status))
-    .flatMap(o => {
-      const pts = [];
-      if (o.restaurant_lat && o.restaurant_lng && !o.picked_up_at)
-        pts.push({ lat: Number(o.restaurant_lat), lng: Number(o.restaurant_lng) });
-      if (o.customer_lat && o.customer_lng)
-        pts.push({ lat: Number(o.customer_lat), lng: Number(o.customer_lng) });
-      return pts;
-    });
+  // allStops: usa el orden calculado por el backend (routeStopsOverride) cuando está
+  // disponible. Fallback: pedidos confirmados en orden de aceptación.
+  const allStops = (() => {
+    if (Array.isArray(routeStopsOverride) && routeStopsOverride.length > 0) {
+      // El backend ya calculó la secuencia óptima — usarla directamente
+      return routeStopsOverride
+        .filter(s => s.pos && Number.isFinite(s.pos.lat) && Number.isFinite(s.pos.lng))
+        .map(s => ({ lat: s.pos.lat, lng: s.pos.lng, type: s.type, orderId: s.orderId }));
+    }
+
+    // Fallback: construir desde pedidos activos en orden de aceptación
+    return (confirmedOrders?.length
+      ? confirmedOrders
+      : (activeOrder?.restaurant_confirmed !== false && activeOrder ? [activeOrder] : [])
+    )
+      .filter(o => !['delivered', 'cancelled'].includes(o.status))
+      .flatMap(o => {
+        const pts = [];
+        if (o.restaurant_lat && o.restaurant_lng && !o.picked_up_at)
+          pts.push({ lat: Number(o.restaurant_lat), lng: Number(o.restaurant_lng), type: 'pickup' });
+        if (o.customer_lat && o.customer_lng)
+          pts.push({ lat: Number(o.customer_lat), lng: Number(o.customer_lng), type: 'delivery' });
+        return pts;
+      });
+  })();
 
   return {
     counters,
