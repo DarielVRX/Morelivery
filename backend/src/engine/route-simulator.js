@@ -22,6 +22,7 @@ import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
 import { scoreCandidate } from './scoring.js';
 import { findOptimalSequence } from './reroute.js';
+import { groupPickupStops } from './stop-grouper.js';
 import { ACTIVE_STATUSES, log, logWarn } from '../modules/orders/assignment/constants.js';
 
 // ─── Carga de stops del driver ────────────────────────────────────────────────
@@ -71,60 +72,7 @@ async function loadDriverStops(driverId) {
     [driverId, ACTIVE_STATUSES, getParam('max_delivery_time_s', 1800)]
   );
 
-  // ── Agrupar pickups por restaurante ──────────────────────────────────────
-  // Key: restaurantId → stop de pickup compartido
-  const pickupByRestaurant = new Map();
-  const stops = [];
-
-  for (const row of r.rows) {
-    const pickedUpAt = row.picked_up_at ? new Date(row.picked_up_at) : null;
-    const kitchenReadyAtSec = row.kitchen_estimated_ready
-      ? new Date(row.kitchen_estimated_ready).getTime() / 1000
-      : nowSec;
-
-    // Pickup pendiente (no recogido aún)
-    if (row.status !== 'on_the_way' && row.rest_lat && row.rest_lng) {
-      const restId = row.restaurant_id;
-
-      if (pickupByRestaurant.has(restId)) {
-        // Agrupar con pickup existente del mismo restaurante
-        const existing = pickupByRestaurant.get(restId);
-        existing.orderIds.push(row.id);
-        existing.volumeLiters += Number(row.volume_liters) || 0;
-        // Usar el kitchenReadyAt más tardío (hay que esperar al último en prepararse)
-        existing.kitchenReadyAtSec = Math.max(existing.kitchenReadyAtSec, kitchenReadyAtSec);
-      } else {
-        const stop = {
-          type:             'pickup',
-          orderIds:         [row.id],
-          orderId:          row.id, // alias para compatibilidad
-          pos:              { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
-          pickedUpAt:       null,
-          volumeLiters:     Number(row.volume_liters) || 0,
-          kitchenReadyAtSec,
-        };
-        pickupByRestaurant.set(restId, stop);
-        stops.push(stop);
-      }
-    }
-
-    // Delivery pendiente (uno por pedido, siempre)
-    if (row.cust_lat && row.cust_lng) {
-      stops.push({
-        type:             'delivery',
-        orderIds:         [row.id],
-        orderId:          row.id,
-        pos:              { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
-        pickedUpAt,
-        volumeLiters:     Number(row.volume_liters) || 0,
-        kitchenReadyAtSec: nowSec,
-        slaDeadlineSec:   (pickedUpAt ? pickedUpAt.getTime() / 1000 : nowSec)
-                          + Number(row.max_delivery_time_s),
-        pairOrderId:      row.id,
-      });
-    }
-  }
-
+  const { stops } = groupPickupStops(r.rows, nowSec, 'simulator');
   return stops;
 }
 
@@ -172,7 +120,7 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
   const driverObj        = { speed_kmh: driver.speedKmh };
   const maxSla           = getParam('max_delivery_time_s', 1800);
   const bagCapacityLiters = Number(driver.bagCapacityLiters)
-    || getParam('default_bag_capacity_liters', 25);
+    || getParam('default_bag_capacity_liters', 60);
   const newOrderVolume   = Number(order.estimated_volume_liters) || 0;
 
   log(`simulator order=${order.id} driver=${driver.id}`, 'inicio simulación', {

@@ -53,7 +53,6 @@ export default function DriverMap({
   const zoomTimeRef       = useRef(null);
   const isDarkRef         = useRef(isDark);
 
-  const [showAttrib, setShowAttrib] = useState(false);
   const [mapReady,   setMapReady]   = useState(false);
   const [hasGPS,     setHasGPS]     = useState(Boolean(driverPos));
 
@@ -539,7 +538,7 @@ export default function DriverMap({
     <div style={{ height: '100%', width: '100%', position: 'relative' }}>
     <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
 
-    <DriverMapOverlays hasGPS={hasGPS} showAttrib={showAttrib} onToggleAttrib={() => setShowAttrib(v => !v)} bottomOffset={bottomOffset} />
+    <DriverMapOverlays hasGPS={hasGPS} />
     </div>
   );
 }

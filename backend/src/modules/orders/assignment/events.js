@@ -55,6 +55,12 @@ export async function acceptOffer(orderId, driverId) {
   await acceptPendingOffer(orderId, driverId);
   await expireCompetingOffers(orderId, driverId);
 
+  // Incrementar contador de pedidos activos — reemplaza subquery COUNT(*) en finder
+  await query(
+    `UPDATE driver_profiles SET active_orders_count = active_orders_count + 1 WHERE user_id = $1`,
+    [driverId]
+  ).catch(e => logWarn(orderId, `active_orders_count +1 error: ${e.message}`));
+
   // Emitir order_update
   const orderData = await getOrderForSse(orderId);
   if (orderData) {
@@ -117,6 +123,12 @@ export async function releaseOrder(orderId, driverId, onOffer) {
 
   await releaseDriverOffer(orderId, driverId, getParam('cooldown_s', 300));
   await unassignDriverFromOrder(orderId, driverId);
+
+  // Decrementar contador — el driver soltó el pedido
+  await query(
+    `UPDATE driver_profiles SET active_orders_count = GREATEST(active_orders_count - 1, 0) WHERE user_id = $1`,
+    [driverId]
+  ).catch(e => logWarn(orderId, `active_orders_count -1 error (release): ${e.message}`));
 
   const freedOrderIds = await expireAllPendingForDriver(driverId, null);
   for (const freeOrderId of freedOrderIds) {
@@ -202,6 +214,12 @@ export async function notifyDelivery(orderId, driverId, onOffer) {
     return { ok: false };
   }
 
+  // Decrementar contador — el pedido salió del inventario activo del driver
+  await query(
+    `UPDATE driver_profiles SET active_orders_count = GREATEST(active_orders_count - 1, 0) WHERE user_id = $1`,
+    [driverId]
+  ).catch(e => logWarn(orderId, `active_orders_count -1 error (delivery): ${e.message}`));
+
   // SSE al cliente y restaurante
   const orderData = await getOrderForSse(orderId);
   if (orderData) {
@@ -238,6 +256,12 @@ export async function notifyOrderCancelled(orderId, driverId, onOffer) {
   log(orderId, `notifyOrderCancelled driver=${driverId?.slice(0,8) ?? 'none'}`);
 
   if (driverId) {
+    // Decrementar contador — el pedido cancelado sale del inventario del driver
+    await query(
+      `UPDATE driver_profiles SET active_orders_count = GREATEST(active_orders_count - 1, 0) WHERE user_id = $1`,
+      [driverId]
+    ).catch(e => logWarn(orderId, `active_orders_count -1 error (cancel): ${e.message}`));
+
     // Rerouting — el pedido desapareció de la ruta del driver
     rerouteDriver(driverId).catch(e =>
       logWarn(orderId, `rerouteDriver error tras cancelación: ${e.message}`)

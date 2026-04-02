@@ -21,6 +21,7 @@ import { query } from '../config/db.js';
 import { haversineMeters } from '../utils/geo.js';
 import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
+import { getRouteGeometry } from './osrm-cache.js';
 import { ACTIVE_STATUSES, log, logWarn } from '../modules/orders/assignment/constants.js';
 
 /**
@@ -31,8 +32,8 @@ import { ACTIVE_STATUSES, log, logWarn } from '../modules/orders/assignment/cons
 function speedKmhByVehicle(vehicleType) {
   switch (vehicleType) {
     case 'bike':       return 20;
-    case 'motorcycle': return 35;
-    case 'car':        return 40;
+    case 'motorcycle': return 40;
+    case 'car':        return 30;
     default:           return 30;
   }
 }
@@ -60,34 +61,29 @@ async function loadCandidateDrivers(orderId) {
        dp.bag_capacity_liters,
        dp.last_lat         AS lat,
        dp.last_lng         AS lng,
-       (SELECT COUNT(*)::int FROM orders o
-        WHERE o.driver_id = dp.user_id AND o.status = ANY($1::text[])
-       )                   AS active_orders
+       dp.active_orders_count AS active_orders
      FROM driver_profiles dp
      JOIN users u ON u.id = dp.user_id
      WHERE dp.is_available = true
        AND u.status = 'active'
        AND dp.last_lat IS NOT NULL
        AND dp.last_lng IS NOT NULL
-       AND (
-         SELECT COUNT(*) FROM orders o
-         WHERE o.driver_id = dp.user_id AND o.status = ANY($1::text[])
-       ) < $2
+       AND dp.active_orders_count < $1
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id = $3
+         WHERE od.order_id = $2
            AND od.driver_id = dp.user_id
            AND od.status IN ('rejected','released','expired')
            AND od.wait_until > NOW()
        )
        AND NOT EXISTS (
          SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id = $3
+         WHERE od.order_id = $2
            AND od.driver_id = dp.user_id
            AND od.status = 'accepted'
        )
-       AND dp.disconnect_penalties < $4`,
-    [ACTIVE_STATUSES, maxActive, orderId, maxPenalties]
+       AND dp.disconnect_penalties < $3`,
+    [maxActive, orderId, maxPenalties]
   );
 
   const result = r.rows.map(row => ({
@@ -135,19 +131,29 @@ async function loadDriverActiveStops(driverId) {
   let idx = 0;
 
   for (const row of r.rows) {
-    if (row.status !== 'on_the_way' && row.rest_lat && row.rest_lng) {
+    // Validar par lat/lng antes de usar COALESCE — si solo uno de los dos
+    // campos existe, la coordenada resultante sería híbrida e inválida.
+    const restLat = Number(row.rest_lat);
+    const restLng = Number(row.rest_lng);
+    const validRestPos = Number.isFinite(restLat) && Number.isFinite(restLng);
+
+    const custLat = Number(row.cust_lat);
+    const custLng = Number(row.cust_lng);
+    const validCustPos = Number.isFinite(custLat) && Number.isFinite(custLng);
+
+    if (row.status !== 'on_the_way' && validRestPos) {
       stops.push({
         type:       'pickup',
         orderId:    row.id,
-        pos:        { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
+        pos:        { lat: restLat, lng: restLng },
         routeIndex: idx++,
       });
     }
-    if (row.cust_lat && row.cust_lng) {
+    if (validCustPos) {
       stops.push({
         type:       'delivery',
         orderId:    row.id,
-        pos:        { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
+        pos:        { lat: custLat, lng: custLng },
         routeIndex: idx++,
       });
     }
@@ -162,22 +168,23 @@ async function loadDriverActiveStops(driverId) {
  *
  * Candidatos:
  *   1. Posición actual del driver (type: 'driver')
- *   2. Cualquier stop ya comprometido en ruta que esté dentro del radio
- *      del restaurante — insertar el pickup nuevo después de ese stop
- *      puede ser más eficiente que desviar desde la posición actual.
- *
- * Retorna el candidato con menor distancia al restaurante.
+ *   2. Stops ya comprometidos en ruta dentro del radio
+ *   3. Nodos de trayectoria — puntos muestreados cada 1000m de la geometría
+ *      de cada segmento activo. Captura restaurantes "de paso" que los stops
+ *      extremos no detectarían.
  *
  * @param {{lat,lng}} driverPos
- * @param {Array}     activeStops   — de loadDriverActiveStops()
+ * @param {Array}     activeStops
  * @param {{lat,lng}} restaurantPos
  * @param {number}    maxRadiusM
+ * @param {Array<Array<{lat,lng}>>} segmentGeometries — geometría por segmento (puede ser [])
  * @returns {{ type, orderId, pos, distToRestaurant, routeIndex? } | null}
  */
-function getClosestViableStop(driverPos, activeStops, restaurantPos, maxRadiusM) {
+function getClosestViableStop(driverPos, activeStops, restaurantPos, maxRadiusM, segmentGeometries = []) {
+  const NODE_INTERVAL_M = 1000; // muestrear un nodo cada 1000m
   const candidates = [];
 
-  // Posición actual del driver
+  // 1. Posición actual del driver
   const driverDist = haversineMeters(driverPos, restaurantPos);
   if (driverDist < maxRadiusM) {
     candidates.push({
@@ -193,8 +200,11 @@ function getClosestViableStop(driverPos, activeStops, restaurantPos, maxRadiusM)
     });
   }
 
-  // Stops ya en ruta
+  // 2. Stops ya en ruta
   for (const stop of activeStops) {
+    const restLat = stop.pos?.lat;
+    const restLng = stop.pos?.lng;
+    if (!Number.isFinite(restLat) || !Number.isFinite(restLng)) continue;
     const dist = haversineMeters(stop.pos, restaurantPos);
     if (dist >= maxRadiusM) continue;
     candidates.push({
@@ -206,21 +216,40 @@ function getClosestViableStop(driverPos, activeStops, restaurantPos, maxRadiusM)
     });
   }
 
+  // 3. Nodos de trayectoria — muestrear geometría de cada segmento cada 1000m
+  for (const geometry of segmentGeometries) {
+    if (!Array.isArray(geometry) || geometry.length < 2) continue;
+    let accumulated = 0;
+
+    for (let i = 0; i < geometry.length - 1; i++) {
+      const segLen = haversineMeters(geometry[i], geometry[i + 1]);
+      accumulated += segLen;
+
+      if (accumulated >= NODE_INTERVAL_M) {
+        accumulated = 0;
+        const node = geometry[i + 1];
+        const dist = haversineMeters(node, restaurantPos);
+        if (dist < maxRadiusM) {
+          candidates.push({
+            type:             'route_node',
+            orderId:          null,
+            pos:              { ...node },
+            distToRestaurant: dist,
+          });
+        }
+      }
+    }
+  }
+
   if (candidates.length === 0) {
     logWarn('finder', 'getClosestViableStop: sin candidatos viables', {
-      driverDist: Math.round(driverDist),
+      driverDist:       Math.round(driverDist),
       maxRadiusM,
       activeStopsCount: activeStops.length,
-      activeStopDists: activeStops.map(s => ({
-        type: s.type,
-        orderId: s.orderId,
-        dist: Math.round(haversineMeters(s.pos, restaurantPos)),
-      })),
     });
     return null;
   }
 
-  // Retornar el candidato más cercano al restaurante
   candidates.sort((a, b) => a.distToRestaurant - b.distToRestaurant);
   return candidates[0];
 }
@@ -301,8 +330,21 @@ export async function findCandidates(orderId, restaurantPos, customerPos) {
       // Cargar stops activos del driver para calcular viableStop
       const activeStops = await loadDriverActiveStops(d.id);
 
-      // Encontrar punto de inserción óptimo
-      const viableStop = getClosestViableStop(d.pos, activeStops, restaurantPos, maxRadiusM);
+      // Obtener geometría de segmentos de ruta para nodos de intercepción
+      // Segmentos: driver→stop1, stop1→stop2, ...
+      const segmentGeometries = [];
+      if (activeStops.length > 0) {
+        const points = [d.pos, ...activeStops.map(s => s.pos)];
+        const geoRequests = [];
+        for (let i = 0; i < points.length - 1; i++) {
+          geoRequests.push(getRouteGeometry(points[i], points[i + 1]));
+        }
+        const resolved = await Promise.all(geoRequests);
+        segmentGeometries.push(...resolved);
+      }
+
+      // Encontrar punto de inserción óptimo (stops + nodos de trayectoria)
+      const viableStop = getClosestViableStop(d.pos, activeStops, restaurantPos, maxRadiusM, segmentGeometries);
 
       // Sin viableStop el driver no puede tomar el pedido
       if (!viableStop) {

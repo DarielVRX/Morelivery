@@ -39,6 +39,7 @@ const DEFAULTS = {
 
   // ── Ruteo / secuenciación ──────────────────────────────────────────────
   sla_critical_margin_s:              180,  // margen bajo el cual un delivery se considera en riesgo para poda de permutaciones
+  reroute_lock_radius_m:              200,  // radio en metros — si el driver está dentro, el próximo stop es intocable
 
   // ── Rebalanceo ─────────────────────────────────────────────────────────
   rebalancer_interval_s:              300,
@@ -49,9 +50,10 @@ const DEFAULTS = {
   // ── Cocina ─────────────────────────────────────────────────────────────
   kitchen_wait_threshold_s:           120,
   kitchen_estimate_diff_threshold_s:  90,
+  kitchen_gap_threshold_s:            600,  // gap máximo entre kitchenReadyAt de pedidos para agruparlos en el mismo stop
 
   // ── Volumen / mochila ──────────────────────────────────────────────────
-  default_bag_capacity_liters:        25,   // litros de mochila si driver no especificó
+  default_bag_capacity_liters:        60,   // litros de mochila si driver no especificó
 };
 
 // Catálogo completo con descripción — fuente de verdad para el panel de admin
@@ -77,12 +79,14 @@ const PARAM_CATALOG = {
   disconnect_penalty_s:               { default: 300,  description: 'Penalización de scoring (segundos) por cada desconexión previa' },
   reconnect_window_s:                 { default: 600,  description: 'Ventana en segundos para que un driver reconecte tras desconexión' },
   sla_critical_margin_s:              { default: 180,  description: 'Margen en segundos bajo el cual un delivery se considera crítico para poda de permutaciones de ruta' },
+  reroute_lock_radius_m:              { default: 200,  description: 'Radio en metros dentro del cual el próximo stop del driver queda bloqueado y el secuenciador no puede reordenarlo' },
   rebalancer_interval_s:              { default: 300,  description: 'Cada cuántos segundos corre el motor de rebalanceo automático' },
   transfer_min_gain_s:                { default: 10,   description: 'Ganancia mínima en segundos para aplicar rebalanceo automático' },
   transfer_cooldown_s:                { default: 60,   description: 'Tiempo mínimo entre transferencias del mismo pedido' },
   transfer_max_route_eta_s:           { default: 180,  description: 'ETA de ruta máximo (s) para disparar rebalanceo en un driver' },
   kitchen_wait_threshold_s:           { default: 120,  description: 'Segundos de espera en restaurante que activan sugerencia de ajuste' },
   kitchen_estimate_diff_threshold_s:  { default: 90,   description: 'Diferencia mínima entre estimado y real para sugerir cambio de prep' },
+  kitchen_gap_threshold_s:            { default: 600,  description: 'Gap máximo en segundos entre kitchenReadyAt de pedidos para agruparlos en el mismo stop de pickup' },
   default_bag_capacity_liters:        { default: 25,   description: 'Litros de capacidad de mochila si el driver no especificó la suya' },
 };
 

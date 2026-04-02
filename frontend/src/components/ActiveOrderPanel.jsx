@@ -1,5 +1,5 @@
 // frontend/src/components/ActiveOrderPanel.jsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getDriverEarningCents, getOrderGrandTotalCents, isCashPayment } from '../features/driver/shared/orderUtils';
 import { IconChat, OrderChat } from '../features/customer/orders/components';
 import { fmt } from '../utils/format';
@@ -70,6 +70,25 @@ export default function ActiveOrderPanel({
   const [callingTarget,    setCallingTarget]    = useState(null);
   const [callFeedback,     setCallFeedback]     = useState(null);
   const [chatOpen,         setChatOpen]         = useState(false);
+  const [kitchenSecsLeft,  setKitchenSecsLeft]  = useState(null);
+
+  // Countdown de cocina — solo activo en estados previos al pickup
+  useEffect(() => {
+    const isWaiting = ['accepted', 'preparing'].includes(order?.status);
+    if (!isWaiting || !order?.kitchen_estimated_ready) {
+      setKitchenSecsLeft(null);
+      return;
+    }
+    const tick = () => {
+      const diff = Math.ceil(
+        (new Date(order.kitchen_estimated_ready).getTime() - Date.now()) / 1000
+      );
+      setKitchenSecsLeft(diff);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [order?.status, order?.kitchen_estimated_ready]);
 
   useEffect(() => { if (!expanded) setShowCallSelector(false); }, [expanded]);
   useEffect(() => {
@@ -171,7 +190,11 @@ export default function ActiveOrderPanel({
             textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
             <strong>{isOTW ? (order.customer_name || 'Cliente') : order.restaurant_name}</strong>
           </div>
-          <div style={{ fontSize:'0.72rem', color:'var(--text-secondary)', marginTop:'0.1rem',
+          <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.05rem',
+            overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+            {isOTW ? (order.restaurant_name || '') : (order.customer_name || 'Cliente')}
+          </div>
+          <div style={{ fontSize:'0.72rem', color:'var(--text-secondary)', marginTop:'0.05rem',
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
             {isOTW
               ? (order.customer_address || order.delivery_address || '')
@@ -235,6 +258,31 @@ export default function ActiveOrderPanel({
           <div style={{ padding:'0.5rem 0.75rem 0.5rem',
             borderTop:'1px solid var(--border-light)',
             display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+
+            {/* Countdown de cocina */}
+            {kitchenSecsLeft !== null && (
+              <div style={{
+                display:'flex', alignItems:'center', gap:8,
+                padding:'0.4rem 0.65rem', borderRadius:8,
+                background: kitchenSecsLeft <= 0 ? 'var(--success-bg)' : 'var(--bg-raised)',
+                border: `1px solid ${kitchenSecsLeft <= 0 ? 'var(--success-border)' : 'var(--border)'}`,
+              }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                  stroke={kitchenSecsLeft <= 0 ? 'var(--success)' : 'var(--text-secondary)'}
+                  strokeWidth="2.5" strokeLinecap="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <polyline points="12 6 12 12 16 14"/>
+                </svg>
+                <span style={{
+                  fontSize:'0.75rem', fontWeight:700,
+                  color: kitchenSecsLeft <= 0 ? 'var(--success)' : 'var(--text-secondary)',
+                }}>
+                  {kitchenSecsLeft <= 0
+                    ? 'Pedido listo en cocina'
+                    : `Cocina: ${Math.floor(kitchenSecsLeft / 60)}:${String(kitchenSecsLeft % 60).padStart(2, '0')} min`}
+                </span>
+              </div>
+            )}
 
             {/* Notificar */}
             <div style={{ position:'relative' }}>
@@ -330,22 +378,28 @@ export default function ActiveOrderPanel({
               <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.15rem' }}>
                 {canRelevo && (
                   <button style={{
-                    flex:1, padding:'0.45rem 0', borderRadius:8, fontWeight:700,
-                    fontSize:'0.78rem', border:'1.5px solid var(--warn-border)', cursor:'pointer',
-                    display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+                    flex:1, padding:'0.5rem 0.25rem', borderRadius:8, fontWeight:700,
+                    fontSize:'0.72rem', border:'1.5px solid var(--warn-border)', cursor:'pointer',
+                    display:'flex', flexDirection:'column',
+                    alignItems:'center', justifyContent:'center', gap:4,
                     color:'var(--warn)', background:'var(--warn-bg)',
+                    minHeight:56,
                   }} onClick={onRebalance}>
-                    <IconRelevo /> Buscar relevo
+                    <IconRelevo />
+                    Relevo
                   </button>
                 )}
                 {canRelease && (
                   <button style={{
-                    flex:1, padding:'0.45rem 0', borderRadius:8, fontWeight:700,
-                    fontSize:'0.78rem', border:'1.5px solid var(--danger-border)', cursor:'pointer',
-                    display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+                    flex:1, padding:'0.5rem 0.25rem', borderRadius:8, fontWeight:700,
+                    fontSize:'0.72rem', border:'1.5px solid var(--danger-border)', cursor:'pointer',
+                    display:'flex', flexDirection:'column',
+                    alignItems:'center', justifyContent:'center', gap:4,
                     background:'var(--danger-bg)', color:'var(--danger)',
+                    minHeight:56,
                   }} onClick={onToggleRelease}>
-                    <IconRelease /> Liberar
+                    <IconRelease />
+                    Liberar
                   </button>
                 )}
               </div>
