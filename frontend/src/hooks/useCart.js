@@ -12,6 +12,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
+import { brandStorageKey, brandEventName } from '../config/brand';
 
 const STORAGE_KEY = brandStorageKey('cart');
 
