@@ -89,7 +89,8 @@ export async function cleanStaleEntities(onOffer) {
       if (row.last_driver_id) {
         await query(
           `UPDATE driver_profiles
-           SET disconnect_penalties = LEAST(disconnect_penalties + 1, 10)
+           SET disconnect_penalties    = LEAST(disconnect_penalties + 1, 10),
+               active_orders_count     = GREATEST(active_orders_count - 1, 0)
            WHERE user_id = $1`,
           [row.last_driver_id]
         );

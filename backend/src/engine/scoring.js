@@ -33,19 +33,17 @@ import { log } from '../modules/orders/assignment/constants.js';
  *   fairnessPenalty: number,
  *   softSlaPenalty: number,
  *   hardSlaPenalty: number,
- *   proximityPenalty: number,
  *   bridgePenalty: number,
  *   disconnectPenalty: number,
  * }}
  */
 export function scoreCandidate(candidate, customer, driverPenalties = 0) {
   const fairnessWeight      = getParam('fairness_penalty_per_order_s',    120);
-  const softSlaWeight       = getParam('soft_sla_penalty_factor',          2);
-  const hardPenalty         = getParam('hard_sla_penalty_s',            3000);
-  const proximityWeight     = getParam('pickup_proximity_penalty_factor', 0.35);
-  const bridgeWeight        = getParam('pickup_bridge_penalty_factor',      1);  // antes hardcoded
-  const disconnectPenaltyS  = getParam('disconnect_penalty_s',            300);
-  const maxDeliverySla      = getParam('max_delivery_time_s',            1800);
+  const softSlaWeight       = getParam('soft_sla_penalty_factor',            3); // intensificado para compensar umbral hard más alto
+  const hardPenalty         = getParam('hard_sla_penalty_s',             1800);
+  const bridgeWeight        = getParam('pickup_bridge_penalty_factor',       1);
+  const disconnectPenaltyS  = getParam('disconnect_penalty_s',             300);
+  const maxDeliverySla      = getParam('max_delivery_time_s',             1800);
 
   const activeOrders      = candidate.activeOrders ?? 0;
   const fairnessPenalty   = activeOrders * fairnessWeight;
@@ -55,17 +53,16 @@ export function scoreCandidate(candidate, customer, driverPenalties = 0) {
   const eta            = candidate.etaToNewCustomer ?? Infinity;
   const delay          = Math.max(0, eta - maxSla);
   const softSlaPenalty = delay * softSlaWeight;
-  const hardSlaPenalty = delay > 0 ? hardPenalty : 0;
+  // hardSlaPenalty: solo se activa si el retraso supera 15 min (900s) — evita pánico
+  // algorítmico ante retrasos leves que permiten batching rentable.
+  const hardSlaPenalty = delay > 900 ? hardPenalty : 0;
 
-  // proximityPenalty: coste de que el driver esté lejos del restaurante
-  // Se calcula sobre la distancia directa driver→restaurante y la velocidad real del driver
-  const speedMs = Math.max(1, ((candidate.driverSpeedKmh ?? 30) * 1000) / 3600);
-  const directMeters = candidate.directDriverToRestaurantMeters ?? 0;
-  const proximityPenalty = Math.max(0, directMeters) * proximityWeight / speedMs;
+  // proximityPenalty eliminada: la distancia ya está capturada en el eta (OSRM/haversine).
+  // Penalizarla por separado generaba doble imposición geométrica.
+  // La distancia pura permanece en candidate-finder como filtro de descarte (maxRadiusM).
 
-  // bridgePenalty: coste de desvío desde viableStop al restaurante
-  // bridgePenaltyS viene calculado por el simulador sobre el punto de inserción real,
-  // no sobre la posición directa del driver — más preciso que antes.
+  // bridgePenalty: coste de desvío desde viableStop al restaurante.
+  // bridgePenaltyS calculado sobre el punto de inserción real — ortogonal al eta.
   const bridgePenalty = Math.max(0, candidate.bridgePenaltyS ?? 0) * bridgeWeight;
 
   const totalCost =
@@ -73,7 +70,6 @@ export function scoreCandidate(candidate, customer, driverPenalties = 0) {
     fairnessPenalty +
     softSlaPenalty +
     hardSlaPenalty +
-    proximityPenalty +
     bridgePenalty +
     disconnectPenalty;
 
@@ -82,23 +78,21 @@ export function scoreCandidate(candidate, customer, driverPenalties = 0) {
     fairnessPenalty,
     softSlaPenalty,
     hardSlaPenalty,
-    proximityPenalty,
     bridgePenalty,
     disconnectPenalty,
   };
 
   log(`scoring driver=${candidate.driverSpeedKmh ?? '?'}kmh`, 'scoreCandidate', {
-    eta:              Math.round(eta),
-    fairnessPenalty:  Math.round(fairnessPenalty),
-    softSlaPenalty:   Math.round(softSlaPenalty),
-    hardSlaPenalty:   Math.round(hardSlaPenalty),
-    proximityPenalty: Math.round(proximityPenalty),
-    bridgePenalty:    Math.round(bridgePenalty),
+    eta:               Math.round(eta),
+    fairnessPenalty:   Math.round(fairnessPenalty),
+    softSlaPenalty:    Math.round(softSlaPenalty),
+    hardSlaPenalty:    Math.round(hardSlaPenalty),
+    bridgePenalty:     Math.round(bridgePenalty),
     disconnectPenalty: Math.round(disconnectPenalty),
-    totalCost:        Math.round(result.totalCost),
+    totalCost:         Math.round(result.totalCost),
     activeOrders,
     maxSla,
-    delay:            Math.round(delay),
+    delay:             Math.round(delay),
   });
 
   return result;

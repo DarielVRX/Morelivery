@@ -1,4 +1,5 @@
 import { authenticate, authorize } from '../../../middlewares/auth.js';
+import { sendPushToUser } from '../../notifications/pushSubscription.js';
 import { validate } from '../../../middlewares/validate.js';
 import { STATUS_TS, notifyOrderParties } from '../shared.js';
 import { notifyPickup, notifyDelivery, notifyOrderCancelled } from '../assignment/events.js';
@@ -164,12 +165,24 @@ export function registerLifecycleRoutes(router, deps) {
             note: note.trim(),
             cancelledBy: 'customer',
           });
+          sendPushToUser(restInfo.rows[0].owner_user_id, {
+            title: 'Pedido cancelado',
+            body:  note.trim() ? `Cliente: ${note.trim().slice(0, 60)}` : 'Un cliente canceló su pedido',
+            tag:   `cancel_${req.params.id}`, group: 'restaurant', priority: 'high',
+            url:   '/restaurant', pushType: 'cancelled', orderId: req.params.id,
+          }).catch(() => {});
         }
       } catch (_) {}
 
       // Notificar al driver si estaba asignado
       if (order.driver_id) {
         sseHub.sendToUser(order.driver_id, 'order_update', { orderId: req.params.id, status: 'cancelled' });
+        sendPushToUser(order.driver_id, {
+          title: 'Pedido cancelado',
+          body:  'El cliente canceló el pedido que llevabas',
+          tag:   `cancel_${req.params.id}`, group: 'driver', priority: 'high',
+          url:   '/driver', pushType: 'cancelled', orderId: req.params.id,
+        }).catch(() => {});
         const onOffer = deps.onOffer ?? null;
         await notifyOrderCancelled(req.params.id, order.driver_id, onOffer).catch(() => {});
       }

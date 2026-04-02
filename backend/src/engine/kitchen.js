@@ -55,8 +55,10 @@ export async function initKitchenTiming(orderId, restaurantId) {
 export async function tickKitchen() {
   try {
     // Pedidos donde el estimado ya venció pero siguen en estado 'accepted' o 'preparing'
+    // customer_id y driver_id incluidos para evitar segundo SELECT
     const overdue = await query(
-      `SELECT o.id, o.restaurant_id, o.prep_started_at, o.kitchen_estimated_ready,
+      `SELECT o.id, o.restaurant_id, o.customer_id, o.driver_id,
+              o.prep_started_at, o.kitchen_estimated_ready,
               r.owner_user_id AS restaurant_owner_id,
               r.name          AS restaurant_name
        FROM orders o
@@ -68,40 +70,26 @@ export async function tickKitchen() {
     );
 
     for (const row of overdue.rows) {
-      // Marcar como ready automáticamente
+      // No se escribe status ni ready_at — el estado real solo lo cambia el restaurante
+      // manualmente. El ticker solo registra la nota y notifica para corrección.
       await query(
         `UPDATE orders
-         SET status='ready', ready_at=NOW(), updated_at=NOW(),
-             restaurant_note=COALESCE(restaurant_note,'') || ' [AUTO: marcado listo por estimado]'
-         WHERE id=$1 AND status IN ('accepted','preparing')`,
+         SET restaurant_note = COALESCE(restaurant_note,'') || ' [AVISO: estimado de cocina vencido]',
+             updated_at = NOW()
+         WHERE id = $1 AND status IN ('accepted','preparing')`,
         [row.id]
       );
 
-      console.log(`[kitchen] order=${shortId(row.id)} marcado ready automáticamente (${row.restaurant_name})`);
+      console.log(`[kitchen] order=${shortId(row.id)} estimado vencido — notificando restaurante (${row.restaurant_name})`);
 
-      // Notificar al restaurante para que corrija si fue error
+      // Notificar solo al restaurante — el frontend de driver/customer
+      // maneja la visualización con countdown local basado en kitchen_estimated_ready
       if (row.restaurant_owner_id) {
         sseHub.sendToUser(row.restaurant_owner_id, 'kitchen_auto_ready', {
           orderId:        row.id,
           restaurantName: row.restaurant_name,
-          message:        'El pedido fue marcado automáticamente como listo. Si aún no está listo, corrígelo.',
+          message:        'El tiempo estimado de preparación venció. Marca el pedido como listo cuando esté.',
         });
-      }
-
-      // Notificar al driver
-      sseHub.sendToUser(null, 'order_update', { orderId: row.id, status: 'ready' });
-
-      // Broadcast a todos los interesados en este pedido
-      const parties = await query(
-        `SELECT o.customer_id, o.driver_id, r.owner_user_id
-         FROM orders o JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`,
-        [row.id]
-      );
-      if (parties.rowCount > 0) {
-        const { customer_id, driver_id, owner_user_id } = parties.rows[0];
-        sseHub.sendToUser(customer_id,  'order_update', { orderId: row.id, status: 'ready' });
-        sseHub.sendToUser(driver_id,    'order_update', { orderId: row.id, status: 'ready' });
-        sseHub.sendToUser(owner_user_id,'order_update', { orderId: row.id, status: 'ready' });
       }
     }
   } catch (e) {

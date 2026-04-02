@@ -1,7 +1,9 @@
 import { AppError } from '../utils/errors.js';
 
 export function notFoundHandler(_req, res) {
-  res.status(404).json({ error: 'Route not found' });
+  res.status(404).json({
+    error: 'La página solicitada no está disponible. Por favor, verifica la dirección o regresa al inicio'
+  });
 }
 
 export function errorHandler(err, _req, res, _next) {
@@ -9,15 +11,17 @@ export function errorHandler(err, _req, res, _next) {
     return res.status(err.statusCode).json({ error: err.message });
   }
 
-  // PostgreSQL errors include SQLSTATE in err.code
   if (err?.code) {
+    console.error(`[DB Error]: ${err.code} - ${err.message}`);
+
     return res.status(500).json({
-      error: 'Database error',
-      code: err.code,
-      message: err.message
+      error: 'No fue posible completar la solicitud en este momento. Por favor, inténtalo de nuevo en unos instantes'
     });
   }
 
-  console.error(err);
-  return res.status(500).json({ error: 'Internal server error' });
+  console.error('[System Error]:', err);
+
+  return res.status(500).json({
+    error: 'Estamos experimentando dificultades técnicas temporales. Agradecemos tu paciencia mientras lo solucionamos'
+  });
 }

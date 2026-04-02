@@ -17,6 +17,7 @@ import { haversineMeters } from '../utils/geo.js';
 const OSRM_BASE     = process.env.OSRM_URL || 'https://router.project-osrm.org';
 const GRID_METERS   = 75;
 const TTL_MS        = 10 * 60 * 1000;   // 10 minutos
+const TTL_GEO_MS    = 30 * 60 * 1000;   // 30 minutos — geometría cambia menos que el tráfico
 const MAX_ENTRIES   = 2000;
 const MAX_RETRIES   = 2;
 const RETRY_BASE_MS = 800;
@@ -25,6 +26,11 @@ const RETRY_BASE_MS = 800;
 const _cache   = new Map();
 // pending: key → Promise<result>   (dedup de requests simultáneos al mismo par)
 const _pending = new Map();
+
+// caché de geometría separado — TTL más largo, menos entradas
+const _geoCache   = new Map();
+const _geoPending = new Map();
+const MAX_GEO_ENTRIES = 500;
 
 let _backoffUntil = 0;  // timestamp: no hacer requests hasta este momento
 
@@ -186,11 +192,77 @@ export async function estimateEta(from, to, driver = null) {
   return Math.round(route.duration_s * factor);
 }
 
+// ─── Geometría de ruta ────────────────────────────────────────────────────────
+
+function _evictGeoIfNeeded() {
+  if (_geoCache.size < MAX_GEO_ENTRIES) return;
+  const oldest = _geoCache.keys().next().value;
+  _geoCache.delete(oldest);
+}
+
+/**
+ * Obtiene la geometría (polyline) de una ruta entre dos puntos.
+ * Devuelve un array de coordenadas [{lat, lng}] o [] si OSRM falla.
+ * Usa caché propio con TTL de 30 minutos.
+ *
+ * Solo se llama desde candidate-finder para evaluar nodos de intercepción.
+ * No reemplaza getRoute() — el request principal sigue con overview=false.
+ *
+ * @param {{ lat: number, lng: number }} from
+ * @param {{ lat: number, lng: number }} to
+ * @returns {Promise<Array<{lat: number, lng: number}>>}
+ */
+export async function getRouteGeometry(from, to) {
+  const key = _cacheKey(from, to) + ':geo';
+  const now = Date.now();
+
+  const cached = _geoCache.get(key);
+  if (cached && (now - cached.fetchedAt) < TTL_GEO_MS) {
+    return cached.coords;
+  }
+
+  if (_geoPending.has(key)) {
+    return _geoPending.get(key);
+  }
+
+  const promise = (async () => {
+    try {
+      if (Date.now() < _backoffUntil) return [];
+
+      const url = `${OSRM_BASE}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}` +
+                  `?overview=simplified&geometries=geojson`;
+
+      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      if (!res.ok) return [];
+
+      const data  = await res.json();
+      const coords = data?.routes?.[0]?.geometry?.coordinates;
+      if (!Array.isArray(coords)) return [];
+
+      // GeoJSON usa [lng, lat] — convertir a {lat, lng}
+      const result = coords.map(([lng, lat]) => ({ lat, lng }));
+
+      _evictGeoIfNeeded();
+      _geoCache.set(key, { coords: result, fetchedAt: Date.now() });
+      return result;
+    } catch {
+      return [];
+    } finally {
+      _geoPending.delete(key);
+    }
+  })();
+
+  _geoPending.set(key, promise);
+  return promise;
+}
+
 /** Estadísticas del caché para monitoring. */
 export function cacheStats() {
   return {
     size:         _cache.size,
     pending:      _pending.size,
+    geoSize:      _geoCache.size,
+    geoPending:   _geoPending.size,
     inBackoff:    Date.now() < _backoffUntil,
     backoffUntil: _backoffUntil > 0 ? new Date(_backoffUntil).toISOString() : null,
   };
@@ -200,5 +272,7 @@ export function cacheStats() {
 export function clearCache() {
   _cache.clear();
   _pending.clear();
+  _geoCache.clear();
+  _geoPending.clear();
   _backoffUntil = 0;
 }

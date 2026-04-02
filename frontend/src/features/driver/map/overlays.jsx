@@ -1,40 +1,8 @@
 import { STADIA_KEY } from './config';
 
-export function DriverMapOverlays({ hasGPS, showAttrib, onToggleAttrib, bottomOffset = 8 }) {
+export function DriverMapOverlays({ hasGPS }) {
   return (
     <>
-      {/* Atribución expandida */}
-      {showAttrib && (
-        <div style={{
-          position: 'absolute', bottom: bottomOffset + 28, left: 8, zIndex: 10,
-          background: 'rgba(255,255,255,0.92)', borderRadius: 6,
-          padding: '0.3rem 0.6rem', fontSize: '0.65rem', color: '#444',
-          boxShadow: '0 1px 6px #0002', maxWidth: 260, pointerEvents: 'auto',
-        }}>
-          © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer"
-            style={{ color: '#2563eb' }}>OpenStreetMap</a> contributors ·{' '}
-          {STADIA_KEY
-            ? <><a href="https://stadiamaps.com" target="_blank" rel="noopener noreferrer"
-                style={{ color: '#2563eb' }}>Stadia Maps</a> · </>
-            : <><a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer"
-                style={{ color: '#2563eb' }}>OpenFreeMap</a> · </>}
-          <a href="https://maplibre.org" target="_blank" rel="noopener noreferrer"
-            style={{ color: '#2563eb' }}>MapLibre</a>
-        </div>
-      )}
-
-      {/* Botón atribución — siempre visible, sube con paneles */}
-      <button onClick={onToggleAttrib} title="Atribuciones del mapa"
-        style={{
-          position: 'absolute', bottom: bottomOffset, left: 8, zIndex: 10,
-          background: 'rgba(255,255,255,0.75)', border: 'none',
-          borderRadius: 3, padding: '1px 5px', cursor: 'pointer',
-          fontSize: '0.6rem', color: '#555', lineHeight: 1,
-          transition: 'bottom 0.25s ease',
-        }}>
-        ©
-      </button>
-
       {/* Sin GPS */}
       {!hasGPS && (
         <div style={{

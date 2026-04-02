@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import ActiveOrderPanel from '../../components/ActiveOrderPanel';
+import SupportChat from '../../features/support/SupportChat';
 import OfferPanel from '../../components/OfferPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -59,6 +60,8 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
   useAppBadge(badgeCount);
 
   const [msg, setMsg] = useState('');
+  const [showSupport, setShowSupport] = useState(false);
+  const [showAttrib,  setShowAttrib]  = useState(false);
   const [panelHeight, setPanelHeight] = useState(0);
   const activePanelRef = useRef(null);
 
@@ -171,6 +174,10 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         isDark={isDark}
         handMode={handMode}
         offerRouteGeometry={home.offerRouteGeometry}
+        onSupport={() => setShowSupport(v => !v)}
+        showSupport={showSupport}
+        showAttrib={showAttrib}
+        onToggleAttrib={() => setShowAttrib(v => !v)}
         onQuickReport={async (type, pos) => {
           if (type === 'zone') {
             home.handleZoneConfirm({ lat: pos.lat, lng: pos.lng, type: 'other', radius_m: 500, estimated_hours: 1 });
@@ -187,6 +194,25 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
           }
         }}
       />
+
+      {/* Panel de soporte — abierto desde NavFABs */}
+      {showSupport && (
+        <div style={{
+          position: 'absolute',
+          bottom: panelHeight + 8,
+          [handMode === 'right' ? 'left' : 'right']: 14,
+          width: 320, height: 480,
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border)',
+          borderRadius: 16,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+          zIndex: 402,
+          overflow: 'hidden',
+          display: 'flex', flexDirection: 'column',
+        }}>
+          <SupportChat />
+        </div>
+      )}
 
       <OfferPanel
         offer={order.pendingOffer}

@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from 'react';
 import DriverMap from '../../../components/DriverMap';
 import NavFABs from '../../../components/NavFABs';
 import RoadPrefsLayer from '../../../components/RoadPrefsLayer';
-import SupportChat from '../../support/SupportChat';
 import WayPicker from '../../../components/WayPicker';
 import ZoneLayer from '../../../components/ZoneLayer';
 import ZonePlacer from '../../../components/ZonePlacer';
@@ -49,6 +48,10 @@ export default function DriverHomeMapSection({
   onQuickReport,
   isDark = false,
   handMode = 'left',
+  onSupport,
+  showSupport = false,
+  showAttrib = false,
+  onToggleAttrib,
 }) {
   // ── Velocidad del driver derivada del GPS ────────────────────────────────
   const [speedKmh, setSpeedKmh] = useState(null);
@@ -175,7 +178,10 @@ export default function DriverHomeMapSection({
         onQuickReport={onQuickReport}
         handMode={handMode}
         speedKmh={speedKmh}
-        supportPanelContent={<SupportChat />}
+        onSupport={onSupport}
+        showSupport={showSupport}
+        showAttrib={showAttrib}
+        onToggleAttrib={onToggleAttrib}
       />
 
       {navMode === 'zone' && mapInstance && (
