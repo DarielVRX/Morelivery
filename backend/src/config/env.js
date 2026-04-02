@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { DEFAULT_DATABASE_NAME, DEFAULT_VAPID_EMAIL } from './brand.js';
 dotenv.config();
 
 /**
@@ -34,14 +35,14 @@ export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   jwtSecret: process.env.JWT_SECRET || 'change-me-in-production',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
-  databaseUrl: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/morelivery',
+  databaseUrl: process.env.DATABASE_URL || `postgresql://postgres:postgres@localhost:5432/${DEFAULT_DATABASE_NAME}`,
   allowedOrigins: parseAllowedOrigins(),
   redisUrl: process.env.REDIS_URL || '',
   // OSRM propio en Railway — fallback al servidor público si no está configurado
   osrmUrl: process.env.OSRM_URL || 'https://router.project-osrm.org',
 
   // ✅ AGREGAR ESTAS VARIABLES PARA WEB PUSH
-  vapidEmail: process.env.VAPID_EMAIL || 'admin@morelivery.com',
+  vapidEmail: process.env.VAPID_EMAIL || DEFAULT_VAPID_EMAIL,
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY,
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY,
 

@@ -14,6 +14,7 @@ import CustomerCart     from './components/CustomerCart';
 import DriverOrders     from './pages/Driver/Orders';
 import RestaurantOrders from './pages/Restaurant/Orders';
 import { usePermissions } from './hooks/usePermissions';
+import { UI_BRAND } from './config/brand';
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const CustomerHome      = lazy(() => import('./pages/Customer/Home'));
@@ -137,7 +138,7 @@ function LandingScreen() {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', marginBottom: '2.5rem' }}>
-        <img src="/logo.svg" alt="Morelivery" style={{ width: 60, height: 60 }} />
+        <img src="/logo.svg" alt={UI_BRAND} style={{ width: 60, height: 60 }} />
         <h1 style={{ margin: 0 }}>
           <BrandName size="2rem" />
         </h1>
@@ -431,4 +432,3 @@ useVibrationBridge();
     </AuthProvider>
   );
 }
-

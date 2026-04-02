@@ -1,6 +1,7 @@
 // backend/src/modules/auth/emailService.js
 import { google }   from 'googleapis';
 import { logEvent } from '../../utils/logger.js';
+import { BACKEND_BASE_URL, UI_BRAND } from '../../config/brand.js';
 
 const gmailAuth = new google.auth.OAuth2(
   process.env.GMAIL_CLIENT_ID,
@@ -46,9 +47,9 @@ export async function sendGmailSafe(opts) {
 const FRONT = () => process.env.FRONTEND_URL || 'http://localhost:5173';
 
 export function verificationEmail(name, verifyToken) {
-  const url = `${process.env.BACKEND_URL || 'https://morelivery.onrender.com'}/api/auth/verify-email?token=${verifyToken}`;
+  const url = `${BACKEND_BASE_URL}/api/auth/verify-email?token=${verifyToken}`;
   return {
-    subject: 'Confirma tu correo en Morelivery',
+    subject: `Confirma tu correo en ${UI_BRAND}`,
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
         <h2 style="color:#1a202c;margin-bottom:8px">Hola, ${name} 👋</h2>
@@ -63,15 +64,15 @@ export function verificationEmail(name, verifyToken) {
           Si no creaste esta cuenta, ignora este correo.
         </p>
         <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
-        <p style="color:#a0aec0;font-size:12px">Morelivery</p>
+        <p style="color:#a0aec0;font-size:12px">${UI_BRAND}</p>
       </div>`,
   };
 }
 
 export function resendVerificationEmail(name, verifyToken) {
-  const url = `${process.env.BACKEND_URL || 'https://morelivery.onrender.com'}/api/auth/verify-email?token=${verifyToken}`;
+  const url = `${BACKEND_BASE_URL}/api/auth/verify-email?token=${verifyToken}`;
   return {
-    subject: 'Tu enlace de verificacion - Morelivery',
+    subject: `Tu enlace de verificacion - ${UI_BRAND}`,
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
         <h2 style="color:#1a202c">Verificacion de correo</h2>
@@ -89,7 +90,7 @@ export function resendVerificationEmail(name, verifyToken) {
 export function resetPasswordEmail(name, resetToken) {
   const url = `${FRONT()}/reset-password?token=${resetToken}`;
   return {
-    subject: 'Recupera tu contrasena en Morelivery',
+    subject: `Recupera tu contrasena en ${UI_BRAND}`,
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
         <h2 style="color:#1a202c;margin-bottom:8px">Hola, ${name} 👋</h2>
@@ -104,7 +105,7 @@ export function resetPasswordEmail(name, resetToken) {
           Si no solicitaste esto, ignora este correo.
         </p>
         <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
-        <p style="color:#a0aec0;font-size:12px">Morelivery</p>
+        <p style="color:#a0aec0;font-size:12px">${UI_BRAND}</p>
       </div>`,
   };
 }

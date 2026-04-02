@@ -21,10 +21,11 @@ import { useDriverLocation } from '../../hooks/useDriverLocation';
 import { useNavFeatures } from '../../hooks/useNavFeatures';
 import { useOrderManager } from '../../hooks/useOrderManager';
 import { ZONE_LABELS } from '../../utils/format';
+import { brandStorageKey } from '../../config/brand';
 
 ensureDriverHomeAnimations();
 
-const HAND_MODE_KEY = 'morelivery_hand_mode';
+const HAND_MODE_KEY = brandStorageKey('hand_mode');
 
 export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
   const { auth, patchUser } = useAuth();

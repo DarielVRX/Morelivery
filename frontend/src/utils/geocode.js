@@ -1,12 +1,13 @@
 // src/utils/geocode.js
 // Único punto de verdad para reverse geocoding con Nominatim.
 // Devuelve tanto el label de display como los campos estructurados.
+import { brandUserAgent } from '../config/brand';
 
 export async function nominatimReverse(lat, lng, { apiFetch, token } = {}) {
   try {
     const r = await fetch(
       `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&countrycodes=mx&accept-language=es`,
-      { headers: { 'Accept-Language': 'es', 'User-Agent': 'Morelivery/1.0' } }
+      { headers: { 'Accept-Language': 'es', 'User-Agent': brandUserAgent() } }
     );
     const data = await r.json();
     const a = data.address || {};
