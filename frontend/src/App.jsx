@@ -202,7 +202,7 @@ function AuthScreen({ mode = 'login' }) {
   const wrongRole = auth.user && auth.user.role !== appKey;
 
   return (
-    <div style={{ minHeight: '100dvh', background: 'var(--bg-card)', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100dvh', background: 'var(--bg-card)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <header style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--gray-200)',
