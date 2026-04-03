@@ -243,7 +243,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         showRelease={order.showRelease}
         releaseNote={order.releaseNote}
         onToggleExpand={() => order.setOrderExpanded((e) => !e)}
-        onChangeStatus={(id, status) => order.changeStatus(id, status, setMsg)}
+        onChangeStatus={(id, status) => order.changeStatus(id, status, () => {})}
         onToggleRelease={() => order.setShowRelease((s) => !s)}
         onReleaseNoteChange={order.setReleaseNote}
         onConfirmRelease={() => order.doRelease(setMsg)}
@@ -257,6 +257,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         routeActive={home.routeActive}
         handMode={handMode}
         panelRef={activePanelRef}
+        distToNextStop={home.distToNextStop}
       />
     </div>
   );

@@ -389,6 +389,16 @@ export function useDriverHomeRuntime({
       });
   })();
 
+  // ── Distancia al próximo stop ─────────────────────────────────────────────
+  const distToNextStop = (() => {
+    if (!myPosition || !activeOrder) return null;
+    const isOTW = activeOrder.status === 'on_the_way';
+    const stopLat = isOTW ? Number(activeOrder.delivery_lat  ?? activeOrder.customer_lat)  : Number(activeOrder.restaurant_lat);
+    const stopLng = isOTW ? Number(activeOrder.delivery_lng  ?? activeOrder.customer_lng)  : Number(activeOrder.restaurant_lng);
+    if (!Number.isFinite(stopLat) || !Number.isFinite(stopLng)) return null;
+    return Math.round(haversineMeters(myPosition.lat, myPosition.lng, stopLat, stopLng));
+  })();
+
   return {
     counters,
     customPin, setCustomPin,
@@ -418,5 +428,6 @@ export function useDriverHomeRuntime({
     openOfferRoutePreview,
     openFullOfferRoute,
     closeOfferPreview,
+    distToNextStop,
   };
 }

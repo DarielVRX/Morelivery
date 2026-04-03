@@ -65,12 +65,36 @@ export default function ActiveOrderPanel({
   routeActive = false,
   handMode = 'left',
   panelRef,
+  distToNextStop = null,
 }) {
   const [showCallSelector, setShowCallSelector] = useState(false);
   const [callingTarget,    setCallingTarget]    = useState(null);
   const [callFeedback,     setCallFeedback]     = useState(null);
   const [chatOpen,         setChatOpen]         = useState(false);
   const [kitchenSecsLeft,  setKitchenSecsLeft]  = useState(null);
+  const [statusFeedback,   setStatusFeedback]   = useState(null); // { ok, msg }
+  const statusFeedbackTimer = useRef(null);
+
+  const handleChangeStatus = async (id, status) => {
+    clearTimeout(statusFeedbackTimer.current);
+    setStatusFeedback(null);
+    try {
+      await onChangeStatus(id, status);
+    } catch (e) {
+      const msg = e?.message || '';
+      let feedback;
+      if (msg.includes('100m') || msg.includes('Debes estar')) {
+        const dist = distToNextStop != null ? ` (estás a ${distToNextStop}m)` : '';
+        feedback = `Debes estar más cerca del punto${dist}`;
+      } else if (msg.includes('No se puede cambiar') || msg.includes('estado')) {
+        feedback = 'El pedido aún no está listo para este cambio';
+      } else {
+        feedback = msg || 'No se pudo actualizar el estado';
+      }
+      setStatusFeedback({ ok: false, msg: feedback });
+      statusFeedbackTimer.current = setTimeout(() => setStatusFeedback(null), 4000);
+    }
+  };
 
   // Countdown de cocina — solo activo en estados previos al pickup
   useEffect(() => {
@@ -104,10 +128,21 @@ export default function ActiveOrderPanel({
   const total  = getOrderGrandTotalCents(order);
   const earn   = getDriverEarningCents(order);
 
-  const canOTW     = order.status === 'ready';
+  // El backend valida distancia y transición de estado — el frontend solo
+  // habilita los botones según el estado lógico mínimo, sin replicar validaciones.
+  const canOTW     = ['assigned', 'accepted', 'preparing', 'ready'].includes(order.status);
   const canDeliver = order.status === 'on_the_way';
   const canRelevo  = !['on_the_way','delivered','cancelled'].includes(order.status) && !order.picked_up_at && !order.is_disputed;
   const canRelease = !['on_the_way','delivered','cancelled'].includes(order.status);
+
+  // Proximidad al stop activo — solo informativo
+  const FENCE_M    = 100;
+  const nearStop   = distToNextStop != null && distToNextStop <= FENCE_M;
+  const distLabel  = distToNextStop != null
+    ? distToNextStop <= FENCE_M
+      ? `A ${distToNextStop}m ✓`
+      : `A ${distToNextStop}m`
+    : null;
 
   const isRight = handMode === 'right';
   const restaurantConfirmed = order.restaurant_confirmed !== false;
@@ -221,31 +256,59 @@ export default function ActiveOrderPanel({
           <button
             style={{
               padding:'0.5rem 0.75rem', borderRadius:8, fontWeight:700, fontSize:'0.8rem',
-              border:'none', cursor: canOTW ? 'pointer' : 'not-allowed',
+              border: nearStop && canOTW ? '2px solid var(--success)' : 'none',
+              cursor: canOTW ? 'pointer' : 'not-allowed',
               display:'flex', alignItems:'center', justifyContent:'center', gap:5,
               background: canOTW ? 'var(--brand)' : 'var(--bg-raised)',
               color: canOTW ? '#fff' : 'var(--text-tertiary)',
               opacity: canOTW ? 1 : 0.45, minWidth:100, minHeight:44,
+              transition: 'border 0.2s',
             }}
             disabled={loadingStatus === 'on_the_way' || !canOTW}
-            onClick={() => onChangeStatus(order.id, 'on_the_way')}>
+            onClick={() => handleChangeStatus(order.id, 'on_the_way')}>
             <IconOTW /> En camino
           </button>
           <button
             style={{
               padding:'0.5rem 0.75rem', borderRadius:8, fontWeight:700, fontSize:'0.8rem',
-              border:'none', cursor: canDeliver ? 'pointer' : 'not-allowed',
+              border: nearStop && canDeliver ? '2px solid var(--success)' : 'none',
+              cursor: canDeliver ? 'pointer' : 'not-allowed',
               display:'flex', alignItems:'center', justifyContent:'center', gap:5,
               background: canDeliver ? 'var(--success)' : 'var(--bg-raised)',
               color: canDeliver ? '#fff' : 'var(--text-tertiary)',
               opacity: canDeliver ? 1 : 0.45, minWidth:100, minHeight:44,
+              transition: 'border 0.2s',
             }}
             disabled={loadingStatus === 'delivered' || !canDeliver}
-            onClick={() => onChangeStatus(order.id, 'delivered')}>
+            onClick={() => handleChangeStatus(order.id, 'delivered')}>
             <IconDelivered /> Entregado
           </button>
+
+          {/* Indicador de distancia al stop activo */}
+          {distLabel && (canOTW || canDeliver) && (
+            <span style={{
+              fontSize: '0.68rem', fontWeight: 600, textAlign: 'center',
+              color: nearStop ? 'var(--success)' : 'var(--text-tertiary)',
+              transition: 'color 0.3s',
+            }}>
+              {distLabel}
+            </span>
+          )}
         </div>
       </div>
+
+      {/* Feedback de cambio de estado */}
+      {statusFeedback && (
+        <div style={{
+          padding: '0.35rem 0.75rem',
+          background: 'var(--danger-bg, #fef2f2)',
+          borderTop: '1px solid var(--danger-border, #fca5a5)',
+          fontSize: '0.78rem', fontWeight: 600,
+          color: 'var(--danger, #dc2626)',
+        }}>
+          {statusFeedback.msg}
+        </div>
+      )}
 
       {/* Expandible */}
       <div style={{

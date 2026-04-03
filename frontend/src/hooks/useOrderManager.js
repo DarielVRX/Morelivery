@@ -314,7 +314,7 @@ export function useOrderManager(token, patchUser, userDriver) {
       await apiFetch(`/orders/${orderId}/status`, { method:'PATCH', body: JSON.stringify(body) }, token);
       loadData();
       notifyOrdersPanel();
-    } catch (e) { onError?.(e.message); }
+    } catch (e) { onError?.(e.message); throw e; }
     finally { setLoadingStatus(''); }
   }
 
