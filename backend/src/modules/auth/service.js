@@ -116,18 +116,18 @@ function getLockDuration(attempts) {
   return 0;
 }
 
-async function getLoginAttempts(db, email, fingerprint) {
+async function getLoginAttempts(query, email, fingerprint) {
   const fp = fingerprint || null;
-  const r  = await db.query(
+  const r  = await query(
     'SELECT * FROM login_attempts WHERE email=$1 AND (fingerprint=$2 OR (fingerprint IS NULL AND $2::text IS NULL)) LIMIT 1',
     [email, fp],
   );
   return r.rows[0] || null;
 }
 
-async function recordLoginFailure(db, email, fingerprint, userName) {
+async function recordLoginFailure(query, email, fingerprint, userName) {
   const fp  = fingerprint || null;
-  const row = await getLoginAttempts(db, email, fp);
+  const row = await getLoginAttempts(query, email, fp);
 
   let newAttempts;
   let lockedUntil = null;
@@ -144,12 +144,12 @@ async function recordLoginFailure(db, email, fingerprint, userName) {
   }
 
   if (row) {
-    await db.query(
+    await query(
       'UPDATE login_attempts SET attempts=$1, locked_until=$2, last_attempt=NOW() WHERE id=$3',
       [newAttempts, lockedUntil, row.id],
     );
   } else {
-    await db.query(
+    await query(
       'INSERT INTO login_attempts (email, fingerprint, attempts, locked_until) VALUES ($1,$2,$3,$4)',
       [email, fp, newAttempts, lockedUntil],
     );
@@ -159,7 +159,7 @@ async function recordLoginFailure(db, email, fingerprint, userName) {
   if (newAttempts >= 10 && userName) {
     const unlockToken   = jwt.sign({ email, purpose: 'account-unlock' }, process.env.RESET_TOKEN_SECRET || env.jwtSecret, { expiresIn: '1h' });
     const unlockExpires = new Date(Date.now() + 60 * 60 * 1000);
-    await db.query(
+    await query(
       'UPDATE users SET account_locked=TRUE, account_unlock_token=$1, account_unlock_expires=$2 WHERE real_email=$3 OR email=$4',
       [unlockToken, unlockExpires, email, email],
     );
@@ -170,9 +170,9 @@ async function recordLoginFailure(db, email, fingerprint, userName) {
   return { attempts: newAttempts, lockedUntil };
 }
 
-async function clearLoginAttempts(db, email, fingerprint) {
+async function clearLoginAttempts(query, email, fingerprint) {
   const fp = fingerprint || null;
-  await db.query(
+  await query(
     'DELETE FROM login_attempts WHERE email=$1 AND (fingerprint=$2 OR (fingerprint IS NULL AND $2::text IS NULL))',
     [email, fp],
   );
