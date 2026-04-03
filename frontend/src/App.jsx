@@ -202,11 +202,12 @@ function AuthScreen({ mode = 'login' }) {
   const wrongRole = auth.user && auth.user.role !== appKey;
 
   return (
-    <div style={{ height: '100dvh', background: 'var(--bg-card)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ height: '100dvh', background: 'var(--bg-card)', display: 'flex', flexDirection: 'column' }}>
       <header style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--gray-200)',
         background: 'var(--bg-card)', position: 'sticky', top: 0, zIndex: 10,
+        flexShrink: 0,
       }}>
         <div style={{ width: 34 }} />  {/* spacer para centrar el logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
