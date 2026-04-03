@@ -173,6 +173,40 @@ export default function ProfilePage() {
           isError={security.pwdErr}
         />
 
+        {/* ── Toggle 2FA ── */}
+        <div style={{ background: 'var(--bg-card)', borderRadius: 12, padding: '1rem', marginBottom: '1rem', border: '1px solid var(--border-light)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>Verificación en dos pasos</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                Al iniciar sesión se enviará un código a tu correo.
+              </div>
+            </div>
+            <button
+              onClick={security.toggleTwoFa}
+              disabled={security.twoFaLoading}
+              style={{
+                width: 44, height: 24, borderRadius: 12, border: 'none', cursor: security.twoFaLoading ? 'wait' : 'pointer',
+                background: security.twoFaEnabled ? 'var(--brand)' : 'var(--border)',
+                position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+                opacity: security.twoFaLoading ? 0.6 : 1,
+              }}
+              aria-label={security.twoFaEnabled ? 'Desactivar 2FA' : 'Activar 2FA'}
+            >
+              <span style={{
+                position: 'absolute', top: 3, width: 18, height: 18, borderRadius: '50%',
+                background: '#fff', transition: 'left 0.2s',
+                left: security.twoFaEnabled ? 23 : 3,
+              }} />
+            </button>
+          </div>
+          {security.twoFaMsg && (
+            <p style={{ fontSize: '0.78rem', marginTop: '0.5rem', color: security.twoFaErr ? 'var(--error)' : 'var(--success)', margin: '0.5rem 0 0' }}>
+              {security.twoFaMsg}
+            </p>
+          )}
+        </div>
+
         <AccountManagementSection
           deleteConfirm={security.deleteConfirm}
           onDeleteAccount={security.deleteAccount}

@@ -89,8 +89,70 @@ function AddressBlock({ postalCode, setPostalCode, estado, setEstado, ciudad, se
   );
 }
 
+// ── TwoFaView ─────────────────────────────────────────────────────────────────
+function TwoFaView({ userId, onSuccess, onGoLogin }) {
+  const [code,    setCode]    = useState('');
+  const [loading, setLoading] = useState(false);
+  const [msg,     setMsg]     = useState('');
+
+  async function submitCode() {
+    const trimmed = code.trim();
+    if (trimmed.length !== 6) { setMsg('Ingresa el código de 6 dígitos'); return; }
+    setLoading(true);
+    try {
+      const data = await apiFetch('/auth/verify-2fa', { method: 'POST', body: JSON.stringify({ userId, code: trimmed }) });
+      onSuccess(data);
+    } catch (e) { setMsg(e.message || 'Código incorrecto o expirado'); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <>
+      <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+        Te enviamos un código de 6 dígitos a tu correo. Ingrésalo para continuar.
+      </p>
+      <div className="row">
+        <label>Código de verificación
+          <input value={code} onChange={e => setCode(e.target.value.replace(/\D/g,'').slice(0,6))}
+            inputMode="numeric" placeholder="000000" autoComplete="one-time-code"
+            onKeyDown={e => e.key === 'Enter' && submitCode()} />
+        </label>
+      </div>
+      <div className="row" style={{ marginTop: '0.75rem' }}>
+        <button className="btn-primary" onClick={submitCode} disabled={loading}>
+          {loading ? 'Verificando…' : 'Confirmar'}
+        </button>
+        <button type="button" onClick={onGoLogin}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.875rem', textAlign: 'center', padding: '0.25rem 0' }}>
+          ← Volver
+        </button>
+      </div>
+      {msg && <p className="flash flash-error" style={{ marginTop: '0.75rem' }}>{msg}</p>}
+    </>
+  );
+}
+
 // ── LoginView ─────────────────────────────────────────────────────────────────
-function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer' }) {
+function useCountdown(lockedUntil) {
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    if (!lockedUntil) { setSecs(0); return; }
+    const calc = () => Math.max(0, Math.round((new Date(lockedUntil) - Date.now()) / 1000));
+    setSecs(calc());
+    const iv = setInterval(() => { const s = calc(); setSecs(s); if (s <= 0) clearInterval(iv); }, 1000);
+    return () => clearInterval(iv);
+  }, [lockedUntil]);
+  return secs;
+}
+
+function fmtCountdown(secs) {
+  if (secs <= 0) return '';
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer', onTwoFa }) {
   const { login }   = useAuth();
   const navigate    = useNavigate();
   const [loading,   setLoading]   = useState(false);
@@ -104,6 +166,15 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer' 
   const [installPrompt, setInstallPrompt] = useState(null);
   const emailRef    = useRef(null);
   const passwordRef = useRef(null);
+
+  // ── Estado de intentos / bloqueo ──────────────────────────────────────────
+  const [attempts,     setAttempts]     = useState(0);
+  const [lockedUntil,  setLockedUntil]  = useState(null);  // bloqueo temporal dispositivo
+  const [accountLocked, setAccountLocked] = useState(false); // bloqueo permanente cuenta
+  const [suggestReset, setSuggestReset] = useState(false);  // banner fallo >= 3
+  const [suggest2Fa,   setSuggest2Fa]   = useState(false);  // sugerencia post fallo 10+
+  const countdown = useCountdown(lockedUntil);
+  const formBlocked = accountLocked || countdown > 0;
 
   useEffect(() => { roleRef.current = role; }, [role]);
 
@@ -150,24 +221,52 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer' 
     const email    = emailRef.current?.value?.trim() || '';
     const password = passwordRef.current?.value      || '';
     if (!email || !password) { setMsg('Ingresa tu correo y contraseña'); return; }
+    if (formBlocked) return;
     setLoading(true);
+    setMsg('');
     try {
       const deviceFingerprint = await getFingerprint();
       const data = await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, role: appKey || undefined, deviceFingerprint }) });
-      // Solo validación estricta para admin — sin revelar rol en otros casos
       if (appKey === 'admin' && data.user.role !== 'admin') {
         setMsg('Correo o contraseña incorrectos.');
+        return;
+      }
+      // ── 2FA requerido ─────────────────────────────────────────────────────
+      if (data.requiresTwoFa) {
+        onTwoFa?.(data.userId);
         return;
       }
       login({ token: data.token, user: data.user });
       navigate(`/${data.user.role}`);
     } catch (e) {
-      // Error genérico — no revelar si el rol es incorrecto ni si el correo existe
-      setMsg('Correo o contraseña incorrectos.');
+      const extra = e.extra || {};
+
+      // Bloqueo permanente de cuenta
+      if (e.status === 403 && e.message?.includes('bloqueada')) {
+        setAccountLocked(true);
+        setMsg(e.message);
+        return;
+      }
+      // Bloqueo temporal de dispositivo (423) o lockedUntil en respuesta
+      if (e.status === 423 || extra.lockedUntil) {
+        setLockedUntil(extra.lockedUntil || null);
+        setAttempts(extra.attempts || attempts);
+        setMsg('');
+        return;
+      }
+      // Actualizar contador de intentos y banderas
+      if (extra.attempts) {
+        setAttempts(extra.attempts);
+        setSuggestReset(extra.suggestReset || false);
+        if (extra.attempts >= 10) setSuggest2Fa(true);
+        if (extra.lockedUntil) { setLockedUntil(extra.lockedUntil); setMsg(''); return; }
+      }
       if (e.message?.includes('verificar tu correo')) {
         setMsg('Verifica tu correo antes de ingresar.');
         setShowResend(true);
+        return;
       }
+      setMsg('Correo o contraseña incorrectos.');
     } finally { setLoading(false); }
   }
 
@@ -185,13 +284,50 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer' 
 
   return (
     <>
+      {/* Banner: cuenta bloqueada */}
+      {accountLocked && (
+        <div style={{ background: 'var(--danger-bg, #fef2f2)', border: '1px solid var(--danger-border, #fca5a5)', borderRadius: 8, padding: '0.65rem 0.9rem', marginBottom: '0.75rem', fontSize: '0.82rem', color: 'var(--danger, #dc2626)' }}>
+          🔒 Tu cuenta está bloqueada por actividad sospechosa. <strong>Revisa tu correo</strong> para recibir el enlace de desbloqueo.
+        </div>
+      )}
+
+      {/* Banner: bloqueo temporal con countdown */}
+      {!accountLocked && countdown > 0 && (
+        <div style={{ background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', borderRadius: 8, padding: '0.65rem 0.9rem', marginBottom: '0.75rem', fontSize: '0.82rem', color: 'var(--warn)' }}>
+          ⏳ Demasiados intentos fallidos. Podrás intentarlo de nuevo en <strong>{fmtCountdown(countdown)}</strong>.
+          <div style={{ fontSize: '0.78rem', marginTop: '0.25rem', opacity: 0.85 }}>
+            Esto protege tu cuenta para evitar su suspensión.
+          </div>
+        </div>
+      )}
+
+      {/* Banner: sugerir recuperación por correo (fallo >= 3) */}
+      {!accountLocked && countdown <= 0 && suggestReset && (
+        <div style={{ background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', borderRadius: 8, padding: '0.65rem 0.9rem', marginBottom: '0.75rem', fontSize: '0.82rem', color: 'var(--warn)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+          <span>¿Olvidaste tu contraseña? Te recomendamos recuperarla por correo.</span>
+          <button type="button" onClick={onGoForgot}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontWeight: 700, fontSize: '0.82rem', whiteSpace: 'nowrap', padding: 0 }}>
+            Recuperar →
+          </button>
+        </div>
+      )}
+
+      {/* Banner: sugerir activar 2FA (post fallo 10+) */}
+      {suggest2Fa && !accountLocked && (
+        <div style={{ background: 'var(--info-bg, #eff6ff)', border: '1px solid var(--info-border, #bfdbfe)', borderRadius: 8, padding: '0.65rem 0.9rem', marginBottom: '0.75rem', fontSize: '0.82rem', color: 'var(--info, #1d4ed8)' }}>
+          🔐 Para mayor seguridad, considera activar la verificación en dos pasos desde tu perfil una vez que ingreses.
+        </div>
+      )}
+
       <div className="row">
         <label>Correo electrónico
           <input ref={emailRef} defaultValue="" type="email" placeholder="tu@correo.com" autoComplete="email"
+            disabled={formBlocked}
             onKeyDown={e => e.key === 'Enter' && submitLogin()} />
         </label>
         <label>Contraseña
           <input ref={passwordRef} defaultValue="" type="password" placeholder="Tu contraseña" autoComplete="current-password"
+            disabled={formBlocked}
             onKeyDown={e => e.key === 'Enter' && submitLogin()} />
         </label>
       </div>
@@ -218,7 +354,7 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer' 
       </div>
 
       <div className="row">
-        <button className="btn-primary" onClick={submitLogin} disabled={loading}>
+        <button className="btn-primary" onClick={submitLogin} disabled={loading || formBlocked}>
           {loading ? 'Ingresando…' : 'Iniciar sesión'}
         </button>
 
@@ -565,9 +701,13 @@ export default function AuthPage({ mode = 'login', appKey = null }) {
   const [searchParams]  = useSearchParams();
   const [view, setView] = useState(mode);
   const [verifiedBanner, setVerifiedBanner] = useState(searchParams.get('verified') === '1');
+  const [unlockedBanner, setUnlockedBanner] = useState(searchParams.get('unlocked') === '1');
   const [showVerifyHint, setShowVerifyHint] = useState(false);
+  const [twoFaUserId,   setTwoFaUserId]    = useState(null);
 
-  // Rol compartido — los links de rol en login llevan al registro con rol preseleccionado
+  const { login }   = useAuth();
+  const navigate    = useNavigate();
+
   const [sharedRole, setSharedRole] = useState('customer');
 
   function goTo(v, role = null) {
@@ -575,22 +715,34 @@ export default function AuthPage({ mode = 'login', appKey = null }) {
     setView(v);
   }
 
-  const TITLES = { login: 'Iniciar sesión', register: 'Crear cuenta', forgot: 'Recuperar contraseña' };
+  function handleTwoFaSuccess(data) {
+    login({ token: data.token, user: data.user });
+    navigate(`/${data.user.role}`);
+  }
+
+  const TITLES = { login: 'Iniciar sesión', register: 'Crear cuenta', forgot: 'Recuperar contraseña', twofa: 'Verificación en dos pasos' };
   const SUBS   = {
     login:    'Ingresa con tu correo y contraseña.',
     register: 'Completa los datos para registrarte.',
     forgot:   'Te enviaremos un enlace para restablecer tu contraseña.',
+    twofa:    'Ingresa el código que enviamos a tu correo.',
   };
 
   return (
     <section className="auth-card">
-      <div style={{ marginBottom: '0.25rem' }}><h2 style={{ margin: 0 }}>{TITLES[view]}</h2></div>
-      <p style={{ marginBottom: '1rem', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>{SUBS[view]}</p>
+      <div style={{ marginBottom: '0.25rem' }}><h2 style={{ margin: 0 }}>{TITLES[view] || TITLES.login}</h2></div>
+      <p style={{ marginBottom: '1rem', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>{SUBS[view] || SUBS.login}</p>
 
       {verifiedBanner && (
         <div style={{ background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: 8, padding: '0.65rem 0.9rem', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
           <span style={{ fontSize: '0.85rem', color: 'var(--success)' }}>✅ Correo verificado. Ya puedes iniciar sesión.</span>
           <button onClick={() => setVerifiedBanner(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--success)', fontSize: '1rem', lineHeight: 1 }}>✕</button>
+        </div>
+      )}
+      {unlockedBanner && (
+        <div style={{ background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: 8, padding: '0.65rem 0.9rem', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ fontSize: '0.85rem', color: 'var(--success)' }}>✅ Cuenta desbloqueada. Ya puedes iniciar sesión.</span>
+          <button onClick={() => setUnlockedBanner(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--success)', fontSize: '1rem', lineHeight: 1 }}>✕</button>
         </div>
       )}
       {showVerifyHint && view === 'login' && (
@@ -606,6 +758,14 @@ export default function AuthPage({ mode = 'login', appKey = null }) {
           initialRole={sharedRole}
           onGoRegister={(role) => goTo('register', role || 'customer')}
           onGoForgot={() => goTo('forgot')}
+          onTwoFa={(userId) => { setTwoFaUserId(userId); setView('twofa'); }}
+        />
+      )}
+      {view === 'twofa' && (
+        <TwoFaView
+          userId={twoFaUserId}
+          onSuccess={handleTwoFaSuccess}
+          onGoLogin={() => goTo('login')}
         />
       )}
       {view === 'register' && (

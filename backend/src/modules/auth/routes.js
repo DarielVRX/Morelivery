@@ -10,6 +10,7 @@ import {
   registerUser, loginUser, updateProfileAddress, changePassword,
   deleteAccount, updateLoginUsername,
   googleLogin, forgotPassword, resetPassword, verifyEmail, resendVerificationEmail,
+  unlockAccount, verifyTwoFaCode, toggleTwoFa,
 } from './service.js';
 import { AppError } from '../../utils/errors.js';
 import { authRateLimit } from '../../middlewares/rateLimit.js';
@@ -178,6 +179,35 @@ router.get('/postal/:cp', async (req, res, next) => {
     } catch (_) {}
 
     return next(new AppError(404, 'CP no encontrado'));
+  } catch (error) { return next(error); }
+});
+
+/* ── GET /auth/unlock-account?token=xxx ──────────────────────────────────── */
+router.get('/unlock-account', async (req, res, next) => {
+  try {
+    await unlockAccount(String(req.query.token || ''));
+    const frontUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    return res.redirect(`${frontUrl}/login?unlocked=1`);
+  } catch (error) { return next(error); }
+});
+
+/* ── POST /auth/verify-2fa ───────────────────────────────────────────────── */
+router.post('/verify-2fa', authRateLimit, async (req, res, next) => {
+  try {
+    const { userId, code } = req.body || {};
+    if (!userId || !code) return next(new AppError(400, 'userId y código son requeridos'));
+    const result = await verifyTwoFaCode(userId, String(code).trim());
+    return res.json(result);
+  } catch (error) { return next(error); }
+});
+
+/* ── PATCH /auth/2fa ─────────────────────────────────────────────────────── */
+router.patch('/2fa', authenticate, async (req, res, next) => {
+  try {
+    const { enable } = req.body || {};
+    if (typeof enable !== 'boolean') return next(new AppError(400, '"enable" debe ser true o false'));
+    const result = await toggleTwoFa(req.user.userId, enable);
+    return res.json(result);
   } catch (error) { return next(error); }
 });
 

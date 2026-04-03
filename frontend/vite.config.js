@@ -22,7 +22,7 @@ export default defineConfig(({ mode }) => {
                             {
                               name: 'html-transform',
                             transformIndexHtml(html) {
-                              return html.replace(/%VITE_UI_BRAND%/g, UI_BRAND);
+                              return html.replace(/__UI_BRAND__/g, UI_BRAND);
                             },
                             },
     ],

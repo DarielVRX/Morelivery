@@ -18,6 +18,30 @@ export function useProfileSecurity({ token, user, patchUser }) {
   const [deletePwd, setDeletePwd] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  // ── 2FA ───────────────────────────────────────────────────────────────────
+  const [twoFaEnabled,  setTwoFaEnabled]  = useState(user?.two_fa_enabled ?? false);
+  const [twoFaLoading,  setTwoFaLoading]  = useState(false);
+  const [twoFaMsg,      setTwoFaMsg]      = useState('');
+  const [twoFaErr,      setTwoFaErr]      = useState(false);
+
+  async function toggleTwoFa() {
+    setTwoFaLoading(true);
+    setTwoFaMsg('');
+    try {
+      const result = await apiFetch('/auth/2fa', {
+        method: 'PATCH',
+        body: JSON.stringify({ enable: !twoFaEnabled }),
+      }, token);
+      setTwoFaEnabled(result.two_fa_enabled);
+      patchUser({ two_fa_enabled: result.two_fa_enabled });
+      setTwoFaMsg(result.two_fa_enabled ? 'Verificación en dos pasos activada.' : 'Verificación en dos pasos desactivada.');
+      setTwoFaErr(false);
+    } catch (e) {
+      setTwoFaMsg(e.message || 'Error al actualizar');
+      setTwoFaErr(true);
+    } finally { setTwoFaLoading(false); }
+  }
+
   async function deleteAccount() {
     if (!deleteConfirm) {
       setDeleteConfirm(true);
@@ -157,5 +181,10 @@ export function useProfileSecurity({ token, user, patchUser }) {
       setDeletePwd('');
       setDeleteMsg('');
     },
+    twoFaEnabled,
+    twoFaLoading,
+    twoFaMsg,
+    twoFaErr,
+    toggleTwoFa,
   };
 }

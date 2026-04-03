@@ -87,6 +87,58 @@ export function resendVerificationEmail(name, verifyToken) {
   };
 }
 
+export function accountLockedEmail(name, unlockToken) {
+  const url = `${FRONT()}/unlock-account?token=${unlockToken}`;
+  return {
+    subject: `Actividad sospechosa detectada en tu cuenta - ${UI_BRAND}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+        <h2 style="color:#1a202c;margin-bottom:8px">Hola, ${name} 👋</h2>
+        <p style="color:#4a5568">
+          Detectamos múltiples intentos de acceso fallidos en tu cuenta desde un dispositivo desconocido.
+          Por seguridad, hemos <strong>bloqueado el acceso</strong> para evitar la suspensión de tu cuenta.
+        </p>
+        <p style="color:#4a5568">
+          Si eres tú, usa el botón de abajo para desbloquearla. Si no reconoces esta actividad,
+          te recomendamos desbloquear tu cuenta y revisar que nadie más tenga acceso a tu correo.
+        </p>
+        <p style="margin:24px 0">
+          <a href="${url}" style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">
+            Desbloquear mi cuenta
+          </a>
+        </p>
+        <p style="color:#718096;font-size:13px">
+          Este enlace expira en <strong>1 hora</strong>.<br>
+          Si no intentaste ingresar, ignora este correo — tu cuenta permanecerá bloqueada.
+        </p>
+        <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
+        <p style="color:#a0aec0;font-size:12px">${UI_BRAND}</p>
+      </div>`,
+  };
+}
+
+export function twoFaCodeEmail(name, code) {
+  return {
+    subject: `Tu código de verificación - ${UI_BRAND}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+        <h2 style="color:#1a202c;margin-bottom:8px">Hola, ${name} 👋</h2>
+        <p style="color:#4a5568">Tu código de verificación de dos pasos es:</p>
+        <div style="margin:24px 0;text-align:center">
+          <span style="font-size:2.5rem;font-weight:800;letter-spacing:0.35em;color:#1a202c;font-family:monospace">
+            ${code}
+          </span>
+        </div>
+        <p style="color:#718096;font-size:13px">
+          Este código expira en <strong>10 minutos</strong>.<br>
+          Si no intentaste ingresar, alguien puede tener tu contraseña — considera cambiarla.
+        </p>
+        <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
+        <p style="color:#a0aec0;font-size:12px">${UI_BRAND}</p>
+      </div>`,
+  };
+}
+
 export function resetPasswordEmail(name, resetToken) {
   const url = `${FRONT()}/reset-password?token=${resetToken}`;
   return {

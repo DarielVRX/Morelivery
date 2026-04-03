@@ -7,7 +7,7 @@ import { AppError }  from '../../utils/errors.js';
 import { logEvent }  from '../../utils/logger.js';
 import { randomUUID } from 'crypto';
 import { checkName } from '../../utils/nameFilter.js';
-import { sendGmailSafe, verificationEmail, resendVerificationEmail as resendVerificationEmailTemplate, resetPasswordEmail } from './emailService.js';
+import { sendGmailSafe, verificationEmail, resendVerificationEmail as resendVerificationEmailTemplate, resetPasswordEmail, accountLockedEmail, twoFaCodeEmail } from './emailService.js';
 import {
   normalizeUsername, pseudoEmailFromUsername, resolveUniqueUsername,
   checkAndSaveFingerprint, insertUser, findUserForLogin,
@@ -101,31 +101,161 @@ export async function registerUser(payload) {
 }
 
 // ── LOGIN ─────────────────────────────────────────────────────────────────────
+// Umbrales de bloqueo escalonado (intentos acumulativos)
+const LOCK_THRESHOLDS = [
+  { at: 5,  minutes: 15 },
+  { at: 8,  minutes: 60 },
+  { at: 10, minutes: 24 * 60 }, // tras este nivel → bloqueo permanente de cuenta
+];
+
+function getLockDuration(attempts) {
+  // De mayor a menor para encontrar el umbral alcanzado
+  for (let i = LOCK_THRESHOLDS.length - 1; i >= 0; i--) {
+    if (attempts >= LOCK_THRESHOLDS[i].at) return LOCK_THRESHOLDS[i].minutes;
+  }
+  return 0;
+}
+
+async function getLoginAttempts(db, email, fingerprint) {
+  const fp = fingerprint || null;
+  const r  = await db.query(
+    'SELECT * FROM login_attempts WHERE email=$1 AND (fingerprint=$2 OR (fingerprint IS NULL AND $2::text IS NULL)) LIMIT 1',
+    [email, fp],
+  );
+  return r.rows[0] || null;
+}
+
+async function recordLoginFailure(db, email, fingerprint, userName) {
+  const fp  = fingerprint || null;
+  const row = await getLoginAttempts(db, email, fp);
+
+  let newAttempts;
+  let lockedUntil = null;
+
+  if (row) {
+    newAttempts = row.attempts + 1;
+  } else {
+    newAttempts = 1;
+  }
+
+  const lockMinutes = getLockDuration(newAttempts);
+  if (lockMinutes > 0) {
+    lockedUntil = new Date(Date.now() + lockMinutes * 60 * 1000);
+  }
+
+  if (row) {
+    await db.query(
+      'UPDATE login_attempts SET attempts=$1, locked_until=$2, last_attempt=NOW() WHERE id=$3',
+      [newAttempts, lockedUntil, row.id],
+    );
+  } else {
+    await db.query(
+      'INSERT INTO login_attempts (email, fingerprint, attempts, locked_until) VALUES ($1,$2,$3,$4)',
+      [email, fp, newAttempts, lockedUntil],
+    );
+  }
+
+  // Fallo 10+: bloquear cuenta y enviar correo de aviso
+  if (newAttempts >= 10 && userName) {
+    const unlockToken   = jwt.sign({ email, purpose: 'account-unlock' }, process.env.RESET_TOKEN_SECRET || env.jwtSecret, { expiresIn: '1h' });
+    const unlockExpires = new Date(Date.now() + 60 * 60 * 1000);
+    await db.query(
+      'UPDATE users SET account_locked=TRUE, account_unlock_token=$1, account_unlock_expires=$2 WHERE real_email=$3 OR email=$4',
+      [unlockToken, unlockExpires, email, email],
+    );
+    const { subject, html } = accountLockedEmail(userName, unlockToken);
+    sendGmailSafe({ to: email, subject, html });
+  }
+
+  return { attempts: newAttempts, lockedUntil };
+}
+
+async function clearLoginAttempts(db, email, fingerprint) {
+  const fp = fingerprint || null;
+  await db.query(
+    'DELETE FROM login_attempts WHERE email=$1 AND (fingerprint=$2 OR (fingerprint IS NULL AND $2::text IS NULL))',
+    [email, fp],
+  );
+}
+
 export async function loginUser(payload) {
   if (!payload.email) throw new AppError(400, 'Correo requerido');
+
+  const { query } = await import('../../config/db.js');
+  const fp        = payload.deviceFingerprint || null;
+
+  // ── 1. Verificar bloqueo de dispositivo (login_attempts) ─────────────────
+  const attemptRow = await getLoginAttempts(query, payload.email, fp);
+  if (attemptRow?.locked_until && new Date(attemptRow.locked_until) > new Date()) {
+    throw new AppError(423, 'Dispositivo bloqueado temporalmente para evitar la suspensión de tu cuenta.', {
+      lockedUntil: attemptRow.locked_until,
+      attempts:    attemptRow.attempts,
+    });
+  }
 
   const user = await findUserForLogin(payload.email, payload.role);
   if (!user) {
     logEvent('auth.login_error', { email: payload.email, reason: 'user_not_found' });
-    throw new AppError(401, 'Credenciales inválidas');
+    await recordLoginFailure(query, payload.email, fp, null);
+    const row = await getLoginAttempts(query, payload.email, fp);
+    throw new AppError(401, 'Credenciales inválidas', {
+      attempts:     row?.attempts || 1,
+      suggestReset: (row?.attempts || 1) >= 3,
+      lockedUntil:  row?.locked_until || null,
+    });
   }
+
   if (user.status === 'suspended') throw new AppError(403, 'Cuenta suspendida. Contacta a soporte.');
+
+  // ── 2. Verificar bloqueo permanente de cuenta ─────────────────────────────
+  if (user.account_locked) {
+    throw new AppError(403, 'Tu cuenta está bloqueada por actividad sospechosa. Revisa tu correo para desbloquearla.');
+  }
+
   if (user.role === 'customer' && user.email_verified === false) {
     throw new AppError(403, 'Debes verificar tu correo electrónico antes de ingresar. Revisa tu bandeja de entrada.');
   }
 
+  // ── 3. Verificar bloqueo de fingerprint permanente ────────────────────────
+  if (fp && user.role === 'customer') {
+    try {
+      const blocked = await query('SELECT 1 FROM blocked_fingerprints WHERE fingerprint=$1', [fp]);
+      if (blocked.rowCount > 0) throw new AppError(403, 'Acceso bloqueado desde este dispositivo.');
+    } catch (e) { if (e instanceof AppError) throw e; }
+  }
+
+  // ── 4. Validar contraseña ─────────────────────────────────────────────────
   const passwordMatch = await bcrypt.compare(payload.password, user.password_hash);
   if (!passwordMatch) {
     logEvent('auth.login_error', { userId: user.id, reason: 'wrong_password' });
-    throw new AppError(401, 'Credenciales inválidas');
+    const userName = user.alias || user.full_name || null;
+    const { attempts, lockedUntil } = await recordLoginFailure(query, payload.email, fp, userName);
+    throw new AppError(401, 'Credenciales inválidas', {
+      attempts,
+      suggestReset: attempts >= 3,
+      lockedUntil:  lockedUntil || null,
+    });
   }
 
-  if (payload.deviceFingerprint && user.role === 'customer') {
-    try {
-      const { query } = await import('../../config/db.js');
-      const blocked   = await query('SELECT 1 FROM blocked_fingerprints WHERE fingerprint=$1', [payload.deviceFingerprint]);
-      if (blocked.rowCount > 0) throw new AppError(403, 'Acceso bloqueado desde este dispositivo.');
-    } catch (e) { if (e instanceof AppError) throw e; }
+  // ── 5. Login correcto: limpiar intentos ───────────────────────────────────
+  await clearLoginAttempts(query, payload.email, fp);
+
+  // ── 6. 2FA: si está habilitado, emitir código y detener flujo ─────────────
+  if (user.two_fa_enabled) {
+    const code        = String(Math.floor(100000 + Math.random() * 900000));
+    const codeExpires = new Date(Date.now() + 10 * 60 * 1000);
+    await query(
+      'UPDATE users SET two_fa_code=$1, two_fa_expires=$2 WHERE id=$3',
+      [code, codeExpires, user.id],
+    );
+    const name = user.alias || user.full_name || 'usuario';
+    const realEmail = user.real_email || payload.email;
+    const { subject, html } = twoFaCodeEmail(name, code);
+    sendGmailSafe({ to: realEmail, subject, html });
+    throw new AppError(202, 'Código de verificación enviado a tu correo.', {
+      requiresTwoFa: true,
+      userId:        user.id,
+    });
   }
 
   const username = user.email.replace(/@local\.test$/, '');
@@ -144,6 +274,7 @@ export async function loginUser(payload) {
     estado:      profile.estado      ?? null,
     ciudad:      profile.ciudad      ?? null,
     needsAddress: false,
+    two_fa_enabled: user.two_fa_enabled ?? false,
   };
 
   if (user.role === 'restaurant') extended.restaurant = await fetchRestaurantProfile(user.id);
@@ -152,6 +283,7 @@ export async function loginUser(payload) {
 
   return { token, user: { id: user.id, username, role: user.role, ...extended } };
 }
+
 
 // ── GOOGLE ────────────────────────────────────────────────────────────────────
 export async function googleLogin(credential, role = 'customer') {
@@ -322,7 +454,73 @@ export async function deleteAccount(userId, role, currentPassword) {
   return { ok: true };
 }
 
-export async function updateLoginUsername(userId, role, currentPassword, newUsername) {
+// ── UNLOCK ACCOUNT ────────────────────────────────────────────────────────────
+export async function unlockAccount(token) {
+  let payload;
+  try { payload = jwt.verify(token, process.env.RESET_TOKEN_SECRET || env.jwtSecret); }
+  catch { throw new AppError(401, 'Enlace inválido o expirado'); }
+  if (payload.purpose !== 'account-unlock') throw new AppError(401, 'Token inválido');
+
+  const { query } = await import('../../config/db.js');
+  const r = await query(
+    `UPDATE users
+     SET account_locked=FALSE, account_unlock_token=NULL, account_unlock_expires=NULL
+     WHERE real_email=$1 AND account_unlock_token=$2 AND account_unlock_expires > NOW()
+     RETURNING id`,
+    [payload.email, token],
+  );
+  if (r.rowCount === 0) throw new AppError(401, 'Enlace inválido, ya usado o expirado');
+
+  // Limpiar intentos asociados a este correo
+  await query('DELETE FROM login_attempts WHERE email=$1', [payload.email]);
+  return { ok: true };
+}
+
+// ── VERIFY 2FA CODE ───────────────────────────────────────────────────────────
+export async function verifyTwoFaCode(userId, code) {
+  const { query } = await import('../../config/db.js');
+  const r = await query(
+    `SELECT * FROM users WHERE id=$1 AND two_fa_code=$2 AND two_fa_expires > NOW()`,
+    [userId, code],
+  );
+  if (r.rowCount === 0) throw new AppError(401, 'Código incorrecto o expirado');
+
+  const user = r.rows[0];
+  // Limpiar código usado
+  await query('UPDATE users SET two_fa_code=NULL, two_fa_expires=NULL WHERE id=$1', [userId]);
+
+  const username = user.email.replace(/@local\.test$/, '');
+  const token    = signToken(user.id, user.role, username);
+
+  const profile  = await fetchUserProfile(user.id);
+  const extended = {
+    alias:          user.alias || user.full_name || username,
+    address:        profile.address ?? user.address ?? null,
+    lat:            profile.lat      ?? null,
+    lng:            profile.lng      ?? null,
+    home_lat:       profile.home_lat ?? null,
+    home_lng:       profile.home_lng ?? null,
+    postal_code:    profile.postal_code ?? null,
+    colonia:        profile.colonia  ?? null,
+    estado:         profile.estado   ?? null,
+    ciudad:         profile.ciudad   ?? null,
+    needsAddress:   false,
+    two_fa_enabled: user.two_fa_enabled ?? true,
+  };
+
+  if (user.role === 'restaurant') extended.restaurant = await fetchRestaurantProfile(user.id);
+  if (user.role === 'driver')     extended.driver     = await fetchDriverProfile(user.id);
+  if (['customer','restaurant'].includes(user.role) && !extended.address) extended.needsAddress = true;
+
+  return { token, user: { id: user.id, username, role: user.role, ...extended } };
+}
+
+// ── TOGGLE 2FA ────────────────────────────────────────────────────────────────
+export async function toggleTwoFa(userId, enable) {
+  const { query } = await import('../../config/db.js');
+  await query('UPDATE users SET two_fa_enabled=$1 WHERE id=$2', [enable, userId]);
+  return { two_fa_enabled: enable };
+}
   const user = await findUserById(userId);
   if (!user) throw new AppError(404, 'Usuario no encontrado');
   const matches = await bcrypt.compare(currentPassword, user.password_hash);
