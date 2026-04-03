@@ -521,6 +521,8 @@ export async function toggleTwoFa(userId, enable) {
   await query('UPDATE users SET two_fa_enabled=$1 WHERE id=$2', [enable, userId]);
   return { two_fa_enabled: enable };
 }
+
+export async function updateLoginUsername(userId, role, currentPassword, newUsername) {
   const user = await findUserById(userId);
   if (!user) throw new AppError(404, 'Usuario no encontrado');
   const matches = await bcrypt.compare(currentPassword, user.password_hash);
