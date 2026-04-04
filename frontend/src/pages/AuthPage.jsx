@@ -227,7 +227,7 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer',
     try {
       const deviceFingerprint = await getFingerprint();
       const data = await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, role: appKey || undefined, deviceFingerprint }) });
-      if (appKey === 'admin' && data.user.role !== 'admin') {
+      if (appKey && data.user.role !== appKey) {
         setMsg('Correo o contraseña incorrectos.');
         return;
       }
