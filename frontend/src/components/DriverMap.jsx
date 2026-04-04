@@ -21,7 +21,7 @@ var _ml = null;
 export default function DriverMap({
   driverPos, customPin, onCustomPin, hasActiveOrder,
   pickupPos, deliveryPos, pickupLabel, deliveryLabel,
-  routeGeometry, onRouteError,
+  routeGeometry, partialRouteGeometry, onRouteError,
   allStops,
   routeActive,
   centerMode, navHeadingDeg, onHeadingChange,
@@ -44,6 +44,8 @@ export default function DriverMap({
   const liveHeadingRef    = useRef(0);
   const watchIdRef        = useRef(null);
   const prevWatchPosRef   = useRef(null);
+  // P2: buffer circular para suavizado de bearing (N=4)
+  const bearingBufferRef  = useRef([]);
   const hasActiveOrderRef = useRef(hasActiveOrder);
   const centerModeRef     = useRef(centerMode);
   const routeActiveRef    = useRef(routeActive);
@@ -117,7 +119,18 @@ export default function DriverMap({
         const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         const prev = prevWatchPosRef.current;
         if (prev) {
-          const h = getBearing(prev, next);
+          const rawBearing = getBearing(prev, next);
+
+          // P2: suavizado angular — buffer de últimos 4 bearings
+          const buf = bearingBufferRef.current;
+          buf.push(rawBearing);
+          if (buf.length > 4) buf.shift();
+
+          // Media circular para evitar el problema del 359°→1° averaging
+          const sinSum = buf.reduce((s, b) => s + Math.sin(b * Math.PI / 180), 0);
+          const cosSum = buf.reduce((s, b) => s + Math.cos(b * Math.PI / 180), 0);
+          const h = (Math.atan2(sinSum, cosSum) * 180 / Math.PI + 360) % 360;
+
           liveHeadingRef.current = h;
           onHeadingRef.current?.(h);
           const svg = markersRef.current.driverSvg;
@@ -437,10 +450,16 @@ export default function DriverMap({
         const label    = isPickup
           ? (pickupLabel || 'Tienda')
           : (deliveryLabel || 'Cliente');
+
+        // P4: badge de cantidad cuando hay múltiples pedidos en el mismo stop
+        const orderCount = stop.orderIds?.length ?? 1;
+        const badgeLabel = orderCount > 1 ? ` ×${orderCount}` : '';
+
         const marker = createDriverPoiMarker(_ml, stop, {
           emoji,
           color,
-          label: allStops.length > 2 ? `${idx + 1}. ${label}` : label,
+          label: (allStops.length > 2 ? `${idx + 1}. ${label}` : label) + badgeLabel,
+          badge: orderCount > 1 ? orderCount : null, // P4: para renderizado visual del badge
         }).addTo(map);
         markersRef.current.stops.push(marker);
       });
@@ -462,13 +481,19 @@ export default function DriverMap({
     pickupLabel, deliveryLabel,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Ruta GeoJSON
+  // Ruta GeoJSON — P1: parcial en nav/nextStop, completa en overview
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+
+    const mode = centerModeRef.current;
+    const geomToShow = (mode === 'overview')
+      ? routeGeometry
+      : (partialRouteGeometry ?? routeGeometry);
+
     function draw() {
       try {
-        syncDriverRouteLayers(map, routeGeometry);
+        syncDriverRouteLayers(map, geomToShow);
       } catch (e) {
         console.warn('[DriverMap] route draw error:', e.message);
       }
@@ -479,7 +504,7 @@ export default function DriverMap({
     } else {
       map.once('styledata', draw);
     }
-  }, [routeGeometry]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [routeGeometry, partialRouteGeometry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Centrar — señal puntual del padre ────────────────────────────────────────
   useEffect(() => {

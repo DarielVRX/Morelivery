@@ -65,6 +65,8 @@ export function groupPickupStops(rows, nowSec, mode = 'reroute') {
         if (mode === 'simulator') {
           existing.orderIds.push(row.id);
           existing.kitchenReadyAtSec = existing.maxKitchenReadyAtSec;
+        } else {
+          existing.orderIds.push(row.id); // P4: acumular en modo reroute también
         }
       } else {
         const stop = mode === 'simulator'
@@ -163,6 +165,7 @@ function _makeRerouteStop(row, restLat, restLng, kitchenReadyAtSec, slaDeadlineS
   return {
     type:                 'pickup',
     orderId:              row.id,
+    orderIds:             [row.id], // P4: array para badge multi-pedido
     pairOrderId:          row.id,
     pos:                  { lat: restLat, lng: restLng },
     pickedUpAtSec:        null,

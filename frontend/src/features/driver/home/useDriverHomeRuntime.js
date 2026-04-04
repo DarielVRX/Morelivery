@@ -370,7 +370,13 @@ export function useDriverHomeRuntime({
       // El backend ya calculó la secuencia óptima — usarla directamente
       return routeStopsOverride
         .filter(s => s.pos && Number.isFinite(s.pos.lat) && Number.isFinite(s.pos.lng))
-        .map(s => ({ lat: s.pos.lat, lng: s.pos.lng, type: s.type, orderId: s.orderId }));
+        .map(s => ({
+          lat:      s.pos.lat,
+          lng:      s.pos.lng,
+          type:     s.type,
+          orderId:  s.orderId,
+          orderIds: Array.isArray(s.orderIds) ? s.orderIds : [s.orderId], // P4
+        }));
     }
 
     // Fallback: construir desde pedidos activos en orden de aceptación
@@ -399,11 +405,66 @@ export function useDriverHomeRuntime({
     return Math.round(haversineMeters(myPosition.lat, myPosition.lng, stopLat, stopLng));
   })();
 
+  // ── P1: Ruta parcial driver→allStops[0] ──────────────────────────────────
+  // En modos nav/nextStop solo se muestra el tramo hasta el próximo stop.
+  // En overview y offerRoute se muestra la geometría completa.
+  // El recorte se hace encontrando el punto de la geometría más cercano
+  // al destino (allStops[0]) y cortando ahí.
+  const partialRouteGeometry = (() => {
+    if (!routeGeometry?.length || !allStops?.length) return routeGeometry;
+    const target = allStops[0];
+    if (!target) return routeGeometry;
+
+    // Encontrar índice del punto de la geometría más cercano al próximo stop
+    let closestIdx = 0;
+    let closestDist = Infinity;
+    for (let i = 0; i < routeGeometry.length; i++) {
+      const pt = routeGeometry[i];
+      const d  = haversineMeters(
+        { lat: pt[1] ?? pt.lat, lng: pt[0] ?? pt.lng },
+        { lat: target.lat, lng: target.lng }
+      );
+      if (d < closestDist) { closestDist = d; closestIdx = i; }
+    }
+    return routeGeometry.slice(0, closestIdx + 1);
+  })();
+
+  // ── P1: Reroute automático por desvío de ruta ─────────────────────────────
+  // Si el driver se aleja más de REROUTE_THRESHOLD_M de la ruta calculada,
+  // solicitar recálculo al backend. Throttleado a una llamada cada 30s.
+  const REROUTE_THRESHOLD_M = 150;
+  const REROUTE_COOLDOWN_MS = 30_000;
+  useEffect(() => {
+    if (!myPosition || !routeGeometry?.length || !routeActive || !token) return;
+
+    // Distancia mínima del driver a cualquier punto de la geometría
+    let minDist = Infinity;
+    for (const pt of routeGeometry) {
+      const ptLat = pt[1] ?? pt.lat;
+      const ptLng = pt[0] ?? pt.lng;
+      if (!Number.isFinite(ptLat) || !Number.isFinite(ptLng)) continue;
+      const d = haversineMeters(myPosition, { lat: ptLat, lng: ptLng });
+      if (d < minDist) minDist = d;
+    }
+
+    if (minDist > REROUTE_THRESHOLD_M) {
+      const now = Date.now();
+      if (now - lastRerouteRef.current > REROUTE_COOLDOWN_MS) {
+        lastRerouteRef.current = now;
+        fetch('/api/drivers/reroute', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+      }
+    }
+  }, [myPosition?.lat, myPosition?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return {
     counters,
     customPin, setCustomPin,
     pinAddress, loadingPin,
     routeGeometry, routeSteps,
+    partialRouteGeometry,
     navHeadingDeg, setNavHeadingDeg,
     centerSignal, setCenterSignal,
     centerMode, centerCycleRef,

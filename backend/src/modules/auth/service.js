@@ -260,6 +260,11 @@ export async function loginUser(payload) {
 
   const username = user.email.replace(/@local\.test$/, '');
   const token    = signToken(user.id, user.role, username);
+  const refresh  = jwt.sign(
+    { userId: user.id, purpose: 'refresh' },
+    process.env.REFRESH_TOKEN_SECRET || env.jwtSecret,
+    { expiresIn: '30d' }
+  );
 
   const profile  = await fetchUserProfile(user.id);
   const extended = {
@@ -281,7 +286,7 @@ export async function loginUser(payload) {
   if (user.role === 'driver')     extended.driver     = await fetchDriverProfile(user.id);
   if (['customer','restaurant'].includes(user.role) && !extended.address) extended.needsAddress = true;
 
-  return { token, user: { id: user.id, username, role: user.role, ...extended } };
+  return { token, refreshToken: refresh, user: { id: user.id, username, role: user.role, ...extended } };
 }
 
 
@@ -454,6 +459,38 @@ export async function deleteAccount(userId, role, currentPassword) {
   return { ok: true };
 }
 
+// ── REFRESH TOKEN ─────────────────────────────────────────────────────────────
+export async function refreshToken(refreshTokenStr) {
+  let payload;
+  try {
+    payload = jwt.verify(refreshTokenStr, process.env.REFRESH_TOKEN_SECRET || env.jwtSecret);
+  } catch {
+    throw new AppError(401, 'Refresh token inválido o expirado');
+  }
+  if (payload.purpose !== 'refresh') throw new AppError(401, 'Token inválido');
+
+  const { query } = await import('../../config/db.js');
+  const r = await query(
+    'SELECT id, email, role, status, account_locked FROM users WHERE id=$1',
+    [payload.userId]
+  );
+  if (r.rowCount === 0) throw new AppError(401, 'Usuario no encontrado');
+
+  const user = r.rows[0];
+  if (user.status === 'suspended') throw new AppError(403, 'Cuenta suspendida');
+  if (user.account_locked) throw new AppError(403, 'Cuenta bloqueada');
+
+  const username   = user.email.replace(/@local\.test$/, '');
+  const accessToken  = signToken(user.id, user.role, username);
+  const newRefresh = jwt.sign(
+    { userId: user.id, purpose: 'refresh' },
+    process.env.REFRESH_TOKEN_SECRET || env.jwtSecret,
+    { expiresIn: '30d' }
+  );
+
+  return { token: accessToken, refreshToken: newRefresh };
+}
+
 // ── UNLOCK ACCOUNT ────────────────────────────────────────────────────────────
 export async function unlockAccount(token) {
   let payload;
@@ -491,6 +528,11 @@ export async function verifyTwoFaCode(userId, code) {
 
   const username = user.email.replace(/@local\.test$/, '');
   const token    = signToken(user.id, user.role, username);
+  const refresh  = jwt.sign(
+    { userId: user.id, purpose: 'refresh' },
+    process.env.REFRESH_TOKEN_SECRET || env.jwtSecret,
+    { expiresIn: '30d' }
+  );
 
   const profile  = await fetchUserProfile(user.id);
   const extended = {
@@ -512,7 +554,7 @@ export async function verifyTwoFaCode(userId, code) {
   if (user.role === 'driver')     extended.driver     = await fetchDriverProfile(user.id);
   if (['customer','restaurant'].includes(user.role) && !extended.address) extended.needsAddress = true;
 
-  return { token, user: { id: user.id, username, role: user.role, ...extended } };
+  return { token, refreshToken: refresh, user: { id: user.id, username, role: user.role, ...extended } };
 }
 
 // ── TOGGLE 2FA ────────────────────────────────────────────────────────────────

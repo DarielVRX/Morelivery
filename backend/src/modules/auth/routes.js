@@ -10,7 +10,7 @@ import {
   registerUser, loginUser, updateProfileAddress, changePassword,
   deleteAccount, updateLoginUsername,
   googleLogin, forgotPassword, resetPassword, verifyEmail, resendVerificationEmail,
-  unlockAccount, verifyTwoFaCode, toggleTwoFa,
+  unlockAccount, verifyTwoFaCode, toggleTwoFa, refreshToken,
 } from './service.js';
 import { AppError } from '../../utils/errors.js';
 import { authRateLimit } from '../../middlewares/rateLimit.js';
@@ -179,6 +179,16 @@ router.get('/postal/:cp', async (req, res, next) => {
     } catch (_) {}
 
     return next(new AppError(404, 'CP no encontrado'));
+  } catch (error) { return next(error); }
+});
+
+/* ── POST /auth/refresh ──────────────────────────────────────────────────── */
+router.post('/refresh', async (req, res, next) => {
+  try {
+    const { refreshToken: rt } = req.body || {};
+    if (!rt) return next(new AppError(400, 'Refresh token requerido'));
+    const result = await refreshToken(rt);
+    return res.json(result);
   } catch (error) { return next(error); }
 });
 

@@ -17,6 +17,24 @@ const STATUS_COLOR = {
   delivered:'#16a34a', cancelled:'#dc2626', pending_driver:'#ef4444',
 };
 
+// P6: mensajes en lenguaje natural por estado
+// Para assigned/accepted el mensaje depende de si este pedido es el próximo stop del driver
+const STATUS_MESSAGES = {
+  created:        'Estamos buscando un repartidor para tu pedido',
+  pending_driver: 'Estamos buscando un repartidor para tu pedido',
+  preparing:      'Tu repartidor está esperando tu pedido',
+  ready:          'Tu repartidor está en camino a recoger tu pedido',
+  on_the_way:     'Tu repartidor está en camino',
+};
+function getStatusMessage(status, isNextStop) {
+  if (status === 'assigned' || status === 'accepted') {
+    return isNextStop
+      ? 'Tu repartidor está en camino a recoger tu pedido'
+      : 'Tu repartidor está entregando otros pedidos';
+  }
+  return STATUS_MESSAGES[status] ?? null;
+}
+
 export default function CustomerOrders({ registerRef } = {}) {
   const { auth } = useAuth();
   const [activeOrders,  setActiveOrders]  = useState([]);
@@ -128,6 +146,14 @@ export default function CustomerOrders({ registerRef } = {}) {
 
   const [chatTick, setChatTick] = useState(0);
 
+  // P7: ETA del driver por pedido { orderId: { eta_secs, receivedAt } }
+  const [driverEta, setDriverEta] = useState({});
+  const [etaTick,   setEtaTick]   = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setEtaTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   useRealtimeOrders(
     auth.token,
     (data) => {
@@ -137,7 +163,12 @@ export default function CustomerOrders({ registerRef } = {}) {
       registerRef?.current?.onCartUpdate?.();
       if (data?.action === 'suggestion_received') loadDataRef.current?.();
     },
-    ({ orderId, lat, lng }) => setDriverPos(p => ({ ...p, [orderId]: { lat, lng } })),
+    ({ orderId, lat, lng, eta_secs, is_next_stop }) => {
+      setDriverPos(p => ({ ...p, [orderId]: { lat, lng } }));
+      // P7: guardar eta_secs e is_next_stop con timestamp para countdown y mensaje
+      if (eta_secs != null)
+        setDriverEta(p => ({ ...p, [orderId]: { eta_secs, receivedAt: Date.now(), is_next_stop } }));
+    },
     undefined,
     (data) => { if (data.orderId === chatOpen) setChatTick(t => t + 1); },
   );
@@ -348,6 +379,37 @@ export default function CustomerOrders({ registerRef } = {}) {
                             {STATUS_LABELS[order.status]}
                           </span>
                           <span style={{ fontWeight:700, fontSize:'0.875rem' }}>{order.restaurant_name}</span>
+                          {/* P6: mensaje contextual en lenguaje natural */}
+                          {(() => {
+                            const isNextStop = driverEta[order.id]?.is_next_stop ?? false;
+                            const msg = getStatusMessage(order.status, isNextStop);
+                            return msg ? (
+                              <div style={{
+                                fontSize:'0.75rem', color:'var(--text-secondary)',
+                                marginTop:'0.2rem', fontWeight:500,
+                              }}>
+                                {msg}
+                              </div>
+                            ) : null;
+                          })()}
+                          {/* P7: countdown ETA del driver */}
+                          {(() => {
+                            const entry = driverEta[order.id];
+                            if (!entry) return null;
+                            const elapsed      = Math.round((Date.now() - entry.receivedAt) / 1000);
+                            const etaRemaining = Math.max(0, entry.eta_secs - elapsed);
+                            const mins = Math.floor(etaRemaining / 60);
+                            const secs = etaRemaining % 60;
+                            return (
+                              <div style={{
+                                fontSize:'0.75rem', fontWeight:700, marginTop:'0.2rem',
+                                color: etaRemaining <= 120 ? 'var(--danger)' : 'var(--brand)',
+                              }}>
+                                🛵 {order.status === 'on_the_way' ? 'Llega en' : 'En camino —'}{' '}
+                                {mins > 0 ? `${mins}:${String(secs).padStart(2,'0')} min` : `${secs}s`}
+                              </div>
+                            );
+                          })()}
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
                           <span style={{ fontWeight:700 }}>{fmt(grandTotal)}</span>

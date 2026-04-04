@@ -150,6 +150,7 @@ async function requestNotificationsForUser(token, userId, role) {
 // ── Context ───────────────────────────────────────────────────────────────────
 const AuthContext = createContext(null);
 const STORAGE_KEY = brandStorageKey('auth_v1');
+const REFRESH_KEY = brandStorageKey('refresh_v1');
 
 function loadStoredAuth() {
   try {
@@ -213,6 +214,9 @@ export function AuthProvider({ children }) {
       promptScheduled.current = false;
       scheduleNotifRequest(payload.token, payload.user);
     }
+    if (payload?.refreshToken) {
+      try { window.localStorage.setItem(REFRESH_KEY, payload.refreshToken); } catch (_) {}
+    }
   }, []); // eslint-disable-line
 
   const patchUser = useCallback((patch) =>
@@ -229,6 +233,7 @@ export function AuthProvider({ children }) {
         }).catch(() => {});
       }
     } catch (_) {}
+    try { window.localStorage.removeItem(REFRESH_KEY); } catch (_) {}
     promptScheduled.current = false;
     setAuth({ token: '', user: null });
   }, []);

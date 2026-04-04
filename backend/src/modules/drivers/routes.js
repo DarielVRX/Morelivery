@@ -4,6 +4,7 @@
 //      y alertas duplicadas tras cold start (ahora se resetean entradas viejas).
 //   2. notify-call — ya usa sseHub importado estáticamente (sin dynamic import). ✓
 //   3. authenticate ya está aplicado en todos los endpoints del router. ✓
+//   4. P7: driver_location payload incluye eta_secs para countdown en restaurante/cliente.
 
 import { Router } from 'express';
 import { query } from '../../config/db.js';
@@ -19,9 +20,6 @@ const router = Router();
 const ETA_ALERT_COOLDOWN_MS     = 5 * 60 * 1000; // 5 min entre alertas ETA
 const ARRIVED_ALERT_COOLDOWN_MS = 2 * 60 * 1000; // 2 min entre alertas arrived
 
-// FIX: mapas con timestamp de inserción para poder limpiarlos periódicamente.
-// Antes se reiniciaban con cada cold start → alertas duplicadas al volver.
-// Ahora se limpian entradas con más de 30 min de antigüedad cada 10 minutos.
 const etaAlertedAt     = new Map(); // orderId → ts
 const arrivedAlertedAt = new Map(); // key → ts
 
@@ -379,18 +377,41 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
 
     const now = Date.now();
 
+    // Determinar el próximo pickup pendiente más cercano al driver
+    // (pedido con status !== on_the_way, sin picked_up_at, más cercano)
+    // Se usa para is_next_stop en el payload al cliente
+    let nextPickupOrderId = null;
+    let nextPickupDist    = Infinity;
     for (const ord of activeOrders.rows) {
-      const payload = { orderId: ord.id, driverId: req.user.userId, lat, lng };
-      sseHub.sendToUser(ord.customer_id,          'driver_location', payload);
-      sseHub.sendToUser(ord.restaurant_owner_id,  'driver_location', payload);
+      if (ord.status === 'on_the_way') continue;
+      const rLat = Number(ord.restaurant_lat);
+      const rLng = Number(ord.restaurant_lng);
+      if (!Number.isFinite(rLat) || !Number.isFinite(rLng)) continue;
+      const d = haversineM(lat, lng, rLat, rLng);
+      if (d < nextPickupDist) { nextPickupDist = d; nextPickupOrderId = ord.id; }
+    }
 
-      const isOTW = ord.status === 'on_the_way';
+    for (const ord of activeOrders.rows) {
+      const isOTW   = ord.status === 'on_the_way';
       const stopLat = isOTW ? Number(ord.delivery_lat)    : Number(ord.restaurant_lat);
       const stopLng = isOTW ? Number(ord.delivery_lng)    : Number(ord.restaurant_lng);
 
+      // P7: calcular eta_secs antes de construir el payload para incluirlo
+      let eta_secs = null;
+      if (Number.isFinite(stopLat) && Number.isFinite(stopLng)) {
+        const distM = haversineM(lat, lng, stopLat, stopLng);
+        eta_secs = Math.round(distM / 6.94);
+      }
+
+      // P7: incluir eta_secs e is_next_stop para mensaje contextual en cliente
+      const is_next_stop = ord.status !== 'on_the_way' && ord.id === nextPickupOrderId;
+      const payload = { orderId: ord.id, driverId: req.user.userId, lat, lng, eta_secs, is_next_stop };
+      sseHub.sendToUser(ord.customer_id,          'driver_location', payload);
+      sseHub.sendToUser(ord.restaurant_owner_id,  'driver_location', payload);
+
       if (!Number.isFinite(stopLat) || !Number.isFinite(stopLng)) continue;
 
-      const distM = haversineM(lat, lng, stopLat, stopLng);
+      const distM    = haversineM(lat, lng, stopLat, stopLng);
       const etaSecs  = Math.round(distM / 6.94);
       const etaMins  = Math.round(etaSecs / 60);
 
@@ -419,7 +440,7 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
         }
       }
 
-      const arrivedKey = `${ord.id}_${isOTW ? 'delivery' : 'pickup'}`;
+      const arrivedKey  = `${ord.id}_${isOTW ? 'delivery' : 'pickup'}`;
       const lastArrived = arrivedAlertedAt.get(arrivedKey) || 0;
       if (distM <= 200 && (now - lastArrived) > ARRIVED_ALERT_COOLDOWN_MS) {
         arrivedAlertedAt.set(arrivedKey, now);
@@ -500,16 +521,14 @@ router.get('/earnings', authenticate, authorize(['driver']), async (req, res, ne
   } catch (error) { return next(error); }
 });
 
-// FIX: sseHub ya se importa estáticamente al inicio del archivo.
-// No se necesita dynamic import aquí — se usa directamente la referencia estática.
 router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
-    const { target } = req.body || {}; // 'customer' | 'restaurant'
+    const { target } = req.body || {};
     if (!['customer', 'restaurant'].includes(target))
       return next(new AppError(400, 'target debe ser customer o restaurant'));
 
     const { orderId } = req.params;
-    const driverId    = req.user.userId; // FIX: req.user.userId disponible porque authenticate está aplicado ✓
+    const driverId    = req.user.userId;
 
     const orderRow = await query(
       `SELECT o.customer_id, r.owner_user_id AS restaurant_owner_id,
@@ -529,25 +548,17 @@ router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver']),
     const targetId   = target === 'customer' ? ord.customer_id : ord.restaurant_owner_id;
     const driverName = ord.driver_name || 'El repartidor';
 
-    // FIX: usa sseHub importado estáticamente — sin await import(...)
     sseHub.sendToUser(targetId, 'simulated_call', {
-      orderId,
-      driverId,
-      driverName,
+      orderId, driverId, driverName,
       message: `${driverName} está intentando localizarte`,
     });
     sendPushToUser(targetId, {
       title: '📞 Llamada del repartidor',
       body: `${driverName} está intentando localizarte`,
-      tag: `call_${orderId}`,
-      group: target,
-      priority: 'high',
+      tag: `call_${orderId}`, group: target, priority: 'high',
       url: target === 'customer' ? '/customer/pedidos' : '/restaurant/pedidos',
-      type: 'simulated_call',
-      pushType: 'simulated_call',
-      orderId,
-      driverName,
-      vibrate: [800, 400, 800, 400, 800],
+      type: 'simulated_call', pushType: 'simulated_call',
+      orderId, driverName, vibrate: [800, 400, 800, 400, 800],
     }).catch(() => {});
 
     console.log(`[driver.call] ${driverId.slice(0,8)} → ${target} order=${orderId.slice(0,8)}`);
@@ -556,10 +567,6 @@ router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver']),
 });
 
 /* ── POST /drivers/reroute ───────────────────────────────────────────────── */
-// Fuerza un recálculo de ruta para el driver autenticado.
-// El resultado llega via SSE route_update — no hay payload en la respuesta.
-// Se llama desde el frontend en: reconexión SSE, loadData con override null,
-// y tras acceptOffer para garantizar que el primer route_update sea correcto.
 router.post('/reroute', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const { rerouteDriver } = await import('../../engine/reroute.js');

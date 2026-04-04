@@ -99,12 +99,14 @@ async function loadDriverStopsForReroute(driverId) {
         // Esperar al pedido que tarde más en estar listo
         existing.kitchenReadyAtSec = Math.max(existing.kitchenReadyAtSec, kitchenReadyAtSec);
         existing.volumeLiters     += Number(row.volume_liters) || 0;
+        existing.orderIds.push(row.id); // P4: acumular todos los orderIds del grupo
         // pairOrderId del grupo apunta al primer orderId — las deliveries
         // de los pedidos agrupados mantienen su propio pairOrderId individual
       } else {
         const stop = {
           type:             'pickup',
           orderId:          row.id,
+          orderIds:         [row.id], // P4: array para badge multi-pedido
           pairOrderId:      row.id,
           pos:              { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
           pickedUpAtSec:    null,
@@ -425,6 +427,7 @@ export async function rerouteDriver(driverId) {
       stopsWithEta.push({
         type:             stop.type,
         orderId:          stop.orderId,
+        orderIds:         stop.orderIds ?? [stop.orderId], // P4: array para badge multi-pedido
         pos:              stop.pos,
         etaFromNowSec:    Math.round(timeSec - nowSec),
         slaDeadlineSec:   Math.round(stop.slaDeadlineSec),

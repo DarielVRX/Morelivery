@@ -128,6 +128,16 @@ export default function RestaurantOrders() {
   const loadDataRef = useRef(null);
   const [chatTick,  setChatTick]  = useState(0);
 
+  // P7: ETA del driver por pedido { orderId: { eta_secs, receivedAt } }
+  const [driverEta,   setDriverEta]   = useState({});
+  const [etaTick,     setEtaTick]     = useState(0);
+  const prepAlertedRef = useRef(new Set());
+
+  useEffect(() => {
+    const id = setInterval(() => setEtaTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   // ── Kitchen event handler ─────────────────────────────────────────────────
   const handleKitchenEvent = useCallback((data) => {
     if (data.type === 'prep_estimate_updated' && data.newEstimate) {
@@ -202,7 +212,10 @@ export default function RestaurantOrders() {
   useRealtimeOrders(
     auth.token,
     handleOrderUpdate,           // onOrderUpdate — cualquier cambio de pedido
-    () => {},                    // onDriverLocation
+    ({ orderId, eta_secs }) => { // P7: recibir ETA del driver para countdown
+      if (eta_secs == null) return;
+      setDriverEta(prev => ({ ...prev, [orderId]: { eta_secs, receivedAt: Date.now() } }));
+    },
     undefined,                   // onNewOffer
     (data) => { if (data.orderId === chatOpen) setChatTick(t => t + 1); }, // onChatMessage
     undefined,                   // onReconnect
@@ -211,6 +224,26 @@ export default function RestaurantOrders() {
     undefined,                   // onSupportMessage
     handleNewOrder,              // onNewOrder — nuevo pedido recibido
   );
+
+  // P7: breakpoint "puedes comenzar a preparar"
+  // Cuando el ETA del driver <= prep restante + margen, emitir banner una sola vez por pedido
+  useEffect(() => {
+    for (const [orderId, entry] of Object.entries(driverEta)) {
+      if (prepAlertedRef.current.has(orderId)) continue;
+      const elapsed      = Math.round((Date.now() - entry.receivedAt) / 1000);
+      const etaRemaining = Math.max(0, entry.eta_secs - elapsed);
+      const prepSecs     = prepMins * 60;
+      if (etaRemaining > 0 && etaRemaining <= prepSecs + 150) {
+        prepAlertedRef.current.add(orderId);
+        const bannerId = `prep_alert-${orderId}-${Date.now()}`;
+        setKitchenBanners(prev => [...prev, {
+          type: 'prep_alert', bannerId,
+          message: 'Tu repartidor está en camino — puedes comenzar a preparar',
+        }]);
+        setTimeout(() => setKitchenBanners(prev => prev.filter(b => b.bannerId !== bannerId)), 20_000);
+      }
+    }
+  }, [etaTick]); // eslint-disable-line
 
   async function savePrepTime() {
     setPrepSaving(true);
@@ -416,12 +449,14 @@ export default function RestaurantOrders() {
           const isArrival  = banner.type === 'driver_arrival';
           const isEstimate = banner.type === 'prep_estimate_updated';
           const isNew      = banner.type === 'new_order';
-          const bg   = isCancel ? 'var(--danger-bg)' : isNew ? 'var(--brand-light)' : isArrival ? 'var(--success-bg)' : isEstimate ? 'var(--warn-bg)' : 'var(--success-bg)';
+          const isPrepAlert = banner.type === 'prep_alert'; // P7
+          const bg   = isCancel ? 'var(--danger-bg)' : isNew ? 'var(--brand-light)' : isArrival ? 'var(--success-bg)' : isEstimate ? 'var(--warn-bg)' : isPrepAlert ? 'var(--success-bg)' : 'var(--success-bg)';
           const bdr  = isCancel ? 'var(--danger-border)' : isNew ? 'var(--brand)' : isArrival ? 'var(--success-border)' : isEstimate ? 'var(--warn-border)' : 'var(--success-border)';
-          const title = isNew     ? 'Nuevo pedido recibido'
-                      : isCancel  ? 'Pedido cancelado mientras preparabas'
-                      : isArrival ? `Conductor llegó — ${banner.driverName || 'Driver'} recogió`
+          const title = isNew      ? 'Nuevo pedido recibido'
+                      : isCancel   ? 'Pedido cancelado mientras preparabas'
+                      : isArrival  ? `Conductor llegó — ${banner.driverName || 'Driver'} recogió`
                       : isEstimate ? 'Estimado de preparación actualizado'
+                      : isPrepAlert ? '🛵 Repartidor en camino'
                       : 'Pedido marcado como listo automáticamente';
           return (
             <div key={banner.bannerId} style={{ background:bg, border:`1px solid ${bdr}`,
@@ -505,6 +540,25 @@ export default function RestaurantOrders() {
                             {STATUS_LABELS[order.status]}
                           </span>
                           <span style={{ fontWeight:600, fontSize:'0.875rem' }}>{order.customer_first_name || '—'}</span>
+                          {/* P7: countdown ETA del driver */}
+                          {(() => {
+                            const entry = driverEta[order.id];
+                            if (!entry) return null;
+                            const elapsed      = Math.round((Date.now() - entry.receivedAt) / 1000);
+                            const etaRemaining = Math.max(0, entry.eta_secs - elapsed);
+                            const mins = Math.floor(etaRemaining / 60);
+                            const secs = etaRemaining % 60;
+                            const isOTW = order.status === 'on_the_way';
+                            return (
+                              <div style={{
+                                fontSize:'0.72rem', fontWeight:700, marginTop:'0.2rem',
+                                color: etaRemaining <= 120 ? 'var(--danger)' : 'var(--success)',
+                              }}>
+                                {isOTW ? '📦 Entrega en' : '🛵 Llega en'}{' '}
+                                {mins > 0 ? `${mins}:${String(secs).padStart(2,'0')} min` : `${secs}s`}
+                              </div>
+                            );
+                          })()}
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexShrink:0 }}>
                           <span style={{ fontWeight:700 }}>{fmt(order.total_cents)}</span>
