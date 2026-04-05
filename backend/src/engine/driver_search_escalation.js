@@ -33,17 +33,18 @@ export async function tickDriverSearchEscalation() {
   // Pedidos en estado pending_driver o created sin driver asignado
   const r = await query(
     `SELECT
-    o.id,
-    o.customer_id,
-    o.created_at,
-    o.driver_search_escalated_at,
-    o.driver_search_push_sent_at,
-    rest.owner_user_id AS restaurant_owner_id
-    FROM orders o
-    JOIN restaurants rest ON rest.id = o.restaurant_id
-    WHERE o.driver_id IS NULL
-    AND o.status IN ('created', 'pending_driver')
-    AND o.cancelled_at IS NULL`,
+       o.id,
+       o.customer_id,
+       o.created_at,
+       o.driver_search_escalated_at,
+       o.driver_search_push_sent_at,
+       o.driver_search_last_notified_at,
+       rest.owner_user_id AS restaurant_owner_id
+     FROM orders o
+     JOIN restaurants rest ON rest.id = o.restaurant_id
+     WHERE o.driver_id IS NULL
+       AND o.status IN ('created', 'pending_driver')
+       AND o.cancelled_at IS NULL`,
     []
   );
 
@@ -61,18 +62,26 @@ export async function tickDriverSearchEscalation() {
 }
 
 async function _processOrder(order, nowSec) {
+  // Cooldown mínimo entre notificaciones: 4 minutos
+  // Evita spam si el ticker corre múltiples veces en la misma ventana
+  const NOTIF_COOLDOWN = 4 * MINUTE;
+  if (order.driver_search_last_notified_at) {
+    const lastNotifiedSec = new Date(order.driver_search_last_notified_at).getTime() / 1000;
+    if (nowSec - lastNotifiedSec < NOTIF_COOLDOWN) return;
+  }
+
   // Base del timer: si el cliente respondió "seguir esperando", usar esa fecha
   // sino usar created_at
   const baseTs = order.driver_search_escalated_at
-  ? new Date(order.driver_search_escalated_at).getTime() / 1000
-  : new Date(order.created_at).getTime() / 1000;
+    ? new Date(order.driver_search_escalated_at).getTime() / 1000
+    : new Date(order.created_at).getTime() / 1000;
 
   const elapsedSec = nowSec - baseTs;
 
   // Push ya enviado — leer timestamp
   const pushSentAt = order.driver_search_push_sent_at
-  ? new Date(order.driver_search_push_sent_at).getTime() / 1000
-  : null;
+    ? new Date(order.driver_search_push_sent_at).getTime() / 1000
+    : null;
 
   const pushElapsedSec = pushSentAt ? nowSec - pushSentAt : null;
 
@@ -89,7 +98,7 @@ async function _processOrder(order, nowSec) {
     });
     await query(
       `UPDATE orders SET driver_search_push_sent_at = NOW() WHERE id = $1`,
-                [order.id]
+      [order.id]
     );
     return;
   }
@@ -99,7 +108,7 @@ async function _processOrder(order, nowSec) {
     // Verificar que no haya respondido (driver_search_escalated_at sigue siendo null
     // o anterior al push)
     const respondedAfterPush = order.driver_search_escalated_at &&
-    new Date(order.driver_search_escalated_at).getTime() / 1000 > pushSentAt;
+      new Date(order.driver_search_escalated_at).getTime() / 1000 > pushSentAt;
 
     if (!respondedAfterPush) {
       await _autoCancelOrder(order);
@@ -149,14 +158,20 @@ async function _sendNoDriverPush(order, { title, body, priority, actions }) {
     orderId:  order.id,
     actions,
   }).catch(() => {});
+
+  // Registrar timestamp para cooldown entre notificaciones
+  await query(
+    `UPDATE orders SET driver_search_last_notified_at = NOW() WHERE id = $1`,
+    [order.id]
+  ).catch(() => {});
 }
 
 async function _autoCancelOrder(order) {
   await query(
     `UPDATE orders
-    SET status = 'cancelled', cancelled_at = NOW(), updated_at = NOW()
-    WHERE id = $1 AND driver_id IS NULL AND status IN ('created','pending_driver')`,
-              [order.id]
+     SET status = 'cancelled', cancelled_at = NOW(), updated_at = NOW()
+     WHERE id = $1 AND driver_id IS NULL AND status IN ('created','pending_driver')`,
+    [order.id]
   );
 
   // Notificar a cliente y restaurante
