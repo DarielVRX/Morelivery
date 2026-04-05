@@ -124,6 +124,18 @@ export default function RestaurantOrders() {
   const [confirmingId,  setConfirmingId]  = useState(null);
   const [kitchenBanners, setKitchenBanners] = useState([]);
   const [driverSearchBanners, setDriverSearchBanners] = useState({}); // orderId → 'offer_sent' | 'no_driver'
+  const driverSearchBannersRef = useRef({}); // ref para sobrevivir recargas de loadData
+
+  function updateDriverSearchBanner(orderId, type) {
+    driverSearchBannersRef.current = { ...driverSearchBannersRef.current, [orderId]: type };
+    setDriverSearchBanners({ ...driverSearchBannersRef.current });
+  }
+  function clearDriverSearchBanner(orderId) {
+    const next = { ...driverSearchBannersRef.current };
+    delete next[orderId];
+    driverSearchBannersRef.current = next;
+    setDriverSearchBanners(next);
+  }
   const [prepMins,  setPrepMins]  = useState(15);
   const [prepSaving, setPrepSaving] = useState(false);
   const loadDataRef = useRef(null);
@@ -214,9 +226,9 @@ export default function RestaurantOrders() {
     auth.token,
     (data) => {
       handleOrderUpdate(data);
-      // Limpiar banner de búsqueda cuando se asigna driver
-      if (data?.orderId && data?.status === 'assigned') {
-        setDriverSearchBanners(p => { const n = {...p}; delete n[data.orderId]; return n; });
+      // Limpiar banner solo cuando se asigna driver o se cancela
+      if (data?.orderId && ['assigned', 'cancelled'].includes(data?.status)) {
+        clearDriverSearchBanner(data.orderId);
       }
     },
     ({ orderId, eta_secs }) => {
@@ -234,7 +246,7 @@ export default function RestaurantOrders() {
     // onDriverSearch
     (data) => {
       if (data?.orderId && data?.type) {
-        setDriverSearchBanners(p => ({ ...p, [data.orderId]: data.type }));
+        updateDriverSearchBanner(data.orderId, data.type);
       }
     },
   );
