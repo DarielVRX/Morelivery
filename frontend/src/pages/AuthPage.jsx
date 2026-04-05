@@ -185,10 +185,20 @@ function LoginView({ appKey, rawAppKey, onGoRegister, onGoForgot, initialRole = 
     return () => window.removeEventListener('beforeinstallprompt', h);
   }, []);
 
-  const handleGoogleResponse = useCallback(async (response) => {
+  const [googleConfirm, setGoogleConfirm] = useState(null); // { credential, email, role }
+
+  const handleGoogleResponse = useCallback(async (response, confirmRegister = false) => {
     setLoading(true);
     try {
-      const data = await apiFetch('/auth/google', { method: 'POST', body: JSON.stringify({ credential: response.credential, role: roleRef.current }) });
+      const data = await apiFetch('/auth/google', {
+        method: 'POST',
+        body: JSON.stringify({ credential: response.credential, role: roleRef.current, confirmRegister }),
+      });
+      if (data.requiresConfirmation) {
+        setGoogleConfirm({ credential: response.credential, email: data.email, role: data.role });
+        setLoading(false);
+        return;
+      }
       login({ token: data.token, user: data.user });
       navigate(`/${data.user.role}`);
     } catch { setMsg('No se pudo iniciar sesión. Verifica tus datos e intenta de nuevo.'); }
@@ -451,6 +461,31 @@ function LoginView({ appKey, rawAppKey, onGoRegister, onGoForgot, initialRole = 
               style={{ background: 'none', border: 'none', cursor: 'pointer',
                 color: 'var(--primary)', fontWeight: 700, fontSize: '0.82rem', padding: 0 }}>
               Ir a recuperar contraseña →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {googleConfirm && (
+        <div style={{ marginTop:'0.75rem', padding:'0.75rem 0.9rem',
+          background:'var(--bg-raised)', border:'1px solid var(--border)',
+          borderRadius:10, fontSize:'0.82rem' }}>
+          <div style={{ fontWeight:700, color:'var(--text-primary)', marginBottom:'0.3rem' }}>
+            No tienes cuenta como {googleConfirm.role === 'restaurant' ? 'restaurante' : googleConfirm.role === 'driver' ? 'repartidor' : 'cliente'}
+          </div>
+          <div style={{ color:'var(--text-secondary)', marginBottom:'0.6rem' }}>
+            ¿Deseas registrarte con <strong>{googleConfirm.email}</strong> en esta sección?
+          </div>
+          <div style={{ display:'flex', gap:'0.5rem' }}>
+            <button className="btn-primary" style={{ flex:1, fontSize:'0.82rem' }}
+              onClick={() => { setGoogleConfirm(null); handleGoogleResponse({ credential: googleConfirm.credential }, true); }}>
+              Sí, registrarme
+            </button>
+            <button style={{ flex:1, fontSize:'0.82rem', background:'none',
+              border:'1px solid var(--border)', borderRadius:8, cursor:'pointer',
+              padding:'0.5rem', fontWeight:600 }}
+              onClick={() => setGoogleConfirm(null)}>
+              Cancelar
             </button>
           </div>
         </div>

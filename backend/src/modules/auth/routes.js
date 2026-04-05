@@ -51,10 +51,17 @@ router.post('/login', authRateLimit, validate(loginSchema), async (req, res, nex
 /* ── POST /auth/google ───────────────────────────────────────────────────── */
 router.post('/google', authRateLimit, validate(googleAuthSchema), async (req, res, next) => {
   try {
-    const role = ['customer', 'restaurant', 'driver'].includes(req.body.role) ? req.body.role : 'customer';
-    const result = await googleLogin(req.body.credential, role);
+    const role            = ['customer', 'restaurant', 'driver'].includes(req.body.role) ? req.body.role : 'customer';
+    const confirmRegister = req.body.confirmRegister === true;
+    const result = await googleLogin(req.body.credential, role, confirmRegister);
     return res.json(result);
-  } catch (error) { return next(error); }
+  } catch (error) {
+    // Propagar el extra de requiresConfirmation al cliente
+    if (error.status === 404 && error.extra?.requiresConfirmation) {
+      return res.status(404).json({ requiresConfirmation: true, email: error.extra.email, role: error.extra.role });
+    }
+    return next(error);
+  }
 });
 
 /* ── POST /auth/forgot-password ──────────────────────────────────────────── */
