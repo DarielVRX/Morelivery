@@ -49,15 +49,15 @@ import { sendPushToUser } from '../../notifications/pushSubscription.js';
 // ─── Helper: notificar a restaurante y cliente sobre estado de búsqueda ───────
 async function notifyDriverSearch(orderId, type) {
   try {
-    const r = await query(
-      `SELECT r.owner_user_id, o.customer_id
+    const result = await query(
+      `SELECT rest.owner_user_id, o.customer_id
        FROM orders o
-       JOIN restaurants r ON r.id = o.restaurant_id
+       JOIN restaurants rest ON rest.id = o.restaurant_id
        WHERE o.id = $1`,
       [orderId]
     );
-    if (r.rowCount === 0) return;
-    const { owner_user_id, customer_id } = r.rows[0];
+    if (result.rowCount === 0) return;
+    const { owner_user_id, customer_id } = result.rows[0];
     const payload = { orderId, type };
     sseHub.sendToUser(owner_user_id, 'driver_search_update', payload);
     sseHub.sendToUser(customer_id,   'driver_search_update', payload);
