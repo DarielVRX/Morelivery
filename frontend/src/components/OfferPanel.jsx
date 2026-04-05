@@ -208,23 +208,7 @@ export default function OfferPanel({
     </>
   );
 }
-  offer,
-  minimized,
-  loading,
-  consecutiveTimeouts,
-  onAccept,
-  onReject,
-  onToggleMinimize,
-  onExpired,
-  panelRef,
-  handMode = 'left',
-  // Ruta de oferta
-  offerRouteGeometry,
-  offerRouteLoading,
-  onRequestOfferRoute,
-  onShowFullOfferRoute,
-  showFullOfferRoute,
-}) {
+
   // Pedir ruta automáticamente al mostrar la oferta
   // Normaliza snake_case (SSE) y camelCase (directo) para las coordenadas
   useEffect(() => {
