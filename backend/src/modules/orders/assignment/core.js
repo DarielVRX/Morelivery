@@ -211,7 +211,7 @@ export async function offerNextDrivers(orderId, onOffer) {
     if (distKm > maxDistKm) {
       await query(
         `UPDATE orders
-         SET status = 'cancelled', cancelled_by = 'distance_limit', updated_at = NOW()
+         SET status = 'cancelled', cancelled_at = 'distance_limit', updated_at = NOW()
          WHERE id = $1`,
         [orderId]
       );
