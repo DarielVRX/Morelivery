@@ -409,10 +409,6 @@ export function useDriverHomeRuntime({
   // La geometría completa es driver→stop1→stop2→...
   // Buscamos el punto de mínima distancia al próximo stop de forma progresiva
   // (forward scan) — el mínimo global marca el fin del tramo driver→stop1.
-  const partialRouteGeometry = (() => {
-    if (!routeGeometry?.length || !allStops?.length) return routeGeometry;
-    const target = allStops[0];
-    if (!target) return routeGeometry;
 
     const partialRouteGeometry = (() => {
     if (!routeGeometry?.length || !allStops?.length) return routeGeometry;
