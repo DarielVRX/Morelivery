@@ -402,41 +402,35 @@ export function useDriverHomeRuntime({
     const stopLat = isOTW ? Number(activeOrder.delivery_lat  ?? activeOrder.customer_lat)  : Number(activeOrder.restaurant_lat);
     const stopLng = isOTW ? Number(activeOrder.delivery_lng  ?? activeOrder.customer_lng)  : Number(activeOrder.restaurant_lng);
     if (!Number.isFinite(stopLat) || !Number.isFinite(stopLng)) return null;
-    return Math.round(haversineMeters(myPosition.lat, myPosition.lng, stopLat, stopLng));
+    return Math.round(haversineMeters({ lat: myPosition.lat, lng: myPosition.lng }, { lat: stopLat, lng: stopLng }));
   })();
 
   // ── P1: Ruta parcial driver→allStops[0] ──────────────────────────────────
   // La geometría completa es driver→stop1→stop2→...
-  // Para mostrar solo el tramo hasta allStops[0], buscamos el punto de la
-  // geometría más cercano al próximo stop buscando desde el final hacia atrás
-  // (el último punto cercano al stop es donde termina ese segmento).
+  // Buscamos el punto de mínima distancia al próximo stop de forma progresiva
+  // (forward scan) — el mínimo global marca el fin del tramo driver→stop1.
   const partialRouteGeometry = (() => {
     if (!routeGeometry?.length || !allStops?.length) return routeGeometry;
     const target = allStops[0];
     if (!target) return routeGeometry;
 
-    // Buscar desde el final — el último punto cercano al stop marca el fin del tramo
-    let closestIdx = routeGeometry.length - 1;
+    const partialRouteGeometry = (() => {
+    if (!routeGeometry?.length || !allStops?.length) return routeGeometry;
+    const target = allStops[0];
+    if (!target) return routeGeometry;
+
+    let closestIdx  = 0;
     let closestDist = Infinity;
-    for (let i = routeGeometry.length - 1; i >= 0; i--) {
-      const pt = routeGeometry[i];
-      const d  = haversineMeters(
-        { lat: pt[1] ?? pt.lat, lng: pt[0] ?? pt.lng },
-        { lat: target.lat, lng: target.lng }
-      );
+
+    for (let i = 0; i < routeGeometry.length; i++) {
+      const pt    = routeGeometry[i];
+      const ptLat = pt[1] ?? pt.lat;
+      const ptLng = pt[0] ?? pt.lng;
+      if (!Number.isFinite(ptLat) || !Number.isFinite(ptLng)) continue;
+      const d = haversineMeters({ lat: ptLat, lng: ptLng }, { lat: target.lat, lng: target.lng });
       if (d < closestDist) { closestDist = d; closestIdx = i; }
-      // Detener cuando la distancia empieza a crecer significativamente
-      // (ya pasamos el punto de mínima distancia)
-      if (d > closestDist + 500) break;
     }
 
-    console.log('[partial] geo.length:', routeGeometry.length,
-                'geo[0]:', routeGeometry[0],
-                'target:', target,
-                'closestIdx:', closestIdx,
-                'closestDist:', Math.round(closestDist));
-
-    // Asegurar al menos 2 puntos para dibujar
     const endIdx = Math.max(closestIdx + 1, 2);
     return routeGeometry.slice(0, endIdx);
   })();
@@ -455,7 +449,7 @@ export function useDriverHomeRuntime({
       const ptLat = pt[1] ?? pt.lat;
       const ptLng = pt[0] ?? pt.lng;
       if (!Number.isFinite(ptLat) || !Number.isFinite(ptLng)) continue;
-      const d = haversineMeters(myPosition, { lat: ptLat, lng: ptLng });
+      const d = haversineMeters({ lat: myPosition.lat, lng: myPosition.lng }, { lat: ptLat, lng: ptLng });
       if (d < minDist) minDist = d;
     }
 
