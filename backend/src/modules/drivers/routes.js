@@ -121,7 +121,48 @@ router.patch('/me/bag-capacity', authenticate, authorize(['driver']), async (req
   } catch (error) { return next(error); }
 });
 
-/* ── GET /drivers/me ─────────────────────────────────────────────────────── */
+/* ── GET /drivers/me/counters ────────────────────────────────────────────── */
+// Ganancias y entregas de la sesión actual (desde session_started_at).
+// session_started_at se resetea al activar disponibilidad.
+router.get('/me/counters', authenticate, authorize(['driver']), async (req, res, next) => {
+  try {
+    const driverId = req.user.userId;
+
+    const profileR = await query(
+      'SELECT session_started_at FROM driver_profiles WHERE user_id = $1',
+      [driverId]
+    );
+    const sessionStart = profileR.rows[0]?.session_started_at || new Date(0);
+
+    const r = await query(
+      `SELECT
+         COUNT(*)::int                                                        AS session_deliveries,
+         COALESCE(SUM(delivery_fee_cents), 0)::int                           AS session_delivery_fee,
+         COALESCE(SUM(ROUND(service_fee_cents * 0.5)), 0)::int               AS session_service_share,
+         COALESCE(SUM(tip_cents + COALESCE(delivered_tip_cents, 0)), 0)::int AS session_tips
+       FROM orders
+       WHERE driver_id   = $1
+         AND status      = 'delivered'
+         AND delivered_at >= $2`,
+      [driverId, sessionStart]
+    );
+
+    const row = r.rows[0];
+    const session_earnings_cents =
+      (row.session_delivery_fee || 0) +
+      (row.session_service_share || 0) +
+      (row.session_tips || 0);
+
+    return res.json({
+      counters: {
+        session_deliveries:    row.session_deliveries    || 0,
+        session_earnings_cents,
+      },
+    });
+  } catch (error) { return next(error); }
+});
+
+
 router.get('/me', authenticate, authorize(['driver']), async (req, res, next) => {
   try {
     const r = await query(

@@ -342,17 +342,6 @@ export default function ActiveOrderPanel({
               <IconDelivered /> Entregado
             </button>
           )}
-
-          {/* Indicador de distancia al stop activo */}
-          {distLabel && (canOTW || canDeliver) && (
-            <span style={{
-              fontSize: '0.68rem', fontWeight: 600, textAlign: 'center',
-              color: nearStop ? 'var(--success)' : 'var(--text-tertiary)',
-              transition: 'color 0.3s',
-            }}>
-              {distLabel}
-            </span>
-          )}
         </div>
       </div>
 
