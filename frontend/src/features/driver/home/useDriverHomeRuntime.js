@@ -199,7 +199,7 @@ export function useDriverHomeRuntime({
   const onRouteToPin = useCallback((pinPos) => {
     if (!pinPos) return;
     const origin = myPosition || pinPos;
-    fetchRouteModel({ origin, pickup: null, delivery: pinPos, token })
+    fetchRouteModel({ origin, pickup: undefined, delivery: pinPos, token })
       .then((data) => {
         if (!data?.geometry?.length) throw new Error('Ruta vacía');
         setRouteGeometry(data.geometry);
@@ -231,7 +231,7 @@ export function useDriverHomeRuntime({
       const segments = [origin, ...waypoints];
       const fetches  = [];
       for (let i = 0; i < segments.length - 1; i++) {
-        fetches.push(fetchRouteModel({ origin: segments[i], pickup: null, delivery: segments[i + 1], token }));
+        fetches.push(fetchRouteModel({ origin: segments[i], pickup: undefined, delivery: segments[i + 1], token }));
       }
       Promise.all(fetches)
         .then((results) => {
@@ -307,7 +307,7 @@ export function useDriverHomeRuntime({
     try {
       const pickup   = { lat: Number(rLat), lng: Number(rLng) };
       const delivery = { lat: Number(cLat), lng: Number(cLng) };
-      const data = await fetchRouteModel({ origin: pickup, pickup: null, delivery, token });
+      const data = await fetchRouteModel({ origin: pickup, pickup: undefined, delivery, token });
       if (data?.geometry?.length) {
         offerRouteCache.set(key, { geometry: data.geometry, ts: Date.now() });
         setOfferRouteGeometry(data.geometry);
@@ -406,27 +406,32 @@ export function useDriverHomeRuntime({
   })();
 
   // ── P1: Ruta parcial driver→allStops[0] ──────────────────────────────────
-  // En modos nav/nextStop solo se muestra el tramo hasta el próximo stop.
-  // En overview y offerRoute se muestra la geometría completa.
-  // El recorte se hace encontrando el punto de la geometría más cercano
-  // al destino (allStops[0]) y cortando ahí.
+  // La geometría completa es driver→stop1→stop2→...
+  // Para mostrar solo el tramo hasta allStops[0], buscamos el punto de la
+  // geometría más cercano al próximo stop buscando desde el final hacia atrás
+  // (el último punto cercano al stop es donde termina ese segmento).
   const partialRouteGeometry = (() => {
     if (!routeGeometry?.length || !allStops?.length) return routeGeometry;
     const target = allStops[0];
     if (!target) return routeGeometry;
 
-    // Encontrar índice del punto de la geometría más cercano al próximo stop
-    let closestIdx = 0;
+    // Buscar desde el final — el último punto cercano al stop marca el fin del tramo
+    let closestIdx = routeGeometry.length - 1;
     let closestDist = Infinity;
-    for (let i = 0; i < routeGeometry.length; i++) {
+    for (let i = routeGeometry.length - 1; i >= 0; i--) {
       const pt = routeGeometry[i];
       const d  = haversineMeters(
         { lat: pt[1] ?? pt.lat, lng: pt[0] ?? pt.lng },
         { lat: target.lat, lng: target.lng }
       );
       if (d < closestDist) { closestDist = d; closestIdx = i; }
+      // Detener cuando la distancia empieza a crecer significativamente
+      // (ya pasamos el punto de mínima distancia)
+      if (d > closestDist + 500) break;
     }
-    return routeGeometry.slice(0, closestIdx + 1);
+    // Asegurar al menos 2 puntos para dibujar
+    const endIdx = Math.max(closestIdx + 1, 2);
+    return routeGeometry.slice(0, endIdx);
   })();
 
   // ── P1: Reroute automático por desvío de ruta ─────────────────────────────

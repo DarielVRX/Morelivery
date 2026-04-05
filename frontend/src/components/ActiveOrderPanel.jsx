@@ -423,19 +423,19 @@ export default function ActiveOrderPanel({
                     position:'absolute', top:'110%', left:0, right:0,
                     background:'var(--bg-card)', border:'1px solid var(--border)',
                     borderRadius:8, boxShadow:'0 4px 16px rgba(0,0,0,0.15)',
-                    zIndex:50, overflow:'hidden',
+                    zIndex:50, overflow:'hidden', display:'flex',
                   }}>
                     <button onClick={() => handleNotify('customer')}
-                      style={{ width:'100%', padding:'0.65rem 0.75rem', textAlign:'left',
-                        background:'none', border:'none', borderBottom:'1px solid var(--border-light)',
-                        cursor:'pointer', fontSize:'0.85rem', fontWeight:600 }}>
-                      📱 Notificar al cliente
+                      style={{ flex:1, padding:'0.65rem 0.5rem', textAlign:'center',
+                        background:'none', border:'none', borderRight:'1px solid var(--border-light)',
+                        cursor:'pointer', fontSize:'0.82rem', fontWeight:600 }}>
+                      📱 Cliente
                     </button>
                     <button onClick={() => handleNotify('restaurant')}
-                      style={{ width:'100%', padding:'0.65rem 0.75rem', textAlign:'left',
-                        background:'none', border:'none', cursor:'pointer',
-                        fontSize:'0.85rem', fontWeight:600 }}>
-                      🏪 Notificar a la tienda
+                      style={{ flex:1, padding:'0.65rem 0.5rem', textAlign:'center',
+                        background:'none', border:'none',
+                        cursor:'pointer', fontSize:'0.82rem', fontWeight:600 }}>
+                      🏪 Tienda
                     </button>
                   </div>
                 )}
