@@ -17,21 +17,34 @@ const STATUS_COLOR = {
   delivered:'#16a34a', cancelled:'#dc2626', pending_driver:'#ef4444',
 };
 
-// P6: mensajes en lenguaje natural por estado
-// Para assigned/accepted el mensaje depende de si este pedido es el próximo stop del driver
+// P6: mensajes en lenguaje natural — modelo basado en nextstop + arrived
 const STATUS_MESSAGES = {
-  created:        'Estamos buscando un repartidor para tu pedido',
-  pending_driver: 'Estamos buscando un repartidor para tu pedido',
-  preparing:      'Tu repartidor está esperando tu pedido',
-  ready:          'Tu repartidor está en camino a recoger tu pedido',
-  on_the_way:     'Tu repartidor está en camino',
+  created:        'Buscando repartidor',
+  pending_driver: 'Buscando repartidor',
 };
-function getStatusMessage(status, isNextStop) {
-  if (status === 'assigned' || status === 'accepted') {
+
+function getStatusMessage(order, etaEntry, arrived) {
+  const { status } = order;
+  if (!order.driver_id) return 'Buscando repartidor';
+  if (status === 'delivered' || status === 'cancelled') return null;
+
+  const isNextStop  = etaEntry?.is_next_stop ?? false;
+
+  if (arrived) return 'El repartidor está esperando';
+
+  if (status === 'on_the_way') {
     return isNextStop
-      ? 'Tu repartidor está en camino a recoger tu pedido'
-      : 'Tu repartidor está entregando otros pedidos';
+      ? 'Está en camino a entregar'
+      : 'Tiene tu pedido · Entregando otros';
   }
+
+  // Pre-pickup
+  if (['assigned','accepted','preparing','ready'].includes(status)) {
+    return isNextStop
+      ? 'El repartidor está en camino a recoger'
+      : 'El repartidor está entregando otros';
+  }
+
   return STATUS_MESSAGES[status] ?? null;
 }
 
@@ -149,6 +162,9 @@ export default function CustomerOrders({ registerRef } = {}) {
   // P7: ETA del driver por pedido { orderId: { eta_secs, receivedAt } }
   const [driverEta, setDriverEta] = useState({});
   const [etaTick,   setEtaTick]   = useState(0);
+  // arrived flag por orderId — solo delivery (target !== 'pickup')
+  const [arrivedOrders, setArrivedOrders] = useState({});
+
   useEffect(() => {
     const id = setInterval(() => setEtaTick(t => t + 1), 1000);
     return () => clearInterval(id);
@@ -158,6 +174,8 @@ export default function CustomerOrders({ registerRef } = {}) {
     auth.token,
     (data) => {
       loadDataRef.current?.();
+      // Limpiar arrived al cambiar estado del pedido
+      if (data?.orderId) setArrivedOrders(p => { const n = {...p}; delete n[data.orderId]; return n; });
       registerRef?.current?.onSuggUpdate?.();
       registerRef?.current?.onPaymentUpdate?.();
       registerRef?.current?.onCartUpdate?.();
@@ -165,12 +183,18 @@ export default function CustomerOrders({ registerRef } = {}) {
     },
     ({ orderId, lat, lng, eta_secs, is_next_stop }) => {
       setDriverPos(p => ({ ...p, [orderId]: { lat, lng } }));
-      // P7: guardar eta_secs e is_next_stop con timestamp para countdown y mensaje
       if (eta_secs != null)
         setDriverEta(p => ({ ...p, [orderId]: { eta_secs, receivedAt: Date.now(), is_next_stop } }));
     },
     undefined,
     (data) => { if (data.orderId === chatOpen) setChatTick(t => t + 1); },
+    undefined, undefined, undefined, undefined, undefined, undefined,
+    // onDriverArrived — solo marcar si es delivery (target !== 'pickup')
+    (data) => {
+      if (data?.orderId && data?.target !== 'pickup') {
+        setArrivedOrders(p => ({ ...p, [data.orderId]: true }));
+      }
+    },
   );
 
   const pendingSuggestions = useMemo(
@@ -381,8 +405,9 @@ export default function CustomerOrders({ registerRef } = {}) {
                           <span style={{ fontWeight:700, fontSize:'0.875rem' }}>{order.restaurant_name}</span>
                           {/* P6: mensaje contextual en lenguaje natural */}
                           {(() => {
-                            const isNextStop = driverEta[order.id]?.is_next_stop ?? false;
-                            const msg = getStatusMessage(order.status, isNextStop);
+                            const etaEntry = driverEta[order.id];
+                            const arrived  = arrivedOrders[order.id] ?? false;
+                            const msg = getStatusMessage(order, etaEntry, arrived);
                             return msg ? (
                               <div style={{
                                 fontSize:'0.75rem', color:'var(--text-secondary)',

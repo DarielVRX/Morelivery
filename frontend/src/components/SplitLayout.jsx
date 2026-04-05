@@ -1,7 +1,7 @@
 // frontend/src/components/SplitLayout.jsx
 // ordersContent se monta UNA sola vez — en desktop es columna fija,
 // en móvil la misma columna se transforma en drawer via CSS (sin re-mount).
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import PullToRefresh from './PullToRefresh';
 
 export default function SplitLayout({
@@ -17,9 +17,12 @@ export default function SplitLayout({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeTab,  setActiveTab]  = useState('orders');
 
+  // Swipe para abrir drawer — solo desde barra de tabs o trigger button
+  const swipeStartRef = useRef(null);
+  const tabHeaderRef  = useRef(null);
+
   const hasAlerts = Boolean(alertsContent);
 
-  // Si se quita alertsContent, volver a la pestaña de pedidos
   useEffect(() => {
     if (!hasAlerts) setActiveTab('orders');
   }, [hasAlerts]);
@@ -31,6 +34,39 @@ export default function SplitLayout({
     return () => { document.body.style.overflow = ''; };
   }, [mobileOpen]);
 
+  // Swipe handler para el trigger button (barra lateral)
+  const handleTriggerTouchStart = (e) => {
+    swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+  const handleTriggerTouchEnd = (e) => {
+    if (!swipeStartRef.current) return;
+    const dx = swipeStartRef.current.x - e.changedTouches[0].clientX;
+    const dy = Math.abs(swipeStartRef.current.y - e.changedTouches[0].clientY);
+    swipeStartRef.current = null;
+    // Solo swipe horizontal predominante desde trigger
+    if (dy > Math.abs(dx) * 0.6 || Math.abs(dx) < 20) return;
+    if (dx > 0 && !mobileOpen) setMobileOpen(true);   // swipe izq → abrir
+    if (dx < 0 && mobileOpen)  setMobileOpen(false);  // swipe der → cerrar
+  };
+
+  // Swipe handler para la barra de tabs — margen generoso (no desde bordes)
+  const handleTabHeaderTouchStart = (e) => {
+    const x = e.touches[0].clientX;
+    const w = e.currentTarget.offsetWidth;
+    // Ignorar toque en borde derecho (<30px del borde) para no chocar con back gesture
+    if (w - x < 30) return;
+    swipeStartRef.current = { x, y: e.touches[0].clientY };
+  };
+  const handleTabHeaderTouchEnd = (e) => {
+    if (!swipeStartRef.current) return;
+    const dx = swipeStartRef.current.x - e.changedTouches[0].clientX;
+    const dy = Math.abs(swipeStartRef.current.y - e.changedTouches[0].clientY);
+    swipeStartRef.current = null;
+    if (dy > Math.abs(dx) * 0.6 || Math.abs(dx) < 30) return;
+    if (dx > 0 && !mobileOpen) setMobileOpen(true);
+    if (dx < 0 && mobileOpen)  setMobileOpen(false);
+  };
+
   return (
     <PullToRefresh onRefresh={onRefresh}>
     <div className="split-root">
@@ -39,11 +75,16 @@ export default function SplitLayout({
     <aside className={`split-orders-col${mobileOpen ? ' mobile-open' : ''}`}>
 
       {/* Header de pestañas — solo muestra alertas si hay contenido */}
-      <div style={{
-        display: 'flex', flexShrink: 0,
-        borderBottom: '1px solid var(--border-light)',
-        background: 'var(--bg-card)',
-      }}>
+      <div
+        ref={tabHeaderRef}
+        onTouchStart={handleTabHeaderTouchStart}
+        onTouchEnd={handleTabHeaderTouchEnd}
+        style={{
+          display: 'flex', flexShrink: 0,
+          borderBottom: '1px solid var(--border-light)',
+          background: 'var(--bg-card)',
+          touchAction: 'pan-y',
+        }}>
         <button onClick={() => setActiveTab('orders')} style={{
           flex: 1, padding: '0.6rem 0', fontSize: '0.78rem', fontWeight: 700,
           cursor: 'pointer', border: 'none', background: 'none',
@@ -93,6 +134,8 @@ export default function SplitLayout({
     <button
       className={`orders-tab-trigger${mobileOpen ? ' open' : ''}`}
       onClick={() => setMobileOpen(v => !v)}
+      onTouchStart={handleTriggerTouchStart}
+      onTouchEnd={handleTriggerTouchEnd}
       aria-label={mobileOpen ? 'Cerrar pedidos' : 'Ver pedidos'}
       style={{
         right: mobileOpen ? 'min(85vw, 360px)' : 0,

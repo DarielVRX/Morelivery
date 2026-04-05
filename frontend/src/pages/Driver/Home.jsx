@@ -145,6 +145,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         pinAddress={home.pinAddress}
         loadingPin={home.loadingPin}
         routeGeometry={home.routeGeometry}
+        partialRouteGeometry={home.partialRouteGeometry}
         allStops={home.allStops}
         routeActive={home.routeActive}
         myPosition={displayPosition}

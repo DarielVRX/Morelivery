@@ -16,7 +16,8 @@ export default function DriverHomeMapSection({
   pinAddress,
   loadingPin,
   routeGeometry,
-  offerRouteGeometry,  // ruta de la oferta actual (preview en mapa)
+  partialRouteGeometry,  // tramo driver→nextstop (modos nav/nextStop)
+  offerRouteGeometry,
   allStops,
   routeActive,
   myPosition,
@@ -81,11 +82,16 @@ export default function DriverHomeMapSection({
   }, [myPosition?.lat, myPosition?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // La geometría a mostrar en el mapa:
-  // - Si hay ruta activa: routeGeometry
-  // - Si hay oferta y no hay ruta activa: offerRouteGeometry
-  const displayGeometry = routeActive
-    ? routeGeometry
-    : (offerRouteGeometry?.length ? offerRouteGeometry : routeGeometry);
+  // - Si hay oferta con ruta → offerRouteGeometry siempre (sobre la ruta activa)
+  // - En overview → ruta completa
+  // - En nav/nextStop → ruta parcial driver→nextstop
+  // - Sin ruta activa → nada
+  const displayGeometry = (() => {
+    if (offerRouteGeometry?.length) return offerRouteGeometry;
+    if (!routeActive) return null;
+    if (centerMode === 'overview') return routeGeometry;
+    return partialRouteGeometry?.length ? partialRouteGeometry : routeGeometry;
+  })();
 
   return (
     <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden', zIndex: 0 }}>
@@ -126,6 +132,7 @@ export default function DriverHomeMapSection({
         pickupLabel={activeOrder?.restaurant_name || 'Tienda'}
         deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
         routeGeometry={displayGeometry}
+        partialRouteGeometry={null}
         allStops={allStops}
         routeActive={routeActive}
         onRouteError={setMsg}

@@ -73,7 +73,8 @@ export default function ActiveOrderPanel({
   const [callFeedback,     setCallFeedback]     = useState(null);
   const [chatOpen,         setChatOpen]         = useState(false);
   const [kitchenSecsLeft,  setKitchenSecsLeft]  = useState(null);
-  const [statusFeedback,   setStatusFeedback]   = useState(null); // { ok, msg }
+  const [statusFeedback,   setStatusFeedback]   = useState(null);
+  const [detailsOpen,      setDetailsOpen]      = useState(false);
 
   // P5: swipe state
   const swipeTouchStartY = useRef(null);
@@ -133,21 +134,21 @@ export default function ActiveOrderPanel({
   const total  = getOrderGrandTotalCents(order);
   const earn   = getDriverEarningCents(order);
 
-  // El backend valida distancia y transición de estado — el frontend solo
-  // habilita los botones según el estado lógico mínimo, sin replicar validaciones.
   const canOTW     = ['assigned', 'accepted', 'preparing', 'ready'].includes(order.status);
   const canDeliver = order.status === 'on_the_way';
   const canRelevo  = !['on_the_way','delivered','cancelled'].includes(order.status) && !order.picked_up_at && !order.is_disputed;
   const canRelease = !['on_the_way','delivered','cancelled'].includes(order.status);
 
-  // Proximidad al stop activo — solo informativo
-  const FENCE_M    = 100;
-  const nearStop   = distToNextStop != null && distToNextStop <= FENCE_M;
-  const distLabel  = distToNextStop != null
-    ? distToNextStop <= FENCE_M
-      ? `A ${distToNextStop}m ✓`
-      : `A ${distToNextStop}m`
-    : null;
+  const FENCE_M  = 100;
+  const nearStop = distToNextStop != null && distToNextStop <= FENCE_M;
+
+  // ETA estimado: distancia / 6.94 m/s + 5 min tolerancia
+  const etaLabel = (() => {
+    if (distToNextStop == null) return null;
+    const etaSecs = Math.round(distToNextStop / 6.94) + 300;
+    const mins    = Math.ceil(etaSecs / 60);
+    return `~${mins} min`;
+  })();
 
   const isRight = handMode === 'right';
   const restaurantConfirmed = order.restaurant_confirmed !== false;
@@ -186,10 +187,16 @@ export default function ActiveOrderPanel({
         const dx = Math.abs(swipeTouchStartX.current - e.changedTouches[0].clientX);
         swipeTouchStartY.current = null;
         swipeTouchStartX.current = null;
-        // Solo capturar swipes predominantemente verticales
         if (Math.abs(dy) < 30 || dx > Math.abs(dy) * 0.6) return;
-        if (dy > 0 && !expanded) onToggleExpand();  // swipe up → expandir
-        if (dy < 0 && expanded)  onToggleExpand();  // swipe down → colapsar
+        if (dy > 0) {
+          // swipe up — expandir panel primero, luego detalles
+          if (!expanded) { onToggleExpand(); }
+          else if (!detailsOpen) { setDetailsOpen(true); }
+        } else {
+          // swipe down — cerrar detalles primero, luego colapsar panel
+          if (detailsOpen) { setDetailsOpen(false); }
+          else if (expanded) { onToggleExpand(); }
+        }
       }}
     >
       {/* Confirmación pendiente */}
@@ -237,6 +244,16 @@ export default function ActiveOrderPanel({
               {STATUS_LABEL[order.status] || order.status}
             </span>
             <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+              {/* Distancia + ETA en la barra de status */}
+              {distToNextStop != null && (canOTW || canDeliver) && (
+                <span style={{
+                  fontSize:'0.65rem', fontWeight:700,
+                  color: nearStop ? 'var(--success)' : 'var(--text-tertiary)',
+                  display:'flex', alignItems:'center', gap:3,
+                }}>
+                  {nearStop ? '✓ ' : ''}{distToNextStop}m{etaLabel ? ` · ${etaLabel}` : ''}
+                </span>
+              )}
               {order.is_disputed && (
                 <span style={{ fontSize:'0.62rem', fontWeight:700, background:'#fef9c3',
                   color:'#854d0e', border:'1px solid #fde047', borderRadius:6,
@@ -274,8 +291,8 @@ export default function ActiveOrderPanel({
         {/* Botones principales — P3: solo el botón del siguiente estado relevante */}
         <div style={{
           display:'flex', flexDirection:'column', gap:4, padding:'0.4rem 0.5rem',
-          justifyContent:'center', flexShrink:0,
-          alignItems: isRight ? 'flex-start' : 'flex-end',
+          justifyContent:'center', flexShrink:0, minWidth:120,
+          alignItems:'stretch',
           position: 'relative',
         }}>
           {/* P4: badge de pedidos múltiples en el stop actual */}
@@ -296,12 +313,12 @@ export default function ActiveOrderPanel({
           {canOTW && (
             <button
               style={{
-                padding:'0.5rem 0.75rem', borderRadius:8, fontWeight:700, fontSize:'0.8rem',
+                padding:'0.75rem 0.5rem', borderRadius:10, fontWeight:800, fontSize:'0.95rem',
                 border: nearStop ? '2px solid var(--success)' : 'none',
                 cursor:'pointer',
-                display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+                display:'flex', alignItems:'center', justifyContent:'center', gap:6,
                 background:'var(--brand)', color:'#fff',
-                minWidth:100, minHeight:44, transition:'border 0.2s',
+                width:'100%', minHeight:60, transition:'border 0.2s',
               }}
               disabled={loadingStatus === 'on_the_way'}
               onClick={() => handleChangeStatus(order.id, 'on_the_way')}>
@@ -313,12 +330,12 @@ export default function ActiveOrderPanel({
           {canDeliver && (
             <button
               style={{
-                padding:'0.5rem 0.75rem', borderRadius:8, fontWeight:700, fontSize:'0.8rem',
+                padding:'0.75rem 0.5rem', borderRadius:10, fontWeight:800, fontSize:'0.95rem',
                 border: nearStop ? '2px solid var(--success)' : 'none',
                 cursor:'pointer',
-                display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+                display:'flex', alignItems:'center', justifyContent:'center', gap:6,
                 background:'var(--success)', color:'#fff',
-                minWidth:100, minHeight:44, transition:'border 0.2s',
+                width:'100%', minHeight:60, transition:'border 0.2s',
               }}
               disabled={loadingStatus === 'delivered'}
               onClick={() => handleChangeStatus(order.id, 'delivered')}>
@@ -389,73 +406,127 @@ export default function ActiveOrderPanel({
               </div>
             )}
 
-            {/* Notificar */}
-            <div style={{ position:'relative' }}>
+            {/* Fila horizontal de acciones: Notificar | Chat | Relevo | Liberar | Detalles */}
+            <div style={{ display:'flex', gap:'0.3rem', alignItems:'stretch' }}>
+
+              {/* Notificar */}
+              <div style={{ flex:1, position:'relative' }}>
+                <button
+                  onClick={() => setShowCallSelector(v => !v)}
+                  disabled={!!callingTarget}
+                  style={{
+                    width:'100%', height:'100%', minHeight:52,
+                    display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
+                    padding:'0.3rem 0.2rem', borderRadius:8, fontWeight:700,
+                    fontSize:'0.68rem', border:'1.5px solid #3b82f6',
+                    background: callingTarget ? '#dbeafe' : '#eff6ff',
+                    color:'#1d4ed8', cursor: callingTarget ? 'not-allowed' : 'pointer',
+                    opacity: callingTarget ? 0.7 : 1,
+                  }}>
+                  <IconPhone />
+                  {callingTarget ? '…' : 'Notificar'}
+                </button>
+                {showCallSelector && (
+                  <div style={{
+                    position:'absolute', bottom:'110%', left:0, right:0,
+                    background:'var(--bg-card)', border:'1px solid var(--border)',
+                    borderRadius:8, boxShadow:'0 4px 16px rgba(0,0,0,0.15)',
+                    zIndex:50, overflow:'hidden',
+                  }}>
+                    <button onClick={() => handleNotify('customer')}
+                      style={{ width:'100%', padding:'0.6rem 0.75rem', textAlign:'left',
+                        background:'none', border:'none', borderBottom:'1px solid var(--border-light)',
+                        cursor:'pointer', fontSize:'0.82rem', fontWeight:600 }}>
+                      Notificar al cliente
+                    </button>
+                    <button onClick={() => handleNotify('restaurant')}
+                      style={{ width:'100%', padding:'0.6rem 0.75rem', textAlign:'left',
+                        background:'none', border:'none', cursor:'pointer',
+                        fontSize:'0.82rem', fontWeight:600 }}>
+                      Notificar a la tienda
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Chat */}
               <button
-                onClick={() => setShowCallSelector(v => !v)}
-                disabled={!!callingTarget}
+                onClick={() => setChatOpen((v) => !v)}
                 style={{
-                  display:'flex', alignItems:'center', gap:6,
-                  padding:'0.45rem 0.75rem', borderRadius:8, fontWeight:700,
-                  fontSize:'0.78rem', border:'1.5px solid #3b82f6',
-                  background: callingTarget ? '#dbeafe' : '#eff6ff',
-                  color:'#1d4ed8', cursor: callingTarget ? 'not-allowed' : 'pointer',
-                  width:'100%', opacity: callingTarget ? 0.7 : 1,
+                  flex:1, minHeight:52,
+                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
+                  padding:'0.3rem 0.2rem', borderRadius:8, fontWeight:700,
+                  fontSize:'0.68rem', border:'1px solid var(--border)',
+                  background: chatOpen ? 'var(--brand-light)' : 'var(--bg-raised)',
+                  color: chatOpen ? 'var(--brand)' : 'var(--text-secondary)',
+                  cursor:'pointer',
                 }}>
-                <IconPhone />
-                {callingTarget ? 'Notificando…' : 'Notificar'}
-                <span style={{ marginLeft:'auto', fontSize:'0.7rem', opacity:0.7 }}>
-                  {showCallSelector ? '▲' : '▼'}
-                </span>
+                <IconChat />
+                Chat
               </button>
 
-              {callFeedback && (
-                <div style={{
-                  marginTop:4, padding:'0.3rem 0.6rem', borderRadius:6,
-                  fontSize:'0.75rem', fontWeight:600,
-                  background: callFeedback.ok ? 'var(--success-bg)' : 'var(--danger-bg)',
-                  color:      callFeedback.ok ? 'var(--success)' : 'var(--danger)',
-                  border:`1px solid ${callFeedback.ok ? 'var(--success-border)' : 'var(--danger-border)'}`,
-                }}>
-                  {callFeedback.msg}
-                </div>
+              {/* Relevo */}
+              {canRelevo && !order.is_disputed && (
+                <button style={{
+                  flex:1, minHeight:52,
+                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
+                  padding:'0.3rem 0.2rem', borderRadius:8, fontWeight:700,
+                  fontSize:'0.68rem', border:'1.5px solid var(--warn-border)', cursor:'pointer',
+                  color:'var(--warn)', background:'var(--warn-bg)',
+                }} onClick={onRebalance}>
+                  <IconRelevo />
+                  Relevo
+                </button>
               )}
 
-              {showCallSelector && (
-                <div style={{
-                  position:'absolute', top:'110%', left:0, right:0,
-                  background:'var(--bg-card)', border:'1px solid var(--border)',
-                  borderRadius:8, boxShadow:'0 4px 16px rgba(0,0,0,0.15)',
-                  zIndex:50, overflow:'hidden',
-                }}>
-                  <button onClick={() => handleNotify('customer')}
-                    style={{ width:'100%', padding:'0.6rem 0.75rem', textAlign:'left',
-                      background:'none', border:'none', borderBottom:'1px solid var(--border-light)',
-                      cursor:'pointer', fontSize:'0.82rem', fontWeight:600 }}>
-                    Notificar al cliente
-                  </button>
-                  <button onClick={() => handleNotify('restaurant')}
-                    style={{ width:'100%', padding:'0.6rem 0.75rem', textAlign:'left',
-                      background:'none', border:'none', cursor:'pointer',
-                      fontSize:'0.82rem', fontWeight:600 }}>
-                    Notificar a la tienda
-                  </button>
-                </div>
+              {/* Liberar */}
+              {canRelease && !order.is_disputed && (
+                <button style={{
+                  flex:1, minHeight:52,
+                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
+                  padding:'0.3rem 0.2rem', borderRadius:8, fontWeight:700,
+                  fontSize:'0.68rem', border:'1.5px solid var(--danger-border)', cursor:'pointer',
+                  background:'var(--danger-bg)', color:'var(--danger)',
+                }} onClick={onToggleRelease}>
+                  <IconRelease />
+                  Liberar
+                </button>
               )}
+
+              {/* Detalles — al final, 20% */}
+              <button
+                onClick={() => setDetailsOpen(v => !v)}
+                style={{
+                  flex:1, minHeight:52,
+                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
+                  padding:'0.3rem 0.2rem', borderRadius:8, fontWeight:700,
+                  fontSize:'0.68rem', border:'1px solid var(--border-light)',
+                  background: detailsOpen ? 'var(--bg-raised)' : 'none',
+                  color:'var(--text-tertiary)', cursor:'pointer',
+                }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                Detalles
+              </button>
             </div>
 
-            <button
-              onClick={() => setChatOpen((v) => !v)}
-              style={{
-                display:'flex', alignItems:'center', gap:6,
-                padding:'0.35rem 0.75rem', borderRadius:8, fontWeight:600,
-                fontSize:'0.75rem', border:'1px solid var(--border)',
-                background:'var(--bg-raised)', color:'var(--text-secondary)',
-                cursor:'pointer', width:'100%',
+            {/* Feedback notificación */}
+            {callFeedback && (
+              <div style={{
+                padding:'0.3rem 0.6rem', borderRadius:6,
+                fontSize:'0.75rem', fontWeight:600,
+                background: callFeedback.ok ? 'var(--success-bg)' : 'var(--danger-bg)',
+                color:      callFeedback.ok ? 'var(--success)' : 'var(--danger)',
+                border:`1px solid ${callFeedback.ok ? 'var(--success-border)' : 'var(--danger-border)'}`,
               }}>
-              <IconChat />
-              {chatOpen ? 'Cerrar chat del pedido' : 'Chat del pedido'}
-            </button>
+                {callFeedback.msg}
+              </div>
+            )}
+
+            {/* Chat expandido */}
             {chatOpen && (
               <OrderChat orderId={order.id} token={authToken} refreshTick={chatTick} />
             )}
@@ -475,38 +546,6 @@ export default function ActiveOrderPanel({
                   onClick={onCancelDispute}>
                   Cancelar disputa
                 </button>
-              </div>
-            )}
-
-            {/* Opciones secundarias */}
-            {(canRelevo || canRelease) && !order.is_disputed && (
-              <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.15rem' }}>
-                {canRelevo && (
-                  <button style={{
-                    flex:1, padding:'0.5rem 0.25rem', borderRadius:8, fontWeight:700,
-                    fontSize:'0.72rem', border:'1.5px solid var(--warn-border)', cursor:'pointer',
-                    display:'flex', flexDirection:'column',
-                    alignItems:'center', justifyContent:'center', gap:4,
-                    color:'var(--warn)', background:'var(--warn-bg)',
-                    minHeight:56,
-                  }} onClick={onRebalance}>
-                    <IconRelevo />
-                    Relevo
-                  </button>
-                )}
-                {canRelease && (
-                  <button style={{
-                    flex:1, padding:'0.5rem 0.25rem', borderRadius:8, fontWeight:700,
-                    fontSize:'0.72rem', border:'1.5px solid var(--danger-border)', cursor:'pointer',
-                    display:'flex', flexDirection:'column',
-                    alignItems:'center', justifyContent:'center', gap:4,
-                    background:'var(--danger-bg)', color:'var(--danger)',
-                    minHeight:56,
-                  }} onClick={onToggleRelease}>
-                    <IconRelease />
-                    Liberar
-                  </button>
-                )}
               </div>
             )}
 
@@ -537,18 +576,9 @@ export default function ActiveOrderPanel({
               </div>
             )}
 
-            {/* Detalles del pedido */}
-            <details style={{ borderTop:'1px solid var(--border-light)', paddingTop:'0.35rem' }}>
-              <summary style={{ cursor:'pointer', color:'var(--text-tertiary)', fontWeight:600,
-                fontSize:'0.72rem', listStyle:'none', display:'flex', alignItems:'center', gap:4 }}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/>
-                </svg>
-                Detalles del pedido
-              </summary>
-              <div style={{ marginTop:'0.35rem' }}>
+            {/* Detalles del pedido — controlado por estado */}
+            {detailsOpen && (
+              <div style={{ borderTop:'1px solid var(--border-light)', paddingTop:'0.35rem' }}>
                 {(order.items || []).length > 0 && (
                   <ul style={{ fontSize:'0.78rem', margin:'0 0 0.3rem 1rem', color:'var(--text-primary)' }}>
                     {order.items.map(i => <li key={i.menuItemId}>{i.name} × {i.quantity}</li>)}
@@ -560,10 +590,11 @@ export default function ActiveOrderPanel({
                   <strong style={{ color:'var(--success)' }}>{fmt(earn)}</strong>
                 </div>
               </div>
-            </details>
+            )}
           </div>
         </div>
       </div>
+
     </div>
   );
 }

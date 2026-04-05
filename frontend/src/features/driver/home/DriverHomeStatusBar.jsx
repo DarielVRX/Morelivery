@@ -107,7 +107,6 @@ export default function DriverHomeStatusBar({
   gpsError = null,
 }) {
   const { auth, patchUser } = useAuth();
-  const [showBagModal,       setShowBagModal]       = useState(false);
   const [currentBagCapacity, setCurrentBagCapacity] = useState(null);
 
   useEffect(() => {
@@ -180,12 +179,11 @@ export default function DriverHomeStatusBar({
             {gpsError && <span style={{ fontSize:'0.62rem', fontWeight:700 }}>GPS</span>}
           </button>
 
-          {/* Mochila */}
-          <button onClick={() => setShowBagModal(true)}
-            style={{ display:'flex', alignItems:'center', gap:3, background:'none',
-              border:'none', cursor:'pointer', padding:'0.2rem 0.3rem', borderRadius:12,
-              color:'rgba(255,255,255,0.9)' }}
-            title={`Capacidad: ${currentBagCapacity ?? '?'} litros`}>
+          {/* Mochila — solo informativo, editar desde perfil */}
+          <span
+            title={`Capacidad: ${currentBagCapacity ?? '?'} litros — editar en perfil`}
+            style={{ display:'flex', alignItems:'center', gap:3,
+              color:'rgba(255,255,255,0.9)', padding:'0.2rem 0.3rem' }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
@@ -195,7 +193,7 @@ export default function DriverHomeStatusBar({
             <span style={{ fontSize:'0.68rem', fontWeight:500 }}>
               {currentBagCapacity ?? '?'}L
             </span>
-          </button>
+          </span>
 
           {bagPct !== null && (
             <span style={{ fontSize:'0.68rem', opacity:0.85 }}>{bagPct}%</span>
@@ -280,13 +278,6 @@ export default function DriverHomeStatusBar({
         </div>
       )}
 
-      <BagCapacityModal
-        isOpen={showBagModal}
-        onClose={() => setShowBagModal(false)}
-        currentLiters={currentBagCapacity ?? 25}
-        onSave={handleSaveBagCapacity}
-        token={auth.token}
-      />
     </>
   );
 }
