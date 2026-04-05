@@ -154,7 +154,7 @@ async function _sendNoDriverPush(order, { title, body, priority, actions }) {
 async function _autoCancelOrder(order) {
   await query(
     `UPDATE orders
-    SET status = 'cancelled', cancelled_at = 'no_driver_timeout', updated_at = NOW()
+    SET status = 'cancelled', cancelled_at = NOW(), updated_at = NOW()
     WHERE id = $1 AND driver_id IS NULL AND status IN ('created','pending_driver')`,
               [order.id]
   );
