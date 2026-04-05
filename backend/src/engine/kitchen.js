@@ -36,7 +36,7 @@ export async function initKitchenTiming(orderId, restaurantId) {
     await query(
       `UPDATE orders
        SET prep_started_at          = NOW(),
-           kitchen_estimated_ready  = NOW() + ($1 * INTERVAL '1 second'),
+           kitchen_estimated_ready  = NOW() + make_interval(secs => $1::int),
            updated_at               = NOW()
        WHERE id = $2`,
       [prepEstimate, orderId]

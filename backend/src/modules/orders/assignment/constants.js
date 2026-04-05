@@ -9,13 +9,16 @@ export const SESSION_REBALANCE_LIMIT      = 5;    // max rebalanceos manuales po
 
 // Statuses que cuentan como pedido "activo" para el límite de carga del driver
 export const ACTIVE_STATUSES = ['assigned','accepted','preparing','ready','on_the_way'];
+const ASSIGNMENT_DEBUG = process.env.ASSIGNMENT_DEBUG === '1';
 
 export function log(ctx, msg, data = {}) {
+  if (!ASSIGNMENT_DEBUG) return;
   const ts = new Date().toISOString();
   const x  = Object.keys(data).length ? ' ' + JSON.stringify(data) : '';
   console.log(`[assign ${ts}] ${ctx} ${msg}${x}`);
 }
 export function logWarn(ctx, msg, data = {}) {
+  if (!ASSIGNMENT_DEBUG) return;
   const ts = new Date().toISOString();
   const x  = Object.keys(data).length ? ' ' + JSON.stringify(data) : '';
   console.warn(`[assign ${ts}] ${ctx} WARN: ${msg}${x}`);

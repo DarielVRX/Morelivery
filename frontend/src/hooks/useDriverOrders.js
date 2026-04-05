@@ -2,11 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { apiFetch } from '../api/client';
 import { splitOrdersByTerminalStatus } from '../features/orders/status';
-import { haversineMeters } from '../utils/geo';
 
 const STATUS_WITH_GPS = ['on_the_way', 'delivered'];
-const MAX_RADIUS_M = 100;
-const GRACE_MS = 3 * 60 * 1000;
 
 export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, onExternalChat, availability } = {}) {
   const [orders, setOrders] = useState([]);
@@ -19,7 +16,6 @@ export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, 
   const loadDataRef = useRef(null);
   const loadOrdersRef = useRef(null);
   const chatOpenRef = useRef(null);
-  const graceRef = useRef({});
 
   const { active, past } = useMemo(() => splitOrdersByTerminalStatus(orders), [orders]);
   const activeIds = useMemo(() => new Set(active.map((order) => order.id)), [active]);
@@ -39,7 +35,9 @@ export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, 
     try {
       const myOrders = await apiFetch('/orders/my', {}, token);
       setOrders(myOrders.orders || []);
-    } catch (_) {}
+    } catch (error) {
+      console.warn('[driver-orders] Error cargando pedidos del driver:', error);
+    }
   }, [token]);
 
   const loadWaitingOrders = useCallback(async () => {
@@ -48,7 +46,9 @@ export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, 
       const qs = availability ? '?available=1' : '';
       const pending = await apiFetch(`/orders/pending-assignment${qs}`, {}, token).catch(() => ({ orders: [] }));
       setWaitingOrders(pending.orders || []);
-    } catch (_) {}
+    } catch (error) {
+      console.warn('[driver-orders] Error cargando pedidos en espera:', error);
+    }
   }, [token, availability]);
 
   const loadData = useCallback(async ({ includeWaiting = true } = {}) => {
@@ -104,7 +104,7 @@ export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, 
     }
   }
 
-  async function getGpsBody(status, order) {
+  async function getGpsBody() {
     return new Promise((resolve) => {
       if (!navigator.geolocation) {
         resolve({});
@@ -113,19 +113,6 @@ export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, 
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const body = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          const refLat = status === 'on_the_way' ? order?.restaurant_lat : order?.delivery_lat;
-          const refLng = status === 'on_the_way' ? order?.restaurant_lng : order?.delivery_lng;
-          if (refLat && refLng) {
-            const distM = haversineMeters(body.lat, body.lng, Number(refLat), Number(refLng));
-            if (distM <= MAX_RADIUS_M) {
-              graceRef.current[status] = Date.now();
-            } else {
-              const lastIn = graceRef.current[status];
-              if (lastIn && Date.now() - lastIn <= GRACE_MS) {
-                body.grace = true;
-              }
-            }
-          }
           resolve(body);
         },
         () => resolve({}),
@@ -134,10 +121,10 @@ export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, 
     });
   }
 
-  async function changeStatusWithGps(orderId, status, order) {
+  async function changeStatusWithGps(orderId, status, _order) {
     setActionLoading(orderId);
     try {
-      const gps = STATUS_WITH_GPS.includes(status) ? await getGpsBody(status, order) : {};
+      const gps = STATUS_WITH_GPS.includes(status) ? await getGpsBody() : {};
       await apiFetch(`/orders/${orderId}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status, ...gps }),
@@ -238,4 +225,3 @@ export function useDriverOrders(token, { onExternalUpdate, onExternalReconnect, 
     setChatOpen,
   };
 }
-

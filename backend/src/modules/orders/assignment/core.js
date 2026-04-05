@@ -34,7 +34,7 @@ import { log, logWarn } from './constants.js';
 import { getParam } from '../../../engine/params.js';
 import {
   getOpenOrder, getPendingOffer, getOfferRound, markPendingDriver,
-  getEligibleDrivers, getEligibleIdleDrivers, getQueuedOrders,
+  getEligibleDrivers, getEligibleIdleDrivers, getQueuedOrders, setCooldownTriggered,
 } from './queries.js';
 import { upsertOffer } from './offer.js';
 import { applyOrderCooldownReduction } from './cooldown.js';
@@ -380,6 +380,9 @@ export async function offerNextDrivers(orderId, onOffer) {
   if (sent === 0) {
     log(`order=${orderId}`, 'batch completo en pending — pending_driver');
     await markPendingDriver(orderId);
+  } else if (orderRow.offer_cooldown_triggered) {
+    // El pedido volvió a ofertarse correctamente: limpiar flag de cooldown activo.
+    await setCooldownTriggered(orderId, false);
   }
 
   return sent;

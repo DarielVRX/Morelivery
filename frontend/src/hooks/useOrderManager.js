@@ -67,8 +67,6 @@ export function useOrderManager(token, patchUser, userDriver) {
   const loadDebounceRef     = useRef(null);
   const consecutiveTimeouts = useRef(0);
   const lastOfferAlertRef   = useRef(null);
-  const graceTimestampRef   = useRef({});
-
   const ordersUpdateListenerRef    = useRef(null);
   const ordersReconnectListenerRef = useRef(null);
   const ordersChatListenerRef      = useRef(null);
@@ -278,9 +276,6 @@ export function useOrderManager(token, patchUser, userDriver) {
     finally { setLoadingOffer(false); }
   }
 
-  const GRACE_MS     = 3 * 60 * 1000;
-  const MAX_RADIUS_M = 200;
-
   async function changeStatus(orderId, status, onError) {
     setLoadingStatus(status);
     try {
@@ -292,18 +287,6 @@ export function useOrderManager(token, patchUser, userDriver) {
             pos => {
               body.lat = pos.coords.latitude;
               body.lng = pos.coords.longitude;
-              const order  = activeOrder;
-              const refLat = status === 'on_the_way' ? order?.restaurant_lat : order?.delivery_lat;
-              const refLng = status === 'on_the_way' ? order?.restaurant_lng : order?.delivery_lng;
-              if (refLat && refLng) {
-                const distM = haversineMeters(body.lat, body.lng, Number(refLat), Number(refLng));
-                if (distM <= MAX_RADIUS_M) {
-                  graceTimestampRef.current[status] = Date.now();
-                } else {
-                  const lastIn = graceTimestampRef.current[status];
-                  if (lastIn && Date.now() - lastIn <= GRACE_MS) body.grace = true;
-                }
-              }
               resolve();
             },
             () => resolve(),
