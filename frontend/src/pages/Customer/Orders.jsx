@@ -30,19 +30,19 @@ function getStatusMessage(order, etaEntry, arrived) {
 
   const isNextStop  = etaEntry?.is_next_stop ?? false;
 
-  if (arrived) return 'El repartidor está esperando';
+  if (arrived) return 'El repartidor está esperando tu pedido';
 
   if (status === 'on_the_way') {
     return isNextStop
-      ? 'Está en camino a entregar'
-      : 'Tiene tu pedido · Entregando otros';
+      ? '¡Tu pedido está en camino!'
+      : 'El repartidor tiene tu pedido, espera tu turno de entrega';
   }
 
   // Pre-pickup
   if (['assigned','accepted','preparing','ready'].includes(status)) {
     return isNextStop
-      ? 'El repartidor está en camino a recoger'
-      : 'El repartidor está entregando otros';
+      ? 'El repartidor está en camino a recoger tu pedido'
+      : 'El repartidor está entregando otros pedidos';
   }
 
   return STATUS_MESSAGES[status] ?? null;
