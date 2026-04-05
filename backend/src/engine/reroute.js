@@ -146,201 +146,149 @@ async function loadDriverStopsForReroute(driverId) {
   return stops;
 }
 
-// ─── Secuenciador de permutaciones ───────────────────────────────────────────
+// ─── Secuenciador greedy con SLA condicional ─────────────────────────────────
+//
+// Reemplaza el secuenciador de permutaciones.
+//
+// Lógica de selección en cada paso:
+//   1. Construir pool de stops viables (respetando precedencia pickup→delivery)
+//   2. Leer slaDeadlineSec de todos los deliveries — incluyendo los de pickups
+//      aún no viables (herencia de urgencia)
+//   3. Clasificar cada stop viable en: normal / warning / crítico
+//   4. Selección:
+//      - Si hay críticos → el más urgente, desempate por distancia
+//      - Si hay warnings → el más urgente, desempate por distancia
+//        (solo si el desvío no supera el greedy puro significativamente)
+//      - Si todo normal  → el más cercano (greedy puro)
+//   5. lockedStop guard: si el driver está dentro del radio de lock,
+//      el primer stop queda congelado independientemente del resultado
 
 /**
- * Genera todas las permutaciones válidas de stops respetando la invariante
- * de precedencia: pickup de un pedido siempre antes de su delivery.
+ * Selecciona el siguiente stop óptimo desde el pool de viables.
  *
- * Con max_active_orders=4 el peor caso son 8 stops → máx ~2520 permutaciones.
- *
- * @param {RerouteStop[]} stops
- * @returns {RerouteStop[][]}
+ * @param {RerouteStop[]} viableStops   — stops que pueden visitarse ahora
+ * @param {RerouteStop[]} allStops      — todos los stops (para herencia SLA)
+ * @param {{lat,lng}}     fromPos       — posición actual
+ * @param {object}        driverObj     — { speed_kmh }
+ * @param {number}        nowSec
+ * @returns {RerouteStop}
  */
-function generateValidPermutations(stops) {
-  const results = [];
+function selectNextStop(viableStops, allStops, fromPos, driverObj, nowSec) {
+  const criticalThreshold = getParam('sla_critical_threshold_s', 600);
+  const warningThreshold  = getParam('sla_warning_threshold_s',  1200);
 
-  function permute(remaining, current, pickedUp) {
-    if (remaining.length === 0) {
-      results.push(current);
-      return;
-    }
-
-    for (let i = 0; i < remaining.length; i++) {
-      const stop = remaining[i];
-
-      // Invariante de precedencia hard: no hacer delivery si no se hizo el pickup
-      if (stop.type === 'delivery' && !pickedUp.has(stop.pairOrderId)) continue;
-
-      const newPickedUp = stop.type === 'pickup'
-        ? new Set([...pickedUp, stop.pairOrderId])
-        : pickedUp;
-
-      permute(
-        [...remaining.slice(0, i), ...remaining.slice(i + 1)],
-        [...current, stop],
-        newPickedUp
-      );
+  // Mapa de urgencia: para cada stop viable, leer el SLA más urgente
+  // asociado — si es pickup, usar el slaDeadlineSec de su delivery asociado
+  const deliverySlaBypairId = new Map();
+  for (const s of allStops) {
+    if (s.type === 'delivery') {
+      deliverySlaBypairId.set(s.pairOrderId, s.slaDeadlineSec);
     }
   }
 
-  // Stops de pedidos ya recogidos (on_the_way) no tienen pickup pendiente —
-  // sus pairOrderIds ya están en el set inicial de pickedUp
-  const alreadyPickedUp = new Set(
+  // Enriquecer cada stop viable con su urgencia real y distancia
+  const enriched = viableStops.map(stop => {
+    const dist = haversineMeters(fromPos, stop.pos);
+    const effectiveSla = stop.type === 'pickup'
+      ? (deliverySlaBypairId.get(stop.pairOrderId) ?? stop.slaDeadlineSec)
+      : stop.slaDeadlineSec;
+    const remaining = effectiveSla - nowSec;
+
+    let zone;
+    if (remaining < criticalThreshold) zone = 'critical';
+    else if (remaining < warningThreshold) zone = 'warning';
+    else zone = 'normal';
+
+    return { stop, dist, remaining, zone };
+  });
+
+  // Clasificar por zona
+  const critical = enriched.filter(e => e.zone === 'critical');
+  const warning  = enriched.filter(e => e.zone === 'warning');
+
+  if (critical.length > 0) {
+    // Más urgente primero, desempate por distancia
+    return critical.sort((a, b) =>
+      a.remaining !== b.remaining ? a.remaining - b.remaining : a.dist - b.dist
+    )[0].stop;
+  }
+
+  if (warning.length > 0) {
+    // Más urgente primero, desempate por distancia
+    return warning.sort((a, b) =>
+      a.remaining !== b.remaining ? a.remaining - b.remaining : a.dist - b.dist
+    )[0].stop;
+  }
+
+  // Todo normal — greedy puro por distancia
+  return enriched.sort((a, b) => a.dist - b.dist)[0].stop;
+}
+
+/**
+ * Construye la secuencia óptima de stops usando greedy con SLA condicional.
+ * Respeta precedencia pickup→delivery y lockedStop guard.
+ *
+ * @param {RerouteStop[]} stops
+ * @param {{lat,lng}}     driverPos
+ * @param {object}        driverObj
+ * @param {number}        nowSec
+ * @returns {RerouteStop[]}
+ */
+export function findOptimalSequence(stops, driverPos, driverObj, nowSec) {
+  if (stops.length === 0) return [];
+  if (stops.length === 1) return stops;
+
+  const lockRadiusM = getParam('reroute_lock_radius_m', 200);
+
+  // Set de pairOrderIds ya recogidos (pedidos on_the_way)
+  const pickedUp = new Set(
     stops
       .filter(s => s.type === 'delivery' && s.pickedUpAtSec !== null)
       .map(s => s.pairOrderId)
   );
 
-  permute(stops, [], alreadyPickedUp);
-  return results;
-}
+  const sequence = [];
+  const remaining = [...stops];
 
-/**
- * Poda permutaciones donde un delivery en riesgo crítico llega tarde,
- * siempre que el stop que lo bloquea NO esté también en riesgo.
- *
- * Es una poda suave — no fuerza posiciones, solo descarta secuencias
- * matemáticamente malas.
- *
- * @param {RerouteStop[][]} permutations
- * @param {{lat,lng}} driverPos
- * @param {object} driverObj  — { speed_kmh }
- * @param {number} nowSec
- * @returns {RerouteStop[][]}
- */
-function pruneBySla(permutations, driverPos, driverObj, nowSec) {
-  const criticalMargin = getParam('sla_critical_margin_s', 180);
-
-  // Identificar stops con margen crítico
-  const criticalOrders = new Set();
-  for (const perm of permutations.slice(0, 1)) { // usar primera perm solo para identificar críticos
-    let pos  = driverPos;
-    let time = nowSec;
-    for (const stop of perm) {
-      const eta = etaEstimator.estimateSync(pos, stop.pos, driverObj);
-      time += eta;
-      pos   = stop.pos;
-      if (stop.type === 'delivery') {
-        const remaining = stop.slaDeadlineSec - nowSec;
-        if (remaining < criticalMargin) criticalOrders.add(stop.orderId);
+  // lockedStop guard: si el driver está dentro del radio de lock de algún stop,
+  // ese stop va primero sin importar el resultado del greedy
+  let lockedStop = null;
+  for (const stop of remaining) {
+    const dist = haversineMeters(driverPos, stop.pos);
+    if (dist <= lockRadiusM) {
+      // Verificar que sea viable (si es delivery, su pickup ya se hizo)
+      if (stop.type === 'pickup' || pickedUp.has(stop.pairOrderId)) {
+        lockedStop = stop;
+        break;
       }
     }
   }
 
-  if (criticalOrders.size === 0) return permutations; // nada crítico, no podar
-
-  return permutations.filter(perm => {
-    let pos  = driverPos;
-    let time = nowSec;
-
-    for (const stop of perm) {
-      const eta = etaEstimator.estimateSync(pos, stop.pos, driverObj);
-      time += eta;
-      pos   = stop.pos;
-
-      if (stop.type === 'delivery' && criticalOrders.has(stop.orderId)) {
-        // Si este delivery crítico llega tarde en esta permutación, descartar
-        // a menos que el stop anterior sea también crítico (conflicto inevitable)
-        if (time > stop.slaDeadlineSec) return false;
-      }
-    }
-
-    return true;
-  });
-}
-
-/**
- * Evalúa el costo global de una secuencia de stops.
- * Costo = Σ max(0, etaEntrega_i - slaDeadline_i)
- * Una sola cifra que representa el daño total al SLA del conjunto.
- *
- * @param {RerouteStop[]} sequence
- * @param {{lat,lng}} driverPos
- * @param {object} driverObj
- * @param {number} nowSec
- * @returns {number}
- */
-function evaluateSequenceCost(sequence, driverPos, driverObj, nowSec) {
-  let pos           = driverPos;
-  let time          = nowSec;
-  let slaCost       = 0;
-  let kitchenWait   = 0;
-  let totalDistance = 0;
-
-  for (const stop of sequence) {
-    const travelSec = etaEstimator.estimateSync(pos, stop.pos, driverObj);
-    totalDistance  += haversineMeters(pos, stop.pos);
-    time           += travelSec;
-    pos             = stop.pos;
-
-    if (stop.type === 'pickup') {
-      const waitSec = Math.max(0, stop.kitchenReadyAtSec - time);
-      kitchenWait  += waitSec;
-      time         += waitSec;
-    }
-
-    if (stop.type === 'delivery') {
-      const violation = Math.max(0, time - stop.slaDeadlineSec);
-      slaCost += violation;
-    }
+  if (lockedStop) {
+    sequence.push(lockedStop);
+    remaining.splice(remaining.indexOf(lockedStop), 1);
+    if (lockedStop.type === 'pickup') pickedUp.add(lockedStop.pairOrderId);
   }
 
-  const totalEta = time - nowSec;
-  return { slaCost, kitchenWait, totalDistance, totalEta };
-}
+  // Greedy iterativo
+  let currentPos = lockedStop ? lockedStop.pos : driverPos;
 
-export function findOptimalSequence(stops, driverPos, driverObj, nowSec) {
-  if (stops.length === 0) return [];
-  if (stops.length === 1) return stops;
+  while (remaining.length > 0) {
+    // Stops viables en este momento
+    const viable = remaining.filter(s =>
+      s.type === 'pickup' || pickedUp.has(s.pairOrderId)
+    );
 
-  const permutations = generateValidPermutations(stops);
-  if (permutations.length === 0) return stops;
+    if (viable.length === 0) break; // no debería ocurrir con datos consistentes
 
-  const pruned = pruneBySla(permutations, driverPos, driverObj, nowSec);
-  const pool   = pruned.length > 0 ? pruned : permutations;
-
-  console.log(`[reroute:seq] ${stops.length} stops → ${permutations.length} perms → ${pool.length} tras poda SLA`);
-
-  let bestSeq  = pool[0];
-  let bestEval = evaluateSequenceCost(pool[0], driverPos, driverObj, nowSec);
-
-  // Log permutación inicial
-  console.log(`[reroute:seq] perm[0] ${pool[0].map(s => `${s.type}(${s.orderId?.slice(0,6)})`).join('→')} | slaCost=${Math.round(bestEval.slaCost)} dist=${Math.round(bestEval.totalDistance)} kitWait=${Math.round(bestEval.kitchenWait)} eta=${Math.round(bestEval.totalEta)}`);
-
-  for (let i = 1; i < pool.length; i++) {
-    const eval_ = evaluateSequenceCost(pool[i], driverPos, driverObj, nowSec);
-
-    const label = pool[i].map(s => `${s.type}(${s.orderId?.slice(0,6)})`).join('→');
-    console.log(`[reroute:seq] perm[${i}] ${label} | slaCost=${Math.round(eval_.slaCost)} dist=${Math.round(eval_.totalDistance)} kitWait=${Math.round(eval_.kitchenWait)} eta=${Math.round(eval_.totalEta)}`);
-
-    const betterSla      = eval_.slaCost       < bestEval.slaCost;
-    const sameSla        = eval_.slaCost      === bestEval.slaCost;
-    const betterDist     = eval_.totalDistance < bestEval.totalDistance;
-    const sameDist       = eval_.totalDistance === bestEval.totalDistance;
-    const betterWait     = eval_.kitchenWait   < bestEval.kitchenWait;
-    const sameWait       = eval_.kitchenWait  === bestEval.kitchenWait;
-    const betterEta      = eval_.totalEta      < bestEval.totalEta;
-
-    if (
-      betterSla ||
-      (sameSla && betterDist) ||
-      (sameSla && sameDist && betterWait) ||
-      (sameSla && sameDist && sameWait && betterEta)
-    ) {
-      const reason = betterSla ? 'mejor slaCost'
-        : betterDist ? 'mismo sla, menor distancia'
-        : betterWait ? 'mismo sla+dist, menor kitchenWait'
-        : 'mismo sla+dist+wait, menor eta';
-      console.log(`[reroute:seq] ↑ nuevo mejor [${i}] por: ${reason}`);
-      bestEval = eval_;
-      bestSeq  = pool[i];
-    }
+    const next = selectNextStop(viable, stops, currentPos, driverObj, nowSec);
+    sequence.push(next);
+    remaining.splice(remaining.indexOf(next), 1);
+    if (next.type === 'pickup') pickedUp.add(next.pairOrderId);
+    currentPos = next.pos;
   }
 
-  console.log(`[reroute:seq] GANADOR: ${bestSeq.map(s => `${s.type}(${s.orderId?.slice(0,6)})`).join('→')} | slaCost=${Math.round(bestEval.slaCost)} dist=${Math.round(bestEval.totalDistance)} kitWait=${Math.round(bestEval.kitchenWait)} eta=${Math.round(bestEval.totalEta)}`);
-
-  return bestSeq;
+  return sequence;
 }
 
 // ─── Carga de posición del driver ─────────────────────────────────────────────

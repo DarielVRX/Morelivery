@@ -147,6 +147,30 @@ export function registerLifecycleRoutes(router, deps) {
     } catch (error) { return next(error); }
   });
 
+  // ── POST /:id/keep-waiting — cliente confirma que quiere seguir esperando ────
+  // Reinicia el timer de escalada de notificaciones desde T=0
+  router.post('/:id/keep-waiting', authenticate, authorize(['customer']), async (req, res, next) => {
+    try {
+      const check = await query(
+        `SELECT id, status, customer_id FROM orders WHERE id=$1 AND customer_id=$2`,
+        [req.params.id, req.user.userId]
+      );
+      if (check.rowCount === 0) return next(new AppError(404, 'Pedido no encontrado'));
+      if (!['created', 'pending_driver'].includes(check.rows[0].status))
+        return next(new AppError(409, 'El pedido ya tiene repartidor asignado'));
+
+      await query(
+        `UPDATE orders
+         SET driver_search_escalated_at = NOW(),
+             driver_search_push_sent_at = NULL,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [req.params.id]
+      );
+      return res.json({ ok: true });
+    } catch (error) { return next(error); }
+  });
+
   // ── PATCH /:id/cancel — cancelación por el cliente ────────────────────────
   router.patch('/:id/cancel', authenticate, authorize(['customer']), async (req, res, next) => {
     try {

@@ -19,13 +19,19 @@ const STATUS_COLOR = {
 
 // P6: mensajes en lenguaje natural — modelo basado en nextstop + arrived
 const STATUS_MESSAGES = {
-  created:        'Buscando repartidor',
-  pending_driver: 'Buscando repartidor',
+  created:        'Estamos buscando un repartidor para tu pedido',
+  pending_driver: 'Estamos buscando un repartidor para tu pedido',
 };
 
-function getStatusMessage(order, etaEntry, arrived) {
+function getStatusMessage(order, etaEntry, arrived, driverSearchStatus) {
   const { status } = order;
-  if (!order.driver_id) return 'Buscando repartidor';
+  if (!order.driver_id) {
+    if (driverSearchStatus === 'no_driver')
+      return '⏳ Nos encontramos con alta demanda — tu pedido sigue en espera, te avisamos en cuanto se asigne un repartidor';
+    if (driverSearchStatus === 'offer_sent')
+      return 'Un repartidor está revisando tu pedido, te avisamos en cuanto lo acepte';
+    return 'Estamos buscando un repartidor para tu pedido';
+  }
   if (status === 'delivered' || status === 'cancelled') return null;
 
   const isNextStop  = etaEntry?.is_next_stop ?? false;
@@ -164,11 +170,30 @@ export default function CustomerOrders({ registerRef } = {}) {
   const [etaTick,   setEtaTick]   = useState(0);
   // arrived flag por orderId — solo delivery (target !== 'pickup')
   const [arrivedOrders, setArrivedOrders] = useState({});
+  // estado de búsqueda de driver por orderId — 'offer_sent' | 'no_driver'
+  const [driverSearchStatus, setDriverSearchStatus] = useState({});
 
   useEffect(() => {
     const id = setInterval(() => setEtaTick(t => t + 1), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Listener para acciones desde notificaciones push (SW → app)
+  useEffect(() => {
+    if (!navigator.serviceWorker) return;
+    const handler = (event) => {
+      const { type, action, data } = event.data || {};
+      if (type !== 'NOTIFICATION_ACTION') return;
+      if (action === 'keep_waiting' && data?.orderId) {
+        handleKeepWaiting(data.orderId);
+      }
+      if (action === 'cancel_order' && data?.orderId) {
+        handleCancelNoDriver(data.orderId);
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', handler);
+    return () => navigator.serviceWorker.removeEventListener('message', handler);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useRealtimeOrders(
     auth.token,
@@ -176,6 +201,10 @@ export default function CustomerOrders({ registerRef } = {}) {
       loadDataRef.current?.();
       // Limpiar arrived al cambiar estado del pedido
       if (data?.orderId) setArrivedOrders(p => { const n = {...p}; delete n[data.orderId]; return n; });
+      // Limpiar búsqueda de driver cuando se asigna
+      if (data?.orderId && data?.status === 'assigned') {
+        setDriverSearchStatus(p => { const n = {...p}; delete n[data.orderId]; return n; });
+      }
       registerRef?.current?.onSuggUpdate?.();
       registerRef?.current?.onPaymentUpdate?.();
       registerRef?.current?.onCartUpdate?.();
@@ -195,12 +224,38 @@ export default function CustomerOrders({ registerRef } = {}) {
         setArrivedOrders(p => ({ ...p, [data.orderId]: true }));
       }
     },
+    undefined, // onRouteUpdate — no aplica para cliente
+    // onDriverSearch — actualiza estado de búsqueda por orderId
+    (data) => {
+      if (data?.orderId && data?.type) {
+        setDriverSearchStatus(p => ({ ...p, [data.orderId]: data.type }));
+        // Limpiar al asignarse driver
+        if (data.type === 'assigned') {
+          setDriverSearchStatus(p => { const n = {...p}; delete n[data.orderId]; return n; });
+        }
+      }
+    },
   );
 
   const pendingSuggestions = useMemo(
     () => activeOrders.filter(o => o.suggestion_status === 'pending_customer' && (o.suggestion_items||[]).length > 0),
     [activeOrders]
   );
+
+  async function handleKeepWaiting(orderId) {
+    try {
+      await apiFetch(`/orders/${orderId}/keep-waiting`, { method: 'POST' }, auth.token);
+      // Limpiar el estado no_driver para quitar los botones hasta el próximo ciclo
+      setDriverSearchStatus(p => { const n = {...p}; delete n[orderId]; return n; });
+    } catch (e) { setMsg(e.message); }
+  }
+
+  async function handleCancelNoDriver(orderId) {
+    try {
+      await apiFetch(`/orders/${orderId}/cancel`, { method: 'PATCH', body: JSON.stringify({ reason: 'no_driver' }) }, auth.token);
+      loadDataRef.current?.();
+    } catch (e) { setMsg(e.message); }
+  }
 
   async function sendComplaint(orderId) {
     if (!complaintText.trim()) return;
@@ -407,7 +462,8 @@ export default function CustomerOrders({ registerRef } = {}) {
                           {(() => {
                             const etaEntry = driverEta[order.id];
                             const arrived  = arrivedOrders[order.id] ?? false;
-                            const msg = getStatusMessage(order, etaEntry, arrived);
+                            const searchStatus = driverSearchStatus[order.id];
+                            const msg = getStatusMessage(order, etaEntry, arrived, searchStatus);
                             return msg ? (
                               <div style={{
                                 fontSize:'0.75rem', color:'var(--text-secondary)',
@@ -417,6 +473,27 @@ export default function CustomerOrders({ registerRef } = {}) {
                               </div>
                             ) : null;
                           })()}
+                          {/* Botones de acción cuando no hay driver */}
+                          {!order.driver_id && driverSearchStatus[order.id] === 'no_driver' && (
+                            <div style={{ display:'flex', gap:'0.4rem', marginTop:'0.4rem' }}>
+                              <button
+                                onClick={e => { e.stopPropagation(); handleKeepWaiting(order.id); }}
+                                style={{ fontSize:'0.72rem', padding:'0.25rem 0.65rem',
+                                  borderRadius:6, border:'1px solid var(--border)',
+                                  background:'var(--bg-raised)', color:'var(--text-primary)',
+                                  cursor:'pointer', fontWeight:600 }}>
+                                ⏳ Seguir esperando
+                              </button>
+                              <button
+                                onClick={e => { e.stopPropagation(); handleCancelNoDriver(order.id); }}
+                                style={{ fontSize:'0.72rem', padding:'0.25rem 0.65rem',
+                                  borderRadius:6, border:'1px solid #fca5a5',
+                                  background:'#fef2f2', color:'#991b1b',
+                                  cursor:'pointer', fontWeight:600 }}>
+                                ✕ Cancelar pedido
+                              </button>
+                            </div>
+                          )}
                           {/* P7: countdown ETA del driver */}
                           {(() => {
                             const entry = driverEta[order.id];

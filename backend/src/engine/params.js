@@ -38,7 +38,8 @@ const DEFAULTS = {
   reconnect_window_s:                 600,
 
   // ── Ruteo / secuenciación ──────────────────────────────────────────────
-  sla_critical_margin_s:              180,  // margen bajo el cual un delivery se considera en riesgo para poda de permutaciones
+  sla_critical_threshold_s:           600,   // margen bajo el cual el SLA sobreescribe distancia completamente
+  sla_warning_threshold_s:            1200,  // margen bajo el cual el SLA entra como criterio de desempate
   reroute_lock_radius_m:              200,  // radio en metros — si el driver está dentro, el próximo stop es intocable
 
   // ── Rebalanceo ─────────────────────────────────────────────────────────
@@ -78,7 +79,8 @@ const PARAM_CATALOG = {
   disconnect_penalty_max:             { default: 3,    description: 'Penalizaciones acumuladas antes de excluir al driver de asignaciones' },
   disconnect_penalty_s:               { default: 300,  description: 'Penalización de scoring (segundos) por cada desconexión previa' },
   reconnect_window_s:                 { default: 600,  description: 'Ventana en segundos para que un driver reconecte tras desconexión' },
-  sla_critical_margin_s:              { default: 180,  description: 'Margen en segundos bajo el cual un delivery se considera crítico para poda de permutaciones de ruta' },
+  sla_critical_threshold_s:           { default: 600,  description: 'Segundos restantes de SLA bajo los cuales el SLA sobreescribe distancia completamente en el greedy' },
+  sla_warning_threshold_s:            { default: 1200, description: 'Segundos restantes de SLA bajo los cuales el SLA entra como criterio de desempate sobre distancia' },
   reroute_lock_radius_m:              { default: 200,  description: 'Radio en metros dentro del cual el próximo stop del driver queda bloqueado y el secuenciador no puede reordenarlo' },
   rebalancer_interval_s:              { default: 300,  description: 'Cada cuántos segundos corre el motor de rebalanceo automático' },
   transfer_min_gain_s:                { default: 10,   description: 'Ganancia mínima en segundos para aplicar rebalanceo automático' },

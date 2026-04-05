@@ -12,6 +12,7 @@ import { ensureParamsLoaded, seedDefaultParams, getParam } from '../engine/param
 import { tickKitchen } from '../engine/kitchen.js';
 import { cleanStaleEntities } from '../engine/stale.js';
 import { runRebalancer } from '../engine/rebalancer.js';
+import { tickDriverSearchEscalation } from '../engine/driver_search_escalation.js';
 import { query } from '../config/db.js';
 import { sendPushToUser } from '../modules/notifications/pushSubscription.js';
 
@@ -217,6 +218,14 @@ export function createSchedulers(offerCb) {
         if (count > 0) console.log(`[schedule.reminder] ${count} recordatorio(s) enviados`);
       },
       onError: (error) => { console.error('[schedule.reminder] error:', error.message); },
+    }),
+    // ── Escalada de búsqueda de driver — cada 60s ─────────────────────────────
+    createLoop({
+      label: 'driver_search_escalation',
+      initialDelayMs: 30_000,
+      intervalMs: 60_000,
+      task: tickDriverSearchEscalation,
+      onError: (error) => { console.error('[escalation.scheduler] error:', error.message); },
     }),
   ];
 }

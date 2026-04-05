@@ -123,6 +123,7 @@ export default function RestaurantOrders() {
   const [suggDrafts,    setSuggDrafts]    = useState({});
   const [confirmingId,  setConfirmingId]  = useState(null);
   const [kitchenBanners, setKitchenBanners] = useState([]);
+  const [driverSearchBanners, setDriverSearchBanners] = useState({}); // orderId → 'offer_sent' | 'no_driver'
   const [prepMins,  setPrepMins]  = useState(15);
   const [prepSaving, setPrepSaving] = useState(false);
   const loadDataRef = useRef(null);
@@ -211,18 +212,31 @@ export default function RestaurantOrders() {
   // ── SSE con todos los callbacks relevantes ────────────────────────────────
   useRealtimeOrders(
     auth.token,
-    handleOrderUpdate,           // onOrderUpdate — cualquier cambio de pedido
-    ({ orderId, eta_secs }) => { // P7: recibir ETA del driver para countdown
+    (data) => {
+      handleOrderUpdate(data);
+      // Limpiar banner de búsqueda cuando se asigna driver
+      if (data?.orderId && data?.status === 'assigned') {
+        setDriverSearchBanners(p => { const n = {...p}; delete n[data.orderId]; return n; });
+      }
+    },
+    ({ orderId, eta_secs }) => {
       if (eta_secs == null) return;
       setDriverEta(prev => ({ ...prev, [orderId]: { eta_secs, receivedAt: Date.now() } }));
     },
     undefined,                   // onNewOffer
-    (data) => { if (data.orderId === chatOpen) setChatTick(t => t + 1); }, // onChatMessage
+    (data) => { if (data.orderId === chatOpen) setChatTick(t => t + 1); },
     undefined,                   // onReconnect
-    handleKitchenEvent,          // onKitchenEvent — cancelaciones, driver arrival, etc.
+    handleKitchenEvent,
     undefined,                   // onTransferEvent
     undefined,                   // onSupportMessage
-    handleNewOrder,              // onNewOrder — nuevo pedido recibido
+    handleNewOrder,
+    undefined, undefined, undefined, undefined,
+    // onDriverSearch
+    (data) => {
+      if (data?.orderId && data?.type) {
+        setDriverSearchBanners(p => ({ ...p, [data.orderId]: data.type }));
+      }
+    },
   );
 
   // P7: breakpoint "puedes comenzar a preparar"
@@ -529,6 +543,20 @@ export default function RestaurantOrders() {
                               opacity: confirmingId === order.id ? 0.6 : 1 }}>
                             {confirmingId === order.id ? '…' : '✓ Confirmar'}
                           </button>
+                        </div>
+                      )}
+
+                      {/* Toast búsqueda de driver */}
+                      {driverSearchBanners[order.id] === 'offer_sent' && (
+                        <div style={{ background:'#eff6ff', borderBottom:'1px solid #bfdbfe',
+                          padding:'0.35rem 0.75rem', fontSize:'0.75rem', color:'#1e40af', fontWeight:500 }}>
+                          El pedido está siendo revisado por un repartidor cercano — no prepares todavía 😊
+                        </div>
+                      )}
+                      {driverSearchBanners[order.id] === 'no_driver' && (
+                        <div style={{ background:'#fef2f2', borderBottom:'1px solid #fecaca',
+                          padding:'0.35rem 0.75rem', fontSize:'0.75rem', color:'#991b1b', fontWeight:600 }}>
+                          ⚠️ No encontramos repartidor disponible — por favor no prepares hasta que se asigne uno
                         </div>
                       )}
 

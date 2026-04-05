@@ -486,6 +486,46 @@ self.addEventListener('notificationclick', (event) => {
   // 'ignore_reminder' — cerrar sin acción
   if (action === 'ignore_reminder') return;
 
+  // keep_waiting — cliente confirma que quiere seguir esperando driver
+  if (action === 'keep_waiting') {
+    const orderId = event.notification.data?.orderId;
+    if (orderId) {
+      event.waitUntil(
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+          const existing = clients.find(c => c.url.includes(self.location.origin));
+          if (existing) {
+            existing.postMessage({ type: 'NOTIFICATION_ACTION', action: 'keep_waiting', data: { orderId } });
+            return existing.focus();
+          }
+          return self.clients.openWindow('/customer/pedidos').then(client => {
+            if (client) setTimeout(() => client.postMessage({ type: 'NOTIFICATION_ACTION', action: 'keep_waiting', data: { orderId } }), 1000);
+          });
+        })
+      );
+    }
+    return;
+  }
+
+  // cancel_order — cliente cancela desde notificación push
+  if (action === 'cancel_order') {
+    const orderId = event.notification.data?.orderId;
+    if (orderId) {
+      event.waitUntil(
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+          const existing = clients.find(c => c.url.includes(self.location.origin));
+          if (existing) {
+            existing.postMessage({ type: 'NOTIFICATION_ACTION', action: 'cancel_order', data: { orderId } });
+            return existing.focus();
+          }
+          return self.clients.openWindow('/customer/pedidos').then(client => {
+            if (client) setTimeout(() => client.postMessage({ type: 'NOTIFICATION_ACTION', action: 'cancel_order', data: { orderId } }), 1000);
+          });
+        })
+      );
+    }
+    return;
+  }
+
   // Acciones existentes — accept, reject, confirm
   if (action === 'accept' || action === 'reject' || action === 'confirm') {
     event.waitUntil(
