@@ -49,6 +49,7 @@ import { sendPushToUser } from '../../notifications/pushSubscription.js';
 // ─── Helper: notificar a restaurante y cliente sobre estado de búsqueda ───────
 async function notifyDriverSearch(orderId, type) {
   try {
+    console.log(`[driver_search] notifying order=${orderId.slice(0,8)} type=${type}`);
     const result = await query(
       `SELECT rest.owner_user_id, o.customer_id
        FROM orders o
@@ -56,13 +57,16 @@ async function notifyDriverSearch(orderId, type) {
        WHERE o.id = $1`,
       [orderId]
     );
-    if (result.rowCount === 0) return;
+    if (result.rowCount === 0) {
+      console.log(`[driver_search] order=${orderId.slice(0,8)} not found`);
+      return;
+    }
     const { owner_user_id, customer_id } = result.rows[0];
+    console.log(`[driver_search] sending SSE to restaurant=${owner_user_id.slice(0,8)} customer=${customer_id.slice(0,8)}`);
     const payload = { orderId, type };
     sseHub.sendToUser(owner_user_id, 'driver_search_update', payload);
     sseHub.sendToUser(customer_id,   'driver_search_update', payload);
 
-    // Push solo para eventos relevantes al cliente
     if (type === 'no_driver') {
       sendPushToUser(customer_id, {
         title: 'Buscando repartidor',
@@ -79,7 +83,9 @@ async function notifyDriverSearch(orderId, type) {
         ],
       }).catch(() => {});
     }
-  } catch (_) {}
+  } catch (e) {
+    console.error(`[driver_search] error order=${orderId.slice(0,8)}:`, e.message);
+  }
 }
 
 // ─── Budget de simulaciones por ciclo ────────────────────────────────────────
