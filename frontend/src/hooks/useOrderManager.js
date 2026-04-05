@@ -105,7 +105,7 @@ export function useOrderManager(token, patchUser, userDriver) {
     lastOfferAlertRef.current = pendingOffer.id;
     playOfferAlertSound();
     const high = notifPriorityMode === 'high' || notifPermission === 'granted';
-    if (navigator?.vibrate) navigator.vibrate(high ? [300,100,300,100,300] : [180,80,180]);
+    if (navigator?.vibrate) navigator.vibrate(high ? [800,400,800,400,800,400,800,400] : [300,100,300,100,300]);
   }, [pendingOffer?.id, notifPriorityMode, notifPermission]);
 
   function scheduleLoad() {
