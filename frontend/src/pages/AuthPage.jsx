@@ -152,7 +152,7 @@ function fmtCountdown(secs) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer', onTwoFa }) {
+function LoginView({ appKey, rawAppKey, onGoRegister, onGoForgot, initialRole = 'customer', onTwoFa }) {
   const { login }   = useAuth();
   const navigate    = useNavigate();
   const [loading,   setLoading]   = useState(false);
@@ -333,8 +333,8 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer',
         </label>
       </div>
 
-      {/* Links discretos de rol — solo en la entrada principal (sin appKey) */}
-      {!appKey && (
+      {/* Links discretos de rol — solo en la entrada principal (sin appKey en URL) */}
+      {!rawAppKey && (
         <div style={{ display: 'flex', justifyContent: 'center', gap: '1.25rem', marginTop: '0.1rem' }}>
         <button type="button" onClick={() => navigate('/driver/login')}
         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: '0.75rem', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
@@ -411,7 +411,7 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer',
           display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
 
           {/* Rol incorrecto — solo mostrar si está en la entrada principal */}
-          {!appKey && (
+          {!rawAppKey && (
             <div>
               <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
                 ¿Eres repartidor o tienes un negocio?
@@ -437,8 +437,8 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer',
           )}
 
           {/* Recuperar contraseña */}
-          <div style={{ borderTop: !appKey ? '1px solid var(--border-light)' : 'none',
-            paddingTop: !appKey ? '0.5rem' : 0 }}>
+          <div style={{ borderTop: !rawAppKey ? '1px solid var(--border-light)' : 'none',
+            paddingTop: !rawAppKey ? '0.5rem' : 0 }}>
             <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
               ¿Olvidaste tu contraseña?
             </div>
@@ -761,7 +761,7 @@ function ForgotView({ onGoLogin }) {
 }
 
 // ── AuthPage ──────────────────────────────────────────────────────────────────
-export default function AuthPage({ mode = 'login', appKey = null }) {
+export default function AuthPage({ mode = 'login', appKey = null, rawAppKey = null }) {
   const [searchParams]  = useSearchParams();
   const [view, setView] = useState(mode);
   const [verifiedBanner, setVerifiedBanner] = useState(searchParams.get('verified') === '1');
@@ -819,6 +819,7 @@ export default function AuthPage({ mode = 'login', appKey = null }) {
       {view === 'login' && (
         <LoginView
           appKey={appKey}
+          rawAppKey={rawAppKey}
           initialRole={sharedRole}
           onGoRegister={(role) => goTo('register', role || 'customer')}
           onGoForgot={() => goTo('forgot')}

@@ -244,7 +244,7 @@ function AuthScreen({ mode = 'login' }) {
               ⚠️ Ya tienes sesión como <strong>{findApp(auth.user.role)?.label}</strong>. Inicia sesión aquí para cambiar de cuenta.
             </div>
           )}
-          <AuthPage mode={mode} appKey={appKey} />
+          <AuthPage mode={mode} appKey={appKey} rawAppKey={rawAppKey} />
         </div>
       </div>
     </div>
