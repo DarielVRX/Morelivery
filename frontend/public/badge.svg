@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+  <!-- Fondo circular rosa marca -->
+  <circle cx="48" cy="48" r="48" fill="#feaeba"/>
+  <!-- Letra M centrada, blanca, bold -->
+  <text
+    x="48" y="66"
+    font-family="system-ui, -apple-system, sans-serif"
+    font-size="62"
+    font-weight="900"
+    text-anchor="middle"
+    fill="#ffffff"
+    letter-spacing="-3">M</text>
+</svg>
