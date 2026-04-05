@@ -429,6 +429,13 @@ export function useDriverHomeRuntime({
       // (ya pasamos el punto de mínima distancia)
       if (d > closestDist + 500) break;
     }
+
+    console.log('[partial] geo.length:', routeGeometry.length,
+                'geo[0]:', routeGeometry[0],
+                'target:', target,
+                'closestIdx:', closestIdx,
+                'closestDist:', Math.round(closestDist));
+
     // Asegurar al menos 2 puntos para dibujar
     const endIdx = Math.max(closestIdx + 1, 2);
     return routeGeometry.slice(0, endIdx);
