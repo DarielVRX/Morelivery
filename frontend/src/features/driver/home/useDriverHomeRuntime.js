@@ -402,7 +402,7 @@ export function useDriverHomeRuntime({
     const stopLat = isOTW ? Number(activeOrder.delivery_lat  ?? activeOrder.customer_lat)  : Number(activeOrder.restaurant_lat);
     const stopLng = isOTW ? Number(activeOrder.delivery_lng  ?? activeOrder.customer_lng)  : Number(activeOrder.restaurant_lng);
     if (!Number.isFinite(stopLat) || !Number.isFinite(stopLng)) return null;
-    return Math.round(haversineMeters({ lat: myPosition.lat, lng: myPosition.lng }, { lat: stopLat, lng: stopLng }));
+    return Math.round(haversineMeters(myPosition.lat, myPosition.lng, stopLat, stopLng));
   })();
 
   // ── P1: Ruta parcial driver→allStops[0] ──────────────────────────────────
@@ -427,7 +427,7 @@ export function useDriverHomeRuntime({
       const ptLat = pt[1] ?? pt.lat;
       const ptLng = pt[0] ?? pt.lng;
       if (!Number.isFinite(ptLat) || !Number.isFinite(ptLng)) continue;
-      const d = haversineMeters({ lat: ptLat, lng: ptLng }, { lat: target.lat, lng: target.lng });
+      const d = haversineMeters(ptLat, ptLng, target.lat, target.lng);
       if (d < closestDist) { closestDist = d; closestIdx = i; }
     }
 
@@ -449,7 +449,7 @@ export function useDriverHomeRuntime({
       const ptLat = pt[1] ?? pt.lat;
       const ptLng = pt[0] ?? pt.lng;
       if (!Number.isFinite(ptLat) || !Number.isFinite(ptLng)) continue;
-      const d = haversineMeters({ lat: myPosition.lat, lng: myPosition.lng }, { lat: ptLat, lng: ptLng });
+      const d = haversineMeters(myPosition.lat, myPosition.lng, ptLat, ptLng);
       if (d < minDist) minDist = d;
     }
 
