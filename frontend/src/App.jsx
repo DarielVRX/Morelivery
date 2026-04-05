@@ -185,7 +185,9 @@ function LandingScreen() {
 
 // ─── AuthScreen ───────────────────────────────────────────────────────────────
 function AuthScreen({ mode = 'login' }) {
-  const { appKey } = useParams();
+  const { appKey: rawAppKey } = useParams();
+  // Ruta "/" no tiene appKey — tratar como customer para aplicar restricción de rol
+  const appKey = rawAppKey || 'customer';
   const { auth }   = useAuth();
   const { isDark, toggle } = useTheme();
   const app        = findApp(appKey);
@@ -193,11 +195,7 @@ function AuthScreen({ mode = 'login' }) {
   if (auth.user && auth.user.role === appKey)
     return <Navigate to={app?.home || `/${appKey}`} replace />;
 
-  // Sin appKey (ruta "/") con sesión activa — redirigir al home del rol
-  if (auth.user && !appKey)
-    return <Navigate to={findApp(auth.user.role)?.home || `/${auth.user.role}`} replace />;
-
-  if (appKey && !app) return <Navigate to="/" replace />;
+  if (!app) return <Navigate to="/" replace />;
 
   const wrongRole = auth.user && auth.user.role !== appKey;
 
