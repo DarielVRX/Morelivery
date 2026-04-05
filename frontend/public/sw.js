@@ -497,7 +497,7 @@ self.addEventListener('notificationclick', (event) => {
             existing.postMessage({ type: 'NOTIFICATION_ACTION', action: 'keep_waiting', data: { orderId } });
             return existing.focus();
           }
-          return self.clients.openWindow('/customer/pedidos').then(client => {
+          return self.clients.openWindow('/customer').then(client => {
             if (client) setTimeout(() => client.postMessage({ type: 'NOTIFICATION_ACTION', action: 'keep_waiting', data: { orderId } }), 1000);
           });
         })
@@ -517,7 +517,7 @@ self.addEventListener('notificationclick', (event) => {
             existing.postMessage({ type: 'NOTIFICATION_ACTION', action: 'cancel_order', data: { orderId } });
             return existing.focus();
           }
-          return self.clients.openWindow('/customer/pedidos').then(client => {
+          return self.clients.openWindow('/customer').then(client => {
             if (client) setTimeout(() => client.postMessage({ type: 'NOTIFICATION_ACTION', action: 'cancel_order', data: { orderId } }), 1000);
           });
         })

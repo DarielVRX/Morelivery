@@ -70,7 +70,7 @@ export function useRealtimeOrders(
         notifyRealtime({
           title: 'Actualización de pedido',
           body:  data?.status ? `Estado: ${data.status}` : 'Tu pedido fue actualizado',
-          tag: 'order_updates', group: 'order_updates', url: '/customer/pedidos',
+          tag: 'order_updates', group: 'order_updates', url: '/customer',
           vibrate: VIBRATE.normal,
         });
       }
@@ -108,7 +108,7 @@ export function useRealtimeOrders(
       if (document.visibilityState !== 'visible') {
         notifyRealtime({
           title: 'Nuevo pedido', body: 'Pedido recibido — confirma para preparar',
-          tag: `new_order_${data.orderId}`, group: 'kitchen', url: '/restaurant/pedidos',
+          tag: `new_order_${data.orderId}`, group: 'kitchen', url: '/restaurant',
           vibrate: VIBRATE.new_order, pushType: 'new_order', orderId: data.orderId,
           actions: [{ action: 'confirm', title: '✓ Confirmar' }],
         });
@@ -122,7 +122,7 @@ export function useRealtimeOrders(
         notifyRealtime({
           title: 'Tu repartidor se acerca',
           body:  data.message || `Llegará en aprox. ${data.etaMins} min`,
-          tag: `eta_${data.orderId}`, group: 'customer', url: '/customer/pedidos',
+          tag: `eta_${data.orderId}`, group: 'customer', url: '/customer',
           vibrate: VIBRATE.eta_alert, pushType: 'driver_eta_alert', orderId: data.orderId,
           actions: [{ action: 'message', title: '💬 Mensaje' }],
         });
@@ -143,7 +143,7 @@ export function useRealtimeOrders(
           title: isPickup ? '🛵 Conductor llegó a recoger' : '📍 Tu repartidor llegó',
           body:  data.message || (isPickup ? 'El conductor está en el restaurante' : 'El conductor está afuera'),
           tag: `arrived_${data.orderId}`, group: isPickup ? 'kitchen' : 'customer',
-          url: isPickup ? '/restaurant/pedidos' : '/customer/pedidos',
+          url: isPickup ? '/restaurant' : '/customer',
           vibrate: isPickup ? VIBRATE.driver_arrived_restaurant : VIBRATE.driver_arrived_customer,
           pushType: 'driver_arrived', orderId: data.orderId,
           actions: [{ action: 'message', title: '💬 Mensaje' }],
@@ -165,7 +165,7 @@ export function useRealtimeOrders(
       if (document.visibilityState !== 'visible') {
         notifyRealtime({
           title: 'Pedido listo para recoger', body: data.message || '',
-          tag: 'kitchen', group: 'kitchen', url: '/restaurant/pedidos',
+          tag: 'kitchen', group: 'kitchen', url: '/restaurant',
           vibrate: VIBRATE.confirm,
         });
       }
@@ -210,7 +210,7 @@ export function useRealtimeOrders(
         notifyRealtime({
           title: `Mensaje de ${data.senderName || 'soporte'}`,
           body: data.text || 'Tienes un nuevo mensaje',
-          tag: 'chat', group: 'chat', url: '/customer/pedidos',
+          tag: 'chat', group: 'chat', url: '/customer',
           vibrate: VIBRATE.support,
         });
       }

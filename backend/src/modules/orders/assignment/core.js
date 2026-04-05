@@ -70,7 +70,7 @@ async function notifyDriverSearch(orderId, type) {
         tag:   `no_driver_${orderId}`,
         group: 'customer',
         priority: 'high',
-        url:   '/customer/pedidos',
+        url:   '/customer',
         pushType: 'no_driver',
         orderId,
         actions: [

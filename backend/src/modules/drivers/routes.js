@@ -597,7 +597,7 @@ router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver']),
       title: '📞 Llamada del repartidor',
       body: `${driverName} está intentando localizarte`,
       tag: `call_${orderId}`, group: target, priority: 'high',
-      url: target === 'customer' ? '/customer/pedidos' : '/restaurant/pedidos',
+      url: target === 'customer' ? '/customer' : '/restaurant',
       type: 'simulated_call', pushType: 'simulated_call',
       orderId, driverName, vibrate: [800, 400, 800, 400, 800],
     }).catch(() => {});

@@ -145,7 +145,7 @@ async function _sendNoDriverPush(order, { title, body, priority, actions }) {
     tag:      `no_driver_${order.id}`,
     group:    'customer',
     priority,
-    url:      '/customer/pedidos',
+    url:      '/customer',
     pushType: 'no_driver',
     orderId:  order.id,
     actions,
@@ -178,7 +178,7 @@ async function _autoCancelOrder(order) {
     tag:      `cancelled_${order.id}`,
     group:    'customer',
     priority: 'high',
-    url:      '/customer/pedidos',
+    url:      '/customer',
     pushType: 'cancelled',
     orderId:  order.id,
   }).catch(() => {});
