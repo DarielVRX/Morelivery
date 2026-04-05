@@ -11,10 +11,9 @@
 //   La query SQL tiene AND updated_at < NOW() - INTERVAL '1 second' para evitar
 //   aplicar la reducción dos veces en el mismo tick del servidor.
 //
-// FLAG PERMANENTE:
-//   offer_cooldown_triggered se marca TRUE la primera vez que se reduce un cooldown
-//   para este pedido. NUNCA se resetea — es un flag de diagnóstico permanente
-//   que indica "este pedido alguna vez agotó candidatos".
+// FLAG DE ESTADO:
+//   offer_cooldown_triggered se marca TRUE cuando se reduce un cooldown
+//   por falta de candidatos. Se limpia al volver a encolar/ofertar exitosamente.
 
 import { COOLDOWN_DIVISOR, log, logWarn } from './constants.js';
 import { getNearestCooldownDriver, reduceCooldown, setCooldownTriggered } from './queries.js';
@@ -51,9 +50,9 @@ export async function applyOrderCooldownReduction(orderId, alreadyTriggered = fa
     immediate:       newWaitSecs < 1,
   });
 
-  // Marcar el flag la primera vez — permanente, no resetear
+  // Marcar el flag para diagnóstico/estado actual del pedido.
   if (!alreadyTriggered) {
-    await setCooldownTriggered(orderId);
+    await setCooldownTriggered(orderId, true);
   }
 
   return { driver_id, newWaitSecs };

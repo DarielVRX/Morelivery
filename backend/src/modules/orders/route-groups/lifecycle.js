@@ -6,6 +6,16 @@ import { notifyPickup, notifyDelivery, notifyOrderCancelled } from '../assignmen
 
 export function registerLifecycleRoutes(router, deps) {
   const { query, AppError, orderEvents, recordPickupWait, evaluatePrepEstimate, sseHub, logEvent, updateOrderStatusSchema } = deps;
+  const DRIVER_STATUS_DISTANCE_THRESHOLD_M = 100;
+
+  function haversineMeters(lat1, lng1, lat2, lng2) {
+    const toRad = (x) => x * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2
+      + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
 
   // ── PATCH /:id/status ─────────────────────────────────────────────────────
   router.patch('/:id/status', authenticate, authorize(['restaurant', 'driver', 'admin']), validate(updateOrderStatusSchema), async (req, res, next) => {
@@ -42,19 +52,34 @@ export function registerLifecycleRoutes(router, deps) {
         return next(new AppError(409, `No se puede cambiar de '${STATUS_ES[order.status] || order.status}' a '${STATUS_ES[nextStatus] || nextStatus}'`));
 
       if (req.user.role === 'driver' && ['on_the_way', 'delivered'].includes(nextStatus)) {
-        const driverLat = Number(req.body.lat);
-        const driverLng = Number(req.body.lng);
-        if (Number.isFinite(driverLat) && Number.isFinite(driverLng)) {
-          const refLat = nextStatus === 'on_the_way' ? Number(order.restaurant_lat) : Number(order.delivery_lat);
-          const refLng = nextStatus === 'on_the_way' ? Number(order.restaurant_lng) : Number(order.delivery_lng);
-          if (Number.isFinite(refLat) && Number.isFinite(refLng)) {
-            const toRad = x => x * Math.PI / 180;
-            const dLat = toRad(refLat - driverLat);
-            const dLng = toRad(refLng - driverLng);
-            const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(driverLat)) * Math.cos(toRad(refLat)) * Math.sin(dLng / 2) ** 2;
-            const distM = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            if (distM > 100 && req.body.grace !== true)
-              return next(new AppError(409, `Debes estar a menos de 100m del ${nextStatus === 'on_the_way' ? 'restaurante' : 'cliente'} para marcar este estado. Distancia actual: ${Math.round(distM)}m`));
+        const targetLat = nextStatus === 'on_the_way' ? Number(order.restaurant_lat) : Number(order.delivery_lat);
+        const targetLng = nextStatus === 'on_the_way' ? Number(order.restaurant_lng) : Number(order.delivery_lng);
+
+        if (Number.isFinite(targetLat) && Number.isFinite(targetLng)) {
+          let driverLat = Number(req.body?.lat);
+          let driverLng = Number(req.body?.lng);
+
+          if (!Number.isFinite(driverLat) || !Number.isFinite(driverLng)) {
+            const profile = await query(
+              'SELECT last_lat, last_lng FROM driver_profiles WHERE user_id=$1',
+              [req.user.userId]
+            );
+            if (profile.rowCount > 0) {
+              driverLat = Number(profile.rows[0].last_lat);
+              driverLng = Number(profile.rows[0].last_lng);
+            }
+          }
+
+          if (!Number.isFinite(driverLat) || !Number.isFinite(driverLng)) {
+            return next(new AppError(409, 'No se pudo validar tu ubicación actual. Activa el GPS y vuelve a intentar.'));
+          }
+
+          const distM = haversineMeters(driverLat, driverLng, targetLat, targetLng);
+          if (distM > DRIVER_STATUS_DISTANCE_THRESHOLD_M) {
+            return next(new AppError(
+              409,
+              `Debes estar a menos de ${DRIVER_STATUS_DISTANCE_THRESHOLD_M}m del ${nextStatus === 'on_the_way' ? 'restaurante' : 'cliente'} para marcar este estado. Distancia actual: ${Math.round(distM)}m`
+            ));
           }
         }
       }

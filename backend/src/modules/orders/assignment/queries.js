@@ -28,34 +28,50 @@ export async function getOpenOrder(orderId) {
  * Dentro de cada grupo: created_at ASC
  */
 export async function getQueuedOrders(driverId = null) {
+  const queueLimit = Math.max(1, Number(getParam('assignment_queue_limit', 200)) || 200);
+
   // Todos los pedidos abiertos sin oferta pending activa
   const r = await query(
-    `SELECT o.id, o.created_at,
-    -- ¿Tiene al menos un driver disponible sin cooldown para este pedido?
-    EXISTS (
-      SELECT 1 FROM driver_profiles dp
-      JOIN users u ON u.id = dp.user_id
-      WHERE dp.is_available = true AND u.status = 'active'
-      AND (SELECT COUNT(*) FROM orders oo
-      WHERE oo.driver_id=dp.user_id AND oo.status=ANY($1::text[])
-      ) < $2
-      AND NOT EXISTS (
-        SELECT 1 FROM order_driver_offers od2
-        WHERE od2.driver_id=dp.user_id AND od2.status='pending')
-      AND NOT EXISTS (
-        SELECT 1 FROM order_driver_offers od3
-        WHERE od3.order_id=o.id AND od3.driver_id=dp.user_id
-        AND od3.status IN ('rejected','released','expired')
-        AND od3.wait_until > NOW())
-    ) AS has_candidates
-    FROM orders o
-    WHERE o.driver_id IS NULL
-    AND o.status NOT IN ('delivered','cancelled')
-    AND NOT EXISTS (
-      SELECT 1 FROM order_driver_offers od
-      WHERE od.order_id=o.id AND od.status='pending')
-    ORDER BY has_candidates DESC, o.created_at ASC`,
-    [ACTIVE_STATUSES, getParam('max_active_orders_per_driver', 4)]
+    `WITH available_drivers AS (
+       SELECT dp.user_id
+       FROM driver_profiles dp
+       JOIN users u ON u.id = dp.user_id
+       WHERE dp.is_available = true
+         AND u.status = 'active'
+         AND ($3::uuid IS NULL OR dp.user_id = $3::uuid)
+         AND (SELECT COUNT(*) FROM orders oo
+              WHERE oo.driver_id = dp.user_id
+                AND oo.status = ANY($1::text[])) < $2
+         AND NOT EXISTS (
+           SELECT 1 FROM order_driver_offers od2
+           WHERE od2.driver_id = dp.user_id
+             AND od2.status = 'pending'
+         )
+     )
+     SELECT o.id, o.created_at,
+       EXISTS (
+         SELECT 1
+         FROM available_drivers ad
+         WHERE NOT EXISTS (
+           SELECT 1
+           FROM order_driver_offers od3
+           WHERE od3.order_id = o.id
+             AND od3.driver_id = ad.user_id
+             AND od3.status IN ('rejected','released','expired')
+             AND od3.wait_until > NOW()
+         )
+       ) AS has_candidates
+     FROM orders o
+     WHERE o.driver_id IS NULL
+       AND o.status NOT IN ('delivered','cancelled')
+       AND NOT EXISTS (
+         SELECT 1 FROM order_driver_offers od
+         WHERE od.order_id = o.id
+           AND od.status = 'pending'
+       )
+     ORDER BY has_candidates DESC, o.created_at ASC
+     LIMIT $4`,
+    [ACTIVE_STATUSES, getParam('max_active_orders_per_driver', 4), driverId, queueLimit]
   );
   return r.rows; // [{id, created_at, has_candidates}]
 }
@@ -455,35 +471,34 @@ export async function getNearestCooldownDriver(orderId) {
  * Devuelve true si se aplicó, false si el guard lo bloqueó.
  */
 export async function reduceCooldown(orderId, driverId, newWaitSecs) {
-  const waitSql    = newWaitSecs < 1
-  ? `NOW() - INTERVAL '2 seconds'`
-  : `NOW() + ($2::float * INTERVAL '1 second')`;
-  const waitParams = newWaitSecs < 1 ? [orderId, driverId] : [orderId, newWaitSecs, driverId];
-  const driverParam = newWaitSecs < 1 ? '$2' : '$3';
-
   const r = await query(
     `UPDATE order_driver_offers
-    SET wait_until = ${waitSql}, updated_at = NOW()
-    WHERE order_id  = $1
-    AND driver_id = ${driverParam}
-    AND status    IN ('rejected','expired','released')
-    AND wait_until > NOW()
-    AND updated_at < NOW() - INTERVAL '1 second'`,
-                        waitParams
+     SET wait_until = CASE
+       WHEN $3::float < 1 THEN NOW() - INTERVAL '2 seconds'
+       ELSE NOW() + ($3::float * INTERVAL '1 second')
+     END,
+     updated_at = NOW()
+     WHERE order_id  = $1
+       AND driver_id = $2
+       AND status    IN ('rejected','expired','released')
+       AND wait_until > NOW()
+       AND updated_at < NOW() - INTERVAL '1 second'`,
+    [orderId, driverId, Number(newWaitSecs) || 0]
   );
   return r.rowCount > 0;
 }
 
 /**
  * Marca/desmarca el flag offer_cooldown_triggered en el pedido.
- * Una vez marcado como true, nunca se resetea — el flag es permanente
- * y sirve solo para diagnóstico (saber que este pedido alguna vez
- * agotó candidatos y tuvo que reducir cooldowns).
+ * Se usa como estado de "cooldown reduction activa" para diagnóstico
+ * operativo y paneles internos.
  */
-export async function setCooldownTriggered(orderId) {
+export async function setCooldownTriggered(orderId, enabled = true) {
   await query(
-    `UPDATE orders SET offer_cooldown_triggered = true, updated_at = NOW() WHERE id = $1`,
-              [orderId]
+    `UPDATE orders
+     SET offer_cooldown_triggered = $2, updated_at = NOW()
+     WHERE id = $1`,
+    [orderId, Boolean(enabled)]
   );
 }
 

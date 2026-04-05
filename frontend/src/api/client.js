@@ -36,10 +36,13 @@ async function attemptRefresh() {
         stored.token = data.token;
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
         window.localStorage.setItem(REFRESH_KEY, data.refreshToken);
-      } catch (_) {}
+      } catch (storageError) {
+        console.warn('[api] No se pudieron persistir tokens tras refresh:', storageError);
+      }
 
       return data.token;
-    } catch (_) {
+    } catch (refreshError) {
+      console.warn('[api] Falló refresh de sesión:', refreshError);
       window.localStorage.removeItem(REFRESH_KEY);
       window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
       throw new Error('Session expired');
@@ -72,7 +75,12 @@ export async function apiFetch(path, options = {}, token = null) {
         if (!retry.ok) {
           if (retry.status === 401) window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
           let message = `Error ${retry.status}`;
-          try { const body = await retry.json(); message = body.error || body.message || message; } catch (_) {}
+          try {
+            const body = await retry.json();
+            message = body.error || body.message || message;
+          } catch (parseError) {
+            console.warn('[api] No se pudo parsear error de reintento:', parseError);
+          }
           throw new Error(message);
         }
         const ct2 = retry.headers.get('content-type') || '';
@@ -91,7 +99,9 @@ export async function apiFetch(path, options = {}, token = null) {
     try {
       const body = await res.json();
       message = body.error || body.message || message;
-    } catch (_) {}
+    } catch (parseError) {
+      console.warn('[api] No se pudo parsear respuesta de error:', parseError);
+    }
     throw new Error(message);
   }
 
