@@ -1,11 +1,4 @@
 // frontend/src/components/OfferPanel.jsx
-import { useEffect } from 'react';
-import { getDriverEarningCents } from '../features/driver/shared/orderUtils';
-import OfferCountdown from './OfferCountdown';
-import { fmt } from '../utils/format';
-
-
-
 import { useEffect, useRef, useState } from 'react';
 import { getDriverEarningCents } from '../features/driver/shared/orderUtils';
 import OfferCountdown from './OfferCountdown';
