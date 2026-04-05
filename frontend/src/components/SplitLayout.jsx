@@ -17,10 +17,6 @@ export default function SplitLayout({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeTab,  setActiveTab]  = useState('orders');
 
-  // Swipe para abrir drawer — solo desde barra de tabs o trigger button
-  const swipeStartRef = useRef(null);
-  const tabHeaderRef  = useRef(null);
-
   const hasAlerts = Boolean(alertsContent);
 
   useEffect(() => {
@@ -34,37 +30,31 @@ export default function SplitLayout({
     return () => { document.body.style.overflow = ''; };
   }, [mobileOpen]);
 
-  // Swipe handler para el trigger button (barra lateral)
-  const handleTriggerTouchStart = (e) => {
-    swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-  };
-  const handleTriggerTouchEnd = (e) => {
-    if (!swipeStartRef.current) return;
-    const dx = swipeStartRef.current.x - e.changedTouches[0].clientX;
-    const dy = Math.abs(swipeStartRef.current.y - e.changedTouches[0].clientY);
-    swipeStartRef.current = null;
-    // Solo swipe horizontal predominante desde trigger
-    if (dy > Math.abs(dx) * 0.6 || Math.abs(dx) < 20) return;
-    if (dx > 0 && !mobileOpen) setMobileOpen(true);   // swipe izq → abrir
-    if (dx < 0 && mobileOpen)  setMobileOpen(false);  // swipe der → cerrar
-  };
+  // Abrir drawer desde Layout (header superior o nav-mobile inferior)
+  useEffect(() => {
+    const handler = () => setMobileOpen(true);
+    window.addEventListener('layout_open_drawer', handler);
+    return () => window.removeEventListener('layout_open_drawer', handler);
+  }, []);
 
-  // Swipe handler para la barra de tabs — margen generoso (no desde bordes)
-  const handleTabHeaderTouchStart = (e) => {
+  // Swipe para cerrar desde dentro del drawer — deslizar hacia la derecha
+  // Ignora los primeros 44px del borde izquierdo para no colisionar con back gesture de Android
+  const drawerSwipeRef = useRef(null);
+  const handleDrawerTouchStart = (e) => {
     const x = e.touches[0].clientX;
-    const w = e.currentTarget.offsetWidth;
-    // Ignorar toque en borde derecho (<30px del borde) para no chocar con back gesture
-    if (w - x < 30) return;
-    swipeStartRef.current = { x, y: e.touches[0].clientY };
+    const screenW = window.innerWidth;
+    const drawerLeft = screenW - Math.min(screenW * 0.85, 360);
+    // Ignorar toque en los primeros 44px desde el borde izquierdo del drawer
+    if (x - drawerLeft < 44) return;
+    drawerSwipeRef.current = { x, y: e.touches[0].clientY };
   };
-  const handleTabHeaderTouchEnd = (e) => {
-    if (!swipeStartRef.current) return;
-    const dx = swipeStartRef.current.x - e.changedTouches[0].clientX;
-    const dy = Math.abs(swipeStartRef.current.y - e.changedTouches[0].clientY);
-    swipeStartRef.current = null;
-    if (dy > Math.abs(dx) * 0.6 || Math.abs(dx) < 30) return;
-    if (dx > 0 && !mobileOpen) setMobileOpen(true);
-    if (dx < 0 && mobileOpen)  setMobileOpen(false);
+  const handleDrawerTouchEnd = (e) => {
+    if (!drawerSwipeRef.current) return;
+    const dx = e.changedTouches[0].clientX - drawerSwipeRef.current.x;
+    const dy = Math.abs(e.changedTouches[0].clientY - drawerSwipeRef.current.y);
+    drawerSwipeRef.current = null;
+    if (dy > Math.abs(dx) * 0.6 || dx < 30) return;
+    setMobileOpen(false);
   };
 
   return (
@@ -72,19 +62,16 @@ export default function SplitLayout({
     <div className="split-root">
 
     {/* ── Orders/Alerts: una sola instancia — desktop col + mobile drawer ── */}
-    <aside className={`split-orders-col${mobileOpen ? ' mobile-open' : ''}`}>
+    <aside className={`split-orders-col${mobileOpen ? ' mobile-open' : ''}`}
+      onTouchStart={handleDrawerTouchStart}
+      onTouchEnd={handleDrawerTouchEnd}>
 
-      {/* Header de pestañas — solo muestra alertas si hay contenido */}
-      <div
-        ref={tabHeaderRef}
-        onTouchStart={handleTabHeaderTouchStart}
-        onTouchEnd={handleTabHeaderTouchEnd}
-        style={{
-          display: 'flex', flexShrink: 0,
-          borderBottom: '1px solid var(--border-light)',
-          background: 'var(--bg-card)',
-          touchAction: 'pan-y',
-        }}>
+      {/* Header de pestañas */}
+      <div style={{
+        display: 'flex', flexShrink: 0,
+        borderBottom: '1px solid var(--border-light)',
+        background: 'var(--bg-card)',
+      }}>
         <button onClick={() => setActiveTab('orders')} style={{
           flex: 1, padding: '0.6rem 0', fontSize: '0.78rem', fontWeight: 700,
           cursor: 'pointer', border: 'none', background: 'none',
@@ -114,7 +101,7 @@ export default function SplitLayout({
         )}
       </div>
 
-      {/* Contenido de pestañas — ambos montados, solo uno visible */}
+      {/* Contenido de pestañas */}
       <div style={{ flex:1, minHeight:0, display: activeTab === 'orders' ? 'flex' : 'none', flexDirection:'column', overflow:'hidden' }}>
         {ordersContent}
       </div>
@@ -134,8 +121,6 @@ export default function SplitLayout({
     <button
       className={`orders-tab-trigger${mobileOpen ? ' open' : ''}`}
       onClick={() => setMobileOpen(v => !v)}
-      onTouchStart={handleTriggerTouchStart}
-      onTouchEnd={handleTriggerTouchEnd}
       aria-label={mobileOpen ? 'Cerrar pedidos' : 'Ver pedidos'}
       style={{
         right: mobileOpen ? 'min(85vw, 360px)' : 0,

@@ -1,4 +1,3 @@
-// frontend/src/components/Layout.jsx
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -47,6 +46,24 @@ export default function Layout({ children }) {
   const navigate  = useNavigate();
   const [address, setAddress] = useState('');
 
+  // Swipe para abrir el drawer lateral — desde header superior y nav-mobile inferior
+  // Se comunica via custom event para no acoplar Layout con SplitLayout
+  const swipeRef = useRef(null);
+
+  const handleSwipeTouchStart = (e) => {
+    swipeRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+
+  const handleSwipeTouchEnd = (e) => {
+    if (!swipeRef.current) return;
+    const dx = e.changedTouches[0].clientX - swipeRef.current.x;
+    const dy = Math.abs(e.changedTouches[0].clientY - swipeRef.current.y);
+    swipeRef.current = null;
+    // Solo swipe horizontal predominante hacia la izquierda (abre el drawer derecho)
+    if (dy > Math.abs(dx) * 0.6 || dx > -30) return;
+    window.dispatchEvent(new CustomEvent('layout_open_drawer'));
+  };
+
   const role  = auth.user?.role;
   const items = getNavItems(role);
   const displayName = auth.user?.alias || auth.user?.full_name || auth.user?.username || '';
@@ -69,7 +86,10 @@ export default function Layout({ children }) {
 
   return (
     <div className="app-shell">
-      <header className="app-header">
+      <header className="app-header"
+        onTouchStart={handleSwipeTouchStart}
+        onTouchEnd={handleSwipeTouchEnd}
+        style={{ touchAction: 'pan-y' }}>
         <Link to={auth.user ? `/${role}` : '/'} className="brand-block" style={{ textDecoration: 'none' }}>
           <img className="brand-logo" src="/logo.svg" alt={UI_BRAND} />
           <div>
@@ -123,7 +143,10 @@ export default function Layout({ children }) {
       <main className="page-content">{children}</main>
 
       {auth.user && items.length > 0 && (
-        <nav className="nav-mobile" aria-label="Navegación">
+        <nav className="nav-mobile" aria-label="Navegación"
+          onTouchStart={handleSwipeTouchStart}
+          onTouchEnd={handleSwipeTouchEnd}
+          style={{ touchAction: 'pan-y' }}>
           {items.map(({ to, label, Icon }) => (
             <button key={to}
               className={`nav-mobile-item${isActive(to, location.pathname) ? ' active' : ''}`}

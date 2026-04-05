@@ -395,25 +395,28 @@ export default function ActiveOrderPanel({
               </div>
             )}
 
-            {/* Fila horizontal de acciones: Notificar | Chat | Relevo | Liberar | Detalles */}
+            {/* FILA 1 — más alta: Notificar (40%) | Chat (40%) | Detalles (20%) */}
             <div style={{ display:'flex', gap:'0.3rem', alignItems:'stretch' }}>
 
-              {/* Notificar */}
-              <div style={{ flex:1, position:'relative' }}>
+              {/* Notificar — 40% */}
+              <div style={{ flex:2, position:'relative' }}>
                 <button
                   onClick={() => setShowCallSelector(v => !v)}
                   disabled={!!callingTarget}
                   style={{
-                    width:'100%', height:'100%', minHeight:52,
-                    display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
-                    padding:'0.3rem 0.2rem', borderRadius:8, fontWeight:700,
-                    fontSize:'0.68rem', border:'1.5px solid #3b82f6',
+                    width:'100%', minHeight:60,
+                    display:'flex', alignItems:'center', justifyContent:'center', gap:6,
+                    padding:'0.5rem 0.5rem', borderRadius:8, fontWeight:700,
+                    fontSize:'0.78rem', border:'1.5px solid #3b82f6',
                     background: callingTarget ? '#dbeafe' : '#eff6ff',
                     color:'#1d4ed8', cursor: callingTarget ? 'not-allowed' : 'pointer',
                     opacity: callingTarget ? 0.7 : 1,
                   }}>
                   <IconPhone />
-                  {callingTarget ? '…' : 'Notificar'}
+                  {callingTarget ? 'Notificando…' : 'Notificar'}
+                  <span style={{ fontSize:'0.7rem', opacity:0.7 }}>
+                    {showCallSelector ? '▲' : '▼'}
+                  </span>
                 </button>
                 {showCallSelector && (
                   <div style={{
@@ -423,29 +426,29 @@ export default function ActiveOrderPanel({
                     zIndex:50, overflow:'hidden',
                   }}>
                     <button onClick={() => handleNotify('customer')}
-                      style={{ width:'100%', padding:'0.6rem 0.75rem', textAlign:'left',
+                      style={{ width:'100%', padding:'0.65rem 0.75rem', textAlign:'left',
                         background:'none', border:'none', borderBottom:'1px solid var(--border-light)',
-                        cursor:'pointer', fontSize:'0.82rem', fontWeight:600 }}>
-                      Notificar al cliente
+                        cursor:'pointer', fontSize:'0.85rem', fontWeight:600 }}>
+                      📱 Notificar al cliente
                     </button>
                     <button onClick={() => handleNotify('restaurant')}
-                      style={{ width:'100%', padding:'0.6rem 0.75rem', textAlign:'left',
+                      style={{ width:'100%', padding:'0.65rem 0.75rem', textAlign:'left',
                         background:'none', border:'none', cursor:'pointer',
-                        fontSize:'0.82rem', fontWeight:600 }}>
-                      Notificar a la tienda
+                        fontSize:'0.85rem', fontWeight:600 }}>
+                      🏪 Notificar a la tienda
                     </button>
                   </div>
                 )}
               </div>
 
-              {/* Chat */}
+              {/* Chat — 40% */}
               <button
                 onClick={() => setChatOpen((v) => !v)}
                 style={{
-                  flex:1, minHeight:52,
-                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
-                  padding:'0.3rem 0.2rem', borderRadius:8, fontWeight:700,
-                  fontSize:'0.68rem', border:'1px solid var(--border)',
+                  flex:2, minHeight:60,
+                  display:'flex', alignItems:'center', justifyContent:'center', gap:6,
+                  padding:'0.5rem 0.25rem', borderRadius:8, fontWeight:700,
+                  fontSize:'0.78rem', border:'1px solid var(--border)',
                   background: chatOpen ? 'var(--brand-light)' : 'var(--bg-raised)',
                   color: chatOpen ? 'var(--brand)' : 'var(--text-secondary)',
                   cursor:'pointer',
@@ -454,42 +457,14 @@ export default function ActiveOrderPanel({
                 Chat
               </button>
 
-              {/* Relevo */}
-              {canRelevo && !order.is_disputed && (
-                <button style={{
-                  flex:1, minHeight:52,
-                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
-                  padding:'0.3rem 0.2rem', borderRadius:8, fontWeight:700,
-                  fontSize:'0.68rem', border:'1.5px solid var(--warn-border)', cursor:'pointer',
-                  color:'var(--warn)', background:'var(--warn-bg)',
-                }} onClick={onRebalance}>
-                  <IconRelevo />
-                  Relevo
-                </button>
-              )}
-
-              {/* Liberar */}
-              {canRelease && !order.is_disputed && (
-                <button style={{
-                  flex:1, minHeight:52,
-                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
-                  padding:'0.3rem 0.2rem', borderRadius:8, fontWeight:700,
-                  fontSize:'0.68rem', border:'1.5px solid var(--danger-border)', cursor:'pointer',
-                  background:'var(--danger-bg)', color:'var(--danger)',
-                }} onClick={onToggleRelease}>
-                  <IconRelease />
-                  Liberar
-                </button>
-              )}
-
-              {/* Detalles — al final, 20% */}
+              {/* Detalles — 20% */}
               <button
                 onClick={() => setDetailsOpen(v => !v)}
                 style={{
-                  flex:1, minHeight:52,
+                  flex:1, minHeight:60,
                   display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
                   padding:'0.3rem 0.2rem', borderRadius:8, fontWeight:700,
-                  fontSize:'0.68rem', border:'1px solid var(--border-light)',
+                  fontSize:'0.65rem', border:'1px solid var(--border-light)',
                   background: detailsOpen ? 'var(--bg-raised)' : 'none',
                   color:'var(--text-tertiary)', cursor:'pointer',
                 }}>
@@ -501,6 +476,34 @@ export default function ActiveOrderPanel({
                 Detalles
               </button>
             </div>
+
+            {/* FILA 2 — altura normal: Relevo | Liberar */}
+            {(canRelevo || canRelease) && !order.is_disputed && (
+              <div style={{ display:'flex', gap:'0.3rem' }}>
+                {canRelevo && (
+                  <button style={{
+                    flex:1, minHeight:44,
+                    display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+                    padding:'0.4rem 0.25rem', borderRadius:8, fontWeight:700,
+                    fontSize:'0.75rem', border:'1.5px solid var(--warn-border)', cursor:'pointer',
+                    color:'var(--warn)', background:'var(--warn-bg)',
+                  }} onClick={onRebalance}>
+                    <IconRelevo /> Relevo
+                  </button>
+                )}
+                {canRelease && (
+                  <button style={{
+                    flex:1, minHeight:44,
+                    display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+                    padding:'0.4rem 0.25rem', borderRadius:8, fontWeight:700,
+                    fontSize:'0.75rem', border:'1.5px solid var(--danger-border)', cursor:'pointer',
+                    background:'var(--danger-bg)', color:'var(--danger)',
+                  }} onClick={onToggleRelease}>
+                    <IconRelease /> Liberar
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Feedback notificación */}
             {callFeedback && (
