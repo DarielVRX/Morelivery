@@ -147,6 +147,10 @@ async function _processOrder(order, nowSec) {
 }
 
 async function _sendNoDriverPush(order, { title, body, priority, actions }) {
+  // SSE — actualiza driverSearchStatus en el frontend en tiempo real
+  sseHub.sendToUser(order.customer_id,        'driver_search_update', { orderId: order.id, type: 'no_driver' });
+  sseHub.sendToUser(order.restaurant_owner_id, 'driver_search_update', { orderId: order.id, type: 'no_driver' });
+
   await sendPushToUser(order.customer_id, {
     title,
     body,
