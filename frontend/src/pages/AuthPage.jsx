@@ -173,6 +173,7 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer',
   const [accountLocked, setAccountLocked] = useState(false); // bloqueo permanente cuenta
   const [suggestReset, setSuggestReset] = useState(false);  // banner fallo >= 3
   const [suggest2Fa,   setSuggest2Fa]   = useState(false);  // sugerencia post fallo 10+
+  const [showHelp,     setShowHelp]     = useState(false);  // panel ¿Problemas para iniciar sesión?
   const countdown = useCountdown(lockedUntil);
   const formBlocked = accountLocked || countdown > 0;
 
@@ -392,6 +393,69 @@ function LoginView({ appKey, onGoRegister, onGoForgot, initialRole = 'customer',
           </button>
         </div>
       )}
+
+      {/* ¿Problemas para iniciar sesión? */}
+      <div style={{ textAlign: 'center', marginTop: '0.75rem' }}>
+        <button type="button" onClick={() => setShowHelp(v => !v)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer',
+            color: 'var(--text-tertiary)', fontSize: '0.78rem', padding: 0,
+            textDecoration: 'underline', textUnderlineOffset: 2 }}>
+          ¿Problemas para iniciar sesión?
+        </button>
+      </div>
+
+      {showHelp && (
+        <div style={{ marginTop: '0.5rem', padding: '0.75rem 0.9rem',
+          background: 'var(--bg-raised)', border: '1px solid var(--border)',
+          borderRadius: 10, fontSize: '0.82rem', color: 'var(--text-secondary)',
+          display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+
+          {/* Rol incorrecto — solo mostrar si está en la entrada principal */}
+          {!appKey && (
+            <div>
+              <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
+                ¿Eres repartidor o tienes un negocio?
+              </div>
+              <div style={{ marginBottom: '0.35rem' }}>
+                Esta pantalla es para clientes. Ingresa desde la sección que corresponde a tu cuenta:
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button type="button" onClick={() => navigate('/driver/login')}
+                  style={{ background: 'none', border: '1px solid var(--border)',
+                    borderRadius: 6, cursor: 'pointer', color: 'var(--primary)',
+                    fontSize: '0.78rem', fontWeight: 700, padding: '0.25rem 0.65rem' }}>
+                  Soy repartidor →
+                </button>
+                <button type="button" onClick={() => navigate('/restaurant/login')}
+                  style={{ background: 'none', border: '1px solid var(--border)',
+                    borderRadius: 6, cursor: 'pointer', color: 'var(--primary)',
+                    fontSize: '0.78rem', fontWeight: 700, padding: '0.25rem 0.65rem' }}>
+                  Tengo un negocio →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Recuperar contraseña */}
+          <div style={{ borderTop: !appKey ? '1px solid var(--border-light)' : 'none',
+            paddingTop: !appKey ? '0.5rem' : 0 }}>
+            <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
+              ¿Olvidaste tu contraseña?
+            </div>
+            <ol style={{ margin: '0 0 0.35rem 1.1rem', padding: 0, lineHeight: 1.6 }}>
+              <li>Presiona <strong>"¿Olvidaste tu contraseña?"</strong> arriba del botón de ingreso.</li>
+              <li>Ingresa el correo con el que te registraste.</li>
+              <li>Revisa tu bandeja de entrada y sigue el enlace que te enviamos.</li>
+            </ol>
+            <button type="button" onClick={() => { setShowHelp(false); onGoForgot(); }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--primary)', fontWeight: 700, fontSize: '0.82rem', padding: 0 }}>
+              Ir a recuperar contraseña →
+            </button>
+          </div>
+        </div>
+      )}
+
       {msg && <p className="flash flash-error" style={{ marginTop: '0.75rem' }}>{msg}</p>}
     </>
   );

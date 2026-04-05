@@ -205,6 +205,20 @@ export async function loginUser(payload) {
     });
   }
 
+  // Validar que el rol del usuario coincida con el rol solicitado.
+  // Si payload.role está definido y no coincide, tratar como credenciales inválidas
+  // para no revelar que el usuario existe en otro rol.
+  if (payload.role && user.role !== payload.role) {
+    logEvent('auth.login_error', { email: payload.email, reason: 'role_mismatch', expected: payload.role, actual: user.role });
+    await recordLoginFailure(query, payload.email, fp, null);
+    const row = await getLoginAttempts(query, payload.email, fp);
+    throw new AppError(401, 'Credenciales inválidas', {
+      attempts:     row?.attempts || 1,
+      suggestReset: (row?.attempts || 1) >= 3,
+      lockedUntil:  row?.locked_until || null,
+    });
+  }
+
   if (user.status === 'suspended') throw new AppError(403, 'Cuenta suspendida. Contacta a soporte.');
 
   // ── 2. Verificar bloqueo permanente de cuenta ─────────────────────────────
