@@ -2,7 +2,7 @@
 // Panel colapsable para un restaurante.
 
 import React, { useState } from 'react';
-import { useSimContext } from '../SimProvider.js';
+import { useSimContext } from '../SimProvider.jsx';
 
 // Íconos simples
 function IconRestaurant() {

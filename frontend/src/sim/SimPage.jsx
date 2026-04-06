@@ -3,7 +3,7 @@
 // TopBar con controles, sidebar izquierdo, mapa central, panel derecho, logs inferior.
 
 import React, { useState, useEffect, useRef } from 'react';
-import SimProvider, { useSimContext } from './SimProvider.js';
+import SimProvider, { useSimContext } from './SimProvider.jsx';
 import SimMap from './SimMap.jsx';
 import DriverPanel from './panels/DriverPanel.jsx';
 import RestaurantPanel from './panels/RestaurantPanel.jsx';

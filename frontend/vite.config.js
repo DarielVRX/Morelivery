@@ -16,6 +16,9 @@ export default defineConfig(({ mode }) => {
   ];
 
   return {
+    resolve: {
+      extensions: ['.jsx', '.js', '.ts', '.tsx'],
+    },
     plugins: [
       react(),
                             // Hook nativo para reemplazar variables en index.html

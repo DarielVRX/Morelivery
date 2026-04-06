@@ -3,9 +3,9 @@
 // Reutiliza DriverMap como base y agrega pines de restaurantes y clientes.
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import DriverMap from '../../components/DriverMap';
-import { useSimContext } from './SimProvider.js';
-import { ensureMapLibreJS } from '../../utils/mapLibre.js';
+import DriverMap from '../components/DriverMap.jsx';
+import { useSimContext } from './SimProvider.jsx';
+import { ensureMapLibreJS } from '../utils/mapLibre.js';
 
 // Colores para los diferentes tipos de pines
 const PIN_COLORS = {

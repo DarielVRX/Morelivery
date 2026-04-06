@@ -3,7 +3,7 @@
 // Permite crear pedidos y ver estado del pedido activo.
 
 import React, { useState } from 'react';
-import { useSimContext } from '../SimProvider.js';
+import { useSimContext } from '../SimProvider.jsx';
 
 // Íconos simples
 function IconCustomer() {
