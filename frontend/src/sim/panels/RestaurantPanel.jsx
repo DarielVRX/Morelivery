@@ -32,6 +32,7 @@ export default function RestaurantPanel({ restaurantId, onClose }) {
   const {
     world,
     updateOrderStatus,
+    getOrders,
     setRestaurantOpen,
     setRestaurantPrepTime,
   } = useSimContext();
@@ -43,7 +44,7 @@ export default function RestaurantPanel({ restaurantId, onClose }) {
   const restaurant = world.getRestaurant(restaurantId);
   
   // Obtener pedidos activos de este restaurante
-  const activeOrders = world.getAllOrders().filter(
+  const activeOrders = getOrders().filter(
     order => order.restaurant_id === restaurantId && 
     !['delivered', 'cancelled'].includes(order.status)
   );

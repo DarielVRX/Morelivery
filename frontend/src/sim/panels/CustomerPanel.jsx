@@ -38,7 +38,7 @@ export default function CustomerPanel({ customerId, onClose }) {
     world,
     createOrder,
     updateOrderStatus,
-    getAllRestaurants,
+    getRestaurants,
   } = useSimContext();
 
   const [expanded, setExpanded] = useState(true);
@@ -50,7 +50,7 @@ export default function CustomerPanel({ customerId, onClose }) {
   const [customItemPrice, setCustomItemPrice] = useState('');
 
   const customer = world.getCustomer(customerId);
-  const restaurants = getAllRestaurants();
+  const restaurants = getRestaurants();
   
   // Obtener pedido activo de este cliente
   const activeOrder = customer?.activeOrderId ? world.getOrder(customer.activeOrderId) : null;

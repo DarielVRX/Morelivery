@@ -42,6 +42,10 @@ export function SimProvider({ children }) {
     simRerouteEngine = getSimRerouteEngine(simWorld, simClock);
     movementEngine = getMovementEngine(simWorld, simClock);
     simLogger = getLogger();
+    enginesRef.current.assignment = simAssignmentEngine;
+    enginesRef.current.reroute    = simRerouteEngine;
+    enginesRef.current.movement   = movementEngine;
+    enginesRef.current.logger     = simLogger;
     enginesRef.current.initialized = true;
   }
 
@@ -64,13 +68,13 @@ export function SimProvider({ children }) {
     const handleOrderCreated = async ({ orderId }) => {
       const order = simWorld.getOrder(orderId);
       if (order && !order.driver_id) {
-        // Pequeño delay para simular procesamiento
         setTimeout(async () => {
-          const assignedDriver = await simAssignmentEngine.assignOrder(orderId);
+          const engine = enginesRef.current.assignment;
+          if (!engine) return;
+          const assignedDriver = await engine.assignOrder(orderId);
           if (assignedDriver) {
-            // Una vez asignado, recalcular ruta del driver
             setTimeout(() => {
-              simRerouteEngine.rerouteDriver(assignedDriver.id);
+              enginesRef.current.reroute?.rerouteDriver(assignedDriver.id);
             }, 500);
           }
         }, 100);
@@ -81,19 +85,16 @@ export function SimProvider({ children }) {
     const handleOrderStatusChanged = async ({ orderId, newStatus, order }) => {
       const driverId = order?.driver_id;
       if (driverId) {
-        // Estados que requieren recalcular ruta
         const needsReroute = ['accepted', 'preparing', 'ready', 'on_the_way', 'delivered'];
         if (needsReroute.includes(newStatus)) {
           setTimeout(() => {
-            simRerouteEngine.rerouteDriver(driverId);
+            enginesRef.current.reroute?.rerouteDriver(driverId);
           }, 200);
         }
-        
-        // Si el pedido fue entregado, limpiar movimiento si ya no hay pedidos activos
         if (newStatus === 'delivered') {
           const driver = simWorld.getDriver(driverId);
           if (driver && driver.activeOrders.length === 0) {
-            movementEngine.stopMovement(driverId);
+            enginesRef.current.movement?.stopMovement(driverId);
           }
         }
       }
@@ -101,7 +102,7 @@ export function SimProvider({ children }) {
 
     // Cuando un driver acepta una oferta (desde el panel)
     const handleOfferAccepted = ({ orderId, driverId }) => {
-      simAssignmentEngine.acceptOffer(orderId, driverId);
+      enginesRef.current.assignment?.acceptOffer(orderId, driverId);
     };
 
     // Cuando se libera un pedido, recalcular ruta
@@ -153,70 +154,55 @@ export function SimProvider({ children }) {
 
   // Context value
   const contextValue = {
-    // Instancias
     world: simWorld,
     clock: simClock,
-    assignmentEngine: simAssignmentEngine,
-    rerouteEngine: simRerouteEngine,
-    movementEngine: movementEngine,
-    logger: simLogger,
+    assignmentEngine: enginesRef.current.assignment,
+    rerouteEngine:    enginesRef.current.reroute,
+    movementEngine:   enginesRef.current.movement,
+    logger:           enginesRef.current.logger,
 
-    // Métodos de conveniencia para UI
-    addDriver: (params) => simWorld.addDriver(params),
-    addRestaurant: (params) => simWorld.addRestaurant(params),
-    addCustomer: (params) => simWorld.addCustomer(params),
-    createOrder: (params) => simWorld.createOrder(params),
-    
-    updateOrderStatus: (orderId, status, extra) => simWorld.updateOrderStatus(orderId, status, extra),
-    assignDriverToOrder: (driverId, orderId) => simWorld.assignDriverToOrder(driverId, orderId),
+    addDriver:      (params) => simWorld.addDriver(params),
+    addRestaurant:  (params) => simWorld.addRestaurant(params),
+    addCustomer:    (params) => simWorld.addCustomer(params),
+    createOrder:    (params) => simWorld.createOrder(params),
+
+    updateOrderStatus:      (orderId, status, extra) => simWorld.updateOrderStatus(orderId, status, extra),
+    assignDriverToOrder:    (driverId, orderId) => simWorld.assignDriverToOrder(driverId, orderId),
     releaseDriverFromOrder: (driverId, orderId, reason) => simWorld.releaseDriverFromOrder(driverId, orderId, reason),
-    
+
     setDriverAvailability: (driverId, isAvailable) => simWorld.setDriverAvailability(driverId, isAvailable),
-    setRestaurantOpen: (restaurantId, isOpen) => simWorld.setRestaurantOpen(restaurantId, isOpen),
-    setRestaurantPrepTime: (restaurantId, prepTimeSecs) => simWorld.setRestaurantPrepTime(restaurantId, prepTimeSecs),
-    
-    addImpassableWay: (driverId, way) => simWorld.addImpassableWay(driverId, way),
-    removeImpassableWay: (driverId, wayId) => simWorld.removeImpassableWay(driverId, wayId),
-    addRoutePreference: (driverId, way) => simWorld.addRoutePreference(driverId, way),
-    removeRoutePreference: (driverId, wayId) => simWorld.removeRoutePreference(driverId, wayId),
-    
-    // Control de simulación
+    setRestaurantOpen:     (restaurantId, isOpen)  => simWorld.setRestaurantOpen(restaurantId, isOpen),
+    setRestaurantPrepTime: (restaurantId, secs)    => simWorld.setRestaurantPrepTime(restaurantId, secs),
+
+    addImpassableWay:     (driverId, way)   => simWorld.addImpassableWay(driverId, way),
+    removeImpassableWay:  (driverId, wayId) => simWorld.removeImpassableWay(driverId, wayId),
+    addRoutePreference:   (driverId, way)   => simWorld.addRoutePreference(driverId, way),
+    removeRoutePreference:(driverId, wayId) => simWorld.removeRoutePreference(driverId, wayId),
+
     startSimulation: () => { simClock.start(); setClockRunning(true); },
     pauseSimulation: () => { simClock.pause(); setClockRunning(false); },
     resetSimulation: () => {
-      // Detener todos los movimientos
-      const drivers = simWorld.getAllDrivers();
-      drivers.forEach(d => movementEngine.stopMovement(d.id));
-      
-      // Resetear mundo
+      simWorld.getAllDrivers().forEach(d => enginesRef.current.movement?.stopMovement(d.id));
       simWorld.reset();
-      
-      // Resetear reloj
       simClock.reset();
-      
-      // Limpiar logs
-      simLogger?.clear();
-      
-      // Forzar actualización UI
+      enginesRef.current.logger?.clear();
+      setClockRunning(false); setClockSimTime(0); setClockSpeed(1);
       forceUpdate({});
     },
     setSimSpeed: (speed) => { simClock.setSpeed(speed); setClockSpeed(speed); },
-    
-    // Movimiento
-    startDriverMovement: (driverId, geometry, onComplete) => movementEngine.startMovement(driverId, geometry, onComplete),
-    pauseDriverMovement: (driverId) => movementEngine.pauseMovement(driverId),
-    resumeDriverMovement: (driverId) => movementEngine.resumeMovement(driverId),
-    stopDriverMovement: (driverId) => movementEngine.stopMovement(driverId),
-    isDriverMoving: (driverId) => movementEngine.isMoving(driverId),
-    getDriverProgress: (driverId) => movementEngine.getProgress(driverId),
-    
-    // Ofertas
-    acceptOffer: (orderId, driverId) => simAssignmentEngine.acceptOffer(orderId, driverId),
-    rejectOffer: (orderId, driverId) => simAssignmentEngine.rejectOffer(orderId, driverId),
-    isDriverInCooldown: (driverId) => simAssignmentEngine.isDriverInCooldown(driverId),
-    
-    // Estado actual (para UI reactiva)
-    getDrivers: () => simWorld.getAllDrivers(),
+
+    startDriverMovement:  (driverId, geometry, fsl, cb) => enginesRef.current.movement?.startMovement(driverId, geometry, fsl, cb),
+    pauseDriverMovement:  (driverId) => enginesRef.current.movement?.pauseMovement(driverId),
+    resumeDriverMovement: (driverId) => enginesRef.current.movement?.resumeMovement(driverId),
+    stopDriverMovement:   (driverId) => enginesRef.current.movement?.stopMovement(driverId),
+    isDriverMoving:       (driverId) => enginesRef.current.movement?.isMoving(driverId),
+    getDriverProgress:    (driverId) => enginesRef.current.movement?.getProgress(driverId),
+
+    acceptOffer:        (orderId, driverId) => enginesRef.current.assignment?.acceptOffer(orderId, driverId),
+    rejectOffer:        (orderId, driverId) => enginesRef.current.assignment?.rejectOffer(orderId, driverId),
+    isDriverInCooldown: (driverId)          => enginesRef.current.assignment?.isDriverInCooldown(driverId),
+
+    getDrivers:     () => simWorld.getAllDrivers(),
     getRestaurants: () => simWorld.getAllRestaurants(),
     getCustomers: () => simWorld.getAllCustomers(),
     getOrders: () => simWorld.getAllOrders(),

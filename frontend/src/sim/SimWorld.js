@@ -274,6 +274,7 @@ class SimWorld {
     restaurant.activeOrders.push(id);
 
     this.eventBus.emit('order_created', { orderId: id, order });
+    console.log('[SimWorld] emitting order_created', id);
     this._logOrder('created', { orderId: id, restaurantId, customerId, totalCents });
 
     return id;

@@ -243,272 +243,206 @@ function LogPanel() {
   );
 }
 
-// Sidebar izquierdo con listas de entidades
-function Sidebar({ onSelectEntity, selectedEntityType, selectedEntityId }) {
-  const { world, addDriver, addRestaurant, addCustomer, getDrivers, getRestaurants, getCustomers } = useSimContext();
-  const [driversExpanded, setDriversExpanded] = useState(true);
-  const [restaurantsExpanded, setRestaurantsExpanded] = useState(true);
-  const [customersExpanded, setCustomersExpanded] = useState(true);
-  
-  const [newDriverPos, setNewDriverPos] = useState({ lat: 19.70595, lng: -101.19498 });
-  const [newRestaurantPos, setNewRestaurantPos] = useState({ lat: 19.70595, lng: -101.19498 });
-  const [newCustomerPos, setNewCustomerPos] = useState({ lat: 19.70595, lng: -101.19498 });
-  
-  const drivers = getDrivers();
-  const restaurants = getRestaurants();
-  const customers = getCustomers();
-  
-  const handleAddDriver = () => {
-    const name = prompt('Nombre del conductor (opcional):');
-    addDriver({
-      lat: newDriverPos.lat,
-      lng: newDriverPos.lng,
-      vehicleType: 'car',
-      bagCapacityLiters: 60,
-      name: name || undefined,
+// Mini popup flotante para configurar entidad recién colocada
+function PlacePopup({ type, pos, onConfirm, onCancel }) {
+  const [name, setName]         = useState('');
+  const [vehicle, setVehicle]   = useState('motorcycle');
+  const [bag, setBag]           = useState(60);
+  const [prep, setPrep]         = useState(15);
+
+  const handleConfirm = () => {
+    if (type === 'restaurant' && !name.trim()) return;
+    onConfirm({
+      name: name.trim() || undefined,
+      vehicleType: vehicle,
+      bagCapacityLiters: Number(bag),
+      prepTimeMins: Number(prep),
     });
   };
-  
-  const handleAddRestaurant = () => {
-    const name = prompt('Nombre del restaurante:');
-    if (!name) return;
-    addRestaurant({
-      lat: newRestaurantPos.lat,
-      lng: newRestaurantPos.lng,
-      name,
-      prepTimeMins: 15,
-    });
-  };
-  
-  const handleAddCustomer = () => {
-    const name = prompt('Nombre del cliente:');
-    if (!name) return;
-    addCustomer({
-      lat: newCustomerPos.lat,
-      lng: newCustomerPos.lng,
-      name,
-    });
-  };
-  
-  const isSelected = (type, id) => selectedEntityType === type && selectedEntityId === id;
-  
+
   return (
     <div style={{
-      width: '220px',
-      background: 'var(--bg-card)',
+      position: 'absolute', top: '50%', left: '50%',
+      transform: 'translate(-50%, -50%)',
+      background: 'var(--bg-card)', border: '1px solid var(--border)',
+      borderRadius: 12, padding: '1rem', zIndex: 100,
+      boxShadow: '0 8px 32px rgba(0,0,0,0.25)', minWidth: 220,
+    }}>
+      <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.75rem' }}>
+        {type === 'driver' ? '🛵 Nuevo conductor' : type === 'restaurant' ? '🍽️ Nuevo restaurante' : '👤 Nuevo cliente'}
+      </div>
+
+      <input
+        autoFocus
+        placeholder={type === 'restaurant' ? 'Nombre del restaurante *' : 'Nombre (opcional)'}
+        value={name}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && handleConfirm()}
+        style={{ width: '100%', marginBottom: '0.5rem', padding: '0.4rem 0.6rem',
+          borderRadius: 7, border: '1px solid var(--border)', fontSize: '0.82rem',
+          boxSizing: 'border-box' }}
+      />
+
+      {type === 'driver' && (
+        <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem' }}>
+          {['motorcycle','car','bike'].map(v => (
+            <button key={v} onClick={() => setVehicle(v)}
+              style={{ flex: 1, padding: '0.3rem', borderRadius: 6, fontSize: '0.7rem',
+                fontWeight: 600, cursor: 'pointer', border: '1px solid var(--border)',
+                background: vehicle === v ? 'var(--brand)' : 'var(--bg-raised)',
+                color: vehicle === v ? '#fff' : 'var(--text-secondary)' }}>
+              {v === 'motorcycle' ? '🏍️' : v === 'car' ? '🚗' : '🚲'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {type === 'driver' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem',
+          fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+          <span>Mochila</span>
+          <input type="number" value={bag} onChange={e => setBag(e.target.value)}
+            min={1} max={200} style={{ width: 60, padding: '0.25rem 0.4rem',
+              borderRadius: 6, border: '1px solid var(--border)', fontSize: '0.75rem' }} />
+          <span>L</span>
+        </div>
+      )}
+
+      {type === 'restaurant' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem',
+          fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+          <span>Prep</span>
+          <input type="number" value={prep} onChange={e => setPrep(e.target.value)}
+            min={1} max={120} style={{ width: 55, padding: '0.25rem 0.4rem',
+              borderRadius: 6, border: '1px solid var(--border)', fontSize: '0.75rem' }} />
+          <span>min</span>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.5rem' }}>
+        <button onClick={handleConfirm}
+          style={{ flex: 1, padding: '0.45rem', borderRadius: 7, border: 'none',
+            background: 'var(--brand)', color: '#fff', fontWeight: 700,
+            fontSize: '0.8rem', cursor: 'pointer' }}>
+          Colocar
+        </button>
+        <button onClick={onCancel}
+          style={{ padding: '0.45rem 0.75rem', borderRadius: 7,
+            border: '1px solid var(--border)', background: 'var(--bg-raised)',
+            cursor: 'pointer', fontSize: '0.8rem' }}>
+          ✕
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Sidebar izquierdo con listas de entidades
+function Sidebar({ onSelectEntity, selectedEntityType, selectedEntityId, onStartPlace }) {
+  const { getDrivers, getRestaurants, getCustomers } = useSimContext();
+  const [driversExpanded,     setDriversExpanded]     = useState(true);
+  const [restaurantsExpanded, setRestaurantsExpanded] = useState(true);
+  const [customersExpanded,   setCustomersExpanded]   = useState(true);
+
+  const drivers     = getDrivers();
+  const restaurants = getRestaurants();
+  const customers   = getCustomers();
+
+  const isSelected = (type, id) => selectedEntityType === type && selectedEntityId === id;
+
+  return (
+    <div style={{
+      width: '200px', background: 'var(--bg-card)',
       borderRight: '1px solid var(--border)',
-      display: 'flex',
-      flexDirection: 'column',
-      overflowY: 'auto',
-      flexShrink: 0,
+      display: 'flex', flexDirection: 'column',
+      overflowY: 'auto', flexShrink: 0,
     }}>
       {/* Drivers */}
       <div style={{ borderBottom: '1px solid var(--border)' }}>
-        <div
-          onClick={() => setDriversExpanded(!driversExpanded)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '10px 12px',
-            cursor: 'pointer',
-            background: 'var(--bg-raised)',
-          }}
-        >
-          <span style={{ fontWeight: 600, fontSize: '0.8rem' }}>🚗 Conductores ({drivers.length})</span>
+        <div onClick={() => setDriversExpanded(!driversExpanded)}
+          style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+            padding:'10px 12px', cursor:'pointer', background:'var(--bg-raised)' }}>
+          <span style={{ fontWeight:600, fontSize:'0.8rem' }}>🛵 Conductores ({drivers.length})</span>
           <IconChevronDown expanded={driversExpanded} />
         </div>
         {driversExpanded && (
-          <div style={{ padding: '8px' }}>
-            {drivers.map(driver => (
-              <div
-                key={driver.id}
-                onClick={() => onSelectEntity('driver', driver.id)}
-                style={{
-                  padding: '6px 8px',
-                  marginBottom: '4px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  background: isSelected('driver', driver.id) ? 'var(--brand-light)' : 'transparent',
-                  fontSize: '0.75rem',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <span>{driver.name}</span>
-                <span style={{ fontSize: '0.6rem', color: driver.is_available ? 'var(--success)' : 'var(--danger)' }}>
-                  {driver.is_available ? '●' : '○'}
+          <div style={{ padding:'6px 8px' }}>
+            {drivers.map(d => (
+              <div key={d.id} onClick={() => onSelectEntity('driver', d.id)}
+                style={{ padding:'5px 8px', marginBottom:3, borderRadius:6, cursor:'pointer',
+                  background: isSelected('driver', d.id) ? 'var(--brand-light)' : 'transparent',
+                  fontSize:'0.75rem', display:'flex', justifyContent:'space-between' }}>
+                <span>{d.name}</span>
+                <span style={{ fontSize:'0.6rem', color: d.is_available ? 'var(--success)' : 'var(--danger)' }}>
+                  {d.is_available ? '●' : '○'}
                 </span>
               </div>
             ))}
-            <div style={{ marginTop: '8px' }}>
-              <div style={{ fontSize: '0.6rem', color: 'var(--text-tertiary)', marginBottom: '4px' }}>Posición inicial:</div>
-              <input
-                type="text"
-                value={`${newDriverPos.lat.toFixed(5)}, ${newDriverPos.lng.toFixed(5)}`}
-                onChange={(e) => {
-                  const [lat, lng] = e.target.value.split(',').map(Number);
-                  if (!isNaN(lat) && !isNaN(lng)) setNewDriverPos({ lat, lng });
-                }}
-                style={{ width: '100%', fontSize: '0.6rem', marginBottom: '4px', padding: '2px 4px' }}
-                placeholder="lat, lng"
-              />
-              <button
-                onClick={handleAddDriver}
-                style={{
-                  width: '100%',
-                  padding: '4px',
-                  fontSize: '0.7rem',
-                  borderRadius: '4px',
-                  border: '1px solid var(--border)',
-                  background: 'var(--bg-raised)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '4px',
-                }}
-              >
-                <IconPlus /> Agregar
-              </button>
-            </div>
+            <button onClick={() => onStartPlace('driver')}
+              style={{ width:'100%', marginTop:6, padding:'5px', borderRadius:6,
+                border:'1px dashed var(--brand)', background:'transparent',
+                color:'var(--brand)', fontSize:'0.72rem', fontWeight:600,
+                cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:4 }}>
+              <IconPlus /> Colocar en mapa
+            </button>
           </div>
         )}
       </div>
-      
+
       {/* Restaurantes */}
       <div style={{ borderBottom: '1px solid var(--border)' }}>
-        <div
-          onClick={() => setRestaurantsExpanded(!restaurantsExpanded)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '10px 12px',
-            cursor: 'pointer',
-            background: 'var(--bg-raised)',
-          }}
-        >
-          <span style={{ fontWeight: 600, fontSize: '0.8rem' }}>🍽️ Restaurantes ({restaurants.length})</span>
+        <div onClick={() => setRestaurantsExpanded(!restaurantsExpanded)}
+          style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+            padding:'10px 12px', cursor:'pointer', background:'var(--bg-raised)' }}>
+          <span style={{ fontWeight:600, fontSize:'0.8rem' }}>🍽️ Restaurantes ({restaurants.length})</span>
           <IconChevronDown expanded={restaurantsExpanded} />
         </div>
         {restaurantsExpanded && (
-          <div style={{ padding: '8px' }}>
-            {restaurants.map(restaurant => (
-              <div
-                key={restaurant.id}
-                onClick={() => onSelectEntity('restaurant', restaurant.id)}
-                style={{
-                  padding: '6px 8px',
-                  marginBottom: '4px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  background: isSelected('restaurant', restaurant.id) ? 'var(--brand-light)' : 'transparent',
-                  fontSize: '0.75rem',
-                }}
-              >
-                {restaurant.name}
+          <div style={{ padding:'6px 8px' }}>
+            {restaurants.map(r => (
+              <div key={r.id} onClick={() => onSelectEntity('restaurant', r.id)}
+                style={{ padding:'5px 8px', marginBottom:3, borderRadius:6, cursor:'pointer',
+                  background: isSelected('restaurant', r.id) ? 'var(--brand-light)' : 'transparent',
+                  fontSize:'0.75rem' }}>
+                {r.name}
               </div>
             ))}
-            <div style={{ marginTop: '8px' }}>
-              <div style={{ fontSize: '0.6rem', color: 'var(--text-tertiary)', marginBottom: '4px' }}>Posición:</div>
-              <input
-                type="text"
-                value={`${newRestaurantPos.lat.toFixed(5)}, ${newRestaurantPos.lng.toFixed(5)}`}
-                onChange={(e) => {
-                  const [lat, lng] = e.target.value.split(',').map(Number);
-                  if (!isNaN(lat) && !isNaN(lng)) setNewRestaurantPos({ lat, lng });
-                }}
-                style={{ width: '100%', fontSize: '0.6rem', marginBottom: '4px', padding: '2px 4px' }}
-              />
-              <button
-                onClick={handleAddRestaurant}
-                style={{
-                  width: '100%',
-                  padding: '4px',
-                  fontSize: '0.7rem',
-                  borderRadius: '4px',
-                  border: '1px solid var(--border)',
-                  background: 'var(--bg-raised)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '4px',
-                }}
-              >
-                <IconPlus /> Agregar
-              </button>
-            </div>
+            <button onClick={() => onStartPlace('restaurant')}
+              style={{ width:'100%', marginTop:6, padding:'5px', borderRadius:6,
+                border:'1px dashed var(--brand)', background:'transparent',
+                color:'var(--brand)', fontSize:'0.72rem', fontWeight:600,
+                cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:4 }}>
+              <IconPlus /> Colocar en mapa
+            </button>
           </div>
         )}
       </div>
-      
+
       {/* Clientes */}
       <div>
-        <div
-          onClick={() => setCustomersExpanded(!customersExpanded)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '10px 12px',
-            cursor: 'pointer',
-            background: 'var(--bg-raised)',
-          }}
-        >
-          <span style={{ fontWeight: 600, fontSize: '0.8rem' }}>👤 Clientes ({customers.length})</span>
+        <div onClick={() => setCustomersExpanded(!customersExpanded)}
+          style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+            padding:'10px 12px', cursor:'pointer', background:'var(--bg-raised)' }}>
+          <span style={{ fontWeight:600, fontSize:'0.8rem' }}>👤 Clientes ({customers.length})</span>
           <IconChevronDown expanded={customersExpanded} />
         </div>
         {customersExpanded && (
-          <div style={{ padding: '8px' }}>
-            {customers.map(customer => (
-              <div
-                key={customer.id}
-                onClick={() => onSelectEntity('customer', customer.id)}
-                style={{
-                  padding: '6px 8px',
-                  marginBottom: '4px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  background: isSelected('customer', customer.id) ? 'var(--brand-light)' : 'transparent',
-                  fontSize: '0.75rem',
-                }}
-              >
-                {customer.name}
+          <div style={{ padding:'6px 8px' }}>
+            {customers.map(c => (
+              <div key={c.id} onClick={() => onSelectEntity('customer', c.id)}
+                style={{ padding:'5px 8px', marginBottom:3, borderRadius:6, cursor:'pointer',
+                  background: isSelected('customer', c.id) ? 'var(--brand-light)' : 'transparent',
+                  fontSize:'0.75rem' }}>
+                {c.name}
               </div>
             ))}
-            <div style={{ marginTop: '8px' }}>
-              <div style={{ fontSize: '0.6rem', color: 'var(--text-tertiary)', marginBottom: '4px' }}>Posición:</div>
-              <input
-                type="text"
-                value={`${newCustomerPos.lat.toFixed(5)}, ${newCustomerPos.lng.toFixed(5)}`}
-                onChange={(e) => {
-                  const [lat, lng] = e.target.value.split(',').map(Number);
-                  if (!isNaN(lat) && !isNaN(lng)) setNewCustomerPos({ lat, lng });
-                }}
-                style={{ width: '100%', fontSize: '0.6rem', marginBottom: '4px', padding: '2px 4px' }}
-              />
-              <button
-                onClick={handleAddCustomer}
-                style={{
-                  width: '100%',
-                  padding: '4px',
-                  fontSize: '0.7rem',
-                  borderRadius: '4px',
-                  border: '1px solid var(--border)',
-                  background: 'var(--bg-raised)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '4px',
-                }}
-              >
-                <IconPlus /> Agregar
-              </button>
-            </div>
+            <button onClick={() => onStartPlace('customer')}
+              style={{ width:'100%', marginTop:6, padding:'5px', borderRadius:6,
+                border:'1px dashed var(--brand)', background:'transparent',
+                color:'var(--brand)', fontSize:'0.72rem', fontWeight:600,
+                cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:4 }}>
+              <IconPlus /> Colocar en mapa
+            </button>
           </div>
         )}
       </div>
@@ -619,97 +553,137 @@ function TopBar() {
   );
 }
 
-// Componente principal del simulador
 function SimPageContent() {
+  const { addDriver, addRestaurant, addCustomer } = useSimContext();
   const [selectedEntityType, setSelectedEntityType] = useState(null);
-  const [selectedEntityId, setSelectedEntityId] = useState(null);
-  const [wayPickerMode, setWayPickerMode] = useState(null);
-  const [zonePlacerMode, setZonePlacerMode] = useState(null);
-  
+  const [selectedEntityId,   setSelectedEntityId]   = useState(null);
+  const [wayPickerMode,      setWayPickerMode]       = useState(null);
+  const [zonePlacerMode,     setZonePlacerMode]      = useState(null);
+
+  // placeMode: tipo de entidad a colocar ('driver'|'restaurant'|'customer'|null)
+  // pendingPlace: { type, lat, lng } — esperando popup de config
+  const [placeMode,    setPlaceMode]    = useState(null);
+  const [pendingPlace, setPendingPlace] = useState(null);
+
+  // ESC cancela placeMode
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'Escape') { setPlaceMode(null); setPendingPlace(null); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   const handleSelectEntity = (type, id) => {
     setSelectedEntityType(type);
     setSelectedEntityId(id);
   };
-  
+
   const handleClosePanel = () => {
     setSelectedEntityType(null);
     setSelectedEntityId(null);
   };
-  
+
+  // Click en mapa mientras se está en placeMode
+  const handleMapPlaceClick = ({ lat, lng }) => {
+    if (!placeMode) return;
+    setPendingPlace({ type: placeMode, lat, lng });
+    setPlaceMode(null);
+  };
+
+  // Confirmar creación desde el popup
+  const handlePlaceConfirm = ({ name, vehicleType, bagCapacityLiters, prepTimeMins }) => {
+    if (!pendingPlace) return;
+    const { type, lat, lng } = pendingPlace;
+    if (type === 'driver') {
+      addDriver({ lat, lng, vehicleType, bagCapacityLiters, name });
+    } else if (type === 'restaurant') {
+      addRestaurant({ lat, lng, name, prepTimeMins });
+    } else {
+      addCustomer({ lat, lng, name });
+    }
+    setPendingPlace(null);
+  };
+
   const renderSelectedPanel = () => {
     if (!selectedEntityType || !selectedEntityId) {
       return (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '100%',
-          color: 'var(--text-tertiary)',
-          fontSize: '0.8rem',
-          textAlign: 'center',
-          padding: '20px',
-        }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'center',
+          height:'100%', color:'var(--text-tertiary)', fontSize:'0.8rem',
+          textAlign:'center', padding:'20px' }}>
           Selecciona un conductor,<br />
           restaurante o cliente<br />
           desde el mapa o el sidebar
         </div>
       );
     }
-    
     switch (selectedEntityType) {
-      case 'driver':
-        return <DriverPanel driverId={selectedEntityId} onClose={handleClosePanel} />;
-      case 'restaurant':
-        return <RestaurantPanel restaurantId={selectedEntityId} onClose={handleClosePanel} />;
-      case 'customer':
-        return <CustomerPanel customerId={selectedEntityId} onClose={handleClosePanel} />;
-      default:
-        return null;
+      case 'driver':     return <DriverPanel     driverId={selectedEntityId}     onClose={handleClosePanel} />;
+      case 'restaurant': return <RestaurantPanel restaurantId={selectedEntityId} onClose={handleClosePanel} />;
+      case 'customer':   return <CustomerPanel   customerId={selectedEntityId}   onClose={handleClosePanel} />;
+      default:           return null;
     }
   };
-  
+
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100vh',
-      width: '100vw',
-      overflow: 'hidden',
-      background: 'var(--bg-page)',
-    }}>
+    <div style={{ display:'flex', flexDirection:'column', height:'100vh',
+      width:'100vw', overflow:'hidden', background:'var(--bg-page)' }}>
       <TopBar />
-      
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+
+      <div style={{ display:'flex', flex:1, overflow:'hidden' }}>
         <Sidebar
           onSelectEntity={handleSelectEntity}
           selectedEntityType={selectedEntityType}
           selectedEntityId={selectedEntityId}
+          onStartPlace={setPlaceMode}
         />
-        
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div style={{ flex: 1, position: 'relative' }}>
+
+        <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+          <div style={{ flex:1, position:'relative',
+            cursor: placeMode ? 'crosshair' : 'default' }}>
+
+            {/* Banner de modo colocar */}
+            {placeMode && (
+              <div style={{
+                position:'absolute', top:10, left:'50%', transform:'translateX(-50%)',
+                background:'rgba(0,0,0,0.7)', color:'#fff', borderRadius:20,
+                padding:'0.3rem 1rem', fontSize:'0.75rem', zIndex:20,
+                pointerEvents:'none', whiteSpace:'nowrap',
+              }}>
+                {placeMode === 'driver' ? '🛵' : placeMode === 'restaurant' ? '🍽️' : '👤'}
+                {' '}Toca el mapa para colocar · <span style={{ opacity:0.7 }}>ESC para cancelar</span>
+              </div>
+            )}
+
             <SimMap
               selectedEntityId={selectedEntityId}
               selectedEntityType={selectedEntityType}
               onSelectEntity={handleSelectEntity}
+              placeMode={placeMode}
+              onPlaceClick={handleMapPlaceClick}
               wayPickerMode={wayPickerMode}
-              onWayPickerConfirm={(ways) => { console.log('Ways:', ways); setWayPickerMode(null); }}
+              onWayPickerConfirm={() => setWayPickerMode(null)}
               onWayPickerCancel={() => setWayPickerMode(null)}
               zonePlacerMode={zonePlacerMode}
-              onZonePlacerConfirm={(zone) => { console.log('Zone:', zone); setZonePlacerMode(null); }}
+              onZonePlacerConfirm={() => setZonePlacerMode(null)}
               onZonePlacerCancel={() => setZonePlacerMode(null)}
             />
+
+            {/* Popup de configuración */}
+            {pendingPlace && (
+              <PlacePopup
+                type={pendingPlace.type}
+                pos={{ lat: pendingPlace.lat, lng: pendingPlace.lng }}
+                onConfirm={handlePlaceConfirm}
+                onCancel={() => setPendingPlace(null)}
+              />
+            )}
           </div>
           <LogPanel />
         </div>
-        
-        <div style={{
-          width: '320px',
-          borderLeft: '1px solid var(--border)',
-          background: 'var(--bg-card)',
-          overflowY: 'auto',
-          flexShrink: 0,
-        }}>
+
+        <div style={{ width:'320px', borderLeft:'1px solid var(--border)',
+          background:'var(--bg-card)', overflowY:'auto', flexShrink:0 }}>
           {renderSelectedPanel()}
         </div>
       </div>

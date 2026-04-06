@@ -3,7 +3,7 @@
 // Reutiliza DriverMap como base y agrega pines de restaurantes y clientes.
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import DriverMap from '../components/DriverMap.jsx';
+import DriverMap from '../components/DriverMap';
 import { useSimContext } from './SimProvider.jsx';
 import { ensureMapLibreJS } from '../utils/mapLibre.js';
 
@@ -25,6 +25,8 @@ export default function SimMap({
   selectedEntityId, 
   selectedEntityType,
   onSelectEntity,
+  placeMode,
+  onPlaceClick,
   wayPickerMode,
   onWayPickerConfirm,
   onWayPickerCancel,
@@ -288,7 +290,16 @@ export default function SimMap({
     return () => unsubscribe();
   }, [world.eventBus]);
 
-  // Obtener posición del driver seleccionado
+  // Click en mapa para colocar entidad
+  useEffect(() => {
+    if (!mapInstance || !placeMode) return;
+    const handler = (e) => {
+      const { lng, lat } = e.lngLat;
+      onPlaceClick?.({ lat, lng });
+    };
+    mapInstance.on('click', handler);
+    return () => mapInstance.off('click', handler);
+  }, [mapInstance, placeMode, onPlaceClick]);
   const driverPos = selectedDriver 
     ? { lat: selectedDriver.last_lat, lng: selectedDriver.last_lng }
     : null;
