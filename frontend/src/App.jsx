@@ -1,6 +1,4 @@
 // frontend/src/App.jsx
-// Modificación: agregar ruta /sim que apunta a SimPage
-
 import { lazy, Suspense, useCallback, useRef, useState, useEffect } from 'react';
 import { Link, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -17,9 +15,6 @@ import DriverOrders     from './pages/Driver/Orders';
 import RestaurantOrders from './pages/Restaurant/Orders';
 import { usePermissions } from './hooks/usePermissions';
 import { UI_BRAND } from './config/brand';
-
-// ─── Import del simulador (lazy para no inflar bundle de producción) ──────────
-const SimPage = lazy(() => import('./sim/SimPage.jsx'));
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 const CustomerHome      = lazy(() => import('./pages/Customer/Home'));
@@ -407,12 +402,6 @@ function RootRouter() {
       <Route path="/reset-password"   element={
         <Suspense fallback={<Spinner />}>
           <ResetPasswordPage />
-        </Suspense>
-      } />
-      {/* Simulador fuera del Layout — tiene su propio layout completo */}
-      <Route path="/sim/*" element={
-        <Suspense fallback={<Spinner />}>
-          <SimPage />
         </Suspense>
       } />
       <Route path="/*" element={<AppRoutes />} />

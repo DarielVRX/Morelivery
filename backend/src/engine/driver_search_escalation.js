@@ -319,4 +319,3 @@ async function _processSlaDelay(order, nowSec) {
   }).catch(() => {});
 
   console.log(`[escalation] auto-cancel order=${order.id.slice(0,8)} — sin respuesta tras push`);
-}
