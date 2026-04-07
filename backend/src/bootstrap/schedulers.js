@@ -12,7 +12,7 @@ import { ensureParamsLoaded, seedDefaultParams, getParam } from '../engine/param
 import { tickKitchen } from '../engine/kitchen.js';
 import { cleanStaleEntities } from '../engine/stale.js';
 import { runRebalancer } from '../engine/rebalancer.js';
-import { tickDriverSearchEscalation } from '../engine/driver_search_escalation.js';
+import { tickDriverSearchEscalation, tickSlaDelayNegotiation } from '../engine/driver_search_escalation.js';
 import { query } from '../config/db.js';
 import { sendPushToUser } from '../modules/notifications/pushSubscription.js';
 
@@ -226,6 +226,14 @@ export function createSchedulers(offerCb) {
       intervalMs: 60_000,
       task: tickDriverSearchEscalation,
       onError: (error) => { console.error('[escalation.scheduler] error:', error.message); },
+    }),
+    // ── Negociación de demora SLA — cada 60s ──────────────────────────────────
+    createLoop({
+      label: 'sla_delay_negotiation',
+      initialDelayMs: 30_000,
+      intervalMs: 60_000,
+      task: tickSlaDelayNegotiation,
+      onError: (error) => { console.error('[sla_delay.scheduler] error:', error.message); },
     }),
   ];
 }

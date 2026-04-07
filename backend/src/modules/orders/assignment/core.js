@@ -88,7 +88,69 @@ async function notifyDriverSearch(orderId, type) {
   }
 }
 
-// ─── Budget de simulaciones por ciclo ────────────────────────────────────────
+// ─── Helper: notificar demora SLA al cliente y restaurante ───────────────────
+async function notifySlaDelay(orderId, delaySeconds) {
+  try {
+    const result = await query(
+      `SELECT rest.owner_user_id, o.customer_id
+       FROM orders o
+       JOIN restaurants rest ON rest.id = o.restaurant_id
+       WHERE o.id = $1`,
+      [orderId]
+    );
+    if (result.rowCount === 0) return;
+    const { owner_user_id, customer_id } = result.rows[0];
+
+    const delayMins  = Math.ceil(delaySeconds / 60);
+    const slaWarningThreshold = getParam('sla_delay_warning_threshold_s', 900);
+
+    // Notificar al restaurante que se está negociando con el cliente
+    sseHub.sendToUser(owner_user_id, 'driver_search_update', {
+      orderId,
+      type:    'sla_delay_negotiation',
+      delaySec: Math.round(delaySeconds),
+    });
+
+    // Notificar al cliente con opción a cancelar
+    sseHub.sendToUser(customer_id, 'driver_search_update', {
+      orderId,
+      type:    'sla_delay_negotiation',
+      delaySec: Math.round(delaySeconds),
+    });
+
+    await sendPushToUser(customer_id, {
+      title:    'Tu pedido podría llegar tarde',
+      body:     `El repartidor disponible llegaría ~${delayMins} min después de lo esperado. ¿Deseas continuar?`,
+      tag:      `sla_delay_${orderId}`,
+      group:    'customer',
+      priority: 'high',
+      url:      '/customer',
+      pushType: 'sla_delay',
+      orderId,
+      delaySec: Math.round(delaySeconds),
+      actions: [
+        { action: 'keep_waiting', title: '⏳ Continuar de todas formas' },
+        { action: 'cancel_order', title: '✕ Cancelar pedido'           },
+      ],
+    }).catch(() => {});
+
+    // Registrar en DB para que tickSlaDelayNegotiation pueda manejar el timeout
+    await query(
+      `UPDATE orders
+       SET sla_delay_push_sent_at = NOW(),
+           sla_delay_seconds      = $2,
+           updated_at             = NOW()
+       WHERE id = $1`,
+      [orderId, Math.round(delaySeconds)]
+    ).catch(() => {});
+
+    console.log(`[sla_delay] notificado order=${orderId.slice(0,8)} delay=${Math.round(delaySeconds)}s threshold=${slaWarningThreshold}s`);
+  } catch (e) {
+    console.error(`[sla_delay] error order=${orderId.slice(0,8)}:`, e.message);
+  }
+}
+
+
 // Compartido entre todos los pedidos del mismo ciclo de asignación.
 // Se resetea al inicio de cada llamada a triggerPendingAssignments().
 let _simulationBudget = 75; // default hasta el primer triggerPendingAssignments
@@ -364,12 +426,14 @@ export async function offerNextDrivers(orderId, onOffer) {
                   const result = await simulateDriverWithOrder(
                     env, orderForSim, restaurantPos, customerPos, nowSec
                   );
-                  log(`order=${orderId}`, `sim driver=${env.driver.id}: totalCost=${Math.round(result.totalCost)} valid=${result.valid} eta=${Math.round(result.etaToNewCustomer)}`);
+                  log(`order=${orderId}`, `sim driver=${env.driver.id}: totalCost=${Math.round(result.totalCost)} valid=${result.valid} eta=${Math.round(result.etaToNewCustomer)} delay=${Math.round(result.newOrderDelay)}`);
                   // totalCost ya viene de scoreCandidate() dentro del simulador
                   return {
                     driverId:       env.driver.id,
                     totalCost:      result.totalCost,
                     bagOverflowPct: result.bagOverflowPct ?? 0,
+                    valid:          result.valid,
+                    newOrderDelay:  result.newOrderDelay ?? 0,
                   };
                 } catch {
                   return { driverId: env.driver.id, totalCost: Infinity, bagOverflowPct: 0 };
@@ -382,6 +446,18 @@ export async function offerNextDrivers(orderId, onOffer) {
           }
 
           const scoreMap = new Map(scored.map(s => [s.driverId, s]));
+
+          // Detectar si todos los candidatos simulados son inválidos por SLA
+          // En ese caso, se asigna el de menor costo pero se notifica al cliente
+          const allInvalid = scored.length > 0 && scored.every(s => !s.valid);
+          let slaDelayCandidate = null;
+          if (allInvalid) {
+            const best = scored.reduce((a, b) =>
+              (a.totalCost ?? Infinity) <= (b.totalCost ?? Infinity) ? a : b
+            );
+            slaDelayCandidate = best;
+            logWarn(`order=${orderId}`, `todos los candidatos con SLA comprometido — mejor candidato driver=${best.driverId} delay=${Math.round(best.newOrderDelay)}s`);
+          }
 
           // Ordenar eligible por score de simulación
           scoredEligible = [...eligible]
@@ -434,7 +510,13 @@ export async function offerNextDrivers(orderId, onOffer) {
     if (orderRow.offer_cooldown_triggered) {
       await setCooldownTriggered(orderId, false);
     }
-    notifyDriverSearch(orderId, 'offer_sent');
+    // Si todos los candidatos tienen SLA comprometido, notificar al cliente
+    // con el delay proyectado antes de confirmar la asignación
+    if (slaDelayCandidate) {
+      notifySlaDelay(orderId, slaDelayCandidate.newOrderDelay);
+    } else {
+      notifyDriverSearch(orderId, 'offer_sent');
+    }
   }
 
   return sent;

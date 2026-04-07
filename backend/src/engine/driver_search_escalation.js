@@ -170,7 +170,124 @@ async function _sendNoDriverPush(order, { title, body, priority, actions }) {
   ).catch(() => {});
 }
 
-async function _autoCancelOrder(order) {
+
+// ─── Ticker de negociación de demora SLA ─────────────────────────────────────
+//
+// Maneja el timeout de 5 minutos tras notificar al cliente de una demora SLA.
+//
+// Si el cliente no responde en 5 min:
+//   - delay ≤ 900s → acepta automáticamente (elección definitiva)
+//   - delay >  900s → cancela automáticamente
+//
+// Una vez resuelta (aceptación manual, automática o cancelación),
+// no se emiten más notificaciones — sla_delay_accepted_at lo bloquea.
+//
+// Se llama desde el ticker principal del servidor cada 60s.
+
+const SLA_DELAY_TIMEOUT_S  = 5 * MINUTE;
+const SLA_DELAY_AUTO_THRESHOLD_S = 900; // misma tolerancia que el sistema de asignación
+
+export async function tickSlaDelayNegotiation() {
+  const r = await query(
+    `SELECT
+       o.id,
+       o.customer_id,
+       o.sla_delay_push_sent_at,
+       o.sla_delay_accepted_at,
+       o.sla_delay_seconds,
+       rest.owner_user_id AS restaurant_owner_id
+     FROM orders o
+     JOIN restaurants rest ON rest.id = o.restaurant_id
+     WHERE o.sla_delay_push_sent_at IS NOT NULL
+       AND o.sla_delay_accepted_at  IS NULL
+       AND o.cancelled_at           IS NULL
+       AND o.status NOT IN ('delivered', 'cancelled')`,
+    []
+  );
+
+  if (r.rowCount === 0) return;
+
+  const nowSec = Date.now() / 1000;
+
+  for (const order of r.rows) {
+    try {
+      await _processSlaDelay(order, nowSec);
+    } catch (e) {
+      console.error(`[sla_delay_ticker] error order=${order.id.slice(0,8)}:`, e.message);
+    }
+  }
+}
+
+async function _processSlaDelay(order, nowSec) {
+  const pushSentSec = new Date(order.sla_delay_push_sent_at).getTime() / 1000;
+  const elapsed     = nowSec - pushSentSec;
+
+  // Aún dentro del timeout — esperar
+  if (elapsed < SLA_DELAY_TIMEOUT_S) return;
+
+  const delaySec = Number(order.sla_delay_seconds) || 0;
+
+  if (delaySec <= SLA_DELAY_AUTO_THRESHOLD_S) {
+    // Aceptación automática definitiva
+    await query(
+      `UPDATE orders
+       SET sla_delay_accepted_at = NOW(),
+           updated_at            = NOW()
+       WHERE id = $1
+         AND sla_delay_accepted_at IS NULL`,
+      [order.id]
+    );
+
+    sseHub.sendToUser(order.customer_id, 'driver_search_update', {
+      orderId: order.id,
+      type:    'sla_delay_auto_accepted',
+    });
+    sseHub.sendToUser(order.restaurant_owner_id, 'driver_search_update', {
+      orderId: order.id,
+      type:    'sla_delay_auto_accepted',
+    });
+
+    console.log(`[sla_delay_ticker] auto-accept order=${order.id.slice(0,8)} delay=${delaySec}s`);
+
+  } else {
+    // Cancelación automática
+    await query(
+      `UPDATE orders
+       SET status       = 'cancelled',
+           cancelled_at = NOW(),
+           updated_at   = NOW()
+       WHERE id = $1
+         AND sla_delay_accepted_at IS NULL
+         AND status NOT IN ('delivered', 'cancelled')`,
+      [order.id]
+    );
+
+    sseHub.sendToUser(order.customer_id, 'order_update', {
+      orderId: order.id,
+      status:  'cancelled',
+      message: 'Tu pedido fue cancelado porque no hubo respuesta ante el aviso de demora.',
+    });
+    sseHub.sendToUser(order.restaurant_owner_id, 'order_update', {
+      orderId: order.id,
+      status:  'cancelled',
+      message: 'El pedido fue cancelado automáticamente — cliente sin respuesta ante demora SLA.',
+    });
+
+    await sendPushToUser(order.customer_id, {
+      title:    'Pedido cancelado',
+      body:     'No recibimos respuesta al aviso de demora. Tu pedido fue cancelado.',
+      tag:      `sla_delay_cancel_${order.id}`,
+      group:    'customer',
+      priority: 'high',
+      url:      '/customer',
+      pushType: 'cancelled',
+      orderId:  order.id,
+    }).catch(() => {});
+
+    console.log(`[sla_delay_ticker] auto-cancel order=${order.id.slice(0,8)} delay=${delaySec}s`);
+  }
+}
+
   await query(
     `UPDATE orders
      SET status = 'cancelled', cancelled_at = NOW(), updated_at = NOW()

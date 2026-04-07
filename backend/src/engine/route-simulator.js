@@ -199,11 +199,10 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
 
   let currentPos       = { ...driverPos };
   let simNow           = nowSec;
-  let etaToNewCustomer = Infinity;
 
   // ── Fase 1: recorrer prefixToViable en orden comprometido ─────────────────
   for (const stop of prefixStops) {
-    const travelSec = await etaEstimator.estimate(currentPos, stop.pos, driverObj);
+    const travelSec = etaEstimator.estimateSync(currentPos, stop.pos, driverObj);
     simNow     += travelSec;
     currentPos  = { ...stop.pos };
 
@@ -290,66 +289,47 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
     volumeLiters:     newOrderVolume,
   });
 
-  // Obtener secuencia óptima (precedencia + poda SLA + costo global mínimo)
-  const optimalSequence = findOptimalSequence(
-    stopsForSequencer,
-    currentPos,
-    driverObj,
-    simNow
+  // Obtener secuencia óptima — retorna sequence, slaBreaches y stopsWithEta
+  // en una sola pasada. slaBreaches ya incluye verificación de pedidos existentes
+  // y del nuevo pedido.
+  const { sequence: optimalSequence, slaBreaches, stopsWithEta } =
+    findOptimalSequence(stopsForSequencer, currentPos, driverObj, simNow);
+
+  // ── Fase 3: extraer etaToNewCustomer desde stopsWithEta ──────────────────
+  // findOptimalSequence ya simuló todos los ETAs — solo localizamos el delivery
+  // del nuevo pedido en el resultado.
+  const newDeliveryEta = stopsWithEta.find(
+    s => s.type === 'delivery' && s.orderId === order.id
   );
+  const etaToNewCustomer = newDeliveryEta
+    ? newDeliveryEta.etaFromNowSec + (simNow - nowSec) // ajustar al origen nowSec
+    : Infinity;
 
-  // ── Fase 3: simular la secuencia óptima ───────────────────────────────────
+  // Actualizar simState para pedidos procesados en la secuencia óptima
+  // (necesario para la verificación de volumen de mochila)
   const pickupDoneSet = new Set();
-
   for (const stop of optimalSequence) {
-    const travelSec = await etaEstimator.estimate(currentPos, stop.pos, driverObj);
-    simNow     += travelSec;
-    currentPos  = { ...stop.pos };
-
     if (stop.type === 'pickup') {
-      const waitSec = estimateRestaurantWait(stop, simNow);
-      simNow += waitSec;
-
       if (simState[stop.orderId]) {
-        simState[stop.orderId].status       = 'on_the_way';
-        simState[stop.orderId].pickedUpAtSec = simNow;
+        simState[stop.orderId].status = 'on_the_way';
       }
-
       currentVolume += stop.volumeLiters;
       if (currentVolume > peakVolume) peakVolume = currentVolume;
       pickupDoneSet.add(stop.orderId);
-
     } else if (stop.type === 'delivery') {
-      // Sólo simular delivery si el pickup ya fue procesado (precedencia)
-      if (!pickupDoneSet.has(stop.pairOrderId) && stop.orderId !== order.id) continue;
-
       if (simState[stop.orderId]) simState[stop.orderId].status = 'delivered';
       currentVolume = Math.max(0, currentVolume - stop.volumeLiters);
-
-      if (stop.orderId === order.id) {
-        etaToNewCustomer = simNow - nowSec;
-        // Actualizar slaDeadline del delivery del nuevo pedido
-        const pickupSec = simState[order.id]?.pickedUpAtSec ?? simNow;
-        stop.slaDeadlineSec = pickupSec + maxSla;
-      }
     }
   }
 
   // ── Verificación SLA ──────────────────────────────────────────────────────
+  // slaBreaches viene de findOptimalSequence — incluye nuevo pedido y existentes.
   const delay = Math.max(0, etaToNewCustomer - maxSla);
   const valid = Number.isFinite(etaToNewCustomer) && delay === 0;
 
-  const slaBreaches = [];
-  for (const stop of existingStops) {
-    if (stop.type !== 'delivery') continue;
-    const st = simState[stop.orderId];
-    if (!st || st.status !== 'delivered') continue;
-    const pickedUp = st.pickedUpAtSec ?? nowSec;
-    const elapsed  = simNow - pickedUp;
-    if (elapsed > maxSla) slaBreaches.push(stop.orderId);
-  }
-
-  const validExisting = slaBreaches.length === 0;
+  // Separar breaches: existentes vs nuevo pedido
+  const existingBreaches = slaBreaches.filter(id => id !== order.id);
+  const validExisting    = existingBreaches.length === 0;
 
   // ── Volumen de mochila ────────────────────────────────────────────────────
   const bagOverflowPct = bagCapacityLiters > 0
@@ -376,7 +356,7 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
     etaToNewCustomer:  Math.round(etaToNewCustomer),
     valid,
     validExisting,
-    slaBreaches,
+    slaBreaches:       existingBreaches,
     newOrderDelay:     Math.round(delay),
     peakVolumeLiters:  Math.round(peakVolume * 10) / 10,
     bagOverflowPct,
@@ -389,7 +369,7 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
       etaToNewCustomer: Math.round(etaToNewCustomer),
       maxSla,
       delay: Math.round(delay),
-      slaBreaches,
+      slaBreaches: existingBreaches,
     });
   }
 
@@ -397,11 +377,10 @@ export async function simulateDriverWithOrder(candidate, order, restaurantPos, c
     ...simResult,
     valid:            valid && validExisting,
     validExisting,
-    slaBreaches,
+    slaBreaches:      existingBreaches,
     newOrderDelay:    delay,
     totalCost,
     ...scoreParts,
-    // Volumen
     bagCapacityLiters,
     peakVolumeLiters: Math.round(peakVolume * 1000) / 1000,
     bagOverflowPct,

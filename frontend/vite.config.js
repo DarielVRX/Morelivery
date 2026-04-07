@@ -31,16 +31,23 @@ export default defineConfig(({ mode }) => {
     ],
 
     server: {
-      proxy: Object.fromEntries(
-        API_PATHS.map(path => [
-          path,
-          {
-            target: API_TARGET,
-            changeOrigin: true,
-            secure: true
-          },
-        ])
-      ),
+      proxy: {
+        '/osrm': {
+          target: 'https://osrm-morelia-production.up.railway.app',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/osrm/, ''),
+        },
+        ...Object.fromEntries(
+          API_PATHS.map(path => [
+            path,
+            {
+              target: API_TARGET,
+              changeOrigin: true,
+              secure: true,
+            },
+          ])
+        ),
+      },
     },
 
     // Define para que estén disponibles en el código cliente si se necesita

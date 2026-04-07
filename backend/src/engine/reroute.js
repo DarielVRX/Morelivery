@@ -146,99 +146,60 @@ async function loadDriverStopsForReroute(driverId) {
   return stops;
 }
 
-// ─── Secuenciador greedy con SLA condicional ─────────────────────────────────
+// ─── Secuenciador greedy puro + simulación ETA diferida ──────────────────────
 //
-// Reemplaza el secuenciador de permutaciones.
+// Construcción de secuencia:
+//   1. lockedStop guard: si el driver está dentro del radio de lock, ese stop
+//      va primero sin importar el resultado del greedy.
+//   2. En cada paso, seleccionar el stop viable más cercano (greedy puro).
+//      Viable = pickup siempre, delivery solo si su pickup ya fue procesado.
+//   3. Una vez construida la secuencia completa, simular ETAs reales con
+//      estimateSync y verificar slaDeadlineSec por delivery.
 //
-// Lógica de selección en cada paso:
-//   1. Construir pool de stops viables (respetando precedencia pickup→delivery)
-//   2. Leer slaDeadlineSec de todos los deliveries — incluyendo los de pickups
-//      aún no viables (herencia de urgencia)
-//   3. Clasificar cada stop viable en: normal / warning / crítico
-//   4. Selección:
-//      - Si hay críticos → el más urgente, desempate por distancia
-//      - Si hay warnings → el más urgente, desempate por distancia
-//        (solo si el desvío no supera el greedy puro significativamente)
-//      - Si todo normal  → el más cercano (greedy puro)
-//   5. lockedStop guard: si el driver está dentro del radio de lock,
-//      el primer stop queda congelado independientemente del resultado
+// El SLA emerge de la simulación final — no se necesitan zonas ni herencia.
 
 /**
- * Selecciona el siguiente stop óptimo desde el pool de viables.
- *
- * @param {RerouteStop[]} viableStops   — stops que pueden visitarse ahora
- * @param {RerouteStop[]} allStops      — todos los stops (para herencia SLA)
- * @param {{lat,lng}}     fromPos       — posición actual
- * @param {object}        driverObj     — { speed_kmh }
- * @param {number}        nowSec
- * @returns {RerouteStop}
- */
-function selectNextStop(viableStops, allStops, fromPos, driverObj, nowSec) {
-  const criticalThreshold = getParam('sla_critical_threshold_s', 600);
-  const warningThreshold  = getParam('sla_warning_threshold_s',  1200);
-
-  // Mapa de urgencia: para cada stop viable, leer el SLA más urgente
-  // asociado — si es pickup, usar el slaDeadlineSec de su delivery asociado
-  const deliverySlaBypairId = new Map();
-  for (const s of allStops) {
-    if (s.type === 'delivery') {
-      deliverySlaBypairId.set(s.pairOrderId, s.slaDeadlineSec);
-    }
-  }
-
-  // Enriquecer cada stop viable con su urgencia real y distancia
-  const enriched = viableStops.map(stop => {
-    const dist = haversineMeters(fromPos, stop.pos);
-    const effectiveSla = stop.type === 'pickup'
-      ? (deliverySlaBypairId.get(stop.pairOrderId) ?? stop.slaDeadlineSec)
-      : stop.slaDeadlineSec;
-    const remaining = effectiveSla - nowSec;
-
-    let zone;
-    if (remaining < criticalThreshold) zone = 'critical';
-    else if (remaining < warningThreshold) zone = 'warning';
-    else zone = 'normal';
-
-    return { stop, dist, remaining, zone };
-  });
-
-  // Clasificar por zona
-  const critical = enriched.filter(e => e.zone === 'critical');
-  const warning  = enriched.filter(e => e.zone === 'warning');
-
-  if (critical.length > 0) {
-    // Más urgente primero, desempate por distancia
-    return critical.sort((a, b) =>
-      a.remaining !== b.remaining ? a.remaining - b.remaining : a.dist - b.dist
-    )[0].stop;
-  }
-
-  if (warning.length > 0) {
-    // Más urgente primero, desempate por distancia
-    return warning.sort((a, b) =>
-      a.remaining !== b.remaining ? a.remaining - b.remaining : a.dist - b.dist
-    )[0].stop;
-  }
-
-  // Todo normal — greedy puro por distancia
-  return enriched.sort((a, b) => a.dist - b.dist)[0].stop;
-}
-
-/**
- * Construye la secuencia óptima de stops usando greedy con SLA condicional.
- * Respeta precedencia pickup→delivery y lockedStop guard.
+ * Construye la secuencia óptima de stops usando greedy puro por distancia,
+ * simula ETAs en una sola pasada y verifica SLA por delivery.
  *
  * @param {RerouteStop[]} stops
  * @param {{lat,lng}}     driverPos
- * @param {object}        driverObj
+ * @param {object}        driverObj     — { speed_kmh }
  * @param {number}        nowSec
- * @returns {RerouteStop[]}
+ * @returns {{
+ *   sequence:     RerouteStop[],
+ *   slaBreaches:  string[],
+ *   stopsWithEta: Array<{
+ *     type, orderId, orderIds, pos,
+ *     etaFromNowSec, slaDeadlineSec, slaRemainingSec
+ *   }>
+ * }}
  */
 export function findOptimalSequence(stops, driverPos, driverObj, nowSec) {
-  if (stops.length === 0) return [];
-  if (stops.length === 1) return stops;
+  const empty = { sequence: [], slaBreaches: [], stopsWithEta: [] };
+  if (stops.length === 0) return empty;
+  if (stops.length === 1) {
+    // Simular el único stop directamente
+    const stop      = stops[0];
+    const travelSec = etaEstimator.estimateSync(driverPos, stop.pos, driverObj);
+    const arrivalSec = nowSec + travelSec;
+    return {
+      sequence:    stops,
+      slaBreaches: [],
+      stopsWithEta: [{
+        type:           stop.type,
+        orderId:        stop.orderId,
+        orderIds:       stop.orderIds ?? [stop.orderId],
+        pos:            stop.pos,
+        etaFromNowSec:  Math.round(travelSec),
+        slaDeadlineSec: Math.round(stop.slaDeadlineSec),
+        slaRemainingSec: Math.round(stop.slaDeadlineSec - arrivalSec),
+      }],
+    };
+  }
 
   const lockRadiusM = getParam('reroute_lock_radius_m', 200);
+  const maxSla      = getParam('max_delivery_time_s', 1800);
 
   // Set de pairOrderIds ya recogidos (pedidos on_the_way)
   const pickedUp = new Set(
@@ -247,7 +208,7 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec) {
       .map(s => s.pairOrderId)
   );
 
-  const sequence = [];
+  const sequence  = [];
   const remaining = [...stops];
 
   // lockedStop guard: si el driver está dentro del radio de lock de algún stop,
@@ -256,7 +217,6 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec) {
   for (const stop of remaining) {
     const dist = haversineMeters(driverPos, stop.pos);
     if (dist <= lockRadiusM) {
-      // Verificar que sea viable (si es delivery, su pickup ya se hizo)
       if (stop.type === 'pickup' || pickedUp.has(stop.pairOrderId)) {
         lockedStop = stop;
         break;
@@ -270,25 +230,67 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec) {
     if (lockedStop.type === 'pickup') pickedUp.add(lockedStop.pairOrderId);
   }
 
-  // Greedy iterativo
+  // Greedy puro por distancia
   let currentPos = lockedStop ? lockedStop.pos : driverPos;
 
   while (remaining.length > 0) {
-    // Stops viables en este momento
     const viable = remaining.filter(s =>
       s.type === 'pickup' || pickedUp.has(s.pairOrderId)
     );
 
     if (viable.length === 0) break; // no debería ocurrir con datos consistentes
 
-    const next = selectNextStop(viable, stops, currentPos, driverObj, nowSec);
+    const next = viable.reduce((best, stop) => {
+      const dist = haversineMeters(currentPos, stop.pos);
+      return dist < best.dist ? { stop, dist } : best;
+    }, { stop: viable[0], dist: haversineMeters(currentPos, viable[0].pos) }).stop;
+
     sequence.push(next);
     remaining.splice(remaining.indexOf(next), 1);
     if (next.type === 'pickup') pickedUp.add(next.pairOrderId);
     currentPos = next.pos;
   }
 
-  return sequence;
+  // ── Simulación ETA diferida + verificación SLA + construcción de payload ──
+  // Una sola pasada: acumula tiempos reales, verifica SLA y construye stopsWithEta.
+  const slaBreaches  = [];
+  const stopsWithEta = [];
+  const simPickedUpAt = new Map(); // orderId → epoch sec del pickup simulado
+  let pos     = driverPos;
+  let timeSec = nowSec;
+
+  for (const stop of sequence) {
+    const travelSec = etaEstimator.estimateSync(pos, stop.pos, driverObj);
+    timeSec += travelSec;
+
+    if (stop.type === 'pickup') {
+      const waitSec = Math.max(0, stop.kitchenReadyAtSec - timeSec);
+      timeSec += waitSec;
+      for (const oid of (stop.orderIds ?? [stop.orderId])) {
+        simPickedUpAt.set(oid, timeSec);
+      }
+    } else {
+      const pickedAt = stop.pickedUpAtSec ?? simPickedUpAt.get(stop.orderId) ?? nowSec;
+      const elapsed  = timeSec - pickedAt;
+      if (elapsed > maxSla || timeSec > stop.slaDeadlineSec) {
+        slaBreaches.push(stop.orderId);
+      }
+    }
+
+    stopsWithEta.push({
+      type:            stop.type,
+      orderId:         stop.orderId,
+      orderIds:        stop.orderIds ?? [stop.orderId],
+      pos:             stop.pos,
+      etaFromNowSec:   Math.round(timeSec - nowSec),
+      slaDeadlineSec:  Math.round(stop.slaDeadlineSec),
+      slaRemainingSec: Math.round(stop.slaDeadlineSec - timeSec),
+    });
+
+    pos = stop.pos;
+  }
+
+  return { sequence, slaBreaches, stopsWithEta };
 }
 
 // ─── Carga de posición del driver ─────────────────────────────────────────────
@@ -356,39 +358,19 @@ export async function rerouteDriver(driverId) {
       return;
     }
 
-    const optimalSequence = findOptimalSequence(stops, driverPos, driverObj, nowSec);
-
-    // Construir payload SSE con ETAs estimados por stop
-    let pos     = driverPos;
-    let timeSec = nowSec;
-    const stopsWithEta = [];
-
-    for (const stop of optimalSequence) {
-      const travelSec = etaEstimator.estimateSync(pos, stop.pos, driverObj);
-      timeSec += travelSec;
-
-      if (stop.type === 'pickup') {
-        const waitSec = Math.max(0, stop.kitchenReadyAtSec - timeSec);
-        timeSec += waitSec;
-      }
-
-      stopsWithEta.push({
-        type:             stop.type,
-        orderId:          stop.orderId,
-        orderIds:         stop.orderIds ?? [stop.orderId], // P4: array para badge multi-pedido
-        pos:              stop.pos,
-        etaFromNowSec:    Math.round(timeSec - nowSec),
-        slaDeadlineSec:   Math.round(stop.slaDeadlineSec),
-        slaRemainingeSec: Math.round(stop.slaDeadlineSec - timeSec),
-      });
-
-      pos = stop.pos;
-    }
+    const { stopsWithEta, slaBreaches } = findOptimalSequence(stops, driverPos, driverObj, nowSec);
 
     sseHub.sendToUser(driverId, 'route_update', {
       stops:      stopsWithEta,
       totalStops: stopsWithEta.length,
     });
+
+    if (slaBreaches.length > 0) {
+      console.warn(
+        `[reroute] driver=${driverId.slice(0,8)} → SLA comprometido por evento externo:`,
+        slaBreaches.map(id => id.slice(0,8))
+      );
+    }
 
     console.log(
       `[reroute] driver=${driverId.slice(0,8)} → ${stopsWithEta.length} stops recalculados`
