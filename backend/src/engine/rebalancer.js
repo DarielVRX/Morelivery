@@ -6,18 +6,19 @@
 // drivers con mejor posición geográfica.
 //
 // CAMBIOS respecto a versión anterior:
-//   - Pase 2 (rebalanceo automático): usa scoreCandidate() para evaluar
-//     receptores en lugar de ETA simple — consistencia con el assignment inicial.
+//   - Pase 2 (rebalanceo automático): usa evaluateCandidates() para evaluar
+//     receptores — consistencia con el assignment inicial.
 //   - Pase 1 (disputas): mantiene ETA puro al restaurante — criterio de
 //     urgencia, no de optimización de ruta.
 //   - rerouteDriver() se llama tras cada transferencia exitosa (ambos pases)
-//     para que el driver actualice su ruta inmediatamente via SSE.
+//   - MIGRADO COMPLETAMENTE: ya no usa scoreCandidate directo, usa evaluateCandidates
 
 import { query } from '../config/db.js';
 import { haversineMeters } from '../utils/geo.js';
 import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
 import { scoreCandidate } from './scoring.js';
+import { evaluateCandidates } from './candidate-evaluator.js';
 import { rerouteDriver } from './reroute.js';
 import { sendPushToUser } from '../modules/notifications/pushSubscription.js';
 import { sseHub } from '../modules/events/hub.js';
@@ -74,12 +75,15 @@ async function loadActiveDrivers() {
   }));
 }
 
-// ─── Carga de pedidos transferibles ──────────────────────────────────────────
+// ─── Carga de pedidos transferibles (con todos los campos necesarios) ─────────
 
 async function loadTransferableOrders(driverId) {
   const cooldownSec = getParam('transfer_cooldown_s', 60);
   const r = await query(
     `SELECT o.id, o.restaurant_id,
+            o.estimated_volume_liters,
+            o.kitchen_estimated_ready,
+            o.created_at,
             COALESCE(ru.home_lat, rest.lat) AS rest_lat,
             COALESCE(ru.home_lng, rest.lng) AS rest_lng,
             o.delivery_lat    AS cust_lat,
@@ -100,9 +104,12 @@ async function loadTransferableOrders(driverId) {
   );
 
   return r.rows.map(row => ({
-    id:            row.id,
-    restaurantPos: { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
-    customerPos:   { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
+    id:                     row.id,
+    estimated_volume_liters: Number(row.estimated_volume_liters) || 0,
+    kitchen_estimated_ready: row.kitchen_estimated_ready,
+    created_at:             row.created_at,
+    restaurantPos:          { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
+    customerPos:            { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
   }));
 }
 
@@ -185,11 +192,10 @@ async function loadDisputedOrders() {
  * Retorna el número de transferencias aplicadas.
  *
  * Pase 1 — disputas (criterio: ETA puro al restaurante)
- *   Reasignaciones urgentes solicitadas por el driver. Se prioriza
- *   velocidad sobre optimización de ruta.
+ *   Reasignaciones urgentes solicitadas por el driver.
  *
- * Pase 2 — rebalanceo automático (criterio: scoreCandidate())
- *   Consistente con el assignment inicial — mismo modelo de costo.
+ * Pase 2 — rebalanceo automático (criterio: evaluateCandidates)
+ *   Consistente con el assignment inicial.
  *
  * @param {Function} onOffer
  * @returns {Promise<number>}
@@ -206,8 +212,7 @@ export async function runRebalancer(onOffer) {
     const drivers   = await loadActiveDrivers();
     const maxActive = getParam('max_active_orders_per_driver', 4);
 
-    // ── Pase 1: pedidos en disputa ────────────────────────────────────────────
-    // Criterio: ETA puro al restaurante — urgencia, no optimización.
+    // ── Pase 1: pedidos en disputa (sin cambios) ────────────────────────────
     if (Date.now() - startMs <= MAX_EXEC_MS) {
       const disputed = await loadDisputedOrders();
 
@@ -233,7 +238,6 @@ export async function runRebalancer(onOffer) {
         const best = evaluations.sort((a, b) => a.etaToPickup - b.etaToPickup)[0];
         if (!best) continue;
 
-        // Guard de race condition
         const stillDisputed = await query(
           `SELECT id FROM orders
            WHERE id=$1 AND is_disputed=true AND picked_up_at IS NULL AND driver_id=$2`,
@@ -266,20 +270,17 @@ export async function runRebalancer(onOffer) {
           message: 'Se te asignó un pedido en disputa.',
         });
 
-        // Push al driver receptor — fallback si app está cerrada
         sendPushToUser(best.driver.id, {
           title: '📦 Pedido asignado', body: 'Se te asignó un pedido en disputa.',
           tag: `reassigned_${order.id}`, group: 'driver', priority: 'high',
           url: '/driver', vibrate: [300, 100, 300], pushType: 'reassigned', orderId: order.id,
         }).catch(e => console.warn('[push] transfer_in disputa:', e.message));
 
-        // Rerouting inmediato para ambos drivers
         await Promise.all([
           rerouteDriver(order.driverId),
           rerouteDriver(best.driver.id),
         ]);
 
-        // Actualizar estado local
         const sourceLocal = drivers.find(d => d.id === order.driverId);
         if (sourceLocal) {
           sourceLocal.orderIds     = sourceLocal.orderIds.filter(id => id !== order.id);
@@ -295,8 +296,7 @@ export async function runRebalancer(onOffer) {
       }
     }
 
-    // ── Pase 2: rebalanceo automático con scoreCandidate() ────────────────────
-    // Usa el mismo modelo de costo que el assignment inicial.
+    // ── Pase 2: rebalanceo automático con evaluateCandidates() ────────────────
     for (let iter = 0; iter < maxIterations; iter++) {
       if (Date.now() - startMs > MAX_EXEC_MS) {
         console.warn('[rebalancer] timeout de seguridad — abortando iteración');
@@ -328,52 +328,53 @@ export async function runRebalancer(onOffer) {
           );
           if (recipients.length === 0) continue;
 
-          const driverObj = (d) => ({ speed_kmh: d.speedKmh });
+          // ── Construir orderForEval compatible con evaluateCandidates ──────
+          const orderForEval = {
+            id: order.id,
+            estimated_volume_liters: order.estimated_volume_liters,
+          };
 
-          // Evaluar receptores con scoreCandidate() para consistencia con assignment
-          const evaluations = await Promise.all(
-            recipients.map(async recipient => {
-              const etaToPickup = await etaEstimator.estimate(
-                recipient.pos, order.restaurantPos, driverObj(recipient)
-              );
-              const etaPickupToCustomer = await etaEstimator.estimate(
-                order.restaurantPos, order.customerPos, driverObj(recipient)
-              );
-              const distToRestaurant = haversineMeters(recipient.pos, order.restaurantPos);
+          // ── Construir envelopes para evaluateCandidates ──────────────────
+          const candidateEnvelopes = recipients.map(recipient => {
+            const distToRestaurant = haversineMeters(recipient.pos, order.restaurantPos);
+            return {
+              driver: {
+                id: recipient.id,
+                speedKmh: recipient.speedKmh,
+                activeOrders: recipient.activeOrders,
+                bagCapacityLiters: recipient.bagCapacityLiters,
+                disconnectPenalties: recipient.disconnectPenalties ?? 0,
+                pos: recipient.pos,
+              },
+              viableStop: { type: 'driver', pos: recipient.pos },
+              directDriverToRestaurantMeters: distToRestaurant,
+            };
+          });
 
-              // Construir candidato mínimo compatible con scoreCandidate()
-              const candidateForScore = {
-                etaToNewCustomer:               etaToPickup + etaPickupToCustomer,
-                activeOrders:                   recipient.activeOrders,
-                bridgePenaltyS:                 distToRestaurant / Math.max(1, (recipient.speedKmh * 1000) / 3600),
-                directDriverToRestaurantMeters: distToRestaurant,
-                driverSpeedKmh:                 recipient.speedKmh,
-              };
-
-              const { totalCost } = scoreCandidate(
-                candidateForScore,
-                { max_delivery_time_s: null },
-                recipient.disconnectPenalties ?? 0
-              );
-
-              return { driver: recipient, totalCost, etaToPickup };
-            })
+          // ── Evaluar receptores con evaluateCandidates ────────────────────
+          const nowSec = Date.now() / 1000;
+          const evaluated = await evaluateCandidates(
+            candidateEnvelopes,
+            orderForEval,
+            order.restaurantPos,
+            order.customerPos,
+            nowSec
           );
 
-          // Score del driver origen para este pedido (baseline)
+          // ── Calcular score del driver origen (scoreCandidate directo) ────
           const sourceEtaToPickup = await etaEstimator.estimate(
-            sourceDriver.pos, order.restaurantPos, driverObj(sourceDriver)
+            sourceDriver.pos, order.restaurantPos, { speed_kmh: sourceDriver.speedKmh }
           );
           const sourceEtaToCustomer = await etaEstimator.estimate(
-            order.restaurantPos, order.customerPos, driverObj(sourceDriver)
+            order.restaurantPos, order.customerPos, { speed_kmh: sourceDriver.speedKmh }
           );
           const sourceDistToRestaurant = haversineMeters(sourceDriver.pos, order.restaurantPos);
           const sourceCandidateForScore = {
-            etaToNewCustomer:               sourceEtaToPickup + sourceEtaToCustomer,
-            activeOrders:                   sourceDriver.activeOrders,
-            bridgePenaltyS:                 sourceDistToRestaurant / Math.max(1, (sourceDriver.speedKmh * 1000) / 3600),
+            etaToNewCustomer: sourceEtaToPickup + sourceEtaToCustomer,
+            activeOrders: sourceDriver.activeOrders,
+            bridgePenaltyS: sourceDistToRestaurant / Math.max(1, (sourceDriver.speedKmh * 1000) / 3600),
             directDriverToRestaurantMeters: sourceDistToRestaurant,
-            driverSpeedKmh:                 sourceDriver.speedKmh,
+            driverSpeedKmh: sourceDriver.speedKmh,
           };
           const { totalCost: sourceCost } = scoreCandidate(
             sourceCandidateForScore,
@@ -381,14 +382,20 @@ export async function runRebalancer(onOffer) {
             sourceDriver.disconnectPenalties ?? 0
           );
 
-          // Mejor receptor: menor totalCost con ganancia mínima sobre el origen
-          const best = evaluations
-            .filter(e => (sourceCost - e.totalCost) >= minGainSec)
+          // ── Encontrar mejor receptor con ganancia mínima ─────────────────
+          const bestEvaluation = evaluated
+            .map(ev => ({
+              driver: recipients.find(r => r.id === ev.driverId),
+              totalCost: ev.totalCost,
+              valid: ev.valid,
+              validExisting: ev.validExisting,
+            }))
+            .filter(ev => ev.driver && (sourceCost - ev.totalCost) >= minGainSec)
             .sort((a, b) => a.totalCost - b.totalCost)[0];
 
-          if (!best) continue;
+          if (!bestEvaluation) continue;
 
-          // Guard de race condition
+          // ── Verificar que el pedido sigue transferible ───────────────────
           const stillTransferable = await query(
             `SELECT id FROM orders
              WHERE id=$1 AND status='assigned' AND picked_up_at IS NULL AND driver_id=$2`,
@@ -396,46 +403,43 @@ export async function runRebalancer(onOffer) {
           );
           if (stillTransferable.rowCount === 0) continue;
 
-          // Aplicar transferencia
+          // ── Aplicar transferencia ────────────────────────────────────────
           await query(
             `UPDATE orders
              SET driver_id=$1, last_driver_id=$2, last_transferred_at=NOW(), updated_at=NOW()
              WHERE id=$3`,
-            [best.driver.id, sourceDriver.id, order.id]
+            [bestEvaluation.driver.id, sourceDriver.id, order.id]
           );
 
           console.log(
             `[rebalancer] order=${shortId(order.id)} ` +
-            `${shortId(sourceDriver.id)} → ${shortId(best.driver.id)} ` +
-            `(score origen=${Math.round(sourceCost)} receptor=${Math.round(best.totalCost)})`
+            `${shortId(sourceDriver.id)} → ${shortId(bestEvaluation.driver.id)} ` +
+            `(score origen=${Math.round(sourceCost)} receptor=${Math.round(bestEvaluation.totalCost)})`
           );
 
           sseHub.sendToUser(sourceDriver.id, 'order_transferred_away', {
             orderId: order.id,
             message: 'Un pedido fue reasignado a otro conductor.',
           });
-          sseHub.sendToUser(best.driver.id, 'order_transferred_in', {
+          sseHub.sendToUser(bestEvaluation.driver.id, 'order_transferred_in', {
             orderId: order.id,
             message: 'Se te asignó un pedido transferido.',
           });
 
-          // Push al driver receptor — fallback si app está cerrada
-          sendPushToUser(best.driver.id, {
+          sendPushToUser(bestEvaluation.driver.id, {
             title: '📦 Pedido asignado', body: 'Se te asignó un pedido transferido.',
             tag: `reassigned_${order.id}`, group: 'driver', priority: 'high',
             url: '/driver', vibrate: [300, 100, 300], pushType: 'reassigned', orderId: order.id,
           }).catch(e => console.warn('[push] transfer_in rebalanceo:', e.message));
 
-          // Rerouting inmediato para ambos drivers
           await Promise.all([
             rerouteDriver(sourceDriver.id),
-            rerouteDriver(best.driver.id),
+            rerouteDriver(bestEvaluation.driver.id),
           ]);
 
-          // Actualizar estado local
-          sourceDriver.orderIds     = sourceDriver.orderIds.filter(id => id !== order.id);
+          sourceDriver.orderIds = sourceDriver.orderIds.filter(id => id !== order.id);
           sourceDriver.activeOrders = Math.max(0, sourceDriver.activeOrders - 1);
-          const recipient = drivers.find(d => d.id === best.driver.id);
+          const recipient = drivers.find(d => d.id === bestEvaluation.driver.id);
           if (recipient) {
             recipient.orderIds.push(order.id);
             recipient.activeOrders++;

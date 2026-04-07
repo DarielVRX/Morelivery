@@ -3,7 +3,7 @@
 // Agrupa filas de pedidos activos en stops de pickup/delivery.
 //
 // Reemplaza el bloque pickupByRestaurant duplicado en reroute.js
-// y route-simulator.js. Ambos módulos llaman a groupPickupStops()
+// y candidate-evaluator.js. Ambos módulos llaman a groupPickupStops()
 // con las filas de su query respectiva.
 //
 // LÓGICA DE AGRUPACIÓN:
@@ -43,7 +43,6 @@ export function groupPickupStops(rows, nowSec, mode = 'reroute') {
       ? new Date(row.kitchen_estimated_ready).getTime() / 1000
       : nowSec;
 
-    // SLA corre desde created_at
     const createdAtSec   = row.created_at
       ? new Date(row.created_at).getTime() / 1000
       : nowSec;
@@ -59,14 +58,13 @@ export function groupPickupStops(rows, nowSec, mode = 'reroute') {
         existing.maxKitchenReadyAtSec = Math.max(existing.maxKitchenReadyAtSec, kitchenReadyAtSec);
         existing.kitchenReadyAtSecs.push(kitchenReadyAtSec);
         existing.volumeLiters += Number(row.volume_liters) || 0;
-        // slaDeadlineSec del grupo = el más urgente (el más antiguo)
         existing.slaDeadlineSec = Math.min(existing.slaDeadlineSec, slaDeadlineSec);
 
         if (mode === 'simulator') {
           existing.orderIds.push(row.id);
           existing.kitchenReadyAtSec = existing.maxKitchenReadyAtSec;
         } else {
-          existing.orderIds.push(row.id); // P4: acumular en modo reroute también
+          existing.orderIds.push(row.id);
         }
       } else {
         const stop = mode === 'simulator'
@@ -165,7 +163,7 @@ function _makeRerouteStop(row, restLat, restLng, kitchenReadyAtSec, slaDeadlineS
   return {
     type:                 'pickup',
     orderId:              row.id,
-    orderIds:             [row.id], // P4: array para badge multi-pedido
+    orderIds:             [row.id],
     pairOrderId:          row.id,
     pos:                  { lat: restLat, lng: restLng },
     pickedUpAtSec:        null,
