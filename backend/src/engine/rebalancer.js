@@ -11,23 +11,23 @@
 //   - Pase 1 (disputas): mantiene ETA puro al restaurante — criterio de
 //     urgencia, no de optimización de ruta.
 //   - rerouteDriver() se llama tras cada transferencia exitosa (ambos pases)
-//   - MIGRADO COMPLETAMENTE: ya no usa scoreCandidate directo, usa evaluateCandidates
+//   - FIX: rebalancer ya no asigna directo — usa serializedOffer/offerNextDrivers
+//     para que el driver receptor deba aceptar manualmente.
+//     El filtro anti-spam queda cubierto por order_driver_offers con wait_until.
 
 import { query } from '../config/db.js';
 import { haversineMeters } from '../utils/geo.js';
 import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
-import { scoreCandidate } from './scoring.js';
-import { evaluateCandidates } from './candidate-evaluator.js';
 import { rerouteDriver } from './reroute.js';
 import { sendPushToUser } from '../modules/notifications/pushSubscription.js';
 import { sseHub } from '../modules/events/hub.js';
 import { shortId } from '../utils/geo.js';
 import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
+import { serializedOffer } from '../modules/orders/assignment/queue.js';
+import { offerNextDrivers } from '../modules/orders/assignment/core.js';
 
 const MAX_EXEC_MS = 8_000;
-
-// ─── Helpers de velocidad ─────────────────────────────────────────────────────
 
 function speedKmhByVehicle(v) {
   switch (v) {
@@ -37,8 +37,6 @@ function speedKmhByVehicle(v) {
     default:           return 30;
   }
 }
-
-// ─── Carga de drivers activos ─────────────────────────────────────────────────
 
 async function loadActiveDrivers() {
   const r = await query(
@@ -75,8 +73,6 @@ async function loadActiveDrivers() {
   }));
 }
 
-// ─── Carga de pedidos transferibles (con todos los campos necesarios) ─────────
-
 async function loadTransferableOrders(driverId) {
   const cooldownSec = getParam('transfer_cooldown_s', 60);
   const r = await query(
@@ -98,6 +94,12 @@ async function loadTransferableOrders(driverId) {
        AND o.is_disputed = false
        AND (o.last_transferred_at IS NULL
             OR o.last_transferred_at < NOW() - ($2 * INTERVAL '1 second'))
+       -- FIX anti-spam: excluir pedidos que ya tienen oferta pending a otro driver
+       AND NOT EXISTS (
+         SELECT 1 FROM order_driver_offers od
+         WHERE od.order_id = o.id
+           AND od.status = 'pending'
+       )
      ORDER BY o.accepted_at DESC
      LIMIT 1`,
     [driverId, cooldownSec]
@@ -112,8 +114,6 @@ async function loadTransferableOrders(driverId) {
     customerPos:            { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
   }));
 }
-
-// ─── ETA de ruta completa ─────────────────────────────────────────────────────
 
 async function estimateRouteEta(driver) {
   if (driver.orderIds.length === 0) return 0;
@@ -156,8 +156,6 @@ async function estimateRouteEta(driver) {
   return totalEta;
 }
 
-// ─── Carga de disputas ────────────────────────────────────────────────────────
-
 async function loadDisputedOrders() {
   const r = await query(
     `SELECT o.id, o.driver_id, o.created_at,
@@ -185,21 +183,6 @@ async function loadDisputedOrders() {
   }));
 }
 
-// ─── Motor principal ──────────────────────────────────────────────────────────
-
-/**
- * Motor de rebalanceo principal.
- * Retorna el número de transferencias aplicadas.
- *
- * Pase 1 — disputas (criterio: ETA puro al restaurante)
- *   Reasignaciones urgentes solicitadas por el driver.
- *
- * Pase 2 — rebalanceo automático (criterio: evaluateCandidates)
- *   Consistente con el assignment inicial.
- *
- * @param {Function} onOffer
- * @returns {Promise<number>}
- */
 export async function runRebalancer(onOffer) {
   const startMs     = Date.now();
   const minGainSec  = getParam('transfer_min_gain_s', 10);
@@ -212,7 +195,7 @@ export async function runRebalancer(onOffer) {
     const drivers   = await loadActiveDrivers();
     const maxActive = getParam('max_active_orders_per_driver', 4);
 
-    // ── Pase 1: pedidos en disputa (sin cambios) ────────────────────────────
+    // ── Pase 1: pedidos en disputa ────────────────────────────────────────────
     if (Date.now() - startMs <= MAX_EXEC_MS) {
       const disputed = await loadDisputedOrders();
 
@@ -245,58 +228,32 @@ export async function runRebalancer(onOffer) {
         );
         if (stillDisputed.rowCount === 0) continue;
 
+        // FIX: marcar last_transferred_at y dejar que offerNextDrivers elija al receptor
+        // en lugar de asignar directo — el driver debe aceptar
         await query(
           `UPDATE orders
-           SET driver_id=$1, last_driver_id=$2, last_transferred_at=NOW(),
-               is_disputed=false, disputed_until=NULL, disputed_by=NULL,
-               updated_at=NOW()
-           WHERE id=$3`,
-          [best.driver.id, order.driverId, order.id]
+           SET is_disputed=false, disputed_until=NULL, disputed_by=NULL,
+               last_transferred_at=NOW(), updated_at=NOW()
+           WHERE id=$1`,
+          [order.id]
         );
 
-        console.log(
-          `[rebalancer:disputa] order=${shortId(order.id)} ` +
-          `${shortId(order.driverId)} → ${shortId(best.driver.id)} ` +
-          `(eta ~${Math.round(best.etaToPickup)}s)`
-        );
+        console.log(`[rebalancer:disputa] order=${shortId(order.id)} liberada para re-oferta`);
 
         sseHub.sendToUser(order.driverId, 'order_transferred_away', {
           orderId:  order.id,
           disputed: true,
-          message:  'Tu pedido en disputa fue tomado por otro conductor.',
-        });
-        sseHub.sendToUser(best.driver.id, 'order_transferred_in', {
-          orderId: order.id,
-          message: 'Se te asignó un pedido en disputa.',
+          message:  'Tu pedido en disputa fue liberado para reasignación.',
         });
 
-        sendPushToUser(best.driver.id, {
-          title: '📦 Pedido asignado', body: 'Se te asignó un pedido en disputa.',
-          tag: `reassigned_${order.id}`, group: 'driver', priority: 'high',
-          url: '/driver', vibrate: [300, 100, 300], pushType: 'reassigned', orderId: order.id,
-        }).catch(e => console.warn('[push] transfer_in disputa:', e.message));
-
-        await Promise.all([
-          rerouteDriver(order.driverId),
-          rerouteDriver(best.driver.id),
-        ]);
-
-        const sourceLocal = drivers.find(d => d.id === order.driverId);
-        if (sourceLocal) {
-          sourceLocal.orderIds     = sourceLocal.orderIds.filter(id => id !== order.id);
-          sourceLocal.activeOrders = Math.max(0, sourceLocal.activeOrders - 1);
-        }
-        const recipientLocal = drivers.find(d => d.id === best.driver.id);
-        if (recipientLocal) {
-          recipientLocal.orderIds.push(order.id);
-          recipientLocal.activeOrders++;
-        }
+        // Usar serializedOffer para respetar el flujo normal de ofertas
+        serializedOffer(order.id, offerNextDrivers, onOffer);
 
         totalTransfers++;
       }
     }
 
-    // ── Pase 2: rebalanceo automático con evaluateCandidates() ────────────────
+    // ── Pase 2: rebalanceo automático ─────────────────────────────────────────
     for (let iter = 0; iter < maxIterations; iter++) {
       if (Date.now() - startMs > MAX_EXEC_MS) {
         console.warn('[rebalancer] timeout de seguridad — abortando iteración');
@@ -323,79 +280,7 @@ export async function runRebalancer(onOffer) {
         if (Date.now() - startMs > MAX_EXEC_MS) break;
 
         for (const order of transferableOrders) {
-          const recipients = drivers.filter(d =>
-            d.id !== sourceDriver.id && d.activeOrders < maxActive
-          );
-          if (recipients.length === 0) continue;
-
-          // ── Construir orderForEval compatible con evaluateCandidates ──────
-          const orderForEval = {
-            id: order.id,
-            estimated_volume_liters: order.estimated_volume_liters,
-          };
-
-          // ── Construir envelopes para evaluateCandidates ──────────────────
-          const candidateEnvelopes = recipients.map(recipient => {
-            const distToRestaurant = haversineMeters(recipient.pos, order.restaurantPos);
-            return {
-              driver: {
-                id: recipient.id,
-                speedKmh: recipient.speedKmh,
-                activeOrders: recipient.activeOrders,
-                bagCapacityLiters: recipient.bagCapacityLiters,
-                disconnectPenalties: recipient.disconnectPenalties ?? 0,
-                pos: recipient.pos,
-              },
-              viableStop: { type: 'driver', pos: recipient.pos },
-              directDriverToRestaurantMeters: distToRestaurant,
-            };
-          });
-
-          // ── Evaluar receptores con evaluateCandidates ────────────────────
-          const nowSec = Date.now() / 1000;
-          const evaluated = await evaluateCandidates(
-            candidateEnvelopes,
-            orderForEval,
-            order.restaurantPos,
-            order.customerPos,
-            nowSec
-          );
-
-          // ── Calcular score del driver origen (scoreCandidate directo) ────
-          const sourceEtaToPickup = await etaEstimator.estimate(
-            sourceDriver.pos, order.restaurantPos, { speed_kmh: sourceDriver.speedKmh }
-          );
-          const sourceEtaToCustomer = await etaEstimator.estimate(
-            order.restaurantPos, order.customerPos, { speed_kmh: sourceDriver.speedKmh }
-          );
-          const sourceDistToRestaurant = haversineMeters(sourceDriver.pos, order.restaurantPos);
-          const sourceCandidateForScore = {
-            etaToNewCustomer: sourceEtaToPickup + sourceEtaToCustomer,
-            activeOrders: sourceDriver.activeOrders,
-            bridgePenaltyS: sourceDistToRestaurant / Math.max(1, (sourceDriver.speedKmh * 1000) / 3600),
-            directDriverToRestaurantMeters: sourceDistToRestaurant,
-            driverSpeedKmh: sourceDriver.speedKmh,
-          };
-          const { totalCost: sourceCost } = scoreCandidate(
-            sourceCandidateForScore,
-            { max_delivery_time_s: null },
-            sourceDriver.disconnectPenalties ?? 0
-          );
-
-          // ── Encontrar mejor receptor con ganancia mínima ─────────────────
-          const bestEvaluation = evaluated
-            .map(ev => ({
-              driver: recipients.find(r => r.id === ev.driverId),
-              totalCost: ev.totalCost,
-              valid: ev.valid,
-              validExisting: ev.validExisting,
-            }))
-            .filter(ev => ev.driver && (sourceCost - ev.totalCost) >= minGainSec)
-            .sort((a, b) => a.totalCost - b.totalCost)[0];
-
-          if (!bestEvaluation) continue;
-
-          // ── Verificar que el pedido sigue transferible ───────────────────
+          // Verificar que el pedido sigue transferible
           const stillTransferable = await query(
             `SELECT id FROM orders
              WHERE id=$1 AND status='assigned' AND picked_up_at IS NULL AND driver_id=$2`,
@@ -403,47 +288,36 @@ export async function runRebalancer(onOffer) {
           );
           if (stillTransferable.rowCount === 0) continue;
 
-          // ── Aplicar transferencia ────────────────────────────────────────
+          // FIX: marcar last_transferred_at para cooldown y dejar que
+          // offerNextDrivers elija al mejor receptor con su propio scoring.
+          // El filtro anti-spam en order_driver_offers evita re-ofertar
+          // a drivers que ya rechazaron este pedido.
           await query(
             `UPDATE orders
-             SET driver_id=$1, last_driver_id=$2, last_transferred_at=NOW(), updated_at=NOW()
-             WHERE id=$3`,
-            [bestEvaluation.driver.id, sourceDriver.id, order.id]
+             SET last_transferred_at=NOW(), updated_at=NOW()
+             WHERE id=$1`,
+            [order.id]
           );
 
           console.log(
             `[rebalancer] order=${shortId(order.id)} ` +
-            `${shortId(sourceDriver.id)} → ${shortId(bestEvaluation.driver.id)} ` +
-            `(score origen=${Math.round(sourceCost)} receptor=${Math.round(bestEvaluation.totalCost)})`
+            `liberada de ${shortId(sourceDriver.id)} para re-oferta`
           );
 
           sseHub.sendToUser(sourceDriver.id, 'order_transferred_away', {
             orderId: order.id,
-            message: 'Un pedido fue reasignado a otro conductor.',
-          });
-          sseHub.sendToUser(bestEvaluation.driver.id, 'order_transferred_in', {
-            orderId: order.id,
-            message: 'Se te asignó un pedido transferido.',
+            message: 'Un pedido fue liberado para reasignación.',
           });
 
-          sendPushToUser(bestEvaluation.driver.id, {
-            title: '📦 Pedido asignado', body: 'Se te asignó un pedido transferido.',
-            tag: `reassigned_${order.id}`, group: 'driver', priority: 'high',
-            url: '/driver', vibrate: [300, 100, 300], pushType: 'reassigned', orderId: order.id,
-          }).catch(e => console.warn('[push] transfer_in rebalanceo:', e.message));
+          // Usar serializedOffer — hereda filtro de rechazos, scoring completo
+          // y requiere aceptación manual del driver receptor
+          serializedOffer(order.id, offerNextDrivers, onOffer);
 
-          await Promise.all([
-            rerouteDriver(sourceDriver.id),
-            rerouteDriver(bestEvaluation.driver.id),
-          ]);
-
-          sourceDriver.orderIds = sourceDriver.orderIds.filter(id => id !== order.id);
+          // Actualizar estado local para siguiente iteración
+          sourceDriver.orderIds     = sourceDriver.orderIds.filter(id => id !== order.id);
           sourceDriver.activeOrders = Math.max(0, sourceDriver.activeOrders - 1);
-          const recipient = drivers.find(d => d.id === bestEvaluation.driver.id);
-          if (recipient) {
-            recipient.orderIds.push(order.id);
-            recipient.activeOrders++;
-          }
+
+          await rerouteDriver(sourceDriver.id);
 
           totalTransfers++;
           didTransfer = true;
@@ -461,7 +335,7 @@ export async function runRebalancer(onOffer) {
   }
 
   if (totalTransfers > 0) {
-    console.log(`[rebalancer] ${totalTransfers} transferencia(s) en ${Date.now() - startMs}ms`);
+    console.log(`[rebalancer] ${totalTransfers} pedido(s) liberados para re-oferta en ${Date.now() - startMs}ms`);
   }
 
   return totalTransfers;

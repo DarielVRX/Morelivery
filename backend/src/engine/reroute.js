@@ -133,7 +133,7 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec, forceFi
   const pickedUp = new Set(
     stops
       .filter(s => s.type === 'delivery' && s.pickedUpAtSec !== null)
-      .map(s => s.pairOrderId)
+      .map(s => s.orderId)
   );
 
   const sequence  = [];
@@ -149,7 +149,7 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec, forceFi
       const forcedStop = remaining[forceStopIndex];
       sequence.push(forcedStop);
       remaining.splice(forceStopIndex, 1);
-      if (forcedStop.type === 'pickup') pickedUp.add(forcedStop.pairOrderId);
+      if (forcedStop.type === 'pickup') pickedUp.add(forcedStop.orderId);
       currentPos = forcedStop.pos;
     }
   }
@@ -159,7 +159,7 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec, forceFi
     for (const stop of remaining) {
       const dist = haversineMeters(driverPos, stop.pos);
       if (dist <= lockRadiusM) {
-        if (stop.type === 'pickup' || pickedUp.has(stop.pairOrderId)) {
+        if (stop.type === 'pickup' || pickedUp.has(stop.orderId)) {
           lockedStop = stop;
           break;
         }
@@ -169,14 +169,14 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec, forceFi
     if (lockedStop) {
       sequence.push(lockedStop);
       remaining.splice(remaining.indexOf(lockedStop), 1);
-      if (lockedStop.type === 'pickup') pickedUp.add(lockedStop.pairOrderId);
+      if (lockedStop.type === 'pickup') pickedUp.add(lockedStop.orderId);
       currentPos = lockedStop.pos;
     }
   }
 
   while (remaining.length > 0) {
     const viable = remaining.filter(s =>
-      s.type === 'pickup' || pickedUp.has(s.pairOrderId)
+      s.type === 'pickup' || pickedUp.has(s.orderId)
     );
 
     if (viable.length === 0) break;
@@ -188,7 +188,7 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec, forceFi
 
     sequence.push(next);
     remaining.splice(remaining.indexOf(next), 1);
-    if (next.type === 'pickup') pickedUp.add(next.pairOrderId);
+    if (next.type === 'pickup') pickedUp.add(next.orderId);
     currentPos = next.pos;
   }
 

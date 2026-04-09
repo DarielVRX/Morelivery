@@ -116,13 +116,19 @@ export async function evaluateCandidates(candidates, order, restaurantPos, custo
         .reduce((sum, s) => sum + s.volumeLiters, 0);
 
       // 3. Crear stops del nuevo pedido
+      // SLA deadline corre desde created_at — el cliente espera desde que hizo el pedido
+      const orderCreatedAtSec = order.created_at
+        ? new Date(order.created_at).getTime() / 1000
+        : nowSec;
+      const newOrderSlaDeadline = orderCreatedAtSec + maxSla;
+
       const newPickupStop = {
         type: 'pickup',
         orderId: order.id,
         pairOrderId: order.id,
         pos: restaurantPos,
         pickedUpAtSec: null,
-        slaDeadlineSec: nowSec + maxSla,
+        slaDeadlineSec: newOrderSlaDeadline,
         kitchenReadyAtSec: nowSec,
         volumeLiters: newOrderVolume,
       };
@@ -133,7 +139,7 @@ export async function evaluateCandidates(candidates, order, restaurantPos, custo
         pairOrderId: order.id,
         pos: customerPos,
         pickedUpAtSec: null,
-        slaDeadlineSec: nowSec + maxSla,
+        slaDeadlineSec: newOrderSlaDeadline,
         kitchenReadyAtSec: nowSec,
         volumeLiters: newOrderVolume,
       };
