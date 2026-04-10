@@ -159,8 +159,15 @@ export function useOrderManager(token, patchUser, userDriver) {
       }
       const newOffer = (off.offers||[]).length > 0 ? off.offers[0] : null;
       setPendingOffer(prev => {
-        if (newOffer?.id !== prev?.id) setOfferMinimized(false);
-        return newOffer;
+        if (!newOffer) { setOfferMinimized(false); return null; }
+        if (newOffer.id !== prev?.id) {
+          // Offer nuevo del fetch — usar tal cual
+          setOfferMinimized(false);
+          return newOffer;
+        }
+        // Mismo offer — preservar el SSE original (tiene camelCase + routeStops)
+        // El fetch de DB solo tiene snake_case sin routeStops
+        return prev;
       });
     } catch (_) {}
   }, [token]);
