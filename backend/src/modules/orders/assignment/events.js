@@ -124,6 +124,16 @@ export async function releaseOrder(orderId, driverId, onOffer) {
   await releaseDriverOffer(orderId, driverId, getParam('cooldown_s', 300));
   await unassignDriverFromOrder(orderId, driverId);
 
+  // Resetear timer de escalación — el pedido vuelve al pool con timer fresco
+  await query(
+    `UPDATE orders
+     SET driver_search_escalated_at = NOW(),
+         driver_search_push_sent_at  = NULL,
+         updated_at                  = NOW()
+     WHERE id = $1`,
+    [orderId]
+  ).catch(e => logWarn(orderId, `reset escalation timer error: ${e.message}`));
+
   // Decrementar contador — el driver soltó el pedido
   await query(
     `UPDATE driver_profiles SET active_orders_count = GREATEST(active_orders_count - 1, 0) WHERE user_id = $1`,

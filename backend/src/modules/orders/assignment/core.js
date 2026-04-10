@@ -290,6 +290,7 @@ export async function offerNextDrivers(orderId, onOffer) {
 
   let scoredEligible = eligible.map(d => ({ ...d, bagOverflowPct: 0 }));
   let slaDelayCandidate = null; // declarar en scope externo — se usa después del try/catch
+  let scoreMap = new Map();     // declarar en scope externo — se usa en el loop del batch
 
   try {
     const coordsRow = await query(
@@ -372,7 +373,7 @@ export async function offerNextDrivers(orderId, onOffer) {
             for (const c of cappedDrivers) _releaseDriverSlot(c.driver.id);
           }
 
-          const scoreMap = new Map(scored.map(s => [s.driverId, s]));
+          scoreMap = new Map(scored.map(s => [s.driverId, s]));
 
           const allInvalid = scored.length > 0 && scored.every(s => !s.valid);
           if (allInvalid) {

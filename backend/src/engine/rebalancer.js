@@ -379,7 +379,12 @@ export async function runRebalancer(onOffer) {
 
           // Liberar y re-ofertar — offerNextDrivers elige al mejor receptor
           await query(
-            `UPDATE orders SET last_transferred_at=NOW(), updated_at=NOW() WHERE id=$1`,
+            `UPDATE orders
+             SET last_transferred_at        = NOW(),
+                 driver_search_escalated_at = NOW(),
+                 driver_search_push_sent_at = NULL,
+                 updated_at                 = NOW()
+             WHERE id = $1`,
             [order.id]
           );
 
