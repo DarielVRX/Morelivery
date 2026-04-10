@@ -18,6 +18,7 @@ export default function DriverHomeMapSection({
   routeGeometry,
   partialRouteGeometry,  // tramo driver→nextstop (modos nav/nextStop)
   offerRouteGeometry,
+  offerMarkers,
   allStops,
   routeActive,
   myPosition,
@@ -93,6 +94,16 @@ export default function DriverHomeMapSection({
     return partialRouteGeometry?.length ? partialRouteGeometry : routeGeometry;
   })();
 
+  // Cuando hay oferta activa — usar markers de oferta y ocultar allStops del pedido activo
+  const isOfferMode = Boolean(offerRouteGeometry?.length && offerMarkers);
+  const displayPickupPos  = isOfferMode
+    ? offerMarkers.restaurant
+    : (activeOrder?.restaurant_lat ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) } : null);
+  const displayDeliveryPos = isOfferMode
+    ? offerMarkers.customer
+    : (activeOrder?.customer_lat ? { lat: Number(activeOrder.customer_lat), lng: Number(activeOrder.customer_lng) } : null);
+  const displayAllStops = isOfferMode ? null : allStops;
+
   return (
     <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden', zIndex: 0 }}>
       {!customPin && !hasActiveOrder && availability && (
@@ -123,17 +134,13 @@ export default function DriverHomeMapSection({
         customPin={customPin}
         onCustomPin={setCustomPin}
         hasActiveOrder={hasActiveOrder}
-        pickupPos={activeOrder?.restaurant_lat
-          ? { lat: Number(activeOrder.restaurant_lat), lng: Number(activeOrder.restaurant_lng) }
-          : null}
-        deliveryPos={activeOrder?.customer_lat
-          ? { lat: Number(activeOrder.customer_lat), lng: Number(activeOrder.customer_lng) }
-          : null}
-        pickupLabel={activeOrder?.restaurant_name || 'Tienda'}
-        deliveryLabel={activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente'}
+        pickupPos={displayPickupPos}
+        deliveryPos={displayDeliveryPos}
+        pickupLabel={isOfferMode ? 'Tienda' : (activeOrder?.restaurant_name || 'Tienda')}
+        deliveryLabel={isOfferMode ? 'Cliente' : (activeOrder?.customer_name || activeOrder?.customer_first_name || 'Cliente')}
         routeGeometry={displayGeometry}
         partialRouteGeometry={null}
-        allStops={allStops}
+        allStops={displayAllStops}
         routeActive={routeActive}
         onRouteError={setMsg}
         centerMode={centerMode}

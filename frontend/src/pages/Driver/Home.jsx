@@ -177,6 +177,7 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         isDark={isDark}
         handMode={handMode}
         offerRouteGeometry={home.offerRouteGeometry}
+        offerMarkers={home.offerMarkers}
         onSupport={() => setShowSupport(v => !v)}
         showSupport={showSupport}
         showAttrib={showAttrib}

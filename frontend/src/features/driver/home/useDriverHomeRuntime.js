@@ -66,7 +66,8 @@ export function useDriverHomeRuntime({
   const offerRouteGeometryRef = useRef(null); // ref para toggle — evita closure stale
 
   // Rerouting
-  const lastRerouteRef   = useRef(0);
+  const lastRerouteRef        = useRef(0);
+  const prevOfferCenterModeRef = useRef(null); // modo antes de activar oferta
 
   const centerModeRef      = useRef('free');
   const centerCycleRef     = useRef(0);
@@ -294,12 +295,6 @@ export function useDriverHomeRuntime({
   // Toggle basado en ref para evitar closure stale — offerRouteGeometryRef
   // siempre refleja el valor actual sin necesitar offerRouteGeometry en deps.
   const openOfferRoutePreview = useCallback(async (offer) => {
-    console.log('[offerRoute] enter', {
-      refHasGeom: Boolean(offerRouteGeometryRef.current?.length),
-                routeStops: offer?.routeStops?.length ?? 'none',
-                rLat: offer?.restaurantLat ?? offer?.restaurant_lat,
-                cLat: offer?.customerLat ?? offer?.customer_lat,
-    });
     // Toggle — leer ref (siempre fresco, no stale)
     if (offerRouteGeometryRef.current?.length) {
       offerRouteGeometryRef.current = null;
@@ -314,12 +309,17 @@ export function useDriverHomeRuntime({
     const cLat = offer?.customerLat   ?? offer?.customer_lat;
     const cLng = offer?.customerLng   ?? offer?.customer_lng;
 
+    // Guardar modo actual antes de activar oferta
+    prevOfferCenterModeRef.current = centerModeRef.current;
+
     // Setear markers inmediatamente — no esperar a la geometría
     if (rLat && cLat) {
       setOfferMarkers({
         restaurant: { lat: Number(rLat), lng: Number(rLng) },
         customer:   { lat: Number(cLat), lng: Number(cLng) },
       });
+      // Centrar mapa para mostrar ambos markers de la oferta
+      setCenterSignal('overview');
     }
 
     // Usar routeStops del engine si están disponibles — no calcular en cliente
@@ -402,6 +402,12 @@ export function useDriverHomeRuntime({
     setOfferRouteGeometry(null);
     setOfferMarkers(null);
     setShowFullOfferRoute(false);
+    // Restaurar centerSignal al modo previo a la oferta
+    const prev = prevOfferCenterModeRef.current;
+    if (prev) {
+      setCenterSignal(prev);
+      prevOfferCenterModeRef.current = null;
+    }
   }, []);
 
   const openGoogleNavigation = useCallback(() => {
