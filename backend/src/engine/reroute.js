@@ -19,9 +19,6 @@
 import { query } from '../config/db.js';
 import { haversineMeters } from '../utils/geo.js';
 import { etaEstimator } from './eta.js';
-import pLimit from 'p-limit';
-
-const OSRM_CONCURRENCY = 8;
 import { getParam } from './params.js';
 import { sseHub } from '../modules/events/hub.js';
 import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
@@ -108,7 +105,7 @@ async function loadDriverStopsForReroute(driverId) {
  *   }>
  * }}
  */
-export async function findOptimalSequence(stops, driverPos, driverObj, nowSec, forceFirstStop = null) {
+export async function findOptimalSequence(stops, driverPos, driverObj, nowSec, forceFirstStop = null, { blockPos, blockRadiusM } = {}) {
   const empty = { sequence: [], slaBreaches: [], stopsWithEta: [] };
   if (stops.length === 0) return empty;
   if (stops.length === 1) {
@@ -164,6 +161,11 @@ export async function findOptimalSequence(stops, driverPos, driverObj, nowSec, f
       const dist = haversineMeters(driverPos, stop.pos);
       if (dist <= lockRadiusM) {
         if (stop.type === 'pickup' || pickedUp.has(stop.orderId)) {
+          // No lockear stops dentro de la zona bloqueada
+          if (blockPos && blockRadiusM) {
+            const distToBlock = haversineMeters(stop.pos.lat, stop.pos.lng, blockPos.lat, blockPos.lng);
+            if (distToBlock < blockRadiusM) continue;
+          }
           lockedStop = stop;
           break;
         }
@@ -184,24 +186,24 @@ export async function findOptimalSequence(stops, driverPos, driverObj, nowSec, f
     );
     if (viable.length === 0) break;
 
-    // Calcular ETA efectivo para cada stop viable con límite de concurrencia
-    // ETA efectivo = max(ETA viaje, kitchenReadyAt) con tolerancia para waits cortos
+    // Calcular ETA efectivo para cada stop viable con límite de concurrencia (8 simultáneos)
     const kitchenTolerance = getParam('kitchen_wait_tolerance_s', 180);
-    const limit = pLimit(OSRM_CONCURRENCY);
-    const withEta = await Promise.all(
-      viable.map(stop => limit(async () => {
+    const CONCURRENCY = 8;
+    const withEta = [];
+    for (let i = 0; i < viable.length; i += CONCURRENCY) {
+      const batch = viable.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(batch.map(async stop => {
         const travelEta = await etaEstimator.estimate(currentPos, stop.pos, driverObj);
         let effectiveEta = travelEta;
-
         if (stop.type === 'pickup' && stop.kitchenReadyAtSec) {
           const arrivalSec = nowSec + travelEta;
           const wait = Math.max(0, stop.kitchenReadyAtSec - arrivalSec);
           effectiveEta = travelEta + Math.max(0, wait - kitchenTolerance);
         }
-
         return { stop, eta: effectiveEta, travelEta };
-      }))
-    );
+      }));
+      withEta.push(...results);
+    }
 
     const best = withEta.reduce((a, b) => a.eta < b.eta ? a : b);
     sequence.push(best.stop);
@@ -294,7 +296,7 @@ function speedKmhByVehicle(vehicleType) {
  * @param {string} driverId
  * @returns {Promise<void>}
  */
-export async function rerouteDriver(driverId) {
+export async function rerouteDriver(driverId, { blockPos, blockRadiusM } = {}) {
   try {
     const driverData = await loadDriverPos(driverId);
     if (!driverData) return;
@@ -315,7 +317,15 @@ export async function rerouteDriver(driverId) {
       return;
     }
 
-    const { stopsWithEta, slaBreaches } = await findOptimalSequence(stops, driverPos, driverObj, nowSec);
+    // Si hay bloqueo activo, filtrar el lockedStop guard para evitar la zona bloqueada
+    // y forzar que la secuencia busque ruta alternativa desde la posición actual
+    const sequenceOpts = (blockPos && blockRadiusM)
+      ? { blockPos, blockRadiusM }
+      : {};
+
+    const { stopsWithEta, slaBreaches } = await findOptimalSequence(
+      stops, driverPos, driverObj, nowSec, null, sequenceOpts
+    );
 
     sseHub.sendToUser(driverId, 'route_update', {
       stops:      stopsWithEta,

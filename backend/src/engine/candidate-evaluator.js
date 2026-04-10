@@ -17,9 +17,6 @@ import { scoreCandidate } from './scoring.js';
 import { findOptimalSequence } from './reroute.js';
 import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
 import { groupPickupStops } from './stop-grouper.js';
-import pLimit from 'p-limit';
-
-const OSRM_CONCURRENCY = 8; // requests OSRM simultáneos máx
 
 // ─── Carga de stops enriquecidos (reutiliza stop-grouper) ─────────────────────
 
@@ -104,9 +101,12 @@ export async function evaluateCandidates(candidates, order, restaurantPos, custo
   const maxSla = getParam('max_delivery_time_s', 1800);
   const newOrderVolume = Number(order.estimated_volume_liters) || 0;
 
-  const limit = pLimit(OSRM_CONCURRENCY);
-  const evaluated = await Promise.all(
-    candidates.map(candidate => limit(async () => {
+  // Procesar candidatos en batches de 8 para limitar concurrencia OSRM
+  const CONCURRENCY = 8;
+  const evaluated = [];
+  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+    const batch = candidates.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(batch.map(async candidate => {
       const driver = candidate.driver;
       const driverObj = { speed_kmh: driver.speedKmh };
       const speedMs = Math.max(1, (driver.speedKmh * 1000) / 3600);
@@ -251,8 +251,9 @@ export async function evaluateCandidates(candidates, order, restaurantPos, custo
         etaToNewCustomer,
         ...scoreParts,
       };
-    }))
-  );
+    }));
+    evaluated.push(...results);
+  }
 
   return evaluated;
 }

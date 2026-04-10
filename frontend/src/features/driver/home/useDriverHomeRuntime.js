@@ -431,34 +431,103 @@ export function useDriverHomeRuntime({
     return routeGeometry.slice(0, endIdx);
   })();
 
-  // ── P1: Reroute automático por desvío de ruta ─────────────────────────────
-  // Si el driver se aleja más de REROUTE_THRESHOLD_M de la ruta calculada,
-  // solicitar recálculo al backend. Throttleado a una llamada cada 30s.
-  const REROUTE_THRESHOLD_M = 150;
+  // ── Reroute automático por desvío de ruta con bloqueo adaptativo ────────────
+  //
+  // Threshold consistente con reroute_lock_radius_m del backend (200m).
+  // Tres escenarios:
+  //   1. Driver regresa por la misma geometría → retroceder índice (no reroute)
+  //   2. Retorno geométrico en la ruta → avanzar índice (no reroute)
+  //   3. Driver abandona la geometría completamente → reroute con bloqueo
+  //
+  // Bloqueo adaptativo: si el driver ignora la nueva ruta, el radio de bloqueo
+  // crece en navigation_block_step_m (200m) en cada intento.
+  // El bloqueo se envía al backend como { blockPos, blockRadiusM } para que
+  // rerouteDriver construya una ruta que evite esa zona.
+
+  const REROUTE_THRESHOLD_M = 200; // consistente con reroute_lock_radius_m
   const REROUTE_COOLDOWN_MS = 30_000;
+  const BLOCK_STEP_M        = 200; // navigation_block_step_m
+
+  const blockStateRef       = useRef(null); // { pos, radiusM, attempts }
+  const routeProgressRef    = useRef(0);    // índice del punto más cercano actual
+
   useEffect(() => {
     if (!myPosition || !routeGeometry?.length || !routeActive || !token) return;
 
-    // Distancia mínima del driver a cualquier punto de la geometría
-    let minDist = Infinity;
-    for (const pt of routeGeometry) {
+    const pos = myPosition;
+
+    // ── Encontrar punto más cercano y su índice en la geometría ──────────────
+    let minDist    = Infinity;
+    let minIdx     = 0;
+    let minDistPrev = Infinity; // distancia mínima a puntos ANTERIORES al progreso actual
+
+    for (let i = 0; i < routeGeometry.length; i++) {
+      const pt    = routeGeometry[i];
       const ptLat = pt[1] ?? pt.lat;
       const ptLng = pt[0] ?? pt.lng;
       if (!Number.isFinite(ptLat) || !Number.isFinite(ptLng)) continue;
-      const d = haversineMeters(myPosition.lat, myPosition.lng, ptLat, ptLng);
-      if (d < minDist) minDist = d;
+      const d = haversineMeters(pos.lat, pos.lng, ptLat, ptLng);
+      if (d < minDist) { minDist = d; minIdx = i; }
+      if (i < routeProgressRef.current && d < minDistPrev) minDistPrev = d;
     }
 
-    if (minDist > REROUTE_THRESHOLD_M) {
-      const now = Date.now();
-      if (now - lastRerouteRef.current > REROUTE_COOLDOWN_MS) {
-        lastRerouteRef.current = now;
-        fetch('/api/drivers/reroute', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {});
+    // ── Escenario 1/2: driver sigue sobre la geometría (retroceso o retorno) ─
+    if (minDist <= REROUTE_THRESHOLD_M) {
+      // Actualizar progreso — avanza o retrocede según posición real
+      routeProgressRef.current = minIdx;
+      // Si había bloqueo activo y el driver volvió a la ruta → limpiar
+      if (blockStateRef.current) blockStateRef.current = null;
+      return;
+    }
+
+    // ── Escenario 3: driver fuera de geometría ────────────────────────────────
+    // Verificar si está cerca de algún punto anterior (retroceso fuera de ruta)
+    // o si realmente tomó otra vialidad
+    const now = Date.now();
+    if (now - lastRerouteRef.current < REROUTE_COOLDOWN_MS) return;
+    lastRerouteRef.current = now;
+
+    // Encontrar último punto de contacto (punto más cercano antes del desvío)
+    const lastContactPt = routeGeometry[routeProgressRef.current];
+    const lastContactPos = lastContactPt
+      ? { lat: lastContactPt[1] ?? lastContactPt.lat, lng: lastContactPt[0] ?? lastContactPt.lng }
+      : pos;
+
+    // Calcular radio de bloqueo adaptativo
+    let blockRadiusM = BLOCK_STEP_M;
+    if (blockStateRef.current) {
+      // El driver ignoró la última ruta sugerida — extender bloqueo
+      const sameZone = haversineMeters(
+        pos.lat, pos.lng,
+        blockStateRef.current.pos.lat, blockStateRef.current.pos.lng
+      ) < BLOCK_STEP_M * 2;
+
+      if (sameZone) {
+        blockRadiusM = blockStateRef.current.radiusM + BLOCK_STEP_M;
+        blockStateRef.current.attempts++;
+      } else {
+        // Nuevo punto de abandono — reiniciar bloqueo
+        blockStateRef.current = null;
+        blockRadiusM = BLOCK_STEP_M;
       }
     }
+
+    blockStateRef.current = {
+      pos:      lastContactPos,
+      radiusM:  blockRadiusM,
+      attempts: blockStateRef.current?.attempts ?? 1,
+    };
+
+    // Enviar reroute con información de bloqueo
+    fetch('/api/drivers/reroute', {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        blockPos:     lastContactPos,
+        blockRadiusM: blockRadiusM,
+      }),
+    }).catch(() => {});
+
   }, [myPosition?.lat, myPosition?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
