@@ -7,3 +7,6 @@ frontend/dist/
 coverage/
 .DS_Store
 ..env.kate-swp
+schema_admin.sql
+schema.sql
+*.sql

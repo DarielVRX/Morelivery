@@ -114,8 +114,8 @@ async function loadDriverActiveStops(driverId) {
        o.status,
        o.delivery_lat                         AS cust_lat,
        o.delivery_lng                         AS cust_lng,
-       COALESCE(ru.home_lat, rest.lat)        AS rest_lat,
-       COALESCE(ru.home_lng, rest.lng)        AS rest_lng
+       ru.home_lat        AS rest_lat,
+       ru.home_lng        AS rest_lng
      FROM orders o
      JOIN restaurants rest ON rest.id = o.restaurant_id
      LEFT JOIN users ru    ON ru.id   = rest.owner_user_id

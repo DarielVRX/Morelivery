@@ -56,8 +56,8 @@ router.get('/', async (_req, res, next) => {
       `SELECT r.id, r.name, r.category, r.is_open,
               COALESCE(u.address, r.address) AS address,
               r.profile_photo,
-              COALESCE(u.home_lat, r.lat) AS lat,
-              COALESCE(u.home_lng, r.lng) AS lng,
+              u.home_lat AS lat,
+              u.home_lng AS lng,
               r.rating_avg, r.rating_count
        FROM restaurants r
        LEFT JOIN users u ON u.id = r.owner_user_id
@@ -68,8 +68,8 @@ router.get('/', async (_req, res, next) => {
         `SELECT r.id, r.name, r.category, r.is_open,
                 COALESCE(u.address, r.address) AS address,
                 r.profile_photo,
-                COALESCE(u.home_lat, r.lat) AS lat,
-                COALESCE(u.home_lng, r.lng) AS lng
+                u.home_lat AS lat,
+                u.home_lng AS lng
          FROM restaurants r
          LEFT JOIN users u ON u.id = r.owner_user_id
          WHERE r.is_active = true
@@ -93,8 +93,8 @@ router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next
       `SELECT r.id, r.name, r.category, r.is_open,
               COALESCE(u.address, r.address) AS address,
               r.manual_open_override, r.profile_photo,
-              COALESCE(u.home_lat, r.lat) AS lat,
-              COALESCE(u.home_lng, r.lng) AS lng,
+              u.home_lat AS lat,
+              u.home_lng AS lng,
               r.max_cash_cents, r.allow_frequent_customers, r.prep_time_estimate_s
        FROM restaurants r
        LEFT JOIN users u ON u.id = r.owner_user_id
@@ -111,8 +111,8 @@ router.get('/my', authenticate, authorize(['restaurant']), async (req, res, next
           `SELECT r.id, r.name, r.category, r.is_open,
                   COALESCE(u.address, r.address) AS address,
                   r.manual_open_override, r.profile_photo,
-                  COALESCE(u.home_lat, r.lat) AS lat,
-                  COALESCE(u.home_lng, r.lng) AS lng
+                  u.home_lat AS lat,
+                  u.home_lng AS lng
            FROM restaurants r
            LEFT JOIN users u ON u.id = r.owner_user_id
            WHERE r.owner_user_id=$1 LIMIT 1`,
@@ -424,8 +424,8 @@ router.get('/:id', async (req, res, next) => {
       `SELECT r.id, r.name, r.category, r.is_open, r.profile_photo,
               r.rating_avg, r.rating_count, r.prep_time_estimate_s,
               COALESCE(u.address, r.address) AS address,
-              COALESCE(u.home_lat, r.lat) AS lat,
-              COALESCE(u.home_lng, r.lng) AS lng
+              u.home_lat AS lat,
+              u.home_lng AS lng
        FROM restaurants r
        LEFT JOIN users u ON u.id = r.owner_user_id
        WHERE r.id = $1 AND r.is_active = true`,

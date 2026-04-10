@@ -85,7 +85,7 @@ export function registerCreationRoutes(router, deps) {
 
       // ── Coordenadas del restaurante ───────────────────────────────────────
       const restCoords = await query(
-        `SELECT COALESCE(u.home_lat, r.lat) AS lat, COALESCE(u.home_lng, r.lng) AS lng
+        `SELECT u.home_lat AS lat, u.home_lng AS lng
          FROM restaurants r LEFT JOIN users u ON u.id=r.owner_user_id WHERE r.id=$1`,
         [restaurantId]
       );
