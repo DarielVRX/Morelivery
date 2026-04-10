@@ -150,16 +150,16 @@ export default function ActiveOrderPanel({
     }
   };
 
-  // Countdown de cocina — solo activo en estados previos al pickup
+  // Countdown de cocina — usa order directamente (currentOrder aún no está declarado aquí)
   useEffect(() => {
-    const isWaiting = ['accepted', 'preparing'].includes(currentOrder?.status);
-    if (!isWaiting || !currentOrder?.kitchen_estimated_ready) {
+    const isWaiting = ['accepted', 'preparing'].includes(order?.status);
+    if (!isWaiting || !order?.kitchen_estimated_ready) {
       setKitchenSecsLeft(null);
       return;
     }
     const tick = () => {
       const diff = Math.ceil(
-        (new Date(currentOrder.kitchen_estimated_ready).getTime() - Date.now()) / 1000
+        (new Date(order.kitchen_estimated_ready).getTime() - Date.now()) / 1000
       );
       setKitchenSecsLeft(diff);
     };
