@@ -419,6 +419,20 @@ export async function offerNextDrivers(orderId, onOffer) {
 
   let sent = 0;
   for (const row of batch) {
+    // Guard anti-spam: no enviar oferta si el driver ya tiene una pendiente de otro pedido
+    const existingOffer = await query(
+      `SELECT 1 FROM order_driver_offers
+       WHERE driver_id = $1
+         AND status = 'pending'
+         AND order_id != $2
+       LIMIT 1`,
+      [row.user_id, orderId]
+    );
+    if (existingOffer.rowCount > 0) {
+      log(`order=${orderId}`, `driver=${row.user_id.slice(0,8)} ya tiene oferta pending — skip`);
+      continue;
+    }
+
     const ok = await upsertOffer(orderId, row.user_id, onOffer, row.bagOverflowPct ?? 0);
     if (ok) sent++;
   }

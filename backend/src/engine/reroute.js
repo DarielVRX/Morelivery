@@ -19,6 +19,9 @@
 import { query } from '../config/db.js';
 import { haversineMeters } from '../utils/geo.js';
 import { etaEstimator } from './eta.js';
+import pLimit from 'p-limit';
+
+const OSRM_CONCURRENCY = 8;
 import { getParam } from './params.js';
 import { sseHub } from '../modules/events/hub.js';
 import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
@@ -105,23 +108,23 @@ async function loadDriverStopsForReroute(driverId) {
  *   }>
  * }}
  */
-export function findOptimalSequence(stops, driverPos, driverObj, nowSec, forceFirstStop = null) {
+export async function findOptimalSequence(stops, driverPos, driverObj, nowSec, forceFirstStop = null) {
   const empty = { sequence: [], slaBreaches: [], stopsWithEta: [] };
   if (stops.length === 0) return empty;
   if (stops.length === 1) {
-    const stop      = stops[0];
-    const travelSec = etaEstimator.estimateSync(driverPos, stop.pos, driverObj);
+    const stop       = stops[0];
+    const travelSec  = await etaEstimator.estimate(driverPos, stop.pos, driverObj);
     const arrivalSec = nowSec + travelSec;
     return {
       sequence:    stops,
       slaBreaches: [],
       stopsWithEta: [{
-        type:           stop.type,
-        orderId:        stop.orderId,
-        orderIds:       stop.orderIds ?? [stop.orderId],
-        pos:            stop.pos,
-        etaFromNowSec:  Math.round(travelSec),
-        slaDeadlineSec: Math.round(stop.slaDeadlineSec),
+        type:            stop.type,
+        orderId:         stop.orderId,
+        orderIds:        stop.orderIds ?? [stop.orderId],
+        pos:             stop.pos,
+        etaFromNowSec:   Math.round(travelSec),
+        slaDeadlineSec:  Math.round(stop.slaDeadlineSec),
         slaRemainingSec: Math.round(stop.slaDeadlineSec - arrivalSec),
       }],
     };
@@ -138,11 +141,12 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec, forceFi
 
   const sequence  = [];
   const remaining = [...stops];
-  let currentPos = driverPos;
+  let currentPos  = driverPos;
 
+  // lockedStop y forceFirstStop usan haversine — solo para filtro de proximidad
   if (forceFirstStop) {
-    const forceStopIndex = remaining.findIndex(s => 
-      s.type === forceFirstStop.type && 
+    const forceStopIndex = remaining.findIndex(s =>
+      s.type === forceFirstStop.type &&
       s.orderId === forceFirstStop.orderId
     );
     if (forceStopIndex !== -1) {
@@ -165,7 +169,6 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec, forceFi
         }
       }
     }
-
     if (lockedStop) {
       sequence.push(lockedStop);
       remaining.splice(remaining.indexOf(lockedStop), 1);
@@ -174,32 +177,48 @@ export function findOptimalSequence(stops, driverPos, driverObj, nowSec, forceFi
     }
   }
 
+  // Greedy con OSRM — elige el stop viable con menor ETA real en cada paso
   while (remaining.length > 0) {
     const viable = remaining.filter(s =>
       s.type === 'pickup' || pickedUp.has(s.orderId)
     );
-
     if (viable.length === 0) break;
 
-    const next = viable.reduce((best, stop) => {
-      const dist = haversineMeters(currentPos, stop.pos);
-      return dist < best.dist ? { stop, dist } : best;
-    }, { stop: viable[0], dist: haversineMeters(currentPos, viable[0].pos) }).stop;
+    // Calcular ETA efectivo para cada stop viable con límite de concurrencia
+    // ETA efectivo = max(ETA viaje, kitchenReadyAt) con tolerancia para waits cortos
+    const kitchenTolerance = getParam('kitchen_wait_tolerance_s', 180);
+    const limit = pLimit(OSRM_CONCURRENCY);
+    const withEta = await Promise.all(
+      viable.map(stop => limit(async () => {
+        const travelEta = await etaEstimator.estimate(currentPos, stop.pos, driverObj);
+        let effectiveEta = travelEta;
 
-    sequence.push(next);
-    remaining.splice(remaining.indexOf(next), 1);
-    if (next.type === 'pickup') pickedUp.add(next.orderId);
-    currentPos = next.pos;
+        if (stop.type === 'pickup' && stop.kitchenReadyAtSec) {
+          const arrivalSec = nowSec + travelEta;
+          const wait = Math.max(0, stop.kitchenReadyAtSec - arrivalSec);
+          effectiveEta = travelEta + Math.max(0, wait - kitchenTolerance);
+        }
+
+        return { stop, eta: effectiveEta, travelEta };
+      }))
+    );
+
+    const best = withEta.reduce((a, b) => a.eta < b.eta ? a : b);
+    sequence.push(best.stop);
+    remaining.splice(remaining.indexOf(best.stop), 1);
+    if (best.stop.type === 'pickup') pickedUp.add(best.stop.orderId);
+    currentPos = best.stop.pos;
   }
 
-  const slaBreaches  = [];
-  const stopsWithEta = [];
+  // Simulación de ETAs finales con OSRM
+  const slaBreaches   = [];
+  const stopsWithEta  = [];
   const simPickedUpAt = new Map();
   let pos     = driverPos;
   let timeSec = nowSec;
 
   for (const stop of sequence) {
-    const travelSec = etaEstimator.estimateSync(pos, stop.pos, driverObj);
+    const travelSec = await etaEstimator.estimate(pos, stop.pos, driverObj);
     timeSec += travelSec;
 
     if (stop.type === 'pickup') {
@@ -296,7 +315,7 @@ export async function rerouteDriver(driverId) {
       return;
     }
 
-    const { stopsWithEta, slaBreaches } = findOptimalSequence(stops, driverPos, driverObj, nowSec);
+    const { stopsWithEta, slaBreaches } = await findOptimalSequence(stops, driverPos, driverObj, nowSec);
 
     sseHub.sendToUser(driverId, 'route_update', {
       stops:      stopsWithEta,

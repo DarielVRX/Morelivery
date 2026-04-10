@@ -17,6 +17,9 @@ import { scoreCandidate } from './scoring.js';
 import { findOptimalSequence } from './reroute.js';
 import { ACTIVE_STATUSES } from '../modules/orders/assignment/constants.js';
 import { groupPickupStops } from './stop-grouper.js';
+import pLimit from 'p-limit';
+
+const OSRM_CONCURRENCY = 8; // requests OSRM simultáneos máx
 
 // ─── Carga de stops enriquecidos (reutiliza stop-grouper) ─────────────────────
 
@@ -101,8 +104,9 @@ export async function evaluateCandidates(candidates, order, restaurantPos, custo
   const maxSla = getParam('max_delivery_time_s', 1800);
   const newOrderVolume = Number(order.estimated_volume_liters) || 0;
 
+  const limit = pLimit(OSRM_CONCURRENCY);
   const evaluated = await Promise.all(
-    candidates.map(async (candidate) => {
+    candidates.map(candidate => limit(async () => {
       const driver = candidate.driver;
       const driverObj = { speed_kmh: driver.speedKmh };
       const speedMs = Math.max(1, (driver.speedKmh * 1000) / 3600);
@@ -116,19 +120,13 @@ export async function evaluateCandidates(candidates, order, restaurantPos, custo
         .reduce((sum, s) => sum + s.volumeLiters, 0);
 
       // 3. Crear stops del nuevo pedido
-      // SLA deadline corre desde created_at — el cliente espera desde que hizo el pedido
-      const orderCreatedAtSec = order.created_at
-        ? new Date(order.created_at).getTime() / 1000
-        : nowSec;
-      const newOrderSlaDeadline = orderCreatedAtSec + maxSla;
-
       const newPickupStop = {
         type: 'pickup',
         orderId: order.id,
         pairOrderId: order.id,
         pos: restaurantPos,
         pickedUpAtSec: null,
-        slaDeadlineSec: newOrderSlaDeadline,
+        slaDeadlineSec: nowSec + maxSla,
         kitchenReadyAtSec: nowSec,
         volumeLiters: newOrderVolume,
       };
@@ -139,7 +137,7 @@ export async function evaluateCandidates(candidates, order, restaurantPos, custo
         pairOrderId: order.id,
         pos: customerPos,
         pickedUpAtSec: null,
-        slaDeadlineSec: newOrderSlaDeadline,
+        slaDeadlineSec: nowSec + maxSla,
         kitchenReadyAtSec: nowSec,
         volumeLiters: newOrderVolume,
       };
@@ -148,7 +146,7 @@ export async function evaluateCandidates(candidates, order, restaurantPos, custo
       const allStops = [...existingStops, newPickupStop, newDeliveryStop];
 
       // 5. Secuencia normal (sin forzar)
-      const normalResult = findOptimalSequence(
+      const normalResult = await findOptimalSequence(
         allStops, driver.pos, driverObj, nowSec
       );
 
@@ -162,7 +160,7 @@ export async function evaluateCandidates(candidates, order, restaurantPos, custo
         let sequenceWithoutNew = [];
         
         if (stopsWithoutNew.length > 0) {
-          const resultWithoutNew = findOptimalSequence(
+          const resultWithoutNew = await findOptimalSequence(
             stopsWithoutNew, driver.pos, driverObj, nowSec
           );
           sequenceWithoutNew = resultWithoutNew.sequence;
@@ -180,7 +178,7 @@ export async function evaluateCandidates(candidates, order, restaurantPos, custo
           }
 
           if (matchedStop) {
-            const forcedResult = findOptimalSequence(
+            const forcedResult = await findOptimalSequence(
               allStops, driver.pos, driverObj, nowSec, matchedStop
             );
 
@@ -222,16 +220,10 @@ export async function evaluateCandidates(candidates, order, restaurantPos, custo
         ? Math.round((peakVolume / bagCapacityLiters) * 100)
         : 0;
 
-      // 11. Calcular bridgePenaltyS para scoreCandidate
-      let bridgePenaltyS = 0;
-      if (candidate.viableStop) {
-        const viableStopPos = candidate.viableStop.pos;
-        const distToRestaurant = haversineMeters(viableStopPos, restaurantPos);
-        bridgePenaltyS = distToRestaurant / speedMs;
-      } else {
-        const directDist = haversineMeters(driver.pos, restaurantPos);
-        bridgePenaltyS = directDist / speedMs;
-      }
+      // 11. bridgePenaltyS — usar ETA real viableStop→restaurante calculado por candidate-finder
+      // candidate.etaViableToRestaurant ya viene de OSRM — consistente con el resto del modelo
+      const bridgePenaltyS = candidate.etaViableToRestaurant
+        ?? (haversineMeters(driver.pos, restaurantPos) / speedMs); // fallback haversine si no disponible
 
       // 12. Llamar a scoreCandidate
       const simResult = {
@@ -259,7 +251,7 @@ export async function evaluateCandidates(candidates, order, restaurantPos, custo
         etaToNewCustomer,
         ...scoreParts,
       };
-    })
+    }))
   );
 
   return evaluated;

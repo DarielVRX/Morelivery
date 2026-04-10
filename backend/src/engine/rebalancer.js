@@ -6,8 +6,8 @@
 // drivers con mejor posición geográfica.
 //
 // CAMBIOS respecto a versión anterior:
-//   - Pase 2 (rebalanceo automático): usa evaluateCandidates() para evaluar
-//     receptores — consistencia con el assignment inicial.
+//   - Pase 2 (rebalanceo automático): gate de gain con etaForOrderWithDriver
+//     antes de liberar. offerNextDrivers elige receptor con scoring completo.
 //   - Pase 1 (disputas): mantiene ETA puro al restaurante — criterio de
 //     urgencia, no de optimización de ruta.
 //   - rerouteDriver() se llama tras cada transferencia exitosa (ambos pases)
@@ -16,10 +16,9 @@
 //     El filtro anti-spam queda cubierto por order_driver_offers con wait_until.
 
 import { query } from '../config/db.js';
-import { haversineMeters } from '../utils/geo.js';
 import { etaEstimator } from './eta.js';
 import { getParam } from './params.js';
-import { rerouteDriver } from './reroute.js';
+import { rerouteDriver, findOptimalSequence, loadDriverStopsForReroute } from './reroute.js';
 import { sendPushToUser } from '../modules/notifications/pushSubscription.js';
 import { sseHub } from '../modules/events/hub.js';
 import { shortId } from '../utils/geo.js';
@@ -73,46 +72,113 @@ async function loadActiveDrivers() {
   }));
 }
 
-async function loadTransferableOrders(driverId) {
+async function loadTransferableOrders(driverId, driverPos, speedKmh) {
   const cooldownSec = getParam('transfer_cooldown_s', 60);
+  const nowSec = Date.now() / 1000;
+
+  // Obtener secuencia óptima del driver desde reroute
+  const stops = await loadDriverStopsForReroute(driverId);
+  if (stops.length === 0) return [];
+
+  const driverObj = { speed_kmh: speedKmh };
+  const { sequence } = await findOptimalSequence(stops, driverPos, driverObj, nowSec);
+
+  // El tail transferible es el último pickup en la secuencia óptima
+  for (let i = sequence.length - 1; i >= 0; i--) {
+    const stop = sequence[i];
+    if (stop.type !== 'pickup') continue;
+
+    // Verificar cooldown y que no tenga oferta pendiente
+    const r = await query(
+      `SELECT o.id, o.restaurant_id,
+              o.estimated_volume_liters,
+              o.kitchen_estimated_ready,
+              o.created_at,
+              COALESCE(ru.home_lat, rest.lat) AS rest_lat,
+              COALESCE(ru.home_lng, rest.lng) AS rest_lng,
+              o.delivery_lat AS cust_lat,
+              o.delivery_lng AS cust_lng
+       FROM orders o
+       JOIN restaurants rest ON rest.id = o.restaurant_id
+       LEFT JOIN users ru ON ru.id = rest.owner_user_id
+       WHERE o.id = $1
+         AND o.status = 'assigned'
+         AND o.picked_up_at IS NULL
+         AND o.is_disputed = false
+         AND (o.last_transferred_at IS NULL
+              OR o.last_transferred_at < NOW() - ($2 * INTERVAL '1 second'))
+         AND NOT EXISTS (
+           SELECT 1 FROM order_driver_offers od
+           WHERE od.order_id = o.id AND od.status = 'pending'
+         )`,
+      [stop.orderId, cooldownSec]
+    );
+
+    if (r.rowCount === 0) continue;
+    const row = r.rows[0];
+
+    return [{
+      id:                      row.id,
+      estimated_volume_liters: Number(row.estimated_volume_liters) || 0,
+      kitchen_estimated_ready: row.kitchen_estimated_ready,
+      created_at:              row.created_at,
+      restaurantPos:           { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
+      customerPos:             { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
+    }];
+  }
+
+  return [];
+}
+
+/**
+ * ETA del pedido específico con un driver en prod.
+ * Para el origen: ETA acumulado de su ruta hasta entregar ese pedido.
+ * Para el receptor: ETA directo desde su posición al restaurante + cliente.
+ */
+async function etaForOrderWithDriver(order, driver) {
+  const driverObj = { speed_kmh: driver.speedKmh };
+
+  if (driver.activeOrders === 0 || !driver.orderIds?.length) {
+    // Driver idle: ETA directo
+    const toRestaurant = await etaEstimator.estimate(driver.pos, order.restaurantPos, driverObj);
+    const toCustomer   = await etaEstimator.estimate(order.restaurantPos, order.customerPos, driverObj);
+    return toRestaurant + toCustomer;
+  }
+
+  // Driver con pedidos: acumular ETA de su ruta hasta llegar al pedido objetivo
   const r = await query(
-    `SELECT o.id, o.restaurant_id,
-            o.estimated_volume_liters,
-            o.kitchen_estimated_ready,
-            o.created_at,
+    `SELECT o.id, o.status, o.picked_up_at,
             COALESCE(ru.home_lat, rest.lat) AS rest_lat,
             COALESCE(ru.home_lng, rest.lng) AS rest_lng,
-            o.delivery_lat    AS cust_lat,
-            o.delivery_lng    AS cust_lng,
-            o.last_transferred_at
+            o.delivery_lat AS cust_lat,
+            o.delivery_lng AS cust_lng
      FROM orders o
      JOIN restaurants rest ON rest.id = o.restaurant_id
      LEFT JOIN users ru ON ru.id = rest.owner_user_id
-     WHERE o.driver_id = $1
-       AND o.status = 'assigned'
-       AND o.picked_up_at IS NULL
-       AND o.is_disputed = false
-       AND (o.last_transferred_at IS NULL
-            OR o.last_transferred_at < NOW() - ($2 * INTERVAL '1 second'))
-       -- FIX anti-spam: excluir pedidos que ya tienen oferta pending a otro driver
-       AND NOT EXISTS (
-         SELECT 1 FROM order_driver_offers od
-         WHERE od.order_id = o.id
-           AND od.status = 'pending'
-       )
-     ORDER BY o.accepted_at DESC
-     LIMIT 1`,
-    [driverId, cooldownSec]
+     WHERE o.id = ANY($1::uuid[])`,
+    [driver.orderIds]
   );
 
-  return r.rows.map(row => ({
-    id:                     row.id,
-    estimated_volume_liters: Number(row.estimated_volume_liters) || 0,
-    kitchen_estimated_ready: row.kitchen_estimated_ready,
-    created_at:             row.created_at,
-    restaurantPos:          { lat: Number(row.rest_lat), lng: Number(row.rest_lng) },
-    customerPos:            { lat: Number(row.cust_lat), lng: Number(row.cust_lng) },
-  }));
+  const nowSec = Date.now() / 1000;
+  const stops = [];
+  for (const row of r.rows) {
+    if (row.status !== 'on_the_way' && row.rest_lat)
+      stops.push({ id: row.id, type: 'pickup', pos: { lat: Number(row.rest_lat), lng: Number(row.rest_lng) } });
+    if (row.cust_lat)
+      stops.push({ id: row.id, type: 'delivery', pos: { lat: Number(row.cust_lat), lng: Number(row.cust_lng) } });
+  }
+  // Añadir stops del pedido objetivo al final
+  stops.push({ id: order.id, type: 'pickup',   pos: order.restaurantPos });
+  stops.push({ id: order.id, type: 'delivery', pos: order.customerPos   });
+
+  let pos = { ...driver.pos };
+  let eta = 0;
+  for (const stop of stops) {
+    eta += await etaEstimator.estimate(pos, stop.pos, driverObj);
+    pos = stop.pos;
+    if (stop.id === order.id && stop.type === 'delivery') break;
+  }
+  return eta;
 }
 
 async function estimateRouteEta(driver) {
@@ -264,7 +330,7 @@ export async function runRebalancer(onOffer) {
         drivers.map(async d => ({
           driver:             d,
           routeEta:           await estimateRouteEta(d),
-          transferableOrders: await loadTransferableOrders(d.id),
+          transferableOrders: await loadTransferableOrders(d.id, d.pos, d.speedKmh),
         }))
       );
 
@@ -288,20 +354,38 @@ export async function runRebalancer(onOffer) {
           );
           if (stillTransferable.rowCount === 0) continue;
 
-          // FIX: marcar last_transferred_at para cooldown y dejar que
-          // offerNextDrivers elija al mejor receptor con su propio scoring.
-          // El filtro anti-spam en order_driver_offers evita re-ofertar
-          // a drivers que ya rechazaron este pedido.
+          // Gate de gain: verificar que existe al menos un driver que puede
+          // entregar este pedido significativamente más rápido que el origen
+          const etaWithOrigin = await etaForOrderWithDriver(order, sourceDriver);
+          const potentialRecipients = drivers.filter(d =>
+            d.id !== sourceDriver.id && d.activeOrders < maxActive
+          );
+
+          let hasViableRecipient = false;
+          for (const recipient of potentialRecipients) {
+            const etaWithRecipient = await etaForOrderWithDriver(order, recipient);
+            if (!Number.isFinite(etaWithRecipient)) continue;
+            const gain = etaWithOrigin - etaWithRecipient;
+            if (gain >= minGainSec) {
+              hasViableRecipient = true;
+              break;
+            }
+          }
+
+          if (!hasViableRecipient) {
+            console.log(`[rebalancer] order=${shortId(order.id)} — sin receptor con gain suficiente, skip`);
+            continue;
+          }
+
+          // Liberar y re-ofertar — offerNextDrivers elige al mejor receptor
           await query(
-            `UPDATE orders
-             SET last_transferred_at=NOW(), updated_at=NOW()
-             WHERE id=$1`,
+            `UPDATE orders SET last_transferred_at=NOW(), updated_at=NOW() WHERE id=$1`,
             [order.id]
           );
 
           console.log(
             `[rebalancer] order=${shortId(order.id)} ` +
-            `liberada de ${shortId(sourceDriver.id)} para re-oferta`
+            `liberada de ${shortId(sourceDriver.id)} para re-oferta (etaOrigen=${Math.round(etaWithOrigin)}s)`
           );
 
           sseHub.sendToUser(sourceDriver.id, 'order_transferred_away', {
@@ -309,11 +393,8 @@ export async function runRebalancer(onOffer) {
             message: 'Un pedido fue liberado para reasignación.',
           });
 
-          // Usar serializedOffer — hereda filtro de rechazos, scoring completo
-          // y requiere aceptación manual del driver receptor
           serializedOffer(order.id, offerNextDrivers, onOffer);
 
-          // Actualizar estado local para siguiente iteración
           sourceDriver.orderIds     = sourceDriver.orderIds.filter(id => id !== order.id);
           sourceDriver.activeOrders = Math.max(0, sourceDriver.activeOrders - 1);
 
