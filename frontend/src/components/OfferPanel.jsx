@@ -53,6 +53,7 @@ export default function OfferPanel({
     if (rLat && cLat) {
       onRequestOfferRoute?.(offer);
     }
+    console.log('[OfferPanel] offer raw:', offer);
   }, [offer?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!offer) return null;
@@ -62,6 +63,7 @@ export default function OfferPanel({
   const showBagWarn   = bagOverflow > 100;
   const restaurantConfirmed = offer.restaurantConfirmed !== false;
   const isRight = handMode === 'right';
+  console.log('[OfferPanel] offer keys:', offer ? Object.keys(offer) : null)
 
   return (
     <>
