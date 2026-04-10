@@ -294,6 +294,12 @@ export function useDriverHomeRuntime({
   // Toggle basado en ref para evitar closure stale — offerRouteGeometryRef
   // siempre refleja el valor actual sin necesitar offerRouteGeometry en deps.
   const openOfferRoutePreview = useCallback(async (offer) => {
+    console.log('[offerRoute] enter', {
+      refHasGeom: Boolean(offerRouteGeometryRef.current?.length),
+                routeStops: offer?.routeStops?.length ?? 'none',
+                rLat: offer?.restaurantLat ?? offer?.restaurant_lat,
+                cLat: offer?.customerLat ?? offer?.customer_lat,
+    });
     // Toggle — leer ref (siempre fresco, no stale)
     if (offerRouteGeometryRef.current?.length) {
       offerRouteGeometryRef.current = null;
