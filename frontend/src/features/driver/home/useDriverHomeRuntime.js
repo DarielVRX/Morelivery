@@ -62,6 +62,8 @@ export function useDriverHomeRuntime({
   const [offerRouteGeometry, setOfferRouteGeometry] = useState(null);
   const [offerRouteLoading,  setOfferRouteLoading]  = useState(false);
   const [showFullOfferRoute, setShowFullOfferRoute]  = useState(false);
+  const [offerMarkers,       setOfferMarkers]        = useState(null); // { restaurant: {lat,lng}, customer: {lat,lng} }
+  const offerRouteGeometryRef = useRef(null); // ref para toggle — evita closure stale
 
   // Rerouting
   const lastRerouteRef   = useRef(0);
@@ -289,11 +291,29 @@ export function useDriverHomeRuntime({
   }, [routeActive, openRoadRouteApi]);
 
   // ── Preview de ruta de oferta ─────────────────────────────────────────────
+  // Toggle basado en ref para evitar closure stale — offerRouteGeometryRef
+  // siempre refleja el valor actual sin necesitar offerRouteGeometry en deps.
   const openOfferRoutePreview = useCallback(async (offer) => {
-    // Toggle — si ya hay geometría de oferta, limpiar
-    if (offerRouteGeometry?.length) {
+    // Toggle — leer ref (siempre fresco, no stale)
+    if (offerRouteGeometryRef.current?.length) {
+      offerRouteGeometryRef.current = null;
       setOfferRouteGeometry(null);
+      setOfferMarkers(null);
       return;
+    }
+
+    // Extraer coordenadas de restaurante y cliente para markers
+    const rLat = offer?.restaurantLat ?? offer?.restaurant_lat;
+    const rLng = offer?.restaurantLng ?? offer?.restaurant_lng;
+    const cLat = offer?.customerLat   ?? offer?.customer_lat;
+    const cLng = offer?.customerLng   ?? offer?.customer_lng;
+
+    // Setear markers inmediatamente — no esperar a la geometría
+    if (rLat && cLat) {
+      setOfferMarkers({
+        restaurant: { lat: Number(rLat), lng: Number(rLng) },
+        customer:   { lat: Number(cLat), lng: Number(cLng) },
+      });
     }
 
     // Usar routeStops del engine si están disponibles — no calcular en cliente
@@ -315,9 +335,11 @@ export function useDriverHomeRuntime({
           const results = await Promise.all(fetches);
           const combined = results.flatMap(d => d?.geometry || []);
           if (combined.length) {
+            offerRouteGeometryRef.current = combined;
             setOfferRouteGeometry(combined);
           }
         } catch (_) {
+          offerRouteGeometryRef.current = null;
           setOfferRouteGeometry(null);
         } finally {
           setOfferRouteLoading(false);
@@ -327,15 +349,12 @@ export function useDriverHomeRuntime({
     }
 
     // Fallback: calcular desde coordenadas del offer
-    const rLat = offer?.restaurantLat ?? offer?.restaurant_lat;
-    const rLng = offer?.restaurantLng ?? offer?.restaurant_lng;
-    const cLat = offer?.customerLat   ?? offer?.customer_lat;
-    const cLng = offer?.customerLng   ?? offer?.customer_lng;
     if (!rLat || !cLat) return;
 
     const key = getOfferRouteCacheKey(offer);
     const cached = offerRouteCache.get(key);
     if (cached && Date.now() - cached.ts < OFFER_ROUTE_CACHE_MS) {
+      offerRouteGeometryRef.current = cached.geometry;
       setOfferRouteGeometry(cached.geometry);
       return;
     }
@@ -347,16 +366,19 @@ export function useDriverHomeRuntime({
       const data = await fetchRouteModel({ origin: pickup, pickup: undefined, delivery, token });
       if (data?.geometry?.length) {
         offerRouteCache.set(key, { geometry: data.geometry, ts: Date.now() });
+        offerRouteGeometryRef.current = data.geometry;
         setOfferRouteGeometry(data.geometry);
       } else {
+        offerRouteGeometryRef.current = null;
         setOfferRouteGeometry(null);
       }
     } catch (_) {
+      offerRouteGeometryRef.current = null;
       setOfferRouteGeometry(null);
     } finally {
       setOfferRouteLoading(false);
     }
-  }, [offerRouteGeometry, myPosition, token]);
+  }, [myPosition, token]); // offerRouteGeometry eliminado de deps — se usa ref
 
   const openFullOfferRoute = useCallback(async (offer) => {
     if (!offer?.restaurantLat) return;
@@ -370,7 +392,9 @@ export function useDriverHomeRuntime({
 
   // Llamar cuando se acepta/rechaza/expira la oferta para restaurar ruta activa
   const clearOfferRoute = useCallback(() => {
+    offerRouteGeometryRef.current = null;
     setOfferRouteGeometry(null);
+    setOfferMarkers(null);
     setShowFullOfferRoute(false);
   }, []);
 
@@ -601,6 +625,7 @@ export function useDriverHomeRuntime({
     handlePreferenceConfirm,
     offerRouteGeometry,
     offerRouteLoading,
+    offerMarkers,
     showFullOfferRoute,
     openOfferRoutePreview,
     openFullOfferRoute,

@@ -30,6 +30,7 @@
 //   - Score final basado 100% en simulación — se eliminó el scoreCandidate() redundante
 //     en este archivo (ya lo llama route-simulator.js internamente).
 //   - REEMPLAZADO: simulateDriverWithOrder por evaluateCandidates (candidate-evaluator.js)
+//   - no_driver: eliminado de core.js — responsabilidad exclusiva de driver_search_escalation
 
 import { log, logWarn } from './constants.js';
 import { getParam } from '../../../engine/params.js';
@@ -47,10 +48,10 @@ import { serializedOffer, hasActiveChain } from './queue.js';
 import { sseHub } from '../../events/hub.js';
 import { sendPushToUser } from '../../notifications/pushSubscription.js';
 
-// ─── Helper: notificar a restaurante y cliente sobre estado de búsqueda ───────
+// ─── Helper: notificar offer_sent en tiempo real ──────────────────────────────
+// no_driver es responsabilidad exclusiva de driver_search_escalation (tiene cooldown)
 async function notifyDriverSearch(orderId, type) {
   try {
-    console.log(`[driver_search] notifying order=${orderId.slice(0,8)} type=${type}`);
     const result = await query(
       `SELECT rest.owner_user_id, o.customer_id
        FROM orders o
@@ -58,32 +59,11 @@ async function notifyDriverSearch(orderId, type) {
        WHERE o.id = $1`,
       [orderId]
     );
-    if (result.rowCount === 0) {
-      console.log(`[driver_search] order=${orderId.slice(0,8)} not found`);
-      return;
-    }
+    if (result.rowCount === 0) return;
     const { owner_user_id, customer_id } = result.rows[0];
-    console.log(`[driver_search] sending SSE to restaurant=${owner_user_id.slice(0,8)} customer=${customer_id.slice(0,8)}`);
     const payload = { orderId, type };
     sseHub.sendToUser(owner_user_id, 'driver_search_update', payload);
     sseHub.sendToUser(customer_id,   'driver_search_update', payload);
-
-    if (type === 'no_driver') {
-      sendPushToUser(customer_id, {
-        title: 'Buscando repartidor',
-        body:  'Aún no encontramos un repartidor. ¿Deseas seguir esperando?',
-        tag:   `no_driver_${orderId}`,
-        group: 'customer',
-        priority: 'high',
-        url:   '/customer',
-        pushType: 'no_driver',
-        orderId,
-        actions: [
-          { action: 'keep_waiting', title: '⏳ Seguir esperando' },
-          { action: 'cancel_order', title: '✕ Cancelar pedido'  },
-        ],
-      }).catch(() => {});
-    }
   } catch (e) {
     console.error(`[driver_search] error order=${orderId.slice(0,8)}:`, e.message);
   }
@@ -102,19 +82,14 @@ async function notifySlaDelay(orderId, delaySeconds) {
     if (result.rowCount === 0) return;
     const { owner_user_id, customer_id } = result.rows[0];
 
-    const delayMins  = Math.ceil(delaySeconds / 60);
+    const delayMins = Math.ceil(delaySeconds / 60);
     const slaWarningThreshold = getParam('sla_delay_warning_threshold_s', 900);
 
     sseHub.sendToUser(owner_user_id, 'driver_search_update', {
-      orderId,
-      type:    'sla_delay_negotiation',
-      delaySec: Math.round(delaySeconds),
+      orderId, type: 'sla_delay_negotiation', delaySec: Math.round(delaySeconds),
     });
-
     sseHub.sendToUser(customer_id, 'driver_search_update', {
-      orderId,
-      type:    'sla_delay_negotiation',
-      delaySec: Math.round(delaySeconds),
+      orderId, type: 'sla_delay_negotiation', delaySec: Math.round(delaySeconds),
     });
 
     await sendPushToUser(customer_id, {
@@ -170,19 +145,16 @@ function _getRetryPriority(order, nowSec) {
   const createdAt = order.created_at
     ? new Date(order.created_at).getTime() / 1000
     : nowSec;
-  const age       = Math.max(0, nowSec - createdAt);
-
-  const maxSla    = getParam('max_delivery_time_s', 1800);
-  const elapsed   = age;
-  const urgency   = Math.max(0, elapsed - maxSla);
-
+  const age     = Math.max(0, nowSec - createdAt);
+  const maxSla  = getParam('max_delivery_time_s', 1800);
+  const urgency = Math.max(0, age - maxSla);
   return age + urgency * 2;
 }
 
 export async function triggerPendingAssignments(onOffer) {
   try {
-    const nowSec  = Date.now() / 1000;
-    const queued  = await getQueuedOrders();
+    const nowSec = Date.now() / 1000;
+    const queued = await getQueuedOrders();
 
     const sorted = queued
       .filter(o => o.has_candidates && !hasActiveChain(o.id))
@@ -263,14 +235,12 @@ export async function offerNextDrivers(orderId, onOffer) {
     if (!reduced) {
       logWarn(`order=${orderId}`, 'sin cooldown que reducir → pending_driver');
       await markPendingDriver(orderId);
-      notifyDriverSearch(orderId, 'no_driver');
       return 0;
     }
 
     if (reduced.newWaitSecs >= 1) {
       log(`order=${orderId}`, `cooldown reducido a ${Math.round(reduced.newWaitSecs)}s → pending_driver`);
       await markPendingDriver(orderId);
-      notifyDriverSearch(orderId, 'no_driver');
       return 0;
     }
 
@@ -281,7 +251,6 @@ export async function offerNextDrivers(orderId, onOffer) {
     if (immediateEligible.length === 0) {
       log(`order=${orderId}`, 'sin candidatos tras reducción inmediata → pending_driver');
       await markPendingDriver(orderId);
-      notifyDriverSearch(orderId, 'no_driver');
       return 0;
     }
 
@@ -320,7 +289,6 @@ export async function offerNextDrivers(orderId, onOffer) {
         if (_simulationBudget <= 0) {
           log(`order=${orderId}`, 'budget de simulaciones agotado — reencolar para próximo ciclo');
           await markPendingDriver(orderId);
-          notifyDriverSearch(orderId, 'no_driver');
           return 0;
         }
 
@@ -359,7 +327,6 @@ export async function offerNextDrivers(orderId, onOffer) {
               })),
             });
             await markPendingDriver(orderId);
-            notifyDriverSearch(orderId, 'no_driver');
             return 0;
           }
 
@@ -442,7 +409,6 @@ export async function offerNextDrivers(orderId, onOffer) {
   if (sent === 0) {
     log(`order=${orderId}`, 'batch completo en pending — pending_driver');
     await markPendingDriver(orderId);
-    notifyDriverSearch(orderId, 'no_driver');
   } else {
     if (orderRow.offer_cooldown_triggered) {
       await setCooldownTriggered(orderId, false);

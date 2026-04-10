@@ -139,7 +139,7 @@ async function _processOrder(order, nowSec) {
 }
 
 async function _sendNoDriverPush(order, { title, body, priority, actions }) {
-  sseHub.sendToUser(order.customer_id,      'driver_search_update', { orderId: order.id, type: 'no_driver' });
+  sseHub.sendToUser(order.customer_id,         'driver_search_update', { orderId: order.id, type: 'no_driver' });
   sseHub.sendToUser(order.restaurant_owner_id, 'driver_search_update', { orderId: order.id, type: 'no_driver' });
 
   await sendPushToUser(order.customer_id, {
@@ -152,6 +152,17 @@ async function _sendNoDriverPush(order, { title, body, priority, actions }) {
     pushType: 'no_driver',
     orderId:  order.id,
     actions,
+  }).catch(() => {});
+
+  await sendPushToUser(order.restaurant_owner_id, {
+    title,
+    body,
+    tag:      `no_driver_rest_${order.id}`,
+    group:    'restaurant',
+    priority,
+    url:      '/restaurant',
+    pushType: 'no_driver',
+    orderId:  order.id,
   }).catch(() => {});
 
   await query(
