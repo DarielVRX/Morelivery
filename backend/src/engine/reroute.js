@@ -43,7 +43,7 @@ import { groupPickupStops } from './stop-grouper.js';
  * @property {number}  kitchenReadyAtSec — epoch segundos en que estará listo (pickups)
  * @property {number}  volumeLiters
  */
-async function loadDriverStopsForReroute(driverId) {
+export async function loadDriverStopsForReroute(driverId) {
   const nowSec    = Date.now() / 1000;
   const maxSlaSec = getParam('max_delivery_time_s', 1800);
 
