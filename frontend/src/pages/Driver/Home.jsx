@@ -221,10 +221,11 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         offer={order.pendingOffer}
         minimized={order.offerMinimized}
         loading={order.loadingOffer}
-        onAccept={() => order.acceptOffer(setMsg)}
-        onReject={() => order.rejectOffer(setMsg)}
+        onAccept={() => { home.clearOfferRoute(); order.acceptOffer(setMsg); }}
+        onReject={() => { home.clearOfferRoute(); order.rejectOffer(setMsg); }}
         onToggleMinimize={() => order.setOfferMinimized((v) => !v)}
         onExpired={() => {
+          home.clearOfferRoute();
           const warning = order.handleOfferExpired();
           if (warning) setMsg(warning);
         }}

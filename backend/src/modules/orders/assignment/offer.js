@@ -4,7 +4,7 @@ import { query } from '../../../config/db.js';
 import { log, logWarn } from './constants.js';
 import { upsertPendingOffer, driverHasPendingOffer, getOfferPayload } from './queries.js';
 
-export async function upsertOffer(orderId, driverId, onOffer, bagOverflowPct = 0) {
+export async function upsertOffer(orderId, driverId, onOffer, bagOverflowPct = 0, routeStops = null) {
   // Advisory lock por driver (sesión) — evita race condition entre pedidos
   // incluso con llamadas concurrentes y latencia de red.
   const lockKey = Buffer.from(driverId.replace(/-/g, '')).readBigUInt64BE(0);
@@ -62,6 +62,7 @@ export async function upsertOffer(orderId, driverId, onOffer, bagOverflowPct = 0
         paymentMethod:     row.payment_method,
         secondsLeft:       row.seconds_left,
         bagOverflowPct:    row.bag_overflow_pct ?? 0,
+        routeStops:        routeStops ?? null, // secuencia óptima para preview en oferta
       });
       log(`order=${orderId}`, `SSE disparado driver=${driverId} secs=${row.seconds_left}`);
     } catch (e) {

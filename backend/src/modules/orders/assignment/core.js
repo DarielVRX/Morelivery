@@ -433,7 +433,8 @@ export async function offerNextDrivers(orderId, onOffer) {
       continue;
     }
 
-    const ok = await upsertOffer(orderId, row.user_id, onOffer, row.bagOverflowPct ?? 0);
+    const routeStops = scoreMap.get(row.user_id)?.stopsWithEta ?? null;
+    const ok = await upsertOffer(orderId, row.user_id, onOffer, row.bagOverflowPct ?? 0, routeStops);
     if (ok) sent++;
   }
 

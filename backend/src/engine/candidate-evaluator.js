@@ -249,6 +249,7 @@ export async function evaluateCandidates(candidates, order, restaurantPos, custo
         newOrderDelay: delay,
         bagOverflowPct,
         etaToNewCustomer,
+        stopsWithEta: bestStopsWithEta, // secuencia óptima para preview de ruta en oferta
         ...scoreParts,
       };
     }));

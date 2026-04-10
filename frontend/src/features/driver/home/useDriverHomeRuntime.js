@@ -290,56 +290,73 @@ export function useDriverHomeRuntime({
 
   // ── Preview de ruta de oferta ─────────────────────────────────────────────
   const openOfferRoutePreview = useCallback(async (offer) => {
+    // Toggle — si ya hay geometría de oferta, limpiar
+    if (offerRouteGeometry?.length) {
+      setOfferRouteGeometry(null);
+      return;
+    }
+
+    // Usar routeStops del engine si están disponibles — no calcular en cliente
+    const routeStops = offer?.routeStops;
+    if (Array.isArray(routeStops) && routeStops.length > 0) {
+      const waypoints = routeStops
+        .filter(s => s.pos && Number.isFinite(s.pos.lat) && Number.isFinite(s.pos.lng))
+        .map(s => ({ lat: s.pos.lat, lng: s.pos.lng }));
+
+      if (waypoints.length > 0) {
+        setOfferRouteLoading(true);
+        try {
+          const origin = myPosition ?? waypoints[0];
+          const segments = [origin, ...waypoints];
+          const fetches = [];
+          for (let i = 0; i < segments.length - 1; i++) {
+            fetches.push(fetchRouteModel({ origin: segments[i], pickup: undefined, delivery: segments[i + 1], token }));
+          }
+          const results = await Promise.all(fetches);
+          const combined = results.flatMap(d => d?.geometry || []);
+          if (combined.length) {
+            setOfferRouteGeometry(combined);
+          }
+        } catch (_) {
+          setOfferRouteGeometry(null);
+        } finally {
+          setOfferRouteLoading(false);
+        }
+        return;
+      }
+    }
+
+    // Fallback: calcular desde coordenadas del offer
     const rLat = offer?.restaurantLat ?? offer?.restaurant_lat;
     const rLng = offer?.restaurantLng ?? offer?.restaurant_lng;
     const cLat = offer?.customerLat   ?? offer?.customer_lat;
     const cLng = offer?.customerLng   ?? offer?.customer_lng;
-
-    console.log('[offerRoute] openOfferRoutePreview llamado', {
-      offerId: offer?.id ?? offer?.orderId,
-      rLat, rLng, cLat, cLng,
-      token: token ? 'ok' : 'MISSING',
-    });
-
-    if (!rLat || !cLat) {
-      console.warn('[offerRoute] coordenadas incompletas — abort');
-      return;
-    }
+    if (!rLat || !cLat) return;
 
     const key = getOfferRouteCacheKey(offer);
     const cached = offerRouteCache.get(key);
     if (cached && Date.now() - cached.ts < OFFER_ROUTE_CACHE_MS) {
-      console.log('[offerRoute] cache hit — geometry points:', cached.geometry?.length);
       setOfferRouteGeometry(cached.geometry);
       return;
     }
 
-    console.log('[offerRoute] fetching route...');
     setOfferRouteLoading(true);
     try {
       const pickup   = { lat: Number(rLat), lng: Number(rLng) };
       const delivery = { lat: Number(cLat), lng: Number(cLng) };
       const data = await fetchRouteModel({ origin: pickup, pickup: undefined, delivery, token });
-      console.log('[offerRoute] fetchRouteModel result:', {
-        hasGeometry: Boolean(data?.geometry?.length),
-        points: data?.geometry?.length,
-        keys: data ? Object.keys(data) : null,
-      });
       if (data?.geometry?.length) {
         offerRouteCache.set(key, { geometry: data.geometry, ts: Date.now() });
         setOfferRouteGeometry(data.geometry);
-        console.log('[offerRoute] geometry seteada OK');
       } else {
-        console.warn('[offerRoute] geometry vacía o ausente');
         setOfferRouteGeometry(null);
       }
-    } catch (err) {
-      console.error('[offerRoute] error:', err.message);
+    } catch (_) {
       setOfferRouteGeometry(null);
     } finally {
       setOfferRouteLoading(false);
     }
-  }, [token]);
+  }, [offerRouteGeometry, myPosition, token]);
 
   const openFullOfferRoute = useCallback(async (offer) => {
     if (!offer?.restaurantLat) return;
@@ -347,6 +364,12 @@ export function useDriverHomeRuntime({
   }, []);
 
   const closeOfferPreview = useCallback(() => {
+    setOfferRouteGeometry(null);
+    setShowFullOfferRoute(false);
+  }, []);
+
+  // Llamar cuando se acepta/rechaza/expira la oferta para restaurar ruta activa
+  const clearOfferRoute = useCallback(() => {
     setOfferRouteGeometry(null);
     setShowFullOfferRoute(false);
   }, []);
@@ -552,14 +575,6 @@ export function useDriverHomeRuntime({
 
   }, [myPosition?.lat, myPosition?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Diagnóstico temporal — eliminar tras resolver offerRoute
-  console.log('[useDriverHomeRuntime] return state:', {
-    offerRouteGeometry: offerRouteGeometry?.length ?? null,
-    offerRouteLoading,
-    showFullOfferRoute,
-    hasToken: Boolean(token),
-  });
-
   return {
     counters,
     customPin, setCustomPin,
@@ -590,6 +605,7 @@ export function useDriverHomeRuntime({
     openOfferRoutePreview,
     openFullOfferRoute,
     closeOfferPreview,
+    clearOfferRoute,
     distToNextStop,
   };
 }
