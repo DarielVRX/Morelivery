@@ -552,6 +552,14 @@ export function useDriverHomeRuntime({
 
   }, [myPosition?.lat, myPosition?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Diagnóstico temporal — eliminar tras resolver offerRoute
+  console.log('[useDriverHomeRuntime] return state:', {
+    offerRouteGeometry: offerRouteGeometry?.length ?? null,
+    offerRouteLoading,
+    showFullOfferRoute,
+    hasToken: Boolean(token),
+  });
+
   return {
     counters,
     customPin, setCustomPin,

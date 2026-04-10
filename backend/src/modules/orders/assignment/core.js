@@ -289,6 +289,7 @@ export async function offerNextDrivers(orderId, onOffer) {
   }
 
   let scoredEligible = eligible.map(d => ({ ...d, bagOverflowPct: 0 }));
+  let slaDelayCandidate = null; // declarar en scope externo — se usa después del try/catch
 
   try {
     const coordsRow = await query(
@@ -374,7 +375,6 @@ export async function offerNextDrivers(orderId, onOffer) {
           const scoreMap = new Map(scored.map(s => [s.driverId, s]));
 
           const allInvalid = scored.length > 0 && scored.every(s => !s.valid);
-          let slaDelayCandidate = null;
           if (allInvalid) {
             const best = scored.reduce((a, b) =>
               (a.totalCost ?? Infinity) <= (b.totalCost ?? Infinity) ? a : b
