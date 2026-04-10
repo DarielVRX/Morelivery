@@ -366,8 +366,8 @@ export async function getOfferPayload(orderId, driverId) {
     o.payment_method,
     r.name    AS restaurant_name,
     COALESCE(ru.address, r.address) AS restaurant_address,
-                        COALESCE(ru.home_lat, ru.lat, r.lat) AS restaurant_lat,
-                        COALESCE(ru.home_lng, ru.lng, r.lng) AS restaurant_lng,
+                        o.restaurant_lat,
+                        o.restaurant_lng,
                         -- Usar dirección fresca del cliente (puede haberse actualizado desde que se creó el pedido)
                         COALESCE(o.delivery_address, c.address) AS customer_address,
                         COALESCE(o.delivery_lat, c.lat) AS customer_lat,
