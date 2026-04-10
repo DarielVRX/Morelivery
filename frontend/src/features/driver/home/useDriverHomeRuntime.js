@@ -294,25 +294,47 @@ export function useDriverHomeRuntime({
     const rLng = offer?.restaurantLng ?? offer?.restaurant_lng;
     const cLat = offer?.customerLat   ?? offer?.customer_lat;
     const cLng = offer?.customerLng   ?? offer?.customer_lng;
-    if (!rLat || !cLat) return;
+
+    console.log('[offerRoute] openOfferRoutePreview llamado', {
+      offerId: offer?.id ?? offer?.orderId,
+      rLat, rLng, cLat, cLng,
+      token: token ? 'ok' : 'MISSING',
+    });
+
+    if (!rLat || !cLat) {
+      console.warn('[offerRoute] coordenadas incompletas — abort');
+      return;
+    }
 
     const key = getOfferRouteCacheKey(offer);
     const cached = offerRouteCache.get(key);
     if (cached && Date.now() - cached.ts < OFFER_ROUTE_CACHE_MS) {
+      console.log('[offerRoute] cache hit — geometry points:', cached.geometry?.length);
       setOfferRouteGeometry(cached.geometry);
       return;
     }
 
+    console.log('[offerRoute] fetching route...');
     setOfferRouteLoading(true);
     try {
       const pickup   = { lat: Number(rLat), lng: Number(rLng) };
       const delivery = { lat: Number(cLat), lng: Number(cLng) };
       const data = await fetchRouteModel({ origin: pickup, pickup: undefined, delivery, token });
+      console.log('[offerRoute] fetchRouteModel result:', {
+        hasGeometry: Boolean(data?.geometry?.length),
+        points: data?.geometry?.length,
+        keys: data ? Object.keys(data) : null,
+      });
       if (data?.geometry?.length) {
         offerRouteCache.set(key, { geometry: data.geometry, ts: Date.now() });
         setOfferRouteGeometry(data.geometry);
+        console.log('[offerRoute] geometry seteada OK');
+      } else {
+        console.warn('[offerRoute] geometry vacía o ausente');
+        setOfferRouteGeometry(null);
       }
-    } catch (_) {
+    } catch (err) {
+      console.error('[offerRoute] error:', err.message);
       setOfferRouteGeometry(null);
     } finally {
       setOfferRouteLoading(false);

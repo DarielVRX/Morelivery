@@ -45,6 +45,11 @@ export default function OfferPanel({
   useEffect(() => {
     const rLat = offer?.restaurantLat ?? offer?.restaurant_lat;
     const cLat = offer?.customerLat   ?? offer?.customer_lat;
+    console.log('[OfferPanel] useEffect offer.id cambió', {
+      offerId: offer?.id ?? offer?.orderId,
+      rLat, cLat,
+      hasCallback: Boolean(onRequestOfferRoute),
+    });
     if (rLat && cLat) {
       onRequestOfferRoute?.(offer);
     }
@@ -179,7 +184,10 @@ export default function OfferPanel({
                     border:'1.5px solid #3b82f6',
                     cursor:'pointer',
                     display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2 }}
-                  onClick={() => onRequestOfferRoute?.(offer)}>
+                  onClick={() => {
+                    console.log('[OfferPanel] botón Ver ruta clicked', { offerId: offer?.id, hasCallback: Boolean(onRequestOfferRoute) });
+                    onRequestOfferRoute?.(offer);
+                  }}>
                   {offerRouteLoading
                     ? <span style={{ fontSize:'0.65rem' }}>Cargando…</span>
                     : <>

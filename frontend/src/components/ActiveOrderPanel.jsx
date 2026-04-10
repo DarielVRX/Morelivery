@@ -45,6 +45,84 @@ function IconCash() {
 function IconPhone() {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.55 12 19.79 19.79 0 01.48 3.38 2 2 0 012.46 1h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 8.73A16 16 0 0015.27 17l1.8-1.8a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>;
 }
+// ── Helper: agrupar stops por posición física (mismo restaurante/cliente) ────
+function buildStopGroups(routeStopsOverride, activeOrders) {
+  if (!Array.isArray(routeStopsOverride) || !routeStopsOverride.length) return null;
+  const orderMap = {};
+  for (const o of (activeOrders || [])) orderMap[o.id] = o;
+
+  const groups = [];
+  let i = 0;
+  while (i < routeStopsOverride.length) {
+    const stop = routeStopsOverride[i];
+    const group = { type: stop.type, pos: stop.pos, stops: [stop] };
+    // Agrupar stops consecutivos con misma pos y mismo tipo
+    let j = i + 1;
+    while (j < routeStopsOverride.length) {
+      const next = routeStopsOverride[j];
+      if (next.type === stop.type &&
+          next.pos?.lat === stop.pos?.lat &&
+          next.pos?.lng === stop.pos?.lng) {
+        group.stops.push(next);
+        j++;
+      } else break;
+    }
+    // Enriquecer con datos de pedido
+    group.orders = group.stops
+      .map(s => orderMap[s.orderId])
+      .filter(Boolean);
+    groups.push(group);
+    i = j;
+  }
+  return groups.length > 0 ? groups : null;
+}
+
+// ── Helpers para agrupar stops ───────────────────────────────────────────────
+function buildStopGroups(activeOrders, routeStopsOverride) {
+  const orderMap = {};
+  for (const o of (activeOrders || [])) orderMap[o.id] = o;
+
+  if (Array.isArray(routeStopsOverride) && routeStopsOverride.length > 0) {
+    const groups = [];
+    for (const stop of routeStopsOverride) {
+      const orderIds = stop.orderIds ?? (stop.orderId ? [stop.orderId] : []);
+      const orders = orderIds.map(id => orderMap[id]).filter(Boolean);
+      if (!orders.length) continue;
+      const prev = groups[groups.length - 1];
+      if (prev && prev.type === stop.type &&
+          stop.pos?.lat === prev.pos?.lat && stop.pos?.lng === prev.pos?.lng) {
+        prev.orders.push(...orders.filter(o => !prev.orders.find(p => p.id === o.id)));
+      } else {
+        groups.push({ type: stop.type, pos: stop.pos, orders, key: `${stop.type}-${stop.pos?.lat}-${stop.pos?.lng}` });
+      }
+    }
+    return groups;
+  }
+
+  const sorted = [...(activeOrders || [])]
+    .filter(o => !['delivered', 'cancelled'].includes(o.status))
+    .sort((a, b) => new Date(a.accepted_at || a.created_at) - new Date(b.accepted_at || b.created_at));
+
+  const groups = [];
+  for (const o of sorted) {
+    if (!o.picked_up_at) {
+      const lat = Number(o.restaurant_lat), lng = Number(o.restaurant_lng);
+      const prev = groups[groups.length - 1];
+      if (prev && prev.type === 'pickup' && prev.pos?.lat === lat && prev.pos?.lng === lng) {
+        prev.orders.push(o);
+      } else {
+        groups.push({ type: 'pickup', pos: { lat, lng }, orders: [o], key: `pickup-${lat}-${lng}` });
+      }
+    }
+    if (o.status === 'on_the_way') {
+      const lat = Number(o.customer_lat ?? o.delivery_lat);
+      const lng = Number(o.customer_lng ?? o.delivery_lng);
+      groups.push({ type: 'delivery', pos: { lat, lng }, orders: [o], key: `delivery-${o.id}` });
+    }
+  }
+  return groups;
+}
+
 export default function ActiveOrderPanel({
   order,
   expanded,
@@ -66,7 +144,9 @@ export default function ActiveOrderPanel({
   handMode = 'left',
   panelRef,
   distToNextStop = null,
-  stopOrderCount = 1,   // P4: total de pedidos en el stop actual
+  stopOrderCount = 1,
+  activeOrders = [],
+  routeStopsOverride = null,
 }) {
   const [showCallSelector, setShowCallSelector] = useState(false);
   const [callingTarget,    setCallingTarget]    = useState(null);
@@ -104,14 +184,14 @@ export default function ActiveOrderPanel({
 
   // Countdown de cocina — solo activo en estados previos al pickup
   useEffect(() => {
-    const isWaiting = ['accepted', 'preparing'].includes(order?.status);
-    if (!isWaiting || !order?.kitchen_estimated_ready) {
+    const isWaiting = ['accepted', 'preparing'].includes(currentOrder?.status);
+    if (!isWaiting || !currentOrder?.kitchen_estimated_ready) {
       setKitchenSecsLeft(null);
       return;
     }
     const tick = () => {
       const diff = Math.ceil(
-        (new Date(order.kitchen_estimated_ready).getTime() - Date.now()) / 1000
+        (new Date(currentOrder.kitchen_estimated_ready).getTime() - Date.now()) / 1000
       );
       setKitchenSecsLeft(diff);
     };
@@ -129,15 +209,25 @@ export default function ActiveOrderPanel({
 
   if (!order) return null;
 
-  const isOTW  = order.status === 'on_the_way';
-  const isCash = isCashPayment(order);
-  const total  = getOrderGrandTotalCents(order);
-  const earn   = getDriverEarningCents(order);
+  // Construir grupos de stops desde routeStopsOverride
+  const stopGroups = buildStopGroups(activeOrders, routeStopsOverride);
+  const currentGroup = stopGroups?.[0] ?? null;
+  const upcomingGroups = stopGroups?.slice(1) ?? [];
 
-  const canOTW     = ['assigned', 'accepted', 'preparing', 'ready'].includes(order.status);
-  const canDeliver = order.status === 'on_the_way';
-  const canRelevo  = !['on_the_way','delivered','cancelled'].includes(order.status) && !order.picked_up_at && !order.is_disputed;
-  const canRelease = !['on_the_way','delivered','cancelled'].includes(order.status);
+  // Determinar el pedido activo: si hay grupos, usar el primero del grupo actual
+  const currentOrder = currentGroup?.orders?.[0] ?? order;
+  const currentGroupOrders = currentGroup?.orders ?? [order];
+  const currentGroupCount = currentGroupOrders.length;
+
+  const isOTW  = currentOrder.status === 'on_the_way';
+  const isCash = isCashPayment(currentOrder);
+  const total  = getOrderGrandTotalCents(currentOrder);
+  const earn   = getDriverEarningCents(currentOrder);
+
+  const canOTW     = ['assigned', 'accepted', 'preparing', 'ready'].includes(currentOrder.status);
+  const canDeliver = currentOrder.status === 'on_the_way';
+  const canRelevo  = !['on_the_way','delivered','cancelled'].includes(currentOrder.status) && !currentOrder.picked_up_at && !currentOrder.is_disputed;
+  const canRelease = !['on_the_way','delivered','cancelled'].includes(currentOrder.status);
 
   const FENCE_M  = 100;
   const nearStop = distToNextStop != null && distToNextStop <= FENCE_M;
@@ -151,7 +241,7 @@ export default function ActiveOrderPanel({
   })();
 
   const isRight = handMode === 'right';
-  const restaurantConfirmed = order.restaurant_confirmed !== false;
+  const restaurantConfirmed = currentOrder.restaurant_confirmed !== false;
 
   const handleNotify = async (target) => {
     setShowCallSelector(false);
@@ -254,7 +344,7 @@ export default function ActiveOrderPanel({
                   {nearStop ? '✓ ' : ''}{distToNextStop}m{etaLabel ? ` · ${etaLabel}` : ''}
                 </span>
               )}
-              {order.is_disputed && (
+              {currentOrder.is_disputed && (
                 <span style={{ fontSize:'0.62rem', fontWeight:700, background:'#fef9c3',
                   color:'#854d0e', border:'1px solid #fde047', borderRadius:6,
                   padding:'0.1rem 0.4rem' }}>En disputa</span>
@@ -264,25 +354,30 @@ export default function ActiveOrderPanel({
           </div>
           <div style={{ fontSize:'0.82rem', marginTop:'0.15rem', overflow:'hidden',
             textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-            <strong>{isOTW ? (order.customer_name || 'Cliente') : order.restaurant_name}</strong>
+            <strong>{isOTW ? (currentOrder.customer_name || 'Cliente') : currentOrder.restaurant_name}</strong>
+            {currentGroupCount > 1 && (
+              <span style={{ fontSize:'0.7rem', color:'var(--text-tertiary)', marginLeft:6 }}>
+                +{currentGroupCount - 1} más
+              </span>
+            )}
           </div>
           <div style={{ fontSize:'0.72rem', color:'var(--text-tertiary)', marginTop:'0.05rem',
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-            {isOTW ? (order.restaurant_name || '') : (order.customer_name || 'Cliente')}
+            {isOTW ? (currentOrder.restaurant_name || '') : (currentOrder.customer_name || 'Cliente')}
           </div>
           <div style={{ fontSize:'0.72rem', color:'var(--text-secondary)', marginTop:'0.05rem',
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
             {isOTW
-              ? (order.customer_address || order.delivery_address || '')
-              : (order.restaurant_address || '')}
+              ? (currentOrder.customer_address || currentOrder.delivery_address || '')
+              : (currentOrder.restaurant_address || '')}
           </div>
           <div style={{ display:'flex', alignItems:'center', gap:4, marginTop:'0.2rem', fontSize:'0.72rem' }}>
             {isCash
               ? <><IconCash /><span style={{ fontWeight:700, color:'var(--brand)' }}>
-                  {isOTW ? `Cobrar ${fmt(total)}` : `Pagar ${fmt(order.total_cents || 0)}`}
+                  {isOTW ? `Cobrar ${fmt(total)}` : `Pagar ${fmt(currentOrder.total_cents || 0)}`}
                 </span></>
               : <><IconCard /><span style={{ color:'var(--text-tertiary)' }}>
-                  {order.payment_method === 'card' ? 'Tarjeta — no cobrar' : 'SPEI — no cobrar'}
+                  {currentOrder.payment_method === 'card' ? 'Tarjeta — no cobrar' : 'SPEI — no cobrar'}
                 </span></>
             }
           </div>
@@ -296,7 +391,7 @@ export default function ActiveOrderPanel({
           position: 'relative',
         }}>
           {/* P4: badge de pedidos múltiples en el stop actual */}
-          {stopOrderCount > 1 && (
+          {currentGroupCount > 1 && (
             <div style={{
               position:'absolute', top:-8, right: isRight ? 'auto' : -6, left: isRight ? -6 : 'auto',
               background:'var(--brand)', color:'#fff',
@@ -305,7 +400,7 @@ export default function ActiveOrderPanel({
               display:'flex', alignItems:'center', justifyContent:'center',
               boxShadow:'0 1px 4px rgba(0,0,0,0.25)', zIndex:2,
             }}>
-              {stopOrderCount}
+              {currentGroupCount}
             </div>
           )}
 
@@ -321,26 +416,41 @@ export default function ActiveOrderPanel({
                 width:'100%', minHeight:60, transition:'border 0.2s',
               }}
               disabled={loadingStatus === 'on_the_way'}
-              onClick={() => handleChangeStatus(order.id, 'on_the_way')}>
-              <IconOTW /> En camino
+              onClick={async () => {
+                for (const o of currentGroupOrders) {
+                  if (['assigned','accepted','preparing','ready'].includes(o.status)) {
+                    await handleChangeStatus(o.id, 'on_the_way');
+                  }
+                }
+              }}>
+              <IconOTW />
+              {currentGroupCount > 1 ? `En camino (${currentGroupCount})` : 'En camino'}
             </button>
           )}
 
           {/* P3: Entregado — solo cuando el próximo estado es delivery */}
           {canDeliver && (
-            <button
-              style={{
-                padding:'0.75rem 0.5rem', borderRadius:10, fontWeight:800, fontSize:'0.95rem',
-                border: nearStop ? '2px solid var(--success)' : 'none',
-                cursor:'pointer',
-                display:'flex', alignItems:'center', justifyContent:'center', gap:6,
-                background:'var(--success)', color:'#fff',
-                width:'100%', minHeight:60, transition:'border 0.2s',
-              }}
-              disabled={loadingStatus === 'delivered'}
-              onClick={() => handleChangeStatus(order.id, 'delivered')}>
-              <IconDelivered /> Entregado
-            </button>
+            <div style={{ display:'flex', flexDirection:'column', gap:4, width:'100%' }}>
+              {currentGroupOrders.filter(o => o.status === 'on_the_way').map(o => (
+                <button key={o.id}
+                  style={{
+                    padding:'0.6rem 0.5rem', borderRadius:10, fontWeight:800, fontSize:'0.82rem',
+                    border: nearStop ? '2px solid var(--success)' : 'none',
+                    cursor:'pointer',
+                    display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+                    background:'var(--success)', color:'#fff',
+                    width:'100%', minHeight: currentGroupCount > 1 ? 44 : 60,
+                    transition:'border 0.2s',
+                  }}
+                  disabled={loadingStatus === 'delivered'}
+                  onClick={() => handleChangeStatus(o.id, 'delivered')}>
+                  <IconDelivered />
+                  {currentGroupCount > 1
+                    ? (o.customer_name || o.id.slice(-4))
+                    : 'Entregado'}
+                </button>
+              ))}
+            </div>
           )}
         </div>
       </div>
@@ -392,6 +502,69 @@ export default function ActiveOrderPanel({
                     ? 'Pedido listo en cocina'
                     : `Cocina: ${Math.floor(kitchenSecsLeft / 60)}:${String(kitchenSecsLeft % 60).padStart(2, '0')} min`}
                 </span>
+              </div>
+            )}
+
+            {/* Pedidos del stop actual — confirmación individual (pickup o delivery) */}
+            {currentGroupOrders.length > 0 && (
+              <div style={{
+                borderRadius: 8, overflow: 'hidden',
+                border: '1px solid var(--border)',
+              }}>
+                {currentGroupOrders.map((o, i) => {
+                  const oIsOTW  = o.status === 'on_the_way';
+                  const oCanOTW = ['assigned','accepted','preparing','ready'].includes(o.status);
+                  const oCanDel = o.status === 'on_the_way';
+                  const oLoading = loadingStatus === o.id;
+                  return (
+                    <div key={o.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '0.45rem 0.65rem',
+                      borderTop: i > 0 ? '1px solid var(--border-light)' : 'none',
+                    }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 700,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {oIsOTW ? (o.customer_name || 'Cliente') : o.restaurant_name}
+                        </div>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {oIsOTW
+                            ? (o.customer_address || o.delivery_address || '')
+                            : (o.restaurant_address || '')}
+                        </div>
+                      </div>
+                      {oCanOTW && (
+                        <button
+                          disabled={oLoading}
+                          onClick={() => handleChangeStatus(o.id, 'on_the_way')}
+                          style={{
+                            padding: '0.45rem 0.75rem', borderRadius: 8, fontWeight: 700,
+                            fontSize: '0.75rem', border: 'none',
+                            cursor: oLoading ? 'not-allowed' : 'pointer',
+                            background: 'var(--brand)', color: '#fff', flexShrink: 0,
+                            opacity: oLoading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: 4,
+                          }}>
+                          <IconOTW /> En camino
+                        </button>
+                      )}
+                      {oCanDel && (
+                        <button
+                          disabled={oLoading}
+                          onClick={() => handleChangeStatus(o.id, 'delivered')}
+                          style={{
+                            padding: '0.45rem 0.75rem', borderRadius: 8, fontWeight: 700,
+                            fontSize: '0.75rem', border: 'none',
+                            cursor: oLoading ? 'not-allowed' : 'pointer',
+                            background: 'var(--success)', color: '#fff', flexShrink: 0,
+                            opacity: oLoading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: 4,
+                          }}>
+                          <IconDelivered /> Entregado
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -478,7 +651,7 @@ export default function ActiveOrderPanel({
             </div>
 
             {/* FILA 2 — altura normal: Relevo | Liberar */}
-            {(canRelevo || canRelease) && !order.is_disputed && (
+            {(canRelevo || canRelease) && !currentOrder.is_disputed && (
               <div style={{ display:'flex', gap:'0.3rem' }}>
                 {canRelevo && (
                   <button style={{
@@ -524,7 +697,7 @@ export default function ActiveOrderPanel({
             )}
 
             {/* Disputa activa */}
-            {order.is_disputed && (
+            {currentOrder.is_disputed && (
               <div style={{ display:'flex', alignItems:'center', gap:'0.4rem',
                 padding:'0.35rem 0.5rem', borderRadius:8,
                 background:'var(--warn-bg)', border:'1px solid var(--warn-border)' }}>
@@ -587,6 +760,41 @@ export default function ActiveOrderPanel({
         </div>
       </div>
 
+      {/* Stops siguientes — colapsados */}
+      {upcomingGroups.length > 0 && (
+        <div style={{
+          borderTop: '1px solid var(--border-light)',
+          padding: '0.3rem 0.75rem',
+          display: 'flex', flexDirection: 'column', gap: '0.2rem',
+        }}>
+          <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--text-tertiary)',
+            textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.15rem' }}>
+            Próximos stops
+          </div>
+          {upcomingGroups.map((group, idx) => (
+            <div key={idx} style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '0.2rem 0', opacity: 0.7,
+            }}>
+              <span style={{ fontSize: '0.68rem', color: group.type === 'pickup' ? 'var(--brand)' : 'var(--success)',
+                fontWeight: 700, minWidth: 14 }}>
+                {group.type === 'pickup' ? '📦' : '🏠'}
+              </span>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                {group.type === 'pickup'
+                  ? (group.orders?.[0]?.restaurant_name || 'Restaurante')
+                  : (group.orders?.[0]?.customer_name || 'Cliente')}
+                {group.orders?.length > 1 && (
+                  <span style={{ color: 'var(--text-tertiary)', marginLeft: 4 }}>
+                    +{group.orders.length - 1}
+                  </span>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

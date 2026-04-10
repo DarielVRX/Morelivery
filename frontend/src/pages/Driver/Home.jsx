@@ -259,6 +259,8 @@ export default function DriverHome({ registerRef, closeMobileDrawerRef }) {
         handMode={handMode}
         panelRef={activePanelRef}
         distToNextStop={home.distToNextStop}
+        activeOrders={order.activeOrders}
+        routeStopsOverride={order.routeStopsOverride}
       />
     </div>
   );
