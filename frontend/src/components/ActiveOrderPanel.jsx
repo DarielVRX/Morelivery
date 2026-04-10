@@ -45,38 +45,6 @@ function IconCash() {
 function IconPhone() {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.55 12 19.79 19.79 0 01.48 3.38 2 2 0 012.46 1h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 8.73A16 16 0 0015.27 17l1.8-1.8a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>;
 }
-// ── Helper: agrupar stops por posición física (mismo restaurante/cliente) ────
-function buildStopGroups(routeStopsOverride, activeOrders) {
-  if (!Array.isArray(routeStopsOverride) || !routeStopsOverride.length) return null;
-  const orderMap = {};
-  for (const o of (activeOrders || [])) orderMap[o.id] = o;
-
-  const groups = [];
-  let i = 0;
-  while (i < routeStopsOverride.length) {
-    const stop = routeStopsOverride[i];
-    const group = { type: stop.type, pos: stop.pos, stops: [stop] };
-    // Agrupar stops consecutivos con misma pos y mismo tipo
-    let j = i + 1;
-    while (j < routeStopsOverride.length) {
-      const next = routeStopsOverride[j];
-      if (next.type === stop.type &&
-          next.pos?.lat === stop.pos?.lat &&
-          next.pos?.lng === stop.pos?.lng) {
-        group.stops.push(next);
-        j++;
-      } else break;
-    }
-    // Enriquecer con datos de pedido
-    group.orders = group.stops
-      .map(s => orderMap[s.orderId])
-      .filter(Boolean);
-    groups.push(group);
-    i = j;
-  }
-  return groups.length > 0 ? groups : null;
-}
-
 // ── Helpers para agrupar stops ───────────────────────────────────────────────
 function buildStopGroups(activeOrders, routeStopsOverride) {
   const orderMap = {};
