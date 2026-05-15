@@ -528,9 +528,9 @@ flowchart TD
     LOCK -->|Libre| FIND
 
     FIND["findCandidates(orderId)\ncandidate-finder.js"] --> Q1["SELECT drivers\nWHERE is_available = true"]
-    Q1 --> Q2["Filtrar zona geográfica\nHaversine < radio máximo"]
-    Q2 --> Q3["Filtrar carga activa\nactive_orders < MAX_ACTIVE"]
-    Q3 --> Q4["Filtrar capacidad\nbag_capacity >= order_size"]
+    Q1 --> Q2["Filtrar zona geográfica\nHaversine &lt; radio máximo"]
+    Q2 --> Q3["Filtrar carga activa\nactive_orders &lt; MAX_ACTIVE"]
+    Q3 --> Q4["Filtrar capacidad\nbag_capacity &gt;= order_size"]
     Q4 --> CANDS{¿Candidatos encontrados?}
 
     CANDS -->|Sin candidatos| ESC["driver_search_escalation.js\nRelajar criterios + aumentar radio"]
