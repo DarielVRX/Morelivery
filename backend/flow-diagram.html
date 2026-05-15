@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Morelivery · Backend — Diagrama de Flujo</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --accent2: #3fb950;
+      --accent3: #f78166;
+      --accent4: #d2a8ff;
+      --accent5: #ffa657;
+      --text: #e6edf3;
+      --muted: #8b949e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    header .logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: -0.5px;
+    }
+    header .badge {
+      background: #1f3a5f;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 20px;
+      border: 1px solid #2d4a6e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    header .subtitle {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    nav {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px;
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+    }
+    nav button {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 13px;
+      padding: 12px 16px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    nav button:hover { color: var(--text); }
+    nav button.active { color: var(--accent); border-color: var(--accent); }
+    main {
+      padding: 32px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+    .section { display: none; }
+    .section.active { display: block; }
+    .section-header {
+      margin-bottom: 24px;
+    }
+    .section-header h2 {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+    .section-header p {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .diagram-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px;
+      margin-bottom: 24px;
+      overflow-x: auto;
+    }
+    .diagram-card h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 24px;
+    }
+    .mermaid {
+      display: flex;
+      justify-content: center;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .tag {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: 'SF Mono', 'Cascadia Code', monospace;
+    }
+    .tag-blue   { background: #1f3a5f; color: #79b8ff; border: 1px solid #2d4a6e; }
+    .tag-green  { background: #1a3a2a; color: #56d364; border: 1px solid #2d5a3a; }
+    .tag-red    { background: #3a1a1a; color: #f97583; border: 1px solid #5a2d2d; }
+    .tag-purple { background: #2d1a4a; color: #c084fc; border: 1px solid #4a2d6e; }
+    .tag-orange { background: #3a2a1a; color: #ffa657; border: 1px solid #6e4a2d; }
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+      margin-top: 20px;
+    }
+    .info-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .info-card h4 {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .info-card p, .info-card li {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.7;
+      list-style: none;
+    }
+    .info-card li::before { content: '→ '; color: var(--accent); }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="logo">Morelivery</span>
+  <span class="badge">Backend</span>
+  <span class="subtitle">Node.js · Express · PostgreSQL · Redis · SSE</span>
+</header>
+
+<nav id="tabs">
+  <button class="active" data-tab="overview">Vista General</button>
+  <button data-tab="request">Ciclo de Request</button>
+  <button data-tab="orders">Flujo de Órdenes</button>
+  <button data-tab="assignment">Motor de Asignación</button>
+  <button data-tab="realtime">Tiempo Real (SSE)</button>
+  <button data-tab="modules">Módulos &amp; Dependencias</button>
+</nav>
+
+<main>
+
+  <!-- TAB: Overview -->
+  <section id="overview" class="section active">
+    <div class="section-header">
+      <h2>Arquitectura General del Backend</h2>
+      <p>Visión completa de los componentes, su función y cómo se relacionan dentro del sistema.</p>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Mapa de Componentes</h3>
+      <div class="mermaid">
+graph TB
+    subgraph ENTRY["🚀 Punto de Entrada"]
+        SV["server.js\nHTTP Server + Schedulers"]
+        APP["app.js\nExpress App"]
+    end
+
+    subgraph BOOT["⚙️ Bootstrap"]
+        MW["middleware.js\nCORS · Helmet · Rate Limit"]
+        RT["routes.js\nRegistro de Rutas"]
+        SC["schedulers.js\nLoops de Fondo"]
+    end
+
+    subgraph MIDS["🛡️ Middlewares"]
+        AUTH["auth.js\nauthenticate() · authorize()"]
+        VAL["validate.js\nZod Schema Validation"]
+        ERR["errorHandler.js\nGlobal Error Handler"]
+    end
+
+    subgraph MODS["📦 Módulos"]
+        MAUTH["auth/\nregistro · login · 2FA · OAuth"]
+        MORD["orders/\ncreación · lifecycle · historial"]
+        MDRV["drivers/\ndisponibilidad · ubicación · ganancias"]
+        MRES["restaurants/\nmenú · horarios · pedidos"]
+        MEVT["events/\nSSE Hub · broadcasting"]
+        MPAY["payments/\nStripe webhook · intents"]
+        MNOT["notifications/\npush · email"]
+        MSUP["support/\nchat · tickets"]
+        MNAV["nav/\nzonas · map-match · rutas"]
+    end
+
+    subgraph ENGINE["🧠 Motor de Asignación"]
+        CF["candidate-finder.js\nBusca drivers elegibles"]
+        CE["candidate-evaluator.js\nScoring de candidatos"]
+        KI["kitchen.js\nTiempos de preparación"]
+        RB["rebalancer.js\nOptimización de rutas"]
+        ES["driver_search_escalation.js\nEscalación de búsqueda"]
+        ETA["eta.js\nCálculo de ETA"]
+        ST["stale.js\nLimpieza de datos"]
+    end
+
+    subgraph DB["🗄️ Datos"]
+        PG["PostgreSQL\nórdenes · usuarios · perfiles"]
+        RD["Redis\ncache · sesiones"]
+    end
+
+    subgraph CFG["🔧 Config"]
+        ENV["env.js"]
+        DBC["db.js"]
+        RDC["redis.js"]
+        BR["brand.js"]
+    end
+
+    SV --> APP
+    SV --> SC
+    APP --> MW
+    APP --> RT
+    RT --> MODS
+    MODS --> MIDS
+    MORD --> ENGINE
+    ENGINE --> PG
+    MODS --> PG
+    MODS --> RD
+    MEVT --> MODS
+    APP --> CFG
+
+    style ENTRY fill:#1f3a5f,stroke:#58a6ff,color:#e6edf3
+    style BOOT fill:#1a3a2a,stroke:#3fb950,color:#e6edf3
+    style MIDS fill:#3a1a1a,stroke:#f78166,color:#e6edf3
+    style MODS fill:#2d1a4a,stroke:#d2a8ff,color:#e6edf3
+    style ENGINE fill:#3a2a1a,stroke:#ffa657,color:#e6edf3
+    style DB fill:#1a2a3a,stroke:#58a6ff,color:#e6edf3
+    style CFG fill:#1a1a2a,stroke:#8b949e,color:#e6edf3
+      </div>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#58a6ff"></div>Infraestructura</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div>Bootstrap</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f78166"></div>Middlewares</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#d2a8ff"></div>Módulos</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffa657"></div>Motor</div>
+      </div>
+    </div>
+
+    <div class="info-grid">
+      <div class="info-card">
+        <h4>Punto de Entrada</h4>
+        <ul>
+          <li>server.js — arranca HTTP y schedulers</li>
+          <li>app.js — configura Express</li>
+          <li>bootstrap/ — middleware, rutas, loops</li>
+        </ul>
+      </div>
+      <div class="info-card">
+        <h4>Módulos Principales</h4>
+        <ul>
+          <li>auth — JWT, OAuth, 2FA, email</li>
+          <li>orders — ciclo completo de pedido</li>
+          <li>drivers — disponibilidad, GPS, ganancias</li>
+          <li>events — SSE Hub para tiempo real</li>
+        </ul>
+      </div>
+      <div class="info-card">
+        <h4>Motor de Asignación</h4>
+        <ul>
+          <li>candidate-finder — busca drivers</li>
+          <li>candidate-evaluator — scoring</li>
+          <li>kitchen — tiempos de prep</li>
+          <li>rebalancer — optimiza rutas</li>
+          <li>escalation — relaja criterios</li>
+        </ul>
+      </div>
+      <div class="info-card">
+        <h4>Stack Tecnológico</h4>
+        <div class="tag-list">
+          <span class="tag tag-blue">Express 4.19</span>
+          <span class="tag tag-green">PostgreSQL</span>
+          <span class="tag tag-red">Redis 4.6</span>
+          <span class="tag tag-purple">JWT</span>
+          <span class="tag tag-orange">Zod 3.23</span>
+          <span class="tag tag-blue">Web Push</span>
+          <span class="tag tag-green">Stripe</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB: Request Cycle -->
+  <section id="request" class="section">
+    <div class="section-header">
+      <h2>Ciclo de Request HTTP</h2>
+      <p>Cómo un request viaja desde el cliente hasta la base de datos y vuelve.</p>
+    </div>
+    <div class="diagram-card">
+      <h3>Pipeline de Middleware</h3>
+      <div class="mermaid">
+sequenceDiagram
+    participant C as Cliente
+    participant MW as middleware.js
+    participant RT as routes.js
+    participant AU as auth.js
+    participant VL as validate.js
+    participant HD as Handler/Controller
+    participant DB as PostgreSQL
+    participant SS as SSE Hub
+
+    C->>MW: HTTP Request
+    MW->>MW: CORS check
+    MW->>MW: Helmet headers
+    MW->>MW: Rate limiting
+    MW->>RT: Pass through
+
+    RT->>AU: authenticate(req)
+    AU->>AU: Extrae Bearer token
+    AU->>AU: jwt.verify(token)
+    alt Token inválido
+        AU-->>C: 401 Unauthorized
+    end
+    AU->>AU: authorize(roles)
+    alt Rol incorrecto
+        AU-->>C: 403 Forbidden
+    end
+
+    RT->>VL: validate(schema)
+    VL->>VL: Zod parse(req.body)
+    alt Datos inválidos
+        VL-->>C: 400 Bad Request + errores
+    end
+
+    VL->>HD: req.validatedBody disponible
+    HD->>DB: query() / transaction
+    DB-->>HD: resultado
+
+    opt Evento en tiempo real
+        HD->>SS: sseHub.sendToUser()
+        SS-->>C: SSE event
+    end
+
+    HD-->>C: JSON response
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Manejo de Errores Global</h3>
+      <div class="mermaid">
+flowchart LR
+    A["Handler lanza error"] --> B{Tipo de error}
+    B -->|AppError| C["Status personalizado\n400/401/403/404/409"]
+    B -->|Error de BD| D["500 Internal\n+ log detallado"]
+    B -->|ZodError| E["400 + lista\nde campos inválidos"]
+    B -->|JWT Error| F["401 Unauthorized"]
+    C --> G["errorHandler.js\nmiddleware"]
+    D --> G
+    E --> G
+    F --> G
+    G --> H["res.json({ error, details })\nNo expone stack trace en prod"]
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB: Orders -->
+  <section id="orders" class="section">
+    <div class="section-header">
+      <h2>Flujo Completo de una Orden</h2>
+      <p>Desde que el cliente crea el pedido hasta la entrega y calificación.</p>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Ciclo de Vida (Estados)</h3>
+      <div class="mermaid">
+stateDiagram-v2
+    [*] --> created : POST /api/orders
+
+    created --> pending_driver : serializedOffer()\nbusca drivers
+
+    pending_driver --> assigned : Driver acepta oferta\nacceptOffer()
+
+    pending_driver --> cancelled : Timeout sin driver\no cancelación
+
+    assigned --> accepted : Driver confirma\nPATCH /status
+
+    accepted --> ready : Restaurant listo\nPATCH /status o kitchen auto
+
+    ready --> on_the_way : Driver recoge\nPATCH /status
+
+    on_the_way --> delivered : Driver confirma entrega\nPOST /delivery
+
+    delivered --> [*] : Calificación opcional\nPOST /rating
+
+    accepted --> cancelled : Customer cancela
+    ready --> cancelled : Customer / Restaurant cancela
+    on_the_way --> disputed : Driver disputa
+    disputed --> [*] : Resolución admin
+    cancelled --> [*]
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Creación de Orden — Detalle de Funciones</h3>
+      <div class="mermaid">
+flowchart TD
+    A["POST /api/orders\nroute-groups/creation.js"] --> B{Cliente bloqueado?}
+    B -->|Sí| Z1["403 Forbidden"]
+    B -->|No| C{Pago con tarjeta?}
+    C -->|Sí| D["Verificar Stripe\npaymentIntentId"]
+    D -->|Falla| Z2["402 Payment Required"]
+    D -->|OK| E
+    C -->|No/Efectivo| E["Calcular distancia\ngeo.haversine()"]
+    E --> F{En zona de cobertura?}
+    F -->|No| Z3["400 Out of range"]
+    F -->|Sí| G["INSERT INTO orders\nstatus = 'created'"]
+    G --> H["initKitchenTiming(orderId)\nkitchen.js"]
+    G --> I["serializedOffer(orderId, offerNextDrivers, cb)\nassignment/queue.js"]
+    I --> J["offerNextDrivers(orderId)"]
+    J --> K["findCandidates(orderId)\ncandidate-finder.js"]
+    K --> L["evaluateCandidates(candidates)\ncandidate-evaluator.js"]
+    L --> M["upsertOffer por driver"]
+    M --> N["sseHub.notifyNewOffer(driverId)\nevents/hub.js"]
+    N --> O["sendPushToUser(driverId)\nnotifications/"]
+    G --> P["res.json({ orderId, eta })\n200 OK"]
+
+    style Z1 fill:#3a1a1a,stroke:#f78166
+    style Z2 fill:#3a1a1a,stroke:#f78166
+    style Z3 fill:#3a1a1a,stroke:#f78166
+    style P fill:#1a3a2a,stroke:#3fb950
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Entrega y Confirmación</h3>
+      <div class="mermaid">
+sequenceDiagram
+    participant D as Driver (Frontend)
+    participant API as Backend API
+    participant DB as PostgreSQL
+    participant SSE as SSE Hub
+    participant C as Customer
+    participant R as Restaurant
+
+    D->>API: POST /orders/:id/delivery
+    API->>DB: UPDATE orders SET status='delivered', delivered_at=NOW()
+    API->>DB: Calcular earnings del driver
+    API->>DB: UPDATE driver_profiles SET earnings += X
+    API->>SSE: sendToUser(customerId, 'order_update')
+    API->>SSE: sendToUser(restaurantId, 'order_update')
+    SSE-->>C: order_update { status: delivered }
+    SSE-->>R: order_update { status: delivered }
+    API-->>D: { ok: true, earnings }
+
+    Note over C: Muestra rating prompt
+    C->>API: POST /orders/:id/rating { stars, comment }
+    API->>DB: INSERT INTO ratings
+    API->>DB: UPDATE restaurants SET avg_rating = ...
+    API->>SSE: sendToUser(restaurantId, 'order_update')
+    SSE-->>R: rating recibido
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB: Assignment Engine -->
+  <section id="assignment" class="section">
+    <div class="section-header">
+      <h2>Motor de Asignación de Drivers</h2>
+      <p>Cómo el sistema encuentra, evalúa y asigna al mejor conductor para cada pedido.</p>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Pipeline de Búsqueda y Scoring</h3>
+      <div class="mermaid">
+flowchart TD
+    START["serializedOffer(orderId)\nassignment/index.js"] --> LOCK{Mutex / Lock\norden en cola?}
+    LOCK -->|En proceso| WAIT["Esperar turno\n(serialized queue)"]
+    LOCK -->|Libre| FIND
+
+    FIND["findCandidates(orderId)\ncandidate-finder.js"] --> Q1["SELECT drivers\nWHERE is_available = true"]
+    Q1 --> Q2["Filtrar zona geográfica\nHaversine < radio máximo"]
+    Q2 --> Q3["Filtrar carga activa\nactive_orders < MAX_ACTIVE"]
+    Q3 --> Q4["Filtrar capacidad\nbag_capacity >= order_size"]
+    Q4 --> CANDS{¿Candidatos encontrados?}
+
+    CANDS -->|Sin candidatos| ESC["driver_search_escalation.js\nRelajar criterios + aumentar radio"]
+    ESC --> ESC2{Max intentos?}
+    ESC2 -->|No| FIND
+    ESC2 -->|Sí| FAIL["Orden no asignada\nNotificar customer"]
+
+    CANDS -->|Hay candidatos| EVAL["evaluateCandidates()\ncandidate-evaluator.js"]
+    EVAL --> SC1["Score: distancia al restaurant"]
+    EVAL --> SC2["Score: ETA estimado (eta.js)"]
+    EVAL --> SC3["Score: historial del driver"]
+    EVAL --> SC4["Score: carga actual"]
+    SC1 & SC2 & SC3 & SC4 --> SORT["Ordenar por score DESC"]
+    SORT --> OFFER["upsertOffer(orderId, driverId)\npor driver en orden de score"]
+    OFFER --> NOTIF["sseHub.notifyNewOffer(driverId)\n+ sendPushToUser(driverId)"]
+    NOTIF --> WAIT2["Esperar respuesta (60s timeout)"]
+
+    WAIT2 -->|Driver acepta| ACCEPT["acceptOffer(orderId, driverId)"]
+    ACCEPT --> ASSIGN["UPDATE orders SET driver_id\nstatus = 'assigned'"]
+    ASSIGN --> CANCEL_REST["Cancelar ofertas\na otros drivers"]
+    CANCEL_REST --> NOTIFY_ALL["SSE: order_update\n→ customer, restaurant"]
+
+    WAIT2 -->|Driver rechaza| REJECT["rejectOffer(orderId, driverId)"]
+    REJECT --> NEXT{Siguiente candidato?}
+    NEXT -->|Sí| OFFER
+    NEXT -->|No| ESC
+
+    style FAIL fill:#3a1a1a,stroke:#f78166
+    style ACCEPT fill:#1a3a2a,stroke:#3fb950
+    style NOTIFY_ALL fill:#1f3a5f,stroke:#58a6ff
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="diagram-card">
+        <h3>Kitchen Scheduler</h3>
+        <div class="mermaid">
+flowchart TD
+    TICK["tickKitchen()\nLoop cada 30s\nschedulers.js"] --> QORD["SELECT órdenes en\nstatus = 'accepted' o 'preparing'"]
+    QORD --> EACH["Por cada orden"]
+    EACH --> CHK{elapsed ≥ prep_estimate?}
+    CHK -->|Sí| READY["UPDATE status = 'ready'\nauto-ready"]
+    READY --> SSE1["sseHub → driver_location\norder_update\n→ driver + customer"]
+    CHK -->|No| SKIP["Continuar"]
+        </div>
+      </div>
+
+      <div class="diagram-card">
+        <h3>Rebalancer Scheduler</h3>
+        <div class="mermaid">
+flowchart TD
+    TICK2["runRebalancer()\nLoop cada 60s\nschedulers.js"] --> QDRV["SELECT drivers con\nmúltiples órdenes activas"]
+    QDRV --> EACH2["Por cada driver"]
+    EACH2 --> CALC["Calcular orden óptimo\nde stops (distancia total)"]
+    CALC --> CHG{¿Cambió el orden?}
+    CHG -->|Sí| UPD["UPDATE route_sequence\nen BD"]
+    UPD --> SSE2["sseHub → route_update\n→ driver"]
+    CHG -->|No| SKIP2["Continuar"]
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB: Realtime -->
+  <section id="realtime" class="section">
+    <div class="section-header">
+      <h2>Sistema de Tiempo Real (SSE)</h2>
+      <p>Cómo el backend hace broadcasting de eventos a los clientes conectados sin WebSockets.</p>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Ciclo SSE — Conexión y Eventos</h3>
+      <div class="mermaid">
+sequenceDiagram
+    participant FE as Frontend (EventSource)
+    participant RT as events/routes.js
+    participant AU as auth.js
+    participant HB as events/hub.js (SseHub)
+    participant MOD as Cualquier Módulo
+    participant DB as PostgreSQL
+
+    FE->>RT: GET /api/events?token=JWT
+    RT->>AU: authenticate(req)
+    AU-->>RT: { userId, role }
+    RT->>HB: hub.register(userId, role, res)
+    HB->>HB: clients.set(clientId, { res, userId, role })
+    RT->>FE: Headers SSE (text/event-stream)
+    RT->>FE: event: connected\ndata: { clientId }
+
+    loop Ping cada 25s (evita timeout de Render)
+        RT->>FE: : ping
+    end
+
+    Note over MOD: Cualquier operación que\ngenera un evento
+
+    MOD->>DB: UPDATE order status
+    MOD->>HB: hub.sendToUser(userId, 'order_update', data)
+    HB->>HB: Buscar clientes de userId
+    HB->>FE: event: order_update\ndata: { orderId, status, ... }
+
+    MOD->>HB: hub.notifyNewOffer(driverId, offerId, data)
+    HB->>FE: event: new_offer\ndata: { orderId, restaurant, fee, ... }
+
+    Note over FE: Usuario cierra tab/app
+    FE->>RT: Conexión cerrada
+    RT->>HB: hub.unregister(clientId)
+    HB->>HB: clients.delete(clientId)
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Catálogo de Eventos SSE</h3>
+      <div class="mermaid">
+flowchart LR
+    HUB["SseHub\nevents/hub.js"]
+
+    HUB -->|order_update| E1["Estado del pedido\ncambia (asignado,\nlisto, entregado)"]
+    HUB -->|driver_location| E2["Posición GPS del\ndriver + ETA calculado"]
+    HUB -->|new_offer| E3["Nueva oferta\npara conductor"]
+    HUB -->|driver_eta_alert| E4["Driver a ≤5 min\ndel destino"]
+    HUB -->|driver_arrived| E5["Driver a ≤200m\n(pickup o delivery)"]
+    HUB -->|simulated_call| E6["Llamada simulada\ndel conductor"]
+    HUB -->|kitchen_auto_ready| E7["Pedido marcado\nauto-listo por kitchen"]
+    HUB -->|route_update| E8["Nueva secuencia\nde stops para driver"]
+    HUB -->|chat_message| E9["Mensaje de chat\nentre partes"]
+    HUB -->|driver_search_update| E10["Progreso búsqueda\nde driver"]
+    HUB -->|order_transferred| E11["Orden transferida\na/desde driver"]
+
+    style HUB fill:#1f3a5f,stroke:#58a6ff,color:#e6edf3
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Location Update → SSE Cascada</h3>
+      <div class="mermaid">
+flowchart TD
+    A["PATCH /api/drivers/location\n{ lat, lng }"] --> B["UPDATE driver_profiles\nSET last_lat, last_lng"]
+    B --> C["SELECT órdenes activas\nWHERE driver_id = $1"]
+    C --> D["Para cada orden activa"]
+    D --> E["Calcular distancia\ngeo.haversine(driver, stop)"]
+    E --> F["Calcular ETA\neta.js"]
+    F --> G["sseHub.sendToUser\n(customerId, 'driver_location', {lat,lng,eta})"]
+    F --> H{ETA ≤ 300s?}
+    H -->|Sí| I["sseHub → 'driver_eta_alert'\n+ sendPushToUser()"]
+    F --> J{distancia ≤ 200m?}
+    J -->|Sí| K["sseHub → 'driver_arrived'\n+ sendPushToUser() alta prioridad"]
+    G & I & K --> L["res.json({ ok: true })"]
+
+    style I fill:#3a2a1a,stroke:#ffa657
+    style K fill:#3a1a1a,stroke:#f78166
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB: Modules -->
+  <section id="modules" class="section">
+    <div class="section-header">
+      <h2>Módulos y Dependencias</h2>
+      <p>Mapa de importaciones entre los archivos más importantes del backend.</p>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Grafo de Dependencias — Módulos Core</h3>
+      <div class="mermaid">
+flowchart TD
+    SRV["server.js"] --> APP["app.js"]
+    SRV --> SCH["bootstrap/schedulers.js"]
+
+    APP --> BMW["bootstrap/middleware.js"]
+    APP --> BRT["bootstrap/routes.js"]
+
+    BRT --> MAUTH["modules/auth/routes.js"]
+    BRT --> MORD["modules/orders/routes.js"]
+    BRT --> MDRV["modules/drivers/routes.js"]
+    BRT --> MRES["modules/restaurants/routes.js"]
+    BRT --> MEVT["modules/events/routes.js"]
+    BRT --> MPAY["modules/payments/routes.js"]
+    BRT --> MSUP["modules/support/routes.js"]
+    BRT --> MNAV["modules/nav/routes.js"]
+
+    MAUTH --> SVC["modules/auth/service.js"]
+    SVC --> DBMOD["config/db.js"]
+    SVC --> RDMOD["config/redis.js"]
+
+    MORD --> CRE["orders/route-groups/creation.js"]
+    MORD --> LFC["orders/route-groups/lifecycle.js"]
+    MORD --> HIS["orders/route-groups/history.js"]
+
+    CRE --> ASS["orders/assignment/index.js"]
+    ASS --> QUE["orders/assignment/queue.js"]
+    QUE --> CFN["engine/candidate-finder.js"]
+    QUE --> CEV["engine/candidate-evaluator.js"]
+    QUE --> HUB["modules/events/hub.js"]
+    QUE --> NOT["modules/notifications/"]
+
+    LFC --> HUB
+    LFC --> NOT
+    MDRV --> HUB
+    MDRV --> ETA["engine/eta.js"]
+    MDRV --> GEO["utils/geo.js"]
+
+    MEVT --> HUB
+    SCH --> KIT["engine/kitchen.js"]
+    SCH --> REB["engine/rebalancer.js"]
+    SCH --> ESC["engine/driver_search_escalation.js"]
+
+    KIT --> HUB
+    REB --> HUB
+    ESC --> QUE
+
+    DBMOD --> PG[("PostgreSQL")]
+    RDMOD --> RD[("Redis")]
+
+    style PG fill:#1a2a3a,stroke:#58a6ff
+    style RD fill:#3a1a1a,stroke:#f78166
+    style HUB fill:#1f3a5f,stroke:#58a6ff
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Auth Service — Funciones Principales</h3>
+      <div class="mermaid">
+flowchart LR
+    subgraph AUTH["modules/auth/service.js"]
+        REG["registerUser(body)\nHash pwd · verificar email\ncrear perfil por rol"]
+        LOG["loginUser(credentials)\nJWT + refresh · 2FA check"]
+        GOO["googleLogin(token)\nOAuth Google verify"]
+        REF["refreshTokens(token)\nRenovar JWT silencioso"]
+        RST["resetPassword(token, pwd)\nVerificar token de email"]
+        CHG["changePassword(userId)"]
+        TFA["toggleTwoFa(userId)"]
+        UNL["unlockAccount(token)"]
+    end
+
+    REG --> DB1["INSERT users\nINSERT customer/restaurant/driver_profiles"]
+    LOG --> DB2["SELECT user\nbcrypt.compare()"]
+    LOG --> DB3["INSERT refresh_token"]
+    GOO --> DB4["google-auth-library\nverifyIdToken()"]
+    RST --> DB5["SELECT reset_token\nUPDATE password"]
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#1f3a5f',
+      primaryTextColor: '#e6edf3',
+      primaryBorderColor: '#58a6ff',
+      lineColor: '#8b949e',
+      secondaryColor: '#161b22',
+      tertiaryColor: '#0d1117',
+      background: '#161b22',
+      mainBkg: '#161b22',
+      nodeBkg: '#1f2937',
+      nodeTextColor: '#e6edf3',
+      edgeLabelBackground: '#161b22',
+      clusterBkg: '#161b22',
+      titleColor: '#e6edf3',
+      actorBkg: '#1f3a5f',
+      actorBorder: '#58a6ff',
+      actorTextColor: '#e6edf3',
+      actorLineColor: '#8b949e',
+      signalColor: '#8b949e',
+      signalTextColor: '#e6edf3',
+      labelBoxBkgColor: '#161b22',
+      labelBoxBorderColor: '#30363d',
+      labelTextColor: '#e6edf3',
+      loopTextColor: '#e6edf3',
+      noteBorderColor: '#30363d',
+      noteBkgColor: '#2d1a4a',
+      noteTextColor: '#e6edf3',
+    },
+    flowchart: { curve: 'basis', useMaxWidth: true },
+    sequence: { useMaxWidth: true, boxMargin: 8 },
+  });
+
+  document.getElementById('tabs').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-tab]');
+    if (!btn) return;
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+  });
+</script>
+</body>
+</html>

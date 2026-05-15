@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Morelivery · Frontend — Diagrama de Flujo</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --accent2: #3fb950;
+      --accent3: #f78166;
+      --accent4: #d2a8ff;
+      --accent5: #ffa657;
+      --text: #e6edf3;
+      --muted: #8b949e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    header .logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--accent4);
+      letter-spacing: -0.5px;
+    }
+    header .badge {
+      background: #2d1a4a;
+      color: var(--accent4);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 20px;
+      border: 1px solid #4a2d6e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    header .subtitle {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    nav {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px;
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+    }
+    nav button {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 13px;
+      padding: 12px 16px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    nav button:hover { color: var(--text); }
+    nav button.active { color: var(--accent4); border-color: var(--accent4); }
+    main {
+      padding: 32px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+    .section { display: none; }
+    .section.active { display: block; }
+    .section-header {
+      margin-bottom: 24px;
+    }
+    .section-header h2 {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+    .section-header p {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .diagram-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px;
+      margin-bottom: 24px;
+      overflow-x: auto;
+    }
+    .diagram-card h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 24px;
+    }
+    .mermaid {
+      display: flex;
+      justify-content: center;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+      margin-top: 20px;
+    }
+    .info-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .info-card h4 {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .info-card li {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.7;
+      list-style: none;
+    }
+    .info-card li::before { content: '→ '; color: var(--accent4); }
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .tag {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: 'SF Mono', 'Cascadia Code', monospace;
+    }
+    .tag-blue   { background: #1f3a5f; color: #79b8ff; border: 1px solid #2d4a6e; }
+    .tag-green  { background: #1a3a2a; color: #56d364; border: 1px solid #2d5a3a; }
+    .tag-red    { background: #3a1a1a; color: #f97583; border: 1px solid #5a2d2d; }
+    .tag-purple { background: #2d1a4a; color: #c084fc; border: 1px solid #4a2d6e; }
+    .tag-orange { background: #3a2a1a; color: #ffa657; border: 1px solid #6e4a2d; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="logo">Morelivery</span>
+  <span class="badge">Frontend</span>
+  <span class="subtitle">React 18 · React Router · Leaflet · Stripe · SSE</span>
+</header>
+
+<nav id="tabs">
+  <button class="active" data-tab="overview">Vista General</button>
+  <button data-tab="auth">Auth &amp; Routing</button>
+  <button data-tab="components">Árbol de Componentes</button>
+  <button data-tab="hooks">Custom Hooks</button>
+  <button data-tab="customer">Flujo Cliente</button>
+  <button data-tab="driver">Flujo Driver</button>
+  <button data-tab="realtime">Tiempo Real</button>
+</nav>
+
+<main>
+
+  <!-- TAB: Overview -->
+  <section id="overview" class="section active">
+    <div class="section-header">
+      <h2>Arquitectura General del Frontend</h2>
+      <p>Organización de carpetas, contextos globales, páginas y componentes principales.</p>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Mapa de Capas</h3>
+      <div class="mermaid">
+graph TB
+    subgraph ENTRY["🚀 Entrada"]
+        MAIN["main.jsx\nReactDOM.render"]
+        APP["App.jsx\nRouter + Guards"]
+    end
+
+    subgraph CTX["🌐 Contextos Globales"]
+        AUTH["AuthContext.jsx\nauth · login · logout · patchUser"]
+        THEME["ThemeContext.jsx\ndark/light mode"]
+    end
+
+    subgraph API["🔌 Capa API"]
+        CLI["api/client.js\napiFetch + token refresh"]
+    end
+
+    subgraph PAGES["📄 Páginas"]
+        PG_C["Customer/\nHome · Orders · Payments · RestaurantPage"]
+        PG_R["Restaurant/\nOrders · Menu · Schedule"]
+        PG_D["Driver/\nHome · Orders · Earnings · Alerts"]
+        PG_A["Admin/\nDashboard"]
+        PG_AUTH["AuthPage · Profile · ResetPassword"]
+    end
+
+    subgraph HOOKS["🪝 Custom Hooks"]
+        HRT["useRealtimeOrders\nSSE connection"]
+        HOM["useOrderManager\nestado de órdenes"]
+        HLO["useDriverLocation\nGPS tracking"]
+        HNA["useNavFeatures\nnavegación por voz"]
+        HCA["useCart\ncarrito de compra"]
+        HAU["useAuth\nauthentication"]
+    end
+
+    subgraph COMP["🧩 Componentes"]
+        SL["SplitLayout\n3-column layout"]
+        DM["DriverMap · OrderMap\nLeaflet maps"]
+        OP["OfferPanel\ncountdown oferta"]
+        AP["ActiveOrderPanel\norden activa driver"]
+        CC["CustomerCart\ncarrito"]
+        WP["WayPicker · ZonePlacer\nherramientas mapa"]
+    end
+
+    subgraph UTILS["🛠️ Utils"]
+        GEO["geo.js · geocode.js"]
+        AUD["audio.js"]
+        FMT["format.js"]
+        PO["pendingOrder.js · sessionDelivery.js"]
+    end
+
+    MAIN --> APP
+    APP --> CTX
+    APP --> PAGES
+    PAGES --> HOOKS
+    HOOKS --> CLI
+    HOOKS --> COMP
+    PAGES --> COMP
+    CLI --> API
+
+    style ENTRY fill:#1f3a5f,stroke:#58a6ff,color:#e6edf3
+    style CTX fill:#1a3a2a,stroke:#3fb950,color:#e6edf3
+    style API fill:#3a1a1a,stroke:#f78166,color:#e6edf3
+    style PAGES fill:#2d1a4a,stroke:#d2a8ff,color:#e6edf3
+    style HOOKS fill:#3a2a1a,stroke:#ffa657,color:#e6edf3
+    style COMP fill:#1a2a3a,stroke:#58a6ff,color:#e6edf3
+    style UTILS fill:#1a1a2a,stroke:#8b949e,color:#e6edf3
+      </div>
+    </div>
+
+    <div class="info-grid">
+      <div class="info-card">
+        <h4>3 Roles de Usuario</h4>
+        <ul>
+          <li>Customer — busca, ordena, rastrea</li>
+          <li>Restaurant — gestiona menú y pedidos</li>
+          <li>Driver — acepta ofertas, navega, entrega</li>
+          <li>Admin — panel de administración</li>
+        </ul>
+      </div>
+      <div class="info-card">
+        <h4>Hooks Críticos</h4>
+        <ul>
+          <li>useRealtimeOrders — SSE + reconexión</li>
+          <li>useOrderManager — estado de órdenes</li>
+          <li>useDriverLocation — GPS + API sync</li>
+          <li>useNavFeatures — voz + wake lock</li>
+        </ul>
+      </div>
+      <div class="info-card">
+        <h4>Patrón registerRef Bus</h4>
+        <ul>
+          <li>DriverHome owna SSE y expone callbacks</li>
+          <li>DriverOrders y AlertsPanel suscriben</li>
+          <li>Evita múltiples conexiones SSE</li>
+          <li>Sin prop drilling ni re-renders extra</li>
+        </ul>
+      </div>
+      <div class="info-card">
+        <h4>Stack Tecnológico</h4>
+        <div class="tag-list">
+          <span class="tag tag-purple">React 18</span>
+          <span class="tag tag-blue">React Router 6</span>
+          <span class="tag tag-green">Leaflet 1.9</span>
+          <span class="tag tag-red">Stripe.js</span>
+          <span class="tag tag-orange">Vite 8</span>
+          <span class="tag tag-purple">FingerprintJS</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB: Auth & Routing -->
+  <section id="auth" class="section">
+    <div class="section-header">
+      <h2>Autenticación y Routing</h2>
+      <p>Cómo App.jsx controla el acceso según el rol del usuario y el estado de sesión.</p>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Guards de Ruta y Flujo de Navegación</h3>
+      <div class="mermaid">
+flowchart TD
+    START["Usuario accede a URL"] --> APP["App.jsx\nBrowserRouter"]
+    APP --> AUTH_CTX["AuthContext\nleer token de localStorage"]
+    AUTH_CTX --> HAS_AUTH{¿Tiene token válido?}
+
+    HAS_AUTH -->|No| LANDING["LandingScreen()\nElegir rol"]
+    LANDING --> CHOOSE{Elige rol}
+    CHOOSE -->|Customer| LOGIN_C["/:appKey/login"]
+    CHOOSE -->|Restaurant| LOGIN_R["/:appKey/login"]
+    CHOOSE -->|Driver| LOGIN_D["/:appKey/login"]
+    LOGIN_C & LOGIN_R & LOGIN_D --> AUTH_PAGE["AuthPage.jsx\nlogin / register"]
+    AUTH_PAGE --> API_LOGIN["POST /api/auth/login\no /register"]
+    API_LOGIN -->|OK| SAVE["AuthContext.login()\nguardar tokens en localStorage"]
+    SAVE --> REDIRECT["Redirigir a home\ndel rol"]
+
+    HAS_AUTH -->|Sí| PROTECTED["ProtectedAny()\nverificar token no expirado"]
+    PROTECTED --> ROLE_CHECK{Rol del usuario}
+
+    ROLE_CHECK -->|customer| CUSTOMER_GUARD["ProtectedRole('customer')"]
+    ROLE_CHECK -->|restaurant| RESTAURANT_GUARD["ProtectedRole('restaurant')"]
+    ROLE_CHECK -->|driver| DRIVER_GUARD["ProtectedRole('driver')"]
+    ROLE_CHECK -->|admin| ADMIN_GUARD["ProtectedRole('admin')"]
+
+    CUSTOMER_GUARD --> CUSTOMER_LAYOUT["CustomerLayout\n+ SplitLayout"]
+    RESTAURANT_GUARD --> RESTAURANT_LAYOUT["RestaurantLayout\n+ SplitLayout"]
+    DRIVER_GUARD --> DRIVER_LAYOUT["DriverLayout\n+ SplitLayout"]
+    ADMIN_GUARD --> ADMIN_DASH["Admin/Dashboard.jsx"]
+
+    subgraph TOKEN_REFRESH["Token Refresh Automático"]
+        TR1["api/client.js recibe 401"]
+        TR2["POST /api/auth/refresh"]
+        TR3{¿Refresh OK?}
+        TR4["Reintentar request\noriginal"]
+        TR5["AUTH_EXPIRED_EVENT\n→ AuthContext.logout()"]
+        TR1 --> TR2 --> TR3
+        TR3 -->|Sí| TR4
+        TR3 -->|No| TR5
+    end
+
+    style LANDING fill:#1f3a5f,stroke:#58a6ff
+    style SAVE fill:#1a3a2a,stroke:#3fb950
+    style TR5 fill:#3a1a1a,stroke:#f78166
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>AuthContext — Ciclo de Sesión</h3>
+      <div class="mermaid">
+sequenceDiagram
+    participant U as Usuario
+    participant AC as AuthContext
+    participant LS as localStorage
+    participant API as api/client.js
+    participant BE as Backend
+
+    Note over AC: Inicialización
+    AC->>LS: leer token, refreshToken, user
+    LS-->>AC: datos persistidos
+
+    U->>AC: login(credentials)
+    AC->>API: POST /api/auth/login
+    API->>BE: { email, password }
+    BE-->>API: { token, refreshToken, user }
+    API-->>AC: respuesta
+    AC->>LS: guardar token, refreshToken, user
+    AC->>AC: setAuth({ token, user })
+    AC->>BE: POST /api/push/subscribe (VAPID)
+
+    Note over API: Más tarde — token expira
+    U->>API: cualquier request
+    API->>BE: request con token expirado
+    BE-->>API: 401 Unauthorized
+    API->>BE: POST /api/auth/refresh { refreshToken }
+    BE-->>API: { token } nuevo
+    API->>AC: patchUser({ token })
+    API->>BE: reintentar request original
+    BE-->>API: respuesta correcta
+
+    U->>AC: logout()
+    AC->>LS: limpiar tokens
+    AC->>AC: setAuth(null)
+    AC->>BE: DELETE /api/push/unsubscribe
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB: Components -->
+  <section id="components" class="section">
+    <div class="section-header">
+      <h2>Árbol de Componentes</h2>
+      <p>Jerarquía completa de componentes React y cómo se anidan entre sí.</p>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Árbol Completo — Todos los Roles</h3>
+      <div class="mermaid">
+graph TD
+    APP["App.jsx"]
+    APP --> SL["SplitLayout.jsx\nLayout base de 3 columnas"]
+
+    SL --> C_HOME["home slot"]
+    SL --> C_ORDERS["orders slot"]
+    SL --> C_ALERTS["alerts slot"]
+
+    subgraph CUSTOMER["👤 Customer Layout"]
+        CH["CustomerHome\nbusqueda + sugerencias"]
+        CO["CustomerOrders\nhistorial en tiempo real"]
+        CC["CustomerCart\ncarrito + checkout"]
+        RP["RestaurantPage\nmenú detallado"]
+        CP["CustomerPayments\nmétodos de pago"]
+        CH --> RC["RestaurantCard"]
+        CH --> SB["SuggestionBanner"]
+        CH --> AS["AddressSearchBar"]
+        RP --> CART["CustomerCart"]
+        CART --> STRIPE["Stripe Elements\nStripeProvider"]
+    end
+
+    subgraph RESTAURANT["🍽️ Restaurant Layout"]
+        RO["RestaurantOrders\ngestión en tiempo real"]
+        RM["RestaurantMenu\neditar ítems"]
+        RS["RestaurantSchedule\nhorarios"]
+        RM --> MI["MenuItemCard"]
+        RS --> SE["ScheduleEditor.jsx"]
+    end
+
+    subgraph DRIVER["🚗 Driver Layout"]
+        DH["DriverHome\norquestador principal"]
+        DO["DriverOrders\nofertas + activas"]
+        DE["DriverEarnings\nganancias"]
+        DA["AlertsPanel\nzonas + preferencias"]
+        DH --> DSB["DriverHomeStatusBar"]
+        DH --> MAP["DriverHomeMapSection"]
+        MAP --> DM["DriverMap.jsx\nLeaflet"]
+        MAP --> OM["OrderMap.jsx\nstops + pins"]
+        MAP --> ZL["ZoneLayer\nzonas de alerta"]
+        DH --> AOP["ActiveOrderPanel.jsx\norden activa"]
+        DH --> OFP["OfferPanel.jsx\ncountdown + accept/reject"]
+        DA --> ZP["ZonePlacer.jsx\ndibujar zonas"]
+        DA --> WP2["WayPicker.jsx\npasos de ruta"]
+    end
+
+    C_HOME --> CH
+    C_HOME --> RP
+    C_ORDERS --> CO
+    C_ALERTS --> CC
+    C_HOME --> RO
+    C_ORDERS --> RS
+    C_HOME --> DH
+    C_ORDERS --> DO
+    C_ALERTS --> DA
+
+    style CUSTOMER fill:#1f3a5f,stroke:#58a6ff,color:#e6edf3
+    style RESTAURANT fill:#1a3a2a,stroke:#3fb950,color:#e6edf3
+    style DRIVER fill:#3a2a1a,stroke:#ffa657,color:#e6edf3
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>SplitLayout — Patrón de 3 Columnas</h3>
+      <div class="mermaid">
+flowchart LR
+    SL["SplitLayout.jsx"]
+    SL -->|"homeContent prop"| HC["Columna Home\n(contenido principal)"]
+    SL -->|"ordersContent prop"| OC["Columna Orders\n(panel lateral)"]
+    SL -->|"alertsContent prop"| AC["Columna Alerts\n(notificaciones)"]
+    SL -->|"onRefresh prop"| PR["PullToRefresh.jsx\ndeslizar para actualizar"]
+
+    HC --> RL["React Router\nRoutes anidadas"]
+    OC --> SSE_CON["useRealtimeOrders\nSSE connection"]
+
+    subgraph MOBILE["📱 Mobile"]
+        MBT["Tabs en Drawer\nhome | orders | alerts"]
+    end
+    SL --> MOBILE
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB: Hooks -->
+  <section id="hooks" class="section">
+    <div class="section-header">
+      <h2>Custom Hooks — Lógica Central</h2>
+      <p>Los hooks encapsulan toda la lógica compleja: SSE, GPS, órdenes, navegación.</p>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Mapa de Dependencias entre Hooks</h3>
+      <div class="mermaid">
+flowchart TD
+    DH["DriverHome.jsx\norquestador"] --> HOM["useOrderManager()\nestado de órdenes"]
+    DH --> HLO["useDriverLocation()\nGPS tracking"]
+    DH --> HRT["useRealtimeOrders()\nSSE + eventos"]
+    DH --> HNA["useNavFeatures()\nvoz + wakeLock"]
+    DH --> HPERM["usePermissions()\ncámaras, notifs, GPS"]
+
+    HOM --> CLI["api/client.js\napiFetch"]
+    HOM --> HRT
+
+    HLO --> CLI
+    HLO --> GEO["utils/geo.js\nHaversine"]
+    HLO --> NAV_API["PATCH /drivers/location"]
+
+    HRT --> EVT_SRC["new EventSource\n/api/events?token=JWT"]
+    HRT --> AUD["utils/audio.js\nsonidos + vibración"]
+    HRT --> PUSH["Push Notifications\nPushManager"]
+
+    HNA --> SPEECH["Web Speech API\nvoz a texto"]
+    HNA --> WAKE["Screen Wake Lock API\npantalla encendida"]
+    HNA --> ZONE["zonas de alerta\ngeofencing"]
+
+    CLI --> BE["Backend API\n/api/*"]
+    EVT_SRC --> BE
+
+    subgraph CUSTOMER_HOOKS["Customer Hooks"]
+        HCA["useCart()\nitems + total + Stripe"]
+        HAB["useAppBadge()\nbadge de notificaciones"]
+        HCA --> CLI
+    end
+
+    style HRT fill:#1f3a5f,stroke:#58a6ff
+    style HOM fill:#2d1a4a,stroke:#d2a8ff
+    style HLO fill:#1a3a2a,stroke:#3fb950
+    style HNA fill:#3a2a1a,stroke:#ffa657
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="diagram-card">
+        <h3>useRealtimeOrders — SSE Handler</h3>
+        <div class="mermaid">
+flowchart TD
+    INIT["useRealtimeOrders(token, callbacks)"] --> ES["new EventSource\n/api/events?token=JWT"]
+    ES --> CONN{Conectado?}
+    CONN -->|Error| RETRY["Reconexión\nBackoff exponencial\n1s→2s→4s→8s"]
+    RETRY --> ES
+    CONN -->|OK| LISTEN["Escuchar eventos"]
+
+    LISTEN --> E1["order_update\n→ cb.onOrderUpdate(data)"]
+    LISTEN --> E2["driver_location\n→ cb.onDriverLocation(data)"]
+    LISTEN --> E3["new_offer\n→ cb.onNewOffer(data)\n+ audio.playOffer()\n+ vibrate()"]
+    LISTEN --> E4["driver_eta_alert\n→ cb.onEtaAlert(data)\n+ audio.playAlert()"]
+    LISTEN --> E5["driver_arrived\n→ cb.onDriverArrived()\n+ push notification"]
+    LISTEN --> E6["chat_message\n→ cb.onChatMessage(data)"]
+    LISTEN --> E7["route_update\n→ cb.onRouteUpdate(data)"]
+
+    INIT --> CLEANUP["Cleanup al unmount\neventSource.close()"]
+        </div>
+      </div>
+
+      <div class="diagram-card">
+        <h3>useOrderManager — Estado del Driver</h3>
+        <div class="mermaid">
+flowchart TD
+    INIT2["useOrderManager(token, patchUser, driver)"] --> LOAD["loadData()\nGET /api/drivers/offers\nGET /api/orders/my"]
+    LOAD --> STATE["Estado:\nactiveOrder\nactiveOrders\npendingOffer\navailability\nposition"]
+
+    STATE --> AVAIL["toggleAvailability()\nPATCH /drivers/availability"]
+    STATE --> ACCEPT["acceptOffer(offerId)\nPOST /drivers/offers/:id/accept"]
+    STATE --> REJECT["rejectOffer()\nPOST /drivers/offers/:id/reject"]
+    STATE --> RELEASE["releaseOrder()\nPOST /orders/:id/release"]
+    STATE --> CALL["doSimulatedCall(target)\nPOST /orders/:id/notify-call"]
+
+    ACCEPT --> LOAD
+    AVAIL --> LOAD
+
+    STATE --> REG["registerOrdersUpdate(fn)\nregistrar listener SSE externo"]
+    REG --> UPD["Cuando llega order_update:\ncb() → componentes actualizan"]
+        </div>
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>useDriverLocation — GPS Sync</h3>
+      <div class="mermaid">
+flowchart LR
+    GEO_API["navigator.geolocation\n.watchPosition()"] --> RAW["posición GPS raw\n{ lat, lng, accuracy }"]
+    RAW --> MAP_MATCH{Map matching\nhabilitado?}
+    MAP_MATCH -->|Sí| POST_MM["POST /api/nav/map-match\n{ lat, lng }"]
+    POST_MM --> MATCHED["posición snapeada\na carretera"]
+    MAP_MATCH -->|No| RAW2["posición raw"]
+
+    MATCHED & RAW2 --> SEND["PATCH /api/drivers/location\n{ lat, lng }"]
+    SEND --> RETURNS["retorna:\n{ position\nMatchedPosition\naccuracy\nerror }"]
+    RETURNS --> USERS["DriverHome usa position\npara renderizar mapa\ny calcular ETAs"]
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB: Customer Flow -->
+  <section id="customer" class="section">
+    <div class="section-header">
+      <h2>Flujo del Cliente</h2>
+      <p>Experiencia completa del cliente: buscar, ordenar, pagar y rastrear su pedido.</p>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Flujo: Hacer un Pedido</h3>
+      <div class="mermaid">
+sequenceDiagram
+    participant U as Cliente
+    participant CH as CustomerHome.jsx
+    participant RP as RestaurantPage.jsx
+    participant CART as CustomerCart.jsx
+    participant API as api/client.js
+    participant BE as Backend
+
+    U->>CH: Ver pantalla Home
+    CH->>API: GET /api/restaurants
+    API->>BE: buscar restaurantes disponibles
+    BE-->>API: lista de restaurantes
+    API-->>CH: renderizar RestaurantCards
+
+    U->>CH: Buscar o filtrar restaurante
+    U->>RP: Abrir RestaurantPage (clic en card)
+    RP->>API: GET /api/restaurants/:id/menu
+    API->>BE: menú del restaurante
+    BE-->>API: { categories, items }
+    API-->>RP: renderizar menú
+
+    U->>RP: Agregar ítems al carrito
+    RP->>CART: useCart.addItem(item)
+    CART->>CART: calcular total + validar
+
+    U->>CART: Confirmar pedido
+    CART->>CART: elegir dirección (sessionDelivery.js)
+    CART->>CART: elegir método de pago
+
+    alt Pago con tarjeta
+        CART->>CART: Stripe Elements
+        CART->>BE: createPaymentMethod()
+        BE-->>CART: paymentMethodId
+    end
+
+    U->>CART: "Ordenar ahora"
+    CART->>API: POST /api/orders { items, restaurantId, payment, address }
+    API->>BE: crear pedido
+    BE-->>API: { orderId, eta }
+    API-->>CART: pedido creado
+    CART->>CART: pendingOrder.save(orderId)
+    CART-->>U: redirigir a CustomerOrders
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Flujo: Rastrear Entrega en Tiempo Real</h3>
+      <div class="mermaid">
+flowchart TD
+    CO["CustomerOrders.jsx"] --> HRT["useRealtimeOrders(token)"]
+    HRT --> SSE["EventSource\n/api/events"]
+
+    SSE -->|order_update| ORD_ST["Actualizar estado de orden\nUI: chip de estado animado"]
+    SSE -->|driver_location| MAP_UP["Actualizar posición en mapa\nOrderMap.jsx re-render"]
+    SSE -->|driver_eta_alert| ETA_AL["Mostrar: 'Tu driver llega en ~5min'\naudio.playAlert()"]
+    SSE -->|driver_arrived| ARR["Mostrar: 'Tu driver ha llegado'\nnotificación push alta prio"]
+    SSE -->|order_update delivered| DELIV["Mostrar pantalla: ¡Entregado!\nBotón: Calificar"]
+
+    DELIV --> RATING["Rating UI\n1-5 estrellas + comentario"]
+    RATING --> API_R["POST /api/orders/:id/rating\n{ stars, comment }"]
+
+    MAP_UP --> OM["OrderMap.jsx\nLeaflet marker animado"]
+    OM --> PIN_D["Pin del driver\nse mueve en tiempo real"]
+    OM --> PIN_R["Pin del restaurante\n(pickup stop)"]
+    OM --> PIN_C["Pin de entrega\n(delivery stop)"]
+
+    style ARR fill:#3a1a1a,stroke:#f78166
+    style DELIV fill:#1a3a2a,stroke:#3fb950
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Sugerencias de Re-orden</h3>
+      <div class="mermaid">
+flowchart LR
+    CH2["CustomerHome.jsx"] --> LOAD_S["loadSuggestions()\nGET /api/orders/my?suggestions=true"]
+    LOAD_S --> SUGGES{¿Hay sugerencias?}
+    SUGGES -->|No| HIDE["Ocultar banner"]
+    SUGGES -->|Sí| BANNER["SuggestionBanner\nmostrar último pedido frecuente"]
+    BANNER --> ACCEPT_S["Usuario acepta\nrespondSugg(id, true)"]
+    BANNER --> REJECT_S["Usuario rechaza\nrespondSugg(id, false)"]
+    ACCEPT_S --> API_S["PATCH /api/orders/:id/suggestion-response\n{ accepted: true }"]
+    API_S --> CART2["Abrir carrito\ncon ítems pre-cargados"]
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB: Driver Flow -->
+  <section id="driver" class="section">
+    <div class="section-header">
+      <h2>Flujo del Driver</h2>
+      <p>DriverHome es el orquestador central que conecta GPS, SSE, mapa y estado de órdenes.</p>
+    </div>
+
+    <div class="diagram-card">
+      <h3>DriverHome — Arquitectura Interna</h3>
+      <div class="mermaid">
+flowchart TD
+    DH2["DriverHome.jsx\norquestador"] --> HOM2["useOrderManager\n{ activeOrder, pendingOffer,\navailability, loadData }"]
+    DH2 --> HLO2["useDriverLocation\n{ position, matchedPosition }"]
+    DH2 --> HRT2["useRealtimeOrders\n{ startSSE, stopSSE }"]
+    DH2 --> HNA2["useNavFeatures\n{ voiceCmd, wakeLock, zones }"]
+    DH2 --> HPERM2["usePermissions\n{ gpsGranted, notifGranted }"]
+
+    HOM2 --> REG_REF["registerRef bus\nexpone callbacks a DriverOrders\ny AlertsPanel"]
+
+    DH2 --> DSB2["DriverHomeStatusBar\nmensaje de estado + availability toggle"]
+    DH2 --> MAP_SEC["DriverHomeMapSection\n{ position, activeOrder, stops }"]
+    DH2 --> OFP2["OfferPanel\n{ offer, onAccept, onReject, countdown }"]
+    DH2 --> AOP2["ActiveOrderPanel\n{ order, onRelease, onDispute, onCall }"]
+
+    MAP_SEC --> DM2["DriverMap.jsx\nLeaflet map"]
+    MAP_SEC --> OM2["OrderMap.jsx\nstops + route"]
+    MAP_SEC --> ZL2["ZoneLayer\nzonas de alerta geofence"]
+
+    HRT2 --> CB_OF["onNewOffer → HOM2.setPendingOffer"]
+    HRT2 --> CB_OR["onOrderUpdate → HOM2.loadData"]
+    HRT2 --> CB_RO["onRouteUpdate → reordenar stops"]
+    HRT2 --> CB_CH["onChatMessage → mostrar toast"]
+
+    style DH2 fill:#3a2a1a,stroke:#ffa657,color:#e6edf3
+    style REG_REF fill:#2d1a4a,stroke:#d2a8ff,color:#e6edf3
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Flujo: Recibir y Aceptar Oferta</h3>
+      <div class="mermaid">
+sequenceDiagram
+    participant SSE as SSE (useRealtimeOrders)
+    participant DH3 as DriverHome.jsx
+    participant OM3 as useOrderManager
+    participant OFP3 as OfferPanel.jsx
+    participant API2 as api/client.js
+    participant BE2 as Backend
+
+    SSE->>DH3: event: new_offer { orderId, restaurant, fee, items }
+    DH3->>DH3: audio.playOffer() + vibrate([200,100,200])
+    DH3->>OM3: setPendingOffer(offer)
+    OM3->>OFP3: renderizar con countdown 60s
+
+    loop Countdown 60s
+        OFP3->>OFP3: decrementar timer
+    end
+
+    alt Driver acepta
+        OFP3->>OM3: onAccept()
+        OM3->>API2: POST /drivers/offers/:id/accept
+        API2->>BE2: validar oferta vigente
+        BE2-->>API2: { ok: true, order }
+        API2-->>OM3: orden asignada
+        OM3->>OM3: setActiveOrder(order)
+        OM3->>OFP3: ocultar OfferPanel
+        DH3->>DH3: mostrar ActiveOrderPanel
+        DH3->>DH3: iniciar navegación
+    else Driver rechaza
+        OFP3->>OM3: onReject()
+        OM3->>API2: POST /drivers/offers/:id/reject
+        API2->>BE2: marcar como rechazada
+        OM3->>OM3: setPendingOffer(null)
+        DH3->>DH3: ocultar OfferPanel
+    else Timeout 60s
+        OFP3->>OM3: expirar silencioso
+        OM3->>OM3: setPendingOffer(null)
+    end
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Flujo: Entregar Pedido</h3>
+      <div class="mermaid">
+flowchart TD
+    AOP3["ActiveOrderPanel.jsx"] --> STOPS["Ver stops en OrderMap\n(pickup + delivery)"]
+    STOPS --> NAV_BTN["Botón: Navegar\nabre app de mapas externa"]
+    AOP3 --> CALL_BTN["Botón: Llamar cliente\ndoSimulatedCall()"]
+    AOP3 --> STATUS_BTN["Botón: Actualizar estado\nsegun etapa actual"]
+
+    STATUS_BTN --> S1{¿Estado actual?}
+    S1 -->|assigned| UPDATE1["PATCH /orders/:id/status\n{ status: 'accepted' }"]
+    S1 -->|accepted| UPDATE2["PATCH /orders/:id/status\n{ status: 'on_the_way' }"]
+    S1 -->|on_the_way| DELIVER["POST /orders/:id/delivery\n{ evidence? }"]
+
+    UPDATE1 & UPDATE2 & DELIVER --> SSE_UP["SSE order_update\n→ customer + restaurant"]
+
+    AOP3 --> RELEASE_BTN["Botón: Liberar orden\nreleaseOrder()"]
+    RELEASE_BTN --> CONF{Confirmar?}
+    CONF -->|Sí| API_REL["POST /orders/:id/release"]
+    API_REL --> RELOAD["loadData() — estado reset"]
+
+    DELIVER --> EARN["Driver recibe earnings\nactualizar contador"]
+    EARN --> DONE["Mostrar: ¡Entregado!\nvolver a estado disponible"]
+
+    style DELIVER fill:#1a3a2a,stroke:#3fb950
+    style DONE fill:#1a3a2a,stroke:#3fb950
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB: Realtime -->
+  <section id="realtime" class="section">
+    <div class="section-header">
+      <h2>Sistema de Tiempo Real (Frontend)</h2>
+      <p>Cómo el frontend maneja la conexión SSE, reconexión y distribución de eventos a componentes.</p>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Flujo SSE de Punta a Punta</h3>
+      <div class="mermaid">
+sequenceDiagram
+    participant APP2 as App.jsx
+    participant LAYOUT as DriverLayout / CustomerLayout
+    participant HRT3 as useRealtimeOrders
+    participant ES as EventSource
+    participant BE3 as Backend SSE Hub
+    participant COMP as Componentes (OfferPanel, OrderMap...)
+
+    APP2->>LAYOUT: mount con registerRef
+    LAYOUT->>HRT3: instanciar hook
+    HRT3->>ES: new EventSource('/api/events?token=JWT')
+    ES->>BE3: GET /api/events
+    BE3-->>ES: SSE headers + 'connected' event
+    HRT3->>HRT3: isConnected = true
+
+    Note over BE3,ES: Ping cada 25s para\nevitar timeout de Render.com
+
+    BE3-->>ES: event: new_offer
+    ES->>HRT3: onmessage handler
+    HRT3->>HRT3: JSON.parse(event.data)
+    HRT3->>LAYOUT: callbacks.onNewOffer(data)
+    LAYOUT->>COMP: setPendingOffer(data)
+    COMP->>COMP: renderizar OfferPanel + audio + vibrar
+
+    BE3-->>ES: event: driver_location
+    ES->>HRT3: onmessage handler
+    HRT3->>LAYOUT: callbacks.onDriverLocation(data)
+    LAYOUT->>COMP: actualizar posición en mapa
+    COMP->>COMP: OrderMap re-render con nueva posición
+
+    Note over ES,HRT3: Red se cae o tab inactivo
+    ES->>HRT3: onerror
+    HRT3->>HRT3: reconexión con backoff
+    HRT3->>ES: nuevo EventSource (1s→2s→4s→8s)
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>registerRef Bus — Comunicación sin Prop Drilling</h3>
+      <div class="mermaid">
+flowchart TD
+    DL["DriverLayout.jsx\nconst registerRef = useRef({})"]
+
+    DL -->|"prop registerRef"| DH4["DriverHome.jsx\nowna SSE + estado"]
+    DL -->|"prop registerRef"| DORD["DriverOrders.jsx\n(slot orders)"]
+    DL -->|"prop registerRef"| DAL["AlertsPanel.jsx\n(slot alerts)"]
+
+    DH4 --> SET1["registerRef.current.onUpdate = handleOrderUpdate\nregistrar callback SSE"]
+    DH4 --> SET2["registerRef.current.loadData = loadData\ntrigger re-fetch"]
+    DH4 --> SET3["registerRef.current.activeZones = zones\nzonas de alerta actualizadas"]
+    DH4 --> SET4["registerRef.current.notifyAlertsUpdate = fn\ntrigger re-render alertas"]
+
+    DORD --> READ1["useEffect: registerRef.current.onUpdate = myCallback\nsuscribirse a updates de órdenes"]
+    DAL --> READ2["Lee registerRef.current.activeZones\ncuando alertsTick cambia"]
+
+    SET4 -->|"incrementa alertsTick state"| DAL
+
+    style DL fill:#2d1a4a,stroke:#d2a8ff,color:#e6edf3
+    style DH4 fill:#3a2a1a,stroke:#ffa657,color:#e6edf3
+      </div>
+    </div>
+
+    <div class="diagram-card">
+      <h3>Audio, Vibración y Push por Evento</h3>
+      <div class="mermaid">
+flowchart LR
+    EVT["Evento SSE"] --> TYPE{Tipo}
+
+    TYPE -->|new_offer| A1["audio.playOffer()\nvibrate([200,100,200])\n+ push notification"]
+    TYPE -->|driver_eta_alert| A2["audio.playAlert()\nbanner en UI"]
+    TYPE -->|driver_arrived| A3["audio.playArrived()\npush alta prioridad\nvibrate([500])"]
+    TYPE -->|order_update delivered| A4["audio.playSuccess()\nvibrate([100])"]
+    TYPE -->|chat_message| A5["audio.playMessage()\nbadge en tab"]
+    TYPE -->|simulated_call| A6["UI: modal de llamada\naudio de ring\nauto-dismiss 30s"]
+
+    A1 & A2 & A3 & A4 & A5 --> PERM{Permiso de\nnotificaciones?}
+    PERM -->|Sí| NOTIF["ServiceWorker\nshowNotification()"]
+    PERM -->|No| UI_ONLY["Solo UI in-app"]
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#2d1a4a',
+      primaryTextColor: '#e6edf3',
+      primaryBorderColor: '#d2a8ff',
+      lineColor: '#8b949e',
+      secondaryColor: '#161b22',
+      tertiaryColor: '#0d1117',
+      background: '#161b22',
+      mainBkg: '#161b22',
+      nodeBkg: '#1f2937',
+      nodeTextColor: '#e6edf3',
+      edgeLabelBackground: '#161b22',
+      clusterBkg: '#161b22',
+      titleColor: '#e6edf3',
+      actorBkg: '#2d1a4a',
+      actorBorder: '#d2a8ff',
+      actorTextColor: '#e6edf3',
+      actorLineColor: '#8b949e',
+      signalColor: '#8b949e',
+      signalTextColor: '#e6edf3',
+      labelBoxBkgColor: '#161b22',
+      labelBoxBorderColor: '#30363d',
+      labelTextColor: '#e6edf3',
+      loopTextColor: '#e6edf3',
+      noteBorderColor: '#30363d',
+      noteBkgColor: '#1f3a5f',
+      noteTextColor: '#e6edf3',
+    },
+    flowchart: { curve: 'basis', useMaxWidth: true },
+    sequence: { useMaxWidth: true, boxMargin: 8 },
+  });
+
+  document.getElementById('tabs').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-tab]');
+    if (!btn) return;
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+  });
+</script>
+</body>
+</html>
