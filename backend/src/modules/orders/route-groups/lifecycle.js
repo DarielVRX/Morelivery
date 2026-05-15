@@ -5,7 +5,7 @@ import { STATUS_TS, notifyOrderParties } from '../shared.js';
 import { notifyPickup, notifyDelivery, notifyOrderCancelled } from '../assignment/events.js';
 
 export function registerLifecycleRoutes(router, deps) {
-  const { query, AppError, orderEvents, recordPickupWait, evaluatePrepEstimate, sseHub, logEvent, updateOrderStatusSchema } = deps;
+  const { query, AppError, recordPickupWait, evaluatePrepEstimate, sseHub, logEvent, updateOrderStatusSchema } = deps;
   const DRIVER_STATUS_DISTANCE_THRESHOLD_M = 100;
 
   function haversineMeters(lat1, lng1, lat2, lng2) {
@@ -99,7 +99,6 @@ export function registerLifecycleRoutes(router, deps) {
         [nextStatus, driverNote, restaurantNote, req.params.id]
       );
       const updated = result.rows[0];
-      orderEvents.emitOrderUpdate(updated.id, updated.status);
       await notifyOrderParties(updated.id, 'order_update', { orderId: updated.id, status: updated.status });
 
       if (nextStatus === 'on_the_way' && updated.driver_id) {

@@ -94,7 +94,8 @@ function ProtectedRole({ role, children }) {
   const { auth } = useAuth();
   usePermissions(auth.token, auth.user?.role);
   if (!auth.user) return <Navigate to="/" replace />;
-  if (auth.user.role !== role) return <Navigate to={findApp(auth.user.role)?.home || '/'} replace />;
+  const allowed = Array.isArray(role) ? role : [role];
+  if (!allowed.includes(auth.user.role)) return <Navigate to={findApp(auth.user.role)?.home || '/'} replace />;
   return children;
 }
 function ProtectedAny({ children }) {
@@ -345,7 +346,7 @@ function DriverLayout() {
   }
 
   return (
-    <ProtectedRole role="driver">
+    <ProtectedRole role={['driver', 'admin']}>
       <SplitLayout
         onRefresh={() => registerRef.current.loadData?.()}
         onCloseMobileDrawerRef={closeMobileDrawerRef}
@@ -383,7 +384,7 @@ function AppRoutes() {
         <Route path="/driver/*"     element={<DriverLayout />} />
         <Route path="/admin" element={
           <Suspense fallback={<Spinner />}>
-            <ProtectedRole role="admin"><PullToRefresh><AdminDashboard /></PullToRefresh></ProtectedRole>
+            <ProtectedRole role="admin"><AdminDashboard /></ProtectedRole>
           </Suspense>
         } />
         <Route path="*" element={<Navigate to="/" replace />} />

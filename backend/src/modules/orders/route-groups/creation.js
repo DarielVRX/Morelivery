@@ -3,13 +3,14 @@ import { authenticate, authorize } from '../../../middlewares/auth.js';
 import { validate } from '../../../middlewares/validate.js';
 import { DELIVERY_FEE_PCT, RESTAURANT_FEE_PCT, SERVICE_FEE_PCT, isMissingColumnError, isMissingRelationError } from '../shared.js';
 import { env } from '../../../config/env.js';
-import { sendPushToUser } from '../../notifications/pushSubscription.js'; // ← NUEVO
+import { sendPushToUser } from '../../notifications/pushSubscription.js';
+import { isPaused } from '../../platform/state.js';
 
 export function registerCreationRoutes(router, deps) {
   const {
     query, AppError, serializedOffer, offerNextDrivers,
     getPendingAssignmentOrders, initKitchenTiming,
-    orderEvents, sseHub, logEvent, createOrderSchema,
+    sseHub, logEvent, createOrderSchema,
   } = deps;
 
   router.get('/pending-assignment', authenticate, authorize(['driver']), async (req, res, next) => {
@@ -42,6 +43,13 @@ export function registerCreationRoutes(router, deps) {
           ));
         }
       } catch (e) { if (e?.code !== '42703') throw e; }
+
+      // ── Verificar pausa de plataforma ─────────────────────────────────────
+      if (isPaused()) {
+        return next(new AppError(503,
+          'En este momento tenemos problemas técnicos. Por favor, intenta de nuevo en unos minutos. Disculpa las molestias.'
+        ));
+      }
 
       // ── Verificar pago con tarjeta ANTES de crear el pedido ──────────────
       if (payment_method === 'card') {
@@ -250,7 +258,6 @@ export function registerCreationRoutes(router, deps) {
       initKitchenTiming(order.id, restaurantId).catch(() => {});
 
       const updated = await query('SELECT * FROM orders WHERE id=$1', [order.id]);
-      orderEvents.emitOrderUpdate(order.id, updated.rows[0].status);
 
       // ── Notificar al restaurante (SSE + push fallback) ────────────────────
       try {
