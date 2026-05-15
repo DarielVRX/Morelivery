@@ -17,6 +17,29 @@ import { getParam }       from '../../engine/params.js';
 import { sendPushToUser } from '../notifications/pushSubscription.js';
 
 const router = Router();
+
+// Auto-create driver_profiles row for admin users accessing driver endpoints
+async function ensureDriverProfile(req, _res, next) {
+  if (req.user?.role !== 'admin') return next();
+  try {
+    const existing = await query(
+      'SELECT 1 FROM driver_profiles WHERE user_id=$1', [req.user.userId]
+    );
+    if (existing.rowCount === 0) {
+      await query(
+        `INSERT INTO driver_profiles (user_id, is_available, vehicle_type, bag_capacity_liters)
+         VALUES ($1, false, 'motorcycle', 60)
+         ON CONFLICT (user_id) DO NOTHING`,
+        [req.user.userId]
+      );
+      console.log(`[driver] ensureDriverProfile: created profile for admin=${req.user.userId.slice(0,8)}`);
+    }
+  } catch (e) {
+    console.warn('[driver] ensureDriverProfile error:', e.message);
+  }
+  return next();
+}
+
 const ETA_ALERT_COOLDOWN_MS     = 5 * 60 * 1000; // 5 min entre alertas ETA
 const ARRIVED_ALERT_COOLDOWN_MS = 2 * 60 * 1000; // 2 min entre alertas arrived
 
@@ -42,12 +65,12 @@ function haversineM(lat1, lng1, lat2, lng2) {
 }
 
 // POST /drivers/listener — deprecated
-router.post('/listener', authenticate, authorize(['driver']), async (_req, res) => {
+router.post('/listener', authenticate, authorize(['driver', 'admin']), async (_req, res) => {
   return res.json({ ok: true, deprecated: true });
 });
 
 /* ── PATCH /drivers/availability ─────────────────────────────────────────── */
-router.patch('/availability', authenticate, authorize(['driver']), async (req, res, next) => {
+router.patch('/availability', authenticate, authorize(['driver', 'admin']), ensureDriverProfile, async (req, res, next) => {
   try {
     const { isAvailable } = req.body;
     const driverId = req.user.userId;
@@ -93,7 +116,7 @@ router.patch('/availability', authenticate, authorize(['driver']), async (req, r
 });
 
 /* ── GET /drivers/me/bag-capacity ────────────────────────────────────────── */
-router.get('/me/bag-capacity', authenticate, authorize(['driver']), async (req, res, next) => {
+router.get('/me/bag-capacity', authenticate, authorize(['driver', 'admin']), ensureDriverProfile, async (req, res, next) => {
   try {
     const result = await query(
       `SELECT bag_capacity_liters FROM driver_profiles WHERE user_id = $1`,
@@ -105,7 +128,7 @@ router.get('/me/bag-capacity', authenticate, authorize(['driver']), async (req, 
 });
 
 /* ── PATCH /drivers/me/bag-capacity ─────────────────────────────────────── */
-router.patch('/me/bag-capacity', authenticate, authorize(['driver']), async (req, res, next) => {
+router.patch('/me/bag-capacity', authenticate, authorize(['driver', 'admin']), ensureDriverProfile, async (req, res, next) => {
   try {
     const { bag_capacity_liters } = req.body || {};
     const val = Number(bag_capacity_liters);
@@ -124,7 +147,7 @@ router.patch('/me/bag-capacity', authenticate, authorize(['driver']), async (req
 /* ── GET /drivers/me/counters ────────────────────────────────────────────── */
 // Ganancias y entregas de la sesión actual (desde session_started_at).
 // session_started_at se resetea al activar disponibilidad.
-router.get('/me/counters', authenticate, authorize(['driver']), async (req, res, next) => {
+router.get('/me/counters', authenticate, authorize(['driver', 'admin']), ensureDriverProfile, async (req, res, next) => {
   try {
     const driverId = req.user.userId;
 
@@ -163,7 +186,7 @@ router.get('/me/counters', authenticate, authorize(['driver']), async (req, res,
 });
 
 
-router.get('/me', authenticate, authorize(['driver']), async (req, res, next) => {
+router.get('/me', authenticate, authorize(['driver', 'admin']), ensureDriverProfile, async (req, res, next) => {
   try {
     const r = await query(
       'SELECT user_id, is_available, vehicle_type, is_verified, driver_number FROM driver_profiles WHERE user_id=$1 LIMIT 1',
@@ -175,7 +198,7 @@ router.get('/me', authenticate, authorize(['driver']), async (req, res, next) =>
 });
 
 /* ── GET /drivers/offers ─────────────────────────────────────────────────── */
-router.get('/offers', authenticate, authorize(['driver']), async (req, res, next) => {
+router.get('/offers', authenticate, authorize(['driver', 'admin']), ensureDriverProfile, async (req, res, next) => {
   try {
     let result;
     try {
@@ -234,7 +257,7 @@ router.get('/offers', authenticate, authorize(['driver']), async (req, res, next
 });
 
 /* ── POST /drivers/offers/:orderId/accept ────────────────────────────────── */
-router.post('/offers/:orderId/accept', authenticate, authorize(['driver']), async (req, res, next) => {
+router.post('/offers/:orderId/accept', authenticate, authorize(['driver', 'admin']), ensureDriverProfile, async (req, res, next) => {
   try {
     const offer = await query(
       `SELECT 1 FROM order_driver_offers WHERE order_id=$1 AND driver_id=$2 AND status='pending'`,
@@ -271,7 +294,7 @@ router.post('/offers/:orderId/accept', authenticate, authorize(['driver']), asyn
 });
 
 /* ── POST /drivers/orders/:orderId/claim ─────────────────────────────────── */
-router.post('/orders/:orderId/claim', authenticate, authorize(['driver']), async (req, res, next) => {
+router.post('/orders/:orderId/claim', authenticate, authorize(['driver', 'admin']), ensureDriverProfile, async (req, res, next) => {
   try {
     const driverId = req.user.userId;
     const orderId  = req.params.orderId;
@@ -320,7 +343,7 @@ router.post('/orders/:orderId/claim', authenticate, authorize(['driver']), async
 });
 
 /* ── POST /drivers/offers/:orderId/reject ────────────────────────────────── */
-router.post('/offers/:orderId/reject', authenticate, authorize(['driver']), async (req, res, next) => {
+router.post('/offers/:orderId/reject', authenticate, authorize(['driver', 'admin']), ensureDriverProfile, async (req, res, next) => {
   try {
     await rejectOffer(req.params.orderId, req.user.userId, offerCb);
     return res.json({ ok: true });
@@ -328,7 +351,7 @@ router.post('/offers/:orderId/reject', authenticate, authorize(['driver']), asyn
 });
 
 /* ── POST /drivers/orders/:orderId/rebalance ─────────────────────────────── */
-router.post('/orders/:orderId/rebalance', authenticate, authorize(['driver']), async (req, res, next) => {
+router.post('/orders/:orderId/rebalance', authenticate, authorize(['driver', 'admin']), async (req, res, next) => {
   try {
     const { orderId } = req.params;
     const driverId    = req.user.userId;
@@ -343,7 +366,7 @@ router.post('/orders/:orderId/rebalance', authenticate, authorize(['driver']), a
 });
 
 /* ── POST /drivers/orders/:orderId/cancel-dispute ────────────────────────── */
-router.post('/orders/:orderId/cancel-dispute', authenticate, authorize(['driver']), async (req, res, next) => {
+router.post('/orders/:orderId/cancel-dispute', authenticate, authorize(['driver', 'admin']), async (req, res, next) => {
   try {
     const { orderId } = req.params;
     const driverId    = req.user.userId;
@@ -364,7 +387,7 @@ router.post('/orders/:orderId/cancel-dispute', authenticate, authorize(['driver'
 });
 
 /* ── POST /drivers/orders/:orderId/release ───────────────────────────────── */
-router.post('/orders/:orderId/release', authenticate, authorize(['driver']), async (req, res, next) => {
+router.post('/orders/:orderId/release', authenticate, authorize(['driver', 'admin']), async (req, res, next) => {
   try {
     const { note }    = req.body || {};
     const { orderId } = req.params;
@@ -391,7 +414,7 @@ router.post('/orders/:orderId/release', authenticate, authorize(['driver']), asy
 });
 
 /* ── PATCH /drivers/location ─────────────────────────────────────────────── */
-router.patch('/location', authenticate, authorize(['driver']), async (req, res, next) => {
+router.patch('/location', authenticate, authorize(['driver', 'admin']), ensureDriverProfile, async (req, res, next) => {
   try {
     const { lat, lng } = req.body || {};
     if (typeof lat !== 'number' || typeof lng !== 'number')
@@ -511,7 +534,7 @@ router.patch('/location', authenticate, authorize(['driver']), async (req, res, 
 });
 
 /* ── GET /drivers/earnings ───────────────────────────────────────────────── */
-router.get('/earnings', authenticate, authorize(['driver']), async (req, res, next) => {
+router.get('/earnings', authenticate, authorize(['driver', 'admin']), ensureDriverProfile, async (req, res, next) => {
   try {
     const days   = Math.min(Number(req.query.days)   || 30, 365);
     const limit  = Math.min(Number(req.query.limit)  || 50, 200);
@@ -562,7 +585,7 @@ router.get('/earnings', authenticate, authorize(['driver']), async (req, res, ne
   } catch (error) { return next(error); }
 });
 
-router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver']), async (req, res, next) => {
+router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver', 'admin']), async (req, res, next) => {
   try {
     const { target } = req.body || {};
     if (!['customer', 'restaurant'].includes(target))
@@ -608,7 +631,7 @@ router.post('/orders/:orderId/notify-call', authenticate, authorize(['driver']),
 });
 
 /* ── POST /drivers/reroute ───────────────────────────────────────────────── */
-router.post('/reroute', authenticate, authorize(['driver']), async (req, res, next) => {
+router.post('/reroute', authenticate, authorize(['driver', 'admin']), async (req, res, next) => {
   try {
     const { rerouteDriver } = await import('../../engine/reroute.js');
     rerouteDriver(req.user.userId).catch(e =>

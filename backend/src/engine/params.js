@@ -91,7 +91,7 @@ const PARAM_CATALOG = {
   kitchen_estimate_diff_threshold_s:  { default: 90,   description: 'Diferencia mínima entre estimado y real para sugerir cambio de prep' },
   kitchen_gap_threshold_s:            { default: 600,  description: 'Gap máximo en segundos entre kitchenReadyAt de pedidos para agruparlos en el mismo stop de pickup' },
   kitchen_wait_tolerance_s:           { default: 180,  description: 'Descuento de tolerancia en segundos aplicado al wait de cocina en el greedy — solo penaliza el exceso' },
-  default_bag_capacity_liters:        { default: 25,   description: 'Litros de capacidad de mochila si el driver no especificó la suya' },
+  default_bag_capacity_liters:        { default: 60,   description: 'Litros de capacidad de mochila si el driver no especificó la suya' },
 };
 
 let _params     = { ...DEFAULTS };

@@ -1,5 +1,4 @@
 import { query } from '../../config/db.js';
-import { orderEvents } from '../../events/orderEvents.js';
 import { logEvent } from '../../utils/logger.js';
 import { AppError } from '../../utils/errors.js';
 import { offerNextDrivers, expireTimedOutOffers, serializedOffer, getPendingAssignmentOrders } from './assignment/index.js';
@@ -95,7 +94,6 @@ function onOffer(driverId, orderId, payload) {
 
 export const sharedDeps = {
   query,
-  orderEvents,
   logEvent,
   AppError,
   offerNextDrivers,

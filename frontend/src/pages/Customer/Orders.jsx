@@ -73,6 +73,8 @@ export default function CustomerOrders({ registerRef } = {}) {
   const [complaintId,   setComplaintId]   = useState(null);
   const [complaintText, setComplaintText] = useState('');
   const [msg,           setMsg]           = useState('');
+  const [platformPaused, setPlatformPaused] = useState(false);
+  const [pauseMsg,       setPauseMsg]       = useState('');
   const loadDataRef = useRef(null);
   const sentinelRef = useRef(null);
 
@@ -235,6 +237,11 @@ export default function CustomerOrders({ registerRef } = {}) {
         }
       }
     },
+    // onPlatformStatus
+    (data) => {
+      setPlatformPaused(Boolean(data?.paused));
+      if (data?.paused && data?.message) setPauseMsg(data.message);
+    },
   );
 
   const pendingSuggestions = useMemo(
@@ -357,6 +364,16 @@ export default function CustomerOrders({ registerRef } = {}) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+
+      {/* Banner pausa de plataforma */}
+      {platformPaused && (
+        <div style={{
+          background:'#f59e0b', color:'#1a1a1a', fontSize:'0.8rem', fontWeight:600,
+          padding:'0.6rem 1rem', textAlign:'center', lineHeight:1.4,
+        }}>
+          ⚠️ {pauseMsg || 'En este momento tenemos problemas técnicos. Por favor, intenta de nuevo en unos minutos. Disculpa las molestias.'}
+        </div>
+      )}
 
       {/* Modal calificación */}
       {ratingOrder && (

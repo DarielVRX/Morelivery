@@ -17,6 +17,7 @@ export function useRealtimeOrders(
   onTransferEvent, onSupportMessage,
   onNewOrder, onEtaAlert, onDriverArrived, onSimulatedCall,
   onRouteUpdate, onDriverSearch,
+  onPlatformStatus,
 ) {
   const esRef          = useRef(null);
   const reconnectTimer = useRef(null);
@@ -33,6 +34,7 @@ export function useRealtimeOrders(
       transfer: onTransferEvent, support: onSupportMessage,
       newOrder: onNewOrder, eta: onEtaAlert, arrived: onDriverArrived, call: onSimulatedCall,
       routeUpdate: onRouteUpdate, driverSearch: onDriverSearch,
+      platformStatus: onPlatformStatus,
     };
   });
 
@@ -260,6 +262,11 @@ export function useRealtimeOrders(
 
     on('orders_blocked', (data) => {
       window.dispatchEvent(new CustomEvent('sse_orders_blocked', { detail: data }));
+    });
+
+    on('platform_status', (data) => {
+      cb.current.platformStatus?.(data);
+      window.dispatchEvent(new CustomEvent('sse_platform_status', { detail: data }));
     });
 
     es.addEventListener('connected', () => {
